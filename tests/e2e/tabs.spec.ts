@@ -35,6 +35,14 @@ async function sessionNames(): Promise<string[]> {
   }
 }
 
+/** What tmux itself thinks the session's window measures. */
+async function windowSize(name: string): Promise<string> {
+  const { stdout } = await run('tmux', [
+    '-L', SOCKET, 'display-message', '-p', '-t', `=${name}:`, '#{window_width}x#{window_height}',
+  ])
+  return stdout.trim()
+}
+
 async function savedActiveTabId(): Promise<unknown> {
   const raw: unknown = JSON.parse(await readFile(join(configDir, 'config.json'), 'utf8'))
   return (raw as { activeTabId?: unknown }).activeTabId
@@ -156,6 +164,39 @@ test('restores every tab and the active one after a relaunch', async () => {
   await expect(secondWindow.getByTestId('terminal-active')).toContainText('marker-two', {
     timeout: 20_000,
   })
+  await second.close()
+})
+
+test('a restored background tab keeps its size instead of being squashed', async () => {
+  const first = await launch()
+  const firstWindow = await first.firstWindow()
+  await expect(firstWindow.getByTestId('terminal-active')).toBeVisible()
+  await firstWindow.getByTestId('new-tab').click()
+  await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(2)
+  await firstWindow.waitForTimeout(1500)
+
+  const names = (await sessionNames()).sort()
+  const before = [await windowSize(names[0]), await windowSize(names[1])]
+  // The app window is far wider than tmux's 80×24 default, so a pane that
+  // never measured itself is unmistakable.
+  expect(before[0]).not.toBe('80x24')
+  expect(before[0]).toBe(before[1])
+  await first.close()
+
+  // Only one of these two comes back visible. The hidden one is attached by
+  // the same client, and tmux sizes the session to whatever that client says.
+  const second = await launch()
+  const secondWindow = await second.firstWindow()
+  await expect(secondWindow.locator('[data-testid^="tab-"]')).toHaveCount(2)
+  await expect
+    .poll(async () => [await windowSize(names[0]), await windowSize(names[1])], {
+      timeout: 20_000,
+    })
+    .toEqual(before)
+  // And it stays that way rather than settling back down.
+  await secondWindow.waitForTimeout(1500)
+  expect([await windowSize(names[0]), await windowSize(names[1])]).toEqual(before)
+
   await second.close()
 })
 

@@ -152,20 +152,31 @@ export function App() {
       <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         {/* Every terminal stays mounted. Unmounting would dispose its xterm
             and lose local scrollback and viewport position on every switch. */}
-        {state.tabs.map((tab) => (
-          <div
-            key={tab.id}
-            data-testid={tab.id === state.activeId ? 'terminal-active' : `terminal-${tab.id}`}
-            style={{
-              position: 'absolute',
-              inset: 0,
-              padding: 8,
-              display: tab.id === state.activeId ? 'block' : 'none',
-            }}
-          >
-            <Terminal tabId={tab.id} visible={tab.id === state.activeId} />
-          </div>
-        ))}
+        {state.tabs.map((tab) => {
+          const active = tab.id === state.activeId
+          return (
+            <div
+              key={tab.id}
+              data-testid={active ? 'terminal-active' : `terminal-${tab.id}`}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                padding: 8,
+                // `visibility` rather than `display`, so a hidden tab is still
+                // laid out and can measure itself. A `display:none` one never
+                // fits, so it attaches at 80×24 and tmux shrinks the real
+                // session to match — every background tab, on every launch.
+                visibility: active ? 'visible' : 'hidden',
+                // Laid out means it would otherwise sit over the active tab
+                // and swallow its clicks.
+                pointerEvents: active ? 'auto' : 'none',
+                zIndex: active ? 1 : 0,
+              }}
+            >
+              <Terminal tabId={tab.id} visible={active} />
+            </div>
+          )
+        })}
       </div>
     </div>
   )
