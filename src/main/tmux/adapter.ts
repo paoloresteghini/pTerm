@@ -23,7 +23,11 @@ function isEnoent(error: unknown): boolean {
 
 function stderrOf(error: unknown): string {
   const value = (error as { stderr?: unknown } | undefined)?.stderr
-  return typeof value === 'string' ? value : ''
+  if (typeof value === 'string') return value
+  // execFile hands back a Buffer under `encoding: 'buffer'`. Returning '' for
+  // it would silently stop every stderr match below from ever firing.
+  if (Buffer.isBuffer(value)) return value.toString('utf8')
+  return ''
 }
 
 /**
@@ -39,6 +43,15 @@ function isNoServer(error: unknown): boolean {
     /no server running/i.test(stderr) ||
     /error connecting to .*no such file or directory/i.test(stderr)
   )
+}
+
+/**
+ * The session genuinely is not there: either tmux said so, or there is no
+ * server at all. Every other failure — unreachable socket, permission denied,
+ * a wedged server — is a real error and must not be read as "absent".
+ */
+function isNoSuchSession(error: unknown): boolean {
+  return /can't find session/i.test(stderrOf(error)) || isNoServer(error)
 }
 
 export class TmuxAdapter {
@@ -89,8 +102,8 @@ export class TmuxAdapter {
       await this.exec(['has-session', '-t', `=${name}`])
       return true
     } catch (error) {
-      if (error instanceof TmuxNotInstalledError) throw error
-      return false
+      if (isNoSuchSession(error)) return false
+      throw error
     }
   }
 
@@ -99,8 +112,16 @@ export class TmuxAdapter {
       await this.exec(['kill-session', '-t', `=${name}`])
     } catch (error) {
       if (error instanceof TmuxNotInstalledError) throw error
-      // Killing something already gone is success. Anything else is not.
-      if (await this.hasSession(name)) throw error
+      // Killing something already gone is success. Anything else is not, and
+      // an unverifiable kill counts as a failure — resolving would report
+      // success while the processes carry on running.
+      let stillRunning: boolean
+      try {
+        stillRunning = await this.hasSession(name)
+      } catch {
+        throw error
+      }
+      if (stillRunning) throw error
     }
   }
 }
