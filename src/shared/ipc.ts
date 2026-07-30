@@ -6,6 +6,7 @@ export const CHANNELS = {
   detach: 'prcli:detach',
   kill: 'prcli:kill',
   restore: 'prcli:restore',
+  setActive: 'prcli:setActive',
   data: 'prcli:data',
   exit: 'prcli:exit',
 } as const
@@ -37,11 +38,17 @@ export interface ExitEvent {
   code: number
 }
 
+export interface RestoreResult {
+  tabs: TabDescriptor[]
+  activeTabId: string | null
+}
+
 export interface PrcliApi {
   open(request: OpenRequest): Promise<TabDescriptor>
   list(): Promise<TabDescriptor[]>
   /** Reattach tabs persisted by the previous run; returns what came back. */
-  restore(): Promise<TabDescriptor[]>
+  restore(): Promise<RestoreResult>
+  setActive(id: string | null): void
   input(id: string, data: string): void
   resize(id: string, cols: number, rows: number): void
   detach(id: string): void

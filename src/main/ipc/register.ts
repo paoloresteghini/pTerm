@@ -1,7 +1,8 @@
 import { ipcMain, type BrowserWindow } from 'electron'
-import { CHANNELS, type OpenRequest, type TabDescriptor } from '../../shared/ipc'
+import { CHANNELS, type OpenRequest, type RestoreResult, type TabDescriptor } from '../../shared/ipc'
 import type { SessionManager } from '../sessions/manager'
 import { ConfigStore } from '../state/store'
+import { restoreWorkspace } from './restore'
 
 export function registerIpc(
   manager: SessionManager,
@@ -70,25 +71,13 @@ export function registerIpc(
 
   ipcMain.handle(CHANNELS.list, (): TabDescriptor[] => manager.list())
 
-  ipcMain.handle(CHANNELS.restore, async (): Promise<TabDescriptor[]> => {
-    const saved = await store.read()
-    const orphans = await manager.findOrphans()
-    const alive = new Set(orphans.map((orphan) => orphan.tmuxSession))
-    const restored: TabDescriptor[] = []
-    for (const tab of saved.tabs) {
-      // Only reattach tabs whose tmux session actually still exists.
-      if (!alive.has(tab.tmuxSession)) continue
-      restored.push(
-        manager.open({
-          id: tab.id,
-          projectSlug: tab.projectSlug,
-          cwd: tab.cwd,
-          command: tab.command,
-          tmuxSession: tab.tmuxSession,
-        }),
-      )
-    }
-    return restored
+  ipcMain.handle(CHANNELS.restore, (): Promise<RestoreResult> => restoreWorkspace(manager, store))
+
+  ipcMain.on(CHANNELS.setActive, (_event, id: string | null) => {
+    void serialise(async () => {
+      const config = await store.read()
+      await store.write({ ...config, activeTabId: id })
+    })
   })
 
   ipcMain.on(CHANNELS.input, (_event, id: string, data: string) => manager.write(id, data))

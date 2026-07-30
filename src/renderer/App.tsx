@@ -8,10 +8,10 @@ export function App() {
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const restored = await window.prcli.restore()
+      const { tabs } = await window.prcli.restore()
       if (cancelled) return
-      if (restored.length > 0) {
-        setTabId(restored[0].id)
+      if (tabs.length > 0) {
+        setTabId(tabs[0].id)
         return
       }
       const tab = await window.prcli.open({

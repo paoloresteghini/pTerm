@@ -12,6 +12,7 @@ const api: PrcliApi = {
   open: (request: OpenRequest) => ipcRenderer.invoke(CHANNELS.open, request),
   list: () => ipcRenderer.invoke(CHANNELS.list),
   restore: () => ipcRenderer.invoke(CHANNELS.restore),
+  setActive: (id) => ipcRenderer.send(CHANNELS.setActive, id),
   input: (id, data) => ipcRenderer.send(CHANNELS.input, id, data),
   resize: (id, cols, rows) => ipcRenderer.send(CHANNELS.resize, id, cols, rows),
   detach: (id) => ipcRenderer.send(CHANNELS.detach, id),

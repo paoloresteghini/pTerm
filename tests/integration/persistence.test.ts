@@ -4,6 +4,7 @@ import { promisify } from 'node:util'
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type { RestoreResult } from '../../src/shared/ipc'
 
 // registerIpc reaches for electron's ipcMain, which does not exist outside the
 // main process. Capturing the handlers lets the real persistence path run.
@@ -101,10 +102,10 @@ function killTab(id: string): Promise<void> {
   return handler(null as never, id as never) as Promise<void>
 }
 
-function restoreTabs(): Promise<{ id: string }[]> {
+function restoreTabs(): Promise<RestoreResult> {
   const handler = ipc.handlers.get(CHANNELS.restore)
   if (!handler) throw new Error('restore handler was not registered')
-  return handler(null as never) as Promise<{ id: string }[]>
+  return handler(null as never) as Promise<RestoreResult>
 }
 
 /** Resolves once the given tab's client has stopped, whatever the reason. */
@@ -259,7 +260,7 @@ describe('durable tab record', () => {
     await settle(500)
 
     const restored = await restoreTabs()
-    expect(restored.map((entry) => entry.id)).toEqual([tab.id])
+    expect(restored.tabs.map((entry) => entry.id)).toEqual([tab.id])
     expect(await savedIds(store)).toEqual([tab.id])
   })
 })
