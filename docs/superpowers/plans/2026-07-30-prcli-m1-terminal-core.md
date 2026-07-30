@@ -1315,6 +1315,7 @@ Create `tests/unit/store.test.ts`:
 
 ```ts
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+// afterEach is used both for temp-dir cleanup and PRCLI_CONFIG_DIR restore.
 import { mkdtemp, rm, readFile, writeFile, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -1389,8 +1390,21 @@ describe('ConfigStore.write', () => {
 })
 
 describe('ConfigStore.defaultPath', () => {
-  it('points at ~/.prcli/config.json', () => {
+  const original = process.env.PRCLI_CONFIG_DIR
+
+  afterEach(() => {
+    if (original === undefined) delete process.env.PRCLI_CONFIG_DIR
+    else process.env.PRCLI_CONFIG_DIR = original
+  })
+
+  it('points at ~/.prcli/config.json by default', () => {
+    delete process.env.PRCLI_CONFIG_DIR
     expect(ConfigStore.defaultPath()).toMatch(/\.prcli\/config\.json$/)
+  })
+
+  it('honours PRCLI_CONFIG_DIR so tests never touch the real config', () => {
+    process.env.PRCLI_CONFIG_DIR = '/tmp/prcli-override'
+    expect(ConfigStore.defaultPath()).toBe('/tmp/prcli-override/config.json')
   })
 })
 ```
@@ -1426,8 +1440,10 @@ function isValid(value: unknown): value is PrcliConfig {
 export class ConfigStore {
   constructor(private readonly filePath: string) {}
 
+  /** `PRCLI_CONFIG_DIR` exists so tests can point at a temp dir instead of the real config. */
   static defaultPath(): string {
-    return join(homedir(), '.prcli', 'config.json')
+    const root = process.env.PRCLI_CONFIG_DIR ?? join(homedir(), '.prcli')
+    return join(root, 'config.json')
   }
 
   /**
@@ -1462,7 +1478,7 @@ export class ConfigStore {
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `npx vitest run tests/unit/store.test.ts`
-Expected: PASS, 8 tests. The unserialisable-input test passes because `JSON.stringify` throws before any file is touched.
+Expected: PASS, 9 tests. The unserialisable-input test passes because `JSON.stringify` throws before any file is touched.
 
 - [ ] **Step 5: Commit**
 
@@ -1943,10 +1959,13 @@ import { join } from 'node:path'
 const run = promisify(execFile)
 
 let userDataDir: string
+let configDir: string
 
 async function launch(): Promise<ElectronApplication> {
   return electron.launch({
     args: ['.vite/build/main.js', `--user-data-dir=${userDataDir}`],
+    // Keep the app's config out of the real ~/.prcli during tests.
+    env: { ...process.env, PRCLI_CONFIG_DIR: configDir },
   })
 }
 
@@ -1969,6 +1988,12 @@ test.beforeAll(async () => {
   await run('npm', ['run', 'package'])
 })
 
+// Both tests in this file share one config dir on purpose — the second test
+// depends on the first launch's persisted tabs to prove reattachment.
+test.beforeAll(async () => {
+  configDir = await mkdtemp(join(tmpdir(), 'prcli-e2e-config-'))
+})
+
 test.beforeEach(async () => {
   userDataDir = await mkdtemp(join(tmpdir(), 'prcli-e2e-'))
 })
@@ -1976,6 +2001,10 @@ test.beforeEach(async () => {
 test.afterEach(async () => {
   await cleanupSessions()
   await rm(userDataDir, { recursive: true, force: true })
+})
+
+test.afterAll(async () => {
+  await rm(configDir, { recursive: true, force: true })
 })
 
 test('renders a terminal and echoes typed input', async () => {
@@ -2015,7 +2044,7 @@ test('reattaches the same session with scrollback after relaunch', async () => {
 })
 ```
 
-Note: the E2E test uses a fresh `--user-data-dir` per test but the real `~/.prcli/config.json`, because `ConfigStore.defaultPath()` is home-relative. The relaunch test depends on that shared config — that is why `cleanupSessions` runs afterwards.
+Note: the E2E tests never touch the real `~/.prcli/config.json` — `PRCLI_CONFIG_DIR` redirects it to a temp dir shared by both tests in the file, which is what lets the second test see the first's persisted tabs. tmux sessions still land on the default socket, hence `cleanupSessions`.
 
 - [ ] **Step 6: Run the end-to-end tests**
 
