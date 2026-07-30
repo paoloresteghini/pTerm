@@ -517,7 +517,16 @@ describe('TmuxAdapter.version', () => {
 })
 
 describe('TmuxAdapter.listSessions', () => {
-  it('returns an empty array when no server is running', async () => {
+  // tmux words this case differently depending on whether the socket file was
+  // ever created, so both paths need covering.
+  it('returns an empty array when the socket was never created', async () => {
+    const pristine = new TmuxAdapter({ socket: 'prcli-test-never-created' })
+    await expect(pristine.listSessions()).resolves.toEqual([])
+  })
+
+  it('returns an empty array after the server has been killed', async () => {
+    await createSession('prcli-lumio-a1b2c3d4e5f60718')
+    await killServer()
     await expect(adapter.listSessions()).resolves.toEqual([])
   })
 
@@ -603,6 +612,21 @@ function stderrOf(error: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
+/**
+ * tmux reports "no server for this socket" two different ways depending on
+ * whether the socket file was ever created:
+ *   never created  -> error connecting to /tmp/.../sock (No such file or directory)
+ *   created, gone  -> no server running on /tmp/.../sock
+ * Both mean zero sessions. Anything else is a real failure and must throw.
+ */
+function isNoServer(error: unknown): boolean {
+  const stderr = stderrOf(error)
+  return (
+    /no server running/i.test(stderr) ||
+    /error connecting to .*no such file or directory/i.test(stderr)
+  )
+}
+
 export class TmuxAdapter {
   readonly bin: string
   private readonly socket?: string
@@ -636,8 +660,7 @@ export class TmuxAdapter {
       const stdout = await this.exec(['list-sessions', '-F', '#{session_name}'])
       return stdout.split('\n').map((line) => line.trim()).filter(Boolean)
     } catch (error) {
-      // "no server running on ..." is the normal empty case, not a failure.
-      if (/no server running/i.test(stderrOf(error))) return []
+      if (isNoServer(error)) return []
       throw error
     }
   }
@@ -672,7 +695,7 @@ export class TmuxAdapter {
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `npx vitest run tests/integration/adapter.test.ts`
-Expected: PASS, 9 tests.
+Expected: PASS, 10 tests.
 
 - [ ] **Step 5: Verify tests did not touch your own tmux server**
 
