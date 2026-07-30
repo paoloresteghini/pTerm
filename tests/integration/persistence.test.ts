@@ -150,12 +150,52 @@ let configDir: string
 let store: Store
 let manager: Manager
 
+/** Every payload registerIpc has sent to the renderer, in order. */
+let sentEvents: Array<{ channel: string; payload: unknown }>
+
 /** Rebuild the whole main-process wiring, optionally against a different tmux. */
 function useManager(bin?: string): void {
   ipc.handlers.clear()
   ipc.listeners.clear()
+  sentEvents = []
   manager = new SessionManager(new TmuxAdapter({ socket: SOCKET, bin }))
-  registerIpc(manager, () => null, store)
+  // A minimal stand-in for BrowserWindow: registerIpc only ever calls
+  // isDestroyed() and webContents.send(), so that is all this needs to supply.
+  const fakeWindow = {
+    isDestroyed: () => false,
+    webContents: {
+      send: (channel: string, payload: unknown) => {
+        sentEvents.push({ channel, payload })
+      },
+    },
+  }
+  registerIpc(manager, () => fakeWindow as never, store)
+}
+
+/** Wait for the exit event a given tab sends to the renderer. */
+function waitForExitEvent(
+  id: string,
+  ms = 8000,
+): Promise<{ id: string; code: number; sessionAlive: boolean }> {
+  const deadline = Date.now() + ms
+  return new Promise((resolve, reject) => {
+    const poll = (): void => {
+      const found = sentEvents.find(
+        (event) =>
+          event.channel === CHANNELS.exit && (event.payload as { id: string }).id === id,
+      )
+      if (found) {
+        resolve(found.payload as { id: string; code: number; sessionAlive: boolean })
+        return
+      }
+      if (Date.now() > deadline) {
+        reject(new Error(`timed out waiting for an exit event for ${id}`))
+        return
+      }
+      setTimeout(poll, 20)
+    }
+    poll()
+  })
 }
 
 beforeAll(killServer)
@@ -239,6 +279,24 @@ describe('durable tab record', () => {
 
     await expect(killTab(tab.id)).rejects.toThrow(/permission denied/i)
     await settle(500)
+
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    await expect(adapter.hasSession(tab.tmuxSession)).resolves.toBe(true)
+    expect(await savedIds(store)).toEqual([tab.id])
+  })
+
+  // `killed` must not be asserted dead just because we asked for it: the kill
+  // can be refused, and the exit event the renderer draws its tab bar from has
+  // to say so, or a live session drops off the screen with no way back to it.
+  it('tells the renderer a killed session is still alive when the kill is refused', async () => {
+    useManager(await tmuxRefusingKills())
+    const tab = await openTab()
+    await waitForPrompt(tab.id)
+    const exitEvent = waitForExitEvent(tab.id)
+
+    await expect(killTab(tab.id)).rejects.toThrow(/permission denied/i)
+
+    await expect(exitEvent).resolves.toMatchObject({ id: tab.id, sessionAlive: true })
 
     const adapter = new TmuxAdapter({ socket: SOCKET })
     await expect(adapter.hasSession(tab.tmuxSession)).resolves.toBe(true)

@@ -42,18 +42,41 @@ export function registerIpc(
     if (window && !window.isDestroyed()) window.webContents.send(channel, payload)
   }
 
+  // `SessionManager.kill()` detaches the local client — which fires the exit
+  // event below — before it even knows whether `TmuxAdapter.killSession()`
+  // will succeed, and killing the local client is quicker than spawning tmux
+  // to destroy the session. So the exit event routinely arrives while the
+  // kill is still in flight, and asking tmux fresh at that moment mostly asks
+  // a question that hasn't been answered yet: a kill that would go on to
+  // succeed can just as well be caught still looking alive. Recording the
+  // in-flight kill here lets the exit event wait on the one query that
+  // actually settles the question, instead of racing a second one against it.
+  const pendingKills = new Map<string, Promise<void>>()
+
   /**
    * Whether the tmux session outlived the client that just stopped.
    *
-   * `detached` is how a session survives on purpose and `killed` is us
-   * destroying it, so both answer themselves. `exited` is the only case that
-   * says nothing either way: `Ctrl-b d`, `tmux detach-client` and a client
-   * killed from outside all land there with the session still running. Only
-   * tmux can settle that one, so ask it rather than inferring.
+   * `detached` is how a session survives on purpose, so that one answers
+   * itself. `killed` is answered by the kill already in flight for it, via
+   * `pendingKills`, when there is one to ask. `exited` — and a `killed` with
+   * no pending kill on record, which should not happen but must still get a
+   * real answer rather than an assumed one — asks tmux directly.
    */
   const sessionSurvived = async (record: TabRecord, reason: ExitReason): Promise<boolean> => {
     if (reason === 'detached') return true
-    if (reason === 'killed') return false
+    const pending = reason === 'killed' ? pendingKills.get(record.id) : undefined
+    if (pending) {
+      // `manager.kill()` resolving means `killSession()` succeeded: dead.
+      // `killSession()` only throws once it has verified the session is
+      // still there (or the verification itself failed, which the shared
+      // catch below already treats as "alive" — the safe default).
+      try {
+        await pending
+        return false
+      } catch {
+        return true
+      }
+    }
     try {
       return await manager.hasSession(record.tmuxSession)
     } catch {
@@ -68,13 +91,16 @@ export function registerIpc(
   manager.onExit((record, code, reason) => {
     // The renderer needs the answer to travel with the event: it draws the
     // tabs, and a tab whose session is still running must stay in the bar.
-    // That makes the send wait on tmux in the `exited` case — a genuine death
-    // still reaches the renderer, one round trip later.
+    // That makes the send wait on the kill (or on tmux) in the `killed` and
+    // `exited` cases — a genuine death still reaches the renderer, one round
+    // trip later.
     void (async () => {
       const sessionAlive = await sessionSurvived(record, reason)
       send(CHANNELS.exit, { id: record.id, code, sessionAlive })
-      // `killed` is pruned by the kill handler below, only once the kill has
-      // actually succeeded.
+      // `killed` is never pruned here: the CHANNELS.kill handler below
+      // already owns that, and forgets the tab immediately after the same
+      // `manager.kill()` this resolved against has succeeded — pruning here
+      // too would only be a redundant second write of the same outcome.
       if (reason === 'exited' && !sessionAlive) await forgetTab(record.id)
     })()
   })
@@ -107,7 +133,16 @@ export function registerIpc(
   ipcMain.on(CHANNELS.detach, (_event, id: string) => manager.detach(id))
 
   ipcMain.handle(CHANNELS.kill, async (_event, id: string) => {
-    await manager.kill(id)
-    await forgetTab(id)
+    // Recorded before the first await inside `manager.kill()` can run, so it
+    // is always in place before the exit event it settles could possibly
+    // fire — see `pendingKills` above.
+    const outcome = manager.kill(id)
+    pendingKills.set(id, outcome)
+    try {
+      await outcome
+      await forgetTab(id)
+    } finally {
+      pendingKills.delete(id)
+    }
   })
 }
