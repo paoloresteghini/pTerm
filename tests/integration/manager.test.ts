@@ -43,8 +43,8 @@ function waitFor(
 function nextExit(manager: SessionManager, id: string, ms = 8000): Promise<string> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`timed out waiting for ${id} to exit`)), ms)
-    manager.onExit((emittedId, _code, reason) => {
-      if (emittedId !== id) return
+    manager.onExit((record, _code, reason) => {
+      if (record.id !== id) return
       clearTimeout(timer)
       resolve(reason)
     })

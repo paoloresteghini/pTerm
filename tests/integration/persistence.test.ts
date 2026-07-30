@@ -1,7 +1,7 @@
-import { describe, it, expect, afterEach, beforeEach, beforeAll, vi } from 'vitest'
+import { describe, it, expect, afterAll, afterEach, beforeEach, beforeAll, vi } from 'vitest'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -107,25 +107,72 @@ function restoreTabs(): Promise<{ id: string }[]> {
   return handler(null as never) as Promise<{ id: string }[]>
 }
 
+/** Resolves once the given tab's client has stopped, whatever the reason. */
+function nextExit(id: string, ms = 8000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`timed out waiting for ${id} to exit`)), ms)
+    manager.onExit((record) => {
+      if (record.id !== id) return
+      clearTimeout(timer)
+      resolve()
+    })
+  })
+}
+
+let fakeBinDir: string | undefined
+
+/**
+ * Real tmux, except that `kill-session` fails the way an unreachable socket
+ * does. Nothing else can produce a kill that fails after the client is already
+ * gone, which is the case that must not drop the record.
+ */
+async function tmuxRefusingKills(): Promise<string> {
+  fakeBinDir ??= await mkdtemp(join(tmpdir(), 'prcli-fake-tmux-'))
+  const bin = join(fakeBinDir, 'tmux')
+  await writeFile(
+    bin,
+    '#!/bin/sh\n' +
+      'for arg in "$@"; do\n' +
+      '  if [ "$arg" = "kill-session" ]; then\n' +
+      '    printf "%s\\n" "error connecting to /tmp/x (Permission denied)" >&2\n' +
+      '    exit 1\n' +
+      '  fi\n' +
+      'done\n' +
+      'exec tmux "$@"\n',
+    'utf8',
+  )
+  await chmod(bin, 0o755)
+  return bin
+}
+
 let configDir: string
 let store: Store
 let manager: Manager
 
+/** Rebuild the whole main-process wiring, optionally against a different tmux. */
+function useManager(bin?: string): void {
+  ipc.handlers.clear()
+  ipc.listeners.clear()
+  manager = new SessionManager(new TmuxAdapter({ socket: SOCKET, bin }))
+  registerIpc(manager, () => null, store)
+}
+
 beforeAll(killServer)
 
 beforeEach(async () => {
-  ipc.handlers.clear()
-  ipc.listeners.clear()
   configDir = await mkdtemp(join(tmpdir(), 'prcli-persist-'))
   store = new ConfigStore(join(configDir, 'config.json'))
-  manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
-  registerIpc(manager, () => null, store)
+  useManager()
 })
 
 afterEach(async () => {
   manager.detachAll()
   await killServer()
   await rm(configDir, { recursive: true, force: true })
+})
+
+afterAll(async () => {
+  if (fakeBinDir) await rm(fakeBinDir, { recursive: true, force: true })
 })
 
 describe('durable tab record', () => {
@@ -161,6 +208,40 @@ describe('durable tab record', () => {
   it('is pruned when the session genuinely exits', async () => {
     await openTab('true')
     await waitForSavedIds(store, [])
+  })
+
+  // `Ctrl-b d` inside the pane. xterm passes the keystroke straight through,
+  // so the client dies with no intent of ours — but the session is still
+  // running, and the record is the only way back to it.
+  it('survives a client death we did not cause', async () => {
+    const tab = await openTab()
+    await waitForPrompt(tab.id)
+    const exited = nextExit(tab.id)
+
+    await run('tmux', ['-L', SOCKET, 'detach-client', '-s', tab.tmuxSession])
+    await exited
+    // Long enough that a wrongly-pruning listener would have written by now.
+    await settle(500)
+
+    expect(manager.get(tab.id)).toBeUndefined()
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    await expect(adapter.hasSession(tab.tmuxSession)).resolves.toBe(true)
+    expect(await savedIds(store)).toEqual([tab.id])
+  })
+
+  // The kill detaches the client before it destroys the session, so a kill
+  // that then fails leaves a session running that only the record can reach.
+  it('survives a kill that fails', async () => {
+    useManager(await tmuxRefusingKills())
+    const tab = await openTab()
+    await waitForPrompt(tab.id)
+
+    await expect(killTab(tab.id)).rejects.toThrow(/permission denied/i)
+    await settle(500)
+
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    await expect(adapter.hasSession(tab.tmuxSession)).resolves.toBe(true)
+    expect(await savedIds(store)).toEqual([tab.id])
   })
 
   it('does not lose other tabs when one is pruned', async () => {

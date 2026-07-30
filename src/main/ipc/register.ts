@@ -42,11 +42,24 @@ export function registerIpc(
   }
 
   manager.onData((id, data) => send(CHANNELS.data, { id, data }))
-  manager.onExit((id, code, reason) => {
-    send(CHANNELS.exit, { id, code })
-    // A detach leaves the tmux session running, so the record must survive it.
-    // Anything else means the session is gone and the record is stale.
-    if (reason !== 'detached') void forgetTab(id)
+  manager.onExit((record, code, reason) => {
+    send(CHANNELS.exit, { id: record.id, code })
+    // `detached` is how a session survives, and `killed` is pruned by the kill
+    // handler below — only once the kill has actually succeeded.
+    if (reason !== 'exited') return
+    void (async () => {
+      try {
+        // A client can die without us asking and without the session dying
+        // with it: `Ctrl-b d` and `tmux detach-client` both look like this.
+        // Only tmux can say, so ask it rather than inferring.
+        if (await manager.hasSession(record.tmuxSession)) return
+      } catch {
+        // Could not find out. Keeping a stale row costs a line of config;
+        // dropping a live one loses the session.
+        return
+      }
+      await forgetTab(record.id)
+    })()
   })
 
   ipcMain.handle(CHANNELS.open, async (_event, request: OpenRequest): Promise<TabDescriptor> => {

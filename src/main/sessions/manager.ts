@@ -23,9 +23,13 @@ export interface OpenInput {
 }
 
 /**
- * Why a client stopped. The distinction is load-bearing: `detached` means the
- * tmux session is still running and must stay in the durable tab list, while
- * `exited` and `killed` mean it is gone and the record should be pruned.
+ * Why a client stopped.
+ *
+ * `detached` and `killed` are the cases we caused and therefore know the
+ * outcome of. `exited` is everything else — and it says nothing about whether
+ * the tmux session survived. `Ctrl-b d`, `tmux detach-client` and a client
+ * killed from outside all land here with the session still running. Treating
+ * `exited` as "the session is gone" strands live sessions; ask the adapter.
  */
 export type ExitReason = 'detached' | 'killed' | 'exited'
 
@@ -46,7 +50,7 @@ export class SessionManager {
   private readonly entries = new Map<string, Entry>()
   private readonly dataListeners = new Set<(id: string, data: string) => void>()
   private readonly exitListeners = new Set<
-    (id: string, code: number, reason: ExitReason) => void
+    (record: TabRecord, code: number, reason: ExitReason) => void
   >()
 
   constructor(private readonly adapter: TmuxAdapter) {}
@@ -93,7 +97,10 @@ export class SessionManager {
       // evict the new entry.
       if (this.entries.get(id) === entry) this.entries.delete(id)
       const reason: ExitReason = entry.intent ?? 'exited'
-      for (const listener of this.exitListeners) listener(id, code, reason)
+      // The record travels with the event: by the time a listener runs the
+      // entry is gone, and a listener that has to check whether the tmux
+      // session survived needs its name.
+      for (const listener of this.exitListeners) listener(record, code, reason)
     })
 
     this.entries.set(id, entry)
@@ -178,7 +185,12 @@ export class SessionManager {
     this.dataListeners.add(listener)
   }
 
-  onExit(listener: (id: string, code: number, reason: ExitReason) => void): void {
+  /** Whether the tmux session behind a tab is still running. */
+  async hasSession(tmuxSession: string): Promise<boolean> {
+    return this.adapter.hasSession(tmuxSession)
+  }
+
+  onExit(listener: (record: TabRecord, code: number, reason: ExitReason) => void): void {
     this.exitListeners.add(listener)
   }
 }
