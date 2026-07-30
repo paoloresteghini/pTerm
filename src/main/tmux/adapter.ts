@@ -124,4 +124,19 @@ export class TmuxAdapter {
       if (stillRunning) throw error
     }
   }
+
+  /**
+   * `=name:` keeps this on one session; without it tmux matches by prefix.
+   * The trailing `:` is required here (unlike `has-session`/`kill-session`):
+   * for `set-option`/`show-options` tmux parses a bare `=name` as an
+   * exact-match *window* target and reports "no such session", so the
+   * session part of the target must be terminated explicitly.
+   */
+  async setSessionOption(name: string, option: string, value: string): Promise<void> {
+    await this.exec(['set-option', '-t', `=${name}:`, option, value])
+  }
+
+  async getSessionOption(name: string, option: string): Promise<string> {
+    return (await this.exec(['show-options', '-t', `=${name}:`, '-v', option])).trim()
+  }
 }

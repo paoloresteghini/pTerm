@@ -48,6 +48,14 @@ export class PtySession {
     ]
     if (this.options.command) args.push(this.options.command)
 
+    // Chained into the same invocation rather than issued afterwards: a
+    // separate call would race the session actually existing. `;` is tmux's
+    // own command separator and reaches it intact because node-pty spawns
+    // without a shell.
+    // The app draws its own chrome, so tmux's status line is redundant here.
+    // A session attached from a plain terminal will also have it off.
+    args.push(';', 'set-option', 'status', 'off')
+
     const env = { ...process.env, ...this.options.env }
     // Electron sets this when re-execing as Node; leaking it breaks child shells.
     delete env.ELECTRON_RUN_AS_NODE

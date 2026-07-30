@@ -135,3 +135,20 @@ describe('TmuxAdapter.killSession', () => {
     )
   })
 })
+
+describe('TmuxAdapter session options', () => {
+  it('sets and reads back a session option', async () => {
+    await createSession('prcli-lumio-a1b2c3d4e5f60718')
+    await adapter.setSessionOption('prcli-lumio-a1b2c3d4e5f60718', 'status', 'off')
+    await expect(adapter.getSessionOption('prcli-lumio-a1b2c3d4e5f60718', 'status'))
+      .resolves.toBe('off')
+  })
+
+  it('targets exactly one session', async () => {
+    await createSession('prcli-lumio-a1b2c3d4e5f60718')
+    await createSession('prcli-lumio-00000000000000ff')
+    await adapter.setSessionOption('prcli-lumio-a1b2c3d4e5f60718', 'status', 'off')
+    await expect(adapter.getSessionOption('prcli-lumio-00000000000000ff', 'status'))
+      .resolves.not.toBe('off')
+  })
+})

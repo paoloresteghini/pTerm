@@ -107,4 +107,11 @@ describe('PtySession', () => {
     expect(output).toMatch(/TERM=(screen|tmux)-256color/)
     session.detach()
   })
+
+  it('disables tmux\'s own status line, which would collide with the app\'s tab bar', async () => {
+    const session = open()
+    await waitForOutput(session, /\$|%|#/)
+    await expect(adapter.getSessionOption(NAME, 'status')).resolves.toBe('off')
+    session.detach()
+  })
 })
