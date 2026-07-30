@@ -35,6 +35,22 @@ async function sessionNames(): Promise<string[]> {
   }
 }
 
+/** Total tmux clients attached across every session on the test socket. */
+async function attachedClients(): Promise<number> {
+  try {
+    const { stdout } = await run('tmux', [
+      '-L', SOCKET, 'list-sessions', '-F', '#{session_attached}',
+    ])
+    return stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .reduce((total, count) => total + Number(count), 0)
+  } catch {
+    return 0
+  }
+}
+
 test.beforeAll(async () => {
   await run('npm', ['run', 'package'])
 })
@@ -148,6 +164,30 @@ test('adopts a session the app has never seen', async () => {
   const window = await app.firstWindow()
   await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(1)
   await expect(window.getByTestId('tab-abcdef0123456789')).toBeVisible()
+
+  await app.close()
+})
+
+test('a detach from inside the pane leaves the tab and its session alone', async () => {
+  const app = await launch()
+  const window = await app.firstWindow()
+  await expect(window.getByTestId('terminal-active')).toBeVisible()
+  await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(1)
+  const before = await sessionNames()
+
+  // Wait for a prompt: tmux must be up before it will act on its prefix key.
+  await window.getByTestId('terminal-active').click()
+  await expect(window.getByTestId('terminal-active')).toContainText(/[$%#]/, { timeout: 20_000 })
+
+  // The tmux user's reflex. The client dies; the session does not.
+  await window.keyboard.press('Control+b')
+  await window.keyboard.press('d')
+  await expect.poll(attachedClients, { timeout: 20_000 }).toBe(0)
+  // Long enough that a renderer deleting the tab on any exit event would have.
+  await window.waitForTimeout(1500)
+
+  expect(await sessionNames()).toEqual(before)
+  await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(1)
 
   await app.close()
 })

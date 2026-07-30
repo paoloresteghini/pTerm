@@ -63,8 +63,18 @@ export function App() {
     }
   }, [fail])
 
-  // A session that dies on its own must leave the tab bar with it.
-  useEffect(() => window.prcli.onExit(({ id }) => dispatch({ type: 'removed', id })), [])
+  // A session that dies on its own must leave the tab bar with it — but a
+  // client stopping is not a session dying. `Ctrl-b d` inside a pane, and the
+  // detach restore does before it reattaches, both arrive here with the
+  // session still running, and those tabs must stay.
+  useEffect(
+    () =>
+      window.prcli.onExit(({ id, sessionAlive }) => {
+        if (sessionAlive) return
+        dispatch({ type: 'removed', id })
+      }),
+    [],
+  )
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {

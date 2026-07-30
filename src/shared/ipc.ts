@@ -36,6 +36,13 @@ export interface DataEvent {
 export interface ExitEvent {
   id: string
   code: number
+  /**
+   * Whether the tmux SESSION is still running — not whether the client is.
+   * A client stops for reasons that leave the session untouched (`Ctrl-b d`,
+   * `tmux detach-client`, our own detach), so a consumer that treats every
+   * exit as a death drops tabs whose work is still there.
+   */
+  sessionAlive: boolean
 }
 
 export interface RestoreResult {

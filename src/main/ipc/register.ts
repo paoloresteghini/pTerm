@@ -1,6 +1,6 @@
 import { ipcMain, type BrowserWindow } from 'electron'
 import { CHANNELS, type OpenRequest, type RestoreResult, type TabDescriptor } from '../../shared/ipc'
-import type { SessionManager } from '../sessions/manager'
+import type { ExitReason, SessionManager, TabRecord } from '../sessions/manager'
 import { ConfigStore } from '../state/store'
 import { restoreWorkspace } from './restore'
 
@@ -42,24 +42,40 @@ export function registerIpc(
     if (window && !window.isDestroyed()) window.webContents.send(channel, payload)
   }
 
+  /**
+   * Whether the tmux session outlived the client that just stopped.
+   *
+   * `detached` is how a session survives on purpose and `killed` is us
+   * destroying it, so both answer themselves. `exited` is the only case that
+   * says nothing either way: `Ctrl-b d`, `tmux detach-client` and a client
+   * killed from outside all land there with the session still running. Only
+   * tmux can settle that one, so ask it rather than inferring.
+   */
+  const sessionSurvived = async (record: TabRecord, reason: ExitReason): Promise<boolean> => {
+    if (reason === 'detached') return true
+    if (reason === 'killed') return false
+    try {
+      return await manager.hasSession(record.tmuxSession)
+    } catch {
+      // Could not find out. Answering "alive" keeps a stale row and a stale
+      // tab, which costs a line of config and a click; answering "dead" for a
+      // live session loses it.
+      return true
+    }
+  }
+
   manager.onData((id, data) => send(CHANNELS.data, { id, data }))
   manager.onExit((record, code, reason) => {
-    send(CHANNELS.exit, { id: record.id, code })
-    // `detached` is how a session survives, and `killed` is pruned by the kill
-    // handler below — only once the kill has actually succeeded.
-    if (reason !== 'exited') return
+    // The renderer needs the answer to travel with the event: it draws the
+    // tabs, and a tab whose session is still running must stay in the bar.
+    // That makes the send wait on tmux in the `exited` case — a genuine death
+    // still reaches the renderer, one round trip later.
     void (async () => {
-      try {
-        // A client can die without us asking and without the session dying
-        // with it: `Ctrl-b d` and `tmux detach-client` both look like this.
-        // Only tmux can say, so ask it rather than inferring.
-        if (await manager.hasSession(record.tmuxSession)) return
-      } catch {
-        // Could not find out. Keeping a stale row costs a line of config;
-        // dropping a live one loses the session.
-        return
-      }
-      await forgetTab(record.id)
+      const sessionAlive = await sessionSurvived(record, reason)
+      send(CHANNELS.exit, { id: record.id, code, sessionAlive })
+      // `killed` is pruned by the kill handler below, only once the kill has
+      // actually succeeded.
+      if (reason === 'exited' && !sessionAlive) await forgetTab(record.id)
     })()
   })
 
