@@ -1,6 +1,7 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, dialog } from 'electron'
 import path from 'node:path'
 import { TmuxAdapter, TmuxNotInstalledError } from './tmux/adapter'
+import { resolveTmuxBin } from './tmux/resolve'
 import { SessionManager } from './sessions/manager'
 import { registerIpc } from './ipc/register'
 
@@ -11,7 +12,12 @@ let mainWindow: BrowserWindow | null = null
 
 // `PRCLI_TMUX_SOCKET` exists so tests run against their own tmux server and can
 // never see, adopt or kill the user's real sessions.
-const adapter = new TmuxAdapter({ socket: process.env.PRCLI_TMUX_SOCKET })
+// tmux is resolved to an absolute path because a Finder/Dock launch inherits
+// launchd's PATH, which has no Homebrew in it.
+const adapter = new TmuxAdapter({
+  bin: resolveTmuxBin(),
+  socket: process.env.PRCLI_TMUX_SOCKET,
+})
 const manager = new SessionManager(adapter)
 
 function createWindow(): void {
@@ -49,8 +55,14 @@ app.whenReady().then(async () => {
     await adapter.version()
   } catch (error) {
     if (error instanceof TmuxNotInstalledError) {
-      // Milestone 4 replaces this with an onboarding screen.
-      console.error('tmux is required. Install it with: brew install tmux')
+      // A console.error is invisible when the app is launched from Finder or
+      // the Dock, which is exactly when tmux is most likely to be missing.
+      // Milestone 4 replaces this with a proper onboarding screen.
+      dialog.showErrorBox(
+        'tmux is required',
+        'PRCLI could not find tmux.\n\nInstall it with:\n    brew install tmux\n\n' +
+          'If tmux is installed somewhere unusual, set PRCLI_TMUX_BIN to its full path.',
+      )
       app.exit(1)
       return
     }

@@ -1,3 +1,5 @@
+import { cp, mkdir } from 'node:fs/promises';
+import path from 'node:path';
 import type { ForgeConfig } from '@electron-forge/shared-types';
 import { MakerZIP } from '@electron-forge/maker-zip';
 import { VitePlugin } from '@electron-forge/plugin-vite';
@@ -5,11 +7,41 @@ import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
 import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-natives';
 
+/**
+ * Runtime dependencies the Vite bundle deliberately does NOT bundle, and which
+ * therefore have to be copied into the packaged app by hand.
+ *
+ * `node-pty` is a native module, so `vite.main.config.ts` marks it external and
+ * the bundle `require()`s it at runtime. The Vite plugin ships only the bundle —
+ * it copies no `node_modules` — so without this the packaged app throws
+ * "Cannot find module 'node-pty'" the first time it opens a session. Nothing in
+ * dev or in the E2E suite catches that: both run from the source tree, where
+ * `node_modules` is present.
+ *
+ * `node-addon-api` is node-pty's own runtime dependency.
+ */
+const EXTERNAL_RUNTIME_DEPS = ['node-pty', 'node-addon-api'];
+
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
   },
   rebuildConfig: {},
+  hooks: {
+    packageAfterCopy: async (_forgeConfig, buildPath) => {
+      for (const dep of EXTERNAL_RUNTIME_DEPS) {
+        const from = path.join(process.cwd(), 'node_modules', dep);
+        const to = path.join(buildPath, 'node_modules', dep);
+        await mkdir(path.dirname(to), { recursive: true });
+        // `prebuilds/` carries binaries for every platform node-pty supports;
+        // this app is macOS-only, so they are dead weight in the bundle.
+        await cp(from, to, {
+          recursive: true,
+          filter: (source) => !source.includes(`${path.sep}prebuilds${path.sep}`),
+        });
+      }
+    },
+  },
   // macOS only — no Windows (Squirrel) or Linux (deb/rpm) makers.
   makers: [new MakerZIP({}, ['darwin'])],
   plugins: [
