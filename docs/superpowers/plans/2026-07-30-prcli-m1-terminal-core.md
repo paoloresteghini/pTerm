@@ -443,7 +443,7 @@ export function isPrcliSession(name: string): boolean {
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `npx vitest run tests/unit/names.test.ts`
-Expected: PASS, 12 tests.
+Expected: PASS, 13 tests.
 
 - [ ] **Step 5: Commit**
 
