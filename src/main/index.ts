@@ -1,15 +1,9 @@
 import { app, BrowserWindow } from 'electron';
 import path from 'node:path';
-import started from 'electron-squirrel-startup';
 
 // Fails loudly at boot if the native module was not rebuilt for Electron's ABI.
 import { spawn as ptySpawn } from 'node-pty';
 console.log('node-pty loaded:', typeof ptySpawn === 'function');
-
-// Handle creating/removing shortcuts on Windows when installing/uninstalling.
-if (started) {
-  app.quit();
-}
 
 const createWindow = () => {
   // Create the browser window.
