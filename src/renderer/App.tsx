@@ -44,7 +44,7 @@ export function App() {
           {error}
         </pre>
       ) : null}
-      {tabId ? <Terminal tabId={tabId} /> : null}
+      {tabId ? <Terminal tabId={tabId} visible /> : null}
     </div>
   )
 }
