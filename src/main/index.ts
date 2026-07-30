@@ -1,4 +1,5 @@
-import { app, BrowserWindow, dialog } from 'electron'
+import { app, BrowserWindow, dialog, Menu } from 'electron'
+import type { MenuItemConstructorOptions } from 'electron'
 import path from 'node:path'
 import { TmuxAdapter, TmuxNotInstalledError } from './tmux/adapter'
 import { resolveTmuxBin } from './tmux/resolve'
@@ -26,6 +27,34 @@ const manager = new SessionManager(adapter)
 const isPrimaryInstance = app.requestSingleInstanceLock()
 if (!isPrimaryInstance) {
   app.quit()
+}
+
+// The renderer owns ⌘W: it closes the active tab. A menu accelerator fires
+// whatever the renderer does with the event, so the default File menu's
+// "Close Window" would win and take every session's client down with it.
+// Same menu as Electron's default, with that one item's accelerator shown
+// but not registered.
+function installMenu(): void {
+  const template: MenuItemConstructorOptions[] = [
+    { role: 'appMenu' },
+    {
+      label: 'File',
+      submenu: [
+        {
+          label: 'Close Tab',
+          accelerator: 'CmdOrCtrl+W',
+          // Displayed, but not claimed from the system — the keystroke
+          // reaches the renderer instead.
+          registerAccelerator: false,
+          click: () => undefined,
+        },
+      ],
+    },
+    { role: 'editMenu' },
+    { role: 'viewMenu' },
+    { role: 'windowMenu' },
+  ]
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
 app.on('second-instance', () => {
@@ -86,6 +115,8 @@ app.whenReady().then(async () => {
     }
     throw error
   }
+
+  installMenu()
 
   registerIpc(manager, () => mainWindow)
   createWindow()
