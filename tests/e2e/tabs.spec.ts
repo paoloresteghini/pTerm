@@ -1,7 +1,7 @@
 import { test, expect, _electron as electron, type ElectronApplication } from '@playwright/test'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -33,6 +33,11 @@ async function sessionNames(): Promise<string[]> {
   } catch {
     return []
   }
+}
+
+async function savedActiveTabId(): Promise<unknown> {
+  const raw: unknown = JSON.parse(await readFile(join(configDir, 'config.json'), 'utf8'))
+  return (raw as { activeTabId?: unknown }).activeTabId
 }
 
 /** Total tmux clients attached across every session on the test socket. */
@@ -151,6 +156,41 @@ test('restores every tab and the active one after a relaunch', async () => {
   await expect(secondWindow.getByTestId('terminal-active')).toContainText('marker-two', {
     timeout: 20_000,
   })
+  await second.close()
+})
+
+test('a relaunch lands on the tab that closing another one activated', async () => {
+  const first = await launch()
+  const firstWindow = await first.firstWindow()
+  await expect(firstWindow.getByTestId('terminal-active')).toBeVisible()
+  await firstWindow.getByTestId('new-tab').click()
+  await firstWindow.getByTestId('new-tab').click()
+  await expect(firstWindow.locator('[data-testid^="tab-"]')).toHaveCount(3)
+  await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(3)
+
+  const ids = await firstWindow
+    .locator('[data-testid^="tab-"]')
+    .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-testid') ?? ''))
+
+  // Work on the middle tab, then close it. The third becomes active — and
+  // that, not the first, is where the next launch has to land.
+  await firstWindow.getByTestId(ids[1]).click()
+  await expect(firstWindow.locator('[data-active="true"]')).toHaveAttribute('data-testid', ids[1])
+  await firstWindow.getByTestId(ids[1].replace('tab-', 'close-')).click()
+  await expect(firstWindow.locator('[data-active="true"]')).toHaveAttribute('data-testid', ids[2])
+  await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(2)
+  // Let the config write land before the app goes away.
+  await firstWindow.waitForTimeout(1000)
+  await first.close()
+
+  const second = await launch()
+  const secondWindow = await second.firstWindow()
+  await expect(secondWindow.locator('[data-testid^="tab-"]')).toHaveCount(2)
+  await expect(secondWindow.locator('[data-active="true"]')).toHaveAttribute('data-testid', ids[2])
+  // A launch that restores tabs must not report an active tab before it knows
+  // of one: writing `null` at mount would wipe the value restore is reading.
+  await secondWindow.waitForTimeout(1000)
+  expect(await savedActiveTabId()).toBe(ids[2].replace('tab-', ''))
   await second.close()
 })
 
