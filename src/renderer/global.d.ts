@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 import type { PrcliApi } from '../shared/ipc'
 
 declare global {
