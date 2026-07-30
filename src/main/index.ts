@@ -20,6 +20,23 @@ const adapter = new TmuxAdapter({
 })
 const manager = new SessionManager(adapter)
 
+// Two instances would each open their own sessions and race on one config
+// file. Real usage hit exactly that: three stray sessions, none reachable
+// from the UI.
+const isPrimaryInstance = app.requestSingleInstanceLock()
+if (!isPrimaryInstance) {
+  app.quit()
+}
+
+app.on('second-instance', () => {
+  if (!mainWindow) {
+    createWindow()
+    return
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.focus()
+})
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -51,6 +68,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
+  if (!isPrimaryInstance) return
   try {
     await adapter.version()
   } catch (error) {
