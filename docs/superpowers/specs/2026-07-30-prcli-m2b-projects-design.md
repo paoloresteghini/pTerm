@@ -58,7 +58,9 @@ Two consequences fall out rather than being built:
 
 `slug` is derived once from the name at creation and never changes; renaming edits `name` only. Re-slugging would leave every live session for that project unmatched, silently dropping it into Unsorted.
 
-Allocation discriminates on collision: a second project named "api" gets `api-2`. `unsorted` is reserved and discriminates the same way.
+Allocation discriminates on collision: a second project named "api" gets `api_2`. `unsorted` is reserved and discriminates the same way.
+
+The separator is an underscore, not a dash. `names.ts` defines slugs as `/^[a-z0-9_]+$/` and decodes a session name by splitting on exactly three dash-separated parts, so a dash in a slug would make `encodeSessionName` throw and `decodeSessionName` fail.
 
 ### An Unsorted row the user cannot delete
 
@@ -174,8 +176,8 @@ Remaining M2a carry-forwards (N2, N3, and the other Minors) stay on the 2b backl
 | `.prcli.json` malformed | Ignored silently; user presets unaffected |
 | `~/Code` missing | Empty candidate list; the picker still offers Choose folder… |
 | Same folder added twice | Refused; the existing project is selected instead |
-| Slug collision | Discriminated (`api`, `api-2`); immutable thereafter |
-| Project named "Unsorted" | `unsorted` is reserved; discriminates to `unsorted-2` |
+| Slug collision | Discriminated (`api`, `api_2`); immutable thereafter |
+| Project named "Unsorted" | `unsorted` is reserved; discriminates to `unsorted_2` |
 | Project removed with live tabs | Sessions keep running and reappear under Unsorted |
 | Folder picker cancelled | No-op |
 | No projects configured | Empty state; `+` disabled; Unsorted still reachable if it has tabs |
