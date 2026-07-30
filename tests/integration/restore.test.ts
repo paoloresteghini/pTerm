@@ -92,10 +92,31 @@ describe('restoreWorkspace', () => {
     await createStray('prcli-lumio-1111111111111111')
     await createStray('prcli-lumio-2222222222222222')
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
-    const store = await configWith(
-      [tab('1111111111111111'), tab('2222222222222222')],
-      '2222222222222222',
+    // v3: the active tab is claimed by a project rather than held globally.
+    // configWith writes the (now-migrated-away) v2 shape, so this one test
+    // writes its own v3 fixture instead of using it.
+    const dir = await mkdtemp(join(tmpdir(), 'prcli-restore-'))
+    const file = join(dir, 'config.json')
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 3,
+        activeProjectId: 'id-lumio',
+        projects: [
+          {
+            id: 'id-lumio',
+            name: 'Lumio',
+            slug: 'lumio',
+            cwd: tmpdir(),
+            presets: [],
+            activeTabId: '2222222222222222',
+          },
+        ],
+        tabs: [tab('1111111111111111'), tab('2222222222222222')],
+      }),
+      'utf8',
     )
+    const store = new ConfigStore(file)
 
     await expect(restoreWorkspace(manager, store).then((r) => r.activeTabId))
       .resolves.toBe('2222222222222222')
@@ -124,7 +145,6 @@ describe('restoreWorkspace', () => {
 
     const saved = await store.read()
     expect(saved.tabs.map((t) => t.id)).toEqual(['1111111111111111'])
-    expect(saved.activeTabId).toBe('1111111111111111')
     manager.detachAll()
   })
 

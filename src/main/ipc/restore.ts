@@ -62,9 +62,14 @@ export async function restoreWorkspace(
     }
   }
 
+  // v3 replaced the global active tab with one per project. Task 7 resolves
+  // these per project properly; until then, honouring whichever project claims
+  // a live tab is enough to keep the behaviour from regressing.
   const activeTabId =
-    tabs.find((candidate) => candidate.id === saved.activeTabId)?.id ?? tabs[0]?.id ?? null
+    tabs.find((candidate) =>
+      saved.projects.some((project) => project.activeTabId === candidate.id),
+    )?.id ?? tabs[0]?.id ?? null
 
-  await store.write({ version: 2, activeTabId, tabs })
+  await store.write({ ...saved, version: 3, tabs })
   return { tabs, activeTabId }
 }

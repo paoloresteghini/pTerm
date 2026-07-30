@@ -115,11 +115,8 @@ export function registerIpc(
 
   ipcMain.handle(CHANNELS.restore, (): Promise<RestoreResult> => restoreWorkspace(manager, store))
 
-  ipcMain.on(CHANNELS.setActive, (_event, id: string | null) => {
-    void serialise(async () => {
-      const config = await store.read()
-      await store.write({ ...config, activeTabId: id })
-    })
+  ipcMain.on(CHANNELS.setActive, (_event, _id: string | null) => {
+    // Task 8 reinstates this against per-project active tabs.
   })
 
   ipcMain.on(CHANNELS.input, (_event, id: string, data: string) => manager.write(id, data))
