@@ -18,6 +18,9 @@ export function Terminal({ tabId, visible }: { tabId: string; visible: boolean }
       // Bounded per-pane so twelve live panes cannot grow without limit.
       // tmux keeps the deeper history.
       scrollback: 5000,
+      // xterm renders to a canvas and cannot read the CSS variables in
+      // index.css, so these two repeat --color-bg and --color-term-fg by
+      // hand. Change them together.
       theme: { background: '#09090b', foreground: '#d4d4d8' },
     })
     const fit = new FitAddon()
@@ -60,5 +63,5 @@ export function Terminal({ tabId, visible }: { tabId: string; visible: boolean }
     return () => cancelAnimationFrame(frame)
   }, [visible])
 
-  return <div data-testid="terminal" ref={containerRef} style={{ width: '100%', height: '100%' }} />
+  return <div data-testid="terminal" ref={containerRef} className="h-full w-full" />
 }

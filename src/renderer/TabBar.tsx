@@ -1,32 +1,5 @@
-import type { CSSProperties } from 'react'
 import type { TabDescriptor } from '../shared/ipc'
-
-const BAR: CSSProperties = {
-  display: 'flex',
-  alignItems: 'stretch',
-  height: 32,
-  background: '#0c0c0e',
-  borderBottom: '1px solid #27272a',
-  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-  fontSize: 11,
-  userSelect: 'none',
-  overflowX: 'auto',
-}
-
-function tabStyle(active: boolean): CSSProperties {
-  return {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 6,
-    padding: '0 10px',
-    borderRight: '1px solid #27272a',
-    color: active ? '#fafafa' : '#71717a',
-    background: active ? '#09090b' : 'transparent',
-    boxShadow: active ? 'inset 0 -1px 0 #a3e635' : undefined,
-    whiteSpace: 'nowrap',
-    cursor: 'default',
-  }
-}
+import { cn } from './lib/cn'
 
 /** The tmux id is 16 hex characters; the first six are plenty to tell tabs apart. */
 function label(tab: TabDescriptor): string {
@@ -39,58 +12,55 @@ export function TabBar({
   onActivate,
   onClose,
   onNew,
+  canOpen,
 }: {
   tabs: TabDescriptor[]
   activeId: string | null
   onActivate: (id: string) => void
   onClose: (id: string) => void
   onNew: () => void
+  canOpen: boolean
 }) {
   return (
-    <div style={BAR} data-testid="tabbar">
-      {tabs.map((tab) => (
-        <div
-          key={tab.id}
-          data-testid={`tab-${tab.id}`}
-          data-active={tab.id === activeId ? 'true' : 'false'}
-          style={tabStyle(tab.id === activeId)}
-          onClick={() => onActivate(tab.id)}
-        >
-          <span>{label(tab)}</span>
-          <button
-            data-testid={`close-${tab.id}`}
-            aria-label={`Close ${label(tab)}`}
-            onClick={(event) => {
-              // Without this the click also activates the tab being closed.
-              event.stopPropagation()
-              onClose(tab.id)
-            }}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: 'inherit',
-              cursor: 'default',
-              fontSize: 12,
-              lineHeight: 1,
-              padding: 0,
-            }}
+    <div
+      data-testid="tabbar"
+      className="flex h-8 select-none items-stretch overflow-x-auto border-b border-border bg-surface font-mono text-[11px]"
+    >
+      {tabs.map((tab) => {
+        const active = tab.id === activeId
+        return (
+          <div
+            key={tab.id}
+            data-testid={`tab-${tab.id}`}
+            data-active={active ? 'true' : 'false'}
+            onClick={() => onActivate(tab.id)}
+            className={cn(
+              'flex cursor-default items-center gap-1.5 whitespace-nowrap border-r border-border px-2.5',
+              active ? 'bg-bg text-fg shadow-[inset_0_-1px_0_var(--color-accent)]' : 'text-muted',
+            )}
           >
-            ×
-          </button>
-        </div>
-      ))}
+            <span>{label(tab)}</span>
+            <button
+              data-testid={`close-${tab.id}`}
+              aria-label={`Close ${label(tab)}`}
+              onClick={(event) => {
+                // Without this the click also activates the tab being closed.
+                event.stopPropagation()
+                onClose(tab.id)
+              }}
+              className="cursor-default border-none bg-transparent p-0 text-xs leading-none text-inherit"
+            >
+              ×
+            </button>
+          </div>
+        )
+      })}
       <button
         data-testid="new-tab"
         aria-label="New terminal"
         onClick={onNew}
-        style={{
-          background: 'none',
-          border: 'none',
-          color: '#3f3f46',
-          cursor: 'default',
-          fontSize: 14,
-          padding: '0 12px',
-        }}
+        disabled={!canOpen}
+        className="cursor-default border-none bg-transparent px-3 text-sm text-faint disabled:opacity-40 enabled:hover:text-muted"
       >
         +
       </button>

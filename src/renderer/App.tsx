@@ -2,6 +2,7 @@ import { useCallback, useEffect, useReducer, useState } from 'react'
 import { Terminal } from './Terminal'
 import { TabBar } from './TabBar'
 import { INITIAL_TABS_STATE, tabsReducer } from './tabs'
+import { cn } from './lib/cn'
 
 // Milestone 2b replaces this with real projects.
 const SCRATCH_PROJECT = { projectSlug: 'scratch', cwd: '/Users/paolo/Code' }
@@ -118,38 +119,24 @@ export function App() {
   }, [state.activeId, state.tabs, openTab, closeTab, activateTab])
 
   return (
-    <div
-      style={{
-        width: '100vw',
-        height: '100vh',
-        background: '#09090b',
-        display: 'flex',
-        flexDirection: 'column',
-      }}
-    >
+    <div className="flex h-screen w-screen flex-col bg-bg">
       <TabBar
         tabs={state.tabs}
         activeId={state.activeId}
         onActivate={activateTab}
         onClose={closeTab}
         onNew={openTab}
+        canOpen
       />
       {error ? (
         <pre
           data-testid="startup-error"
-          style={{
-            color: '#f87171',
-            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-            fontSize: 13,
-            whiteSpace: 'pre-wrap',
-            padding: 8,
-            margin: 0,
-          }}
+          className="m-0 whitespace-pre-wrap p-2 font-mono text-[13px] text-danger"
         >
           {error}
         </pre>
       ) : null}
-      <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+      <div className="relative min-h-0 flex-1">
         {/* Every terminal stays mounted. Unmounting would dispose its xterm
             and lose local scrollback and viewport position on every switch. */}
         {state.tabs.map((tab) => {
@@ -158,20 +145,14 @@ export function App() {
             <div
               key={tab.id}
               data-testid={active ? 'terminal-active' : `terminal-${tab.id}`}
-              style={{
-                position: 'absolute',
-                inset: 0,
-                padding: 8,
+              className={cn(
                 // `visibility` rather than `display`, so a hidden tab is still
-                // laid out and can measure itself. A `display:none` one never
+                // laid out and can measure itself. A display:none one never
                 // fits, so it attaches at 80×24 and tmux shrinks the real
                 // session to match — every background tab, on every launch.
-                visibility: active ? 'visible' : 'hidden',
-                // Laid out means it would otherwise sit over the active tab
-                // and swallow its clicks.
-                pointerEvents: active ? 'auto' : 'none',
-                zIndex: active ? 1 : 0,
-              }}
+                'absolute inset-0 p-2',
+                active ? 'visible z-10' : 'invisible z-0 pointer-events-none',
+              )}
             >
               <Terminal tabId={tab.id} visible={active} />
             </div>
