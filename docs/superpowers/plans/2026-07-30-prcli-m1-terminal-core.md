@@ -2110,6 +2110,31 @@ EOF
 - `npm test`, `npm run typecheck` and `npm run e2e` are all green
 - `tmux ls` shows a surviving `prcli-scratch-<id>` session after the app quits
 
+## Corrections made during execution
+
+This plan was wrong in two places. Both were caught by review, fixed in the branch, and are recorded here so Milestone 2 does not inherit them.
+
+**1. `listSessions` matched only one of tmux's two no-server messages.** tmux says `no server running on <path>` when the socket existed and `error connecting to <path> (No such file or directory)` when it never did. The plan matched only the first, so `listSessions` rejected on a pristine socket instead of returning `[]`. Fixed by an explicit `isNoServer` helper matching both and nothing else.
+
+**2. Persistence conflated two different sets — the significant one.** The plan defined `persist()` as `store.write({ tabs: manager.list() })`. But `manager.list()` is *clients currently attached*, while `config.json` must mean *tabs to reattach next launch*. Conflating them made detaching — the operation this entire product exists to make safe — erase the record of the session that had just survived. It surfaced two ways: an explicit detach permanently forgot a session, and on macOS, closing the window and reopening it stranded the live session while silently opening a new one, leaking a tmux session per cycle.
+
+The fix replaced wholesale persistence with incremental upsert-on-open / prune-on-kill / prune-on-genuine-exit, and made `SessionManager` distinguish `'detached' | 'killed' | 'exited'` intent.
+
+A follow-on defect in that fix is worth remembering: *"our client exited and we didn't ask for it" is not evidence the session died.* `Ctrl-b d` and `tmux detach-client` both look exactly like an exit from the app's side. Only tmux can answer, so the exit path now asks `hasSession` before pruning, and keeps the row if that check itself fails.
+
+**Design rule for Milestone 2:** the durable record and the attached-client set are different things. Never derive one from the other, and never infer a session's death from a client's death.
+
+## Carried into Milestone 2
+
+Known, deliberately not fixed in M1:
+
+- Config rows whose tmux session has died are never pruned and cannot be removed through the app — `kill` finds no entry and no orphan, and throws. Editing `config.json` is the only route today. The design spec wants such rows kept and shown as dead with a one-click restart, which is M2 UI work.
+- `CHANNELS.exit` fires on detach as well as on genuine exit, with no reason on the wire. Nothing consumes it in M1. The tab UI will need to tell them apart, and will also need to show something when a session genuinely dies.
+- No `requestSingleInstanceLock`, so two instances would share `~/.prcli/config.json` with only per-process serialisation.
+- `npm run lint` cannot run — the scaffold left a lint script and ESLint dependencies but no `.eslintrc*`. Pre-existing; no lint gate covers any of this code.
+- `@types/node` reaches the typecheck through Electron rather than being declared in `package.json`.
+- `findOrphans` synthesises `cwd` as `$HOME` for adopted sessions. Recoverable properly via `tmux display-message -p -t '=<name>' '#{pane_current_path}'`.
+
 ## Not in this milestone
 
 Projects, sidebar, tab bar, splits, skills panel, presets, hook bridge, state machine, notifications, dock badge, settings, onboarding. Milestone 2 (`Workspace`) is planned after this one lands.
