@@ -168,6 +168,29 @@ test('adopts a session the app has never seen', async () => {
   await app.close()
 })
 
+test('reloading the window reattaches what is open instead of stranding it', async () => {
+  const app = await launch()
+  const window = await app.firstWindow()
+  await expect(window.getByTestId('terminal-active')).toBeVisible()
+  await window.getByTestId('new-tab').click()
+  await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(2)
+  const before = (await sessionNames()).sort()
+
+  // Exactly what View → Reload, or a renderer crash, does.
+  await app.evaluate(({ BrowserWindow }) => {
+    const [target] = BrowserWindow.getAllWindows()
+    target.webContents.reload()
+  })
+
+  await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
+  await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(2)
+  // Long enough for a restore that found nothing to have opened a stray.
+  await window.waitForTimeout(1500)
+  expect((await sessionNames()).sort()).toEqual(before)
+
+  await app.close()
+})
+
 test('a detach from inside the pane leaves the tab and its session alone', async () => {
   const app = await launch()
   const window = await app.firstWindow()

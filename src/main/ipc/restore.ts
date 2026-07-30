@@ -2,7 +2,7 @@ import type { SessionManager, TabRecord } from '../sessions/manager'
 import type { ConfigStore } from '../state/store'
 // One definition, shared with the renderer — `TabDescriptor` and `TabRecord`
 // are the same shape, and duplicating the type here would let them drift.
-import type { RestoreResult } from '../../shared/ipc'
+import type { RestoreResult, TabDescriptor } from '../../shared/ipc'
 
 /**
  * Reconcile the saved workspace against what tmux actually has.
@@ -18,6 +18,14 @@ export async function restoreWorkspace(
   store: ConfigStore,
 ): Promise<RestoreResult> {
   const saved = await store.read()
+
+  // Any client we still hold is stale here by definition: a restore means the
+  // renderer that owned it is gone. `findOrphans` excludes sessions we have
+  // attached, so without this a second restore in one app lifetime — a ⌘R, a
+  // renderer crash — sees nothing, returns an empty workspace and writes it
+  // over config, stranding every session the user had open. Detaching first
+  // also makes tmux redraw each pane into the fresh xterm.
+  manager.detachAll()
   const orphans = await manager.findOrphans()
   const byId = new Map(orphans.map((orphan) => [orphan.id, orphan]))
 
@@ -33,15 +41,26 @@ export async function restoreWorkspace(
   // Then anything tmux has that config did not know about.
   ordered.push(...byId.values())
 
-  const tabs = ordered.map((record) =>
-    manager.open({
-      id: record.id,
-      projectSlug: record.projectSlug,
-      cwd: record.cwd,
-      command: record.command,
-      tmuxSession: record.tmuxSession,
-    }),
-  )
+  const tabs: TabDescriptor[] = []
+  for (const record of ordered) {
+    try {
+      tabs.push(
+        manager.open({
+          id: record.id,
+          projectSlug: record.projectSlug,
+          cwd: record.cwd,
+          command: record.command,
+          tmuxSession: record.tmuxSession,
+        }),
+      )
+    } catch {
+      // One session that will not attach must not cost the user the ones that
+      // did — with twelve tabs, rejecting the whole restore would leave every
+      // other session attached and invisible. tmux still has this one, so the
+      // next restore finds it again and tries afresh.
+      continue
+    }
+  }
 
   const activeTabId =
     tabs.find((candidate) => candidate.id === saved.activeTabId)?.id ?? tabs[0]?.id ?? null
