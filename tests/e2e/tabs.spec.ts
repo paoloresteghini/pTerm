@@ -40,6 +40,7 @@ test.beforeAll(async () => {
 })
 
 test.beforeEach(async () => {
+  await killServer()
   userDataDir = await mkdtemp(join(tmpdir(), 'prcli-tabs-user-'))
   configDir = await mkdtemp(join(tmpdir(), 'prcli-tabs-config-'))
 })
@@ -53,7 +54,7 @@ test.afterEach(async () => {
 test('a second instance exits instead of opening its own session', async () => {
   const first = await launch()
   const firstWindow = await first.firstWindow()
-  await expect(firstWindow.getByTestId('terminal')).toBeVisible()
+  await expect(firstWindow.getByTestId('terminal-active')).toBeVisible()
   await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(1)
 
   // A second launch must not create a second session. electron.launch() itself
@@ -78,4 +79,91 @@ test('a second instance exits instead of opening its own session', async () => {
   await expect.poll(async () => (await sessionNames()).length, { timeout: 10_000 }).toBe(1)
 
   await first.close()
+})
+
+test('opens several tabs and keeps each one\'s scrollback', async () => {
+  const app = await launch()
+  const window = await app.firstWindow()
+  await expect(window.getByTestId('terminal-active')).toBeVisible()
+
+  await window.getByTestId('terminal-active').click()
+  await window.keyboard.type('echo first-tab')
+  await window.keyboard.press('Enter')
+  await expect(window.locator('.xterm-rows')).toContainText('first-tab', { timeout: 20_000 })
+
+  await window.getByTestId('new-tab').click()
+  await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(2)
+
+  await window.getByTestId('terminal-active').click()
+  await window.keyboard.type('echo second-tab')
+  await window.keyboard.press('Enter')
+  await expect(window.getByTestId('terminal-active')).toContainText('second-tab', {
+    timeout: 20_000,
+  })
+  // The first tab's content is hidden, not gone.
+  await expect(window.getByTestId('terminal-active')).not.toContainText('first-tab')
+
+  const tabs = window.locator('[data-testid^="tab-"]')
+  await expect(tabs).toHaveCount(2)
+  await tabs.first().click()
+  await expect(window.getByTestId('terminal-active')).toContainText('first-tab', {
+    timeout: 20_000,
+  })
+
+  await app.close()
+})
+
+test('restores every tab and the active one after a relaunch', async () => {
+  const first = await launch()
+  const firstWindow = await first.firstWindow()
+  await expect(firstWindow.getByTestId('terminal-active')).toBeVisible()
+  await firstWindow.getByTestId('new-tab').click()
+  await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(2)
+
+  await firstWindow.getByTestId('terminal-active').click()
+  await firstWindow.keyboard.type('echo marker-two')
+  await firstWindow.keyboard.press('Enter')
+  await expect(firstWindow.getByTestId('terminal-active')).toContainText('marker-two', {
+    timeout: 20_000,
+  })
+  await first.close()
+
+  const second = await launch()
+  const secondWindow = await second.firstWindow()
+  await expect(secondWindow.locator('[data-testid^="tab-"]')).toHaveCount(2)
+  // The second tab was active when we quit, and its scrollback came back.
+  await expect(secondWindow.getByTestId('terminal-active')).toContainText('marker-two', {
+    timeout: 20_000,
+  })
+  await second.close()
+})
+
+test('adopts a session the app has never seen', async () => {
+  // Exactly what a crash or an external tmux command leaves behind.
+  await run('tmux', [
+    '-L', SOCKET, 'new-session', '-d', '-s', 'prcli-scratch-abcdef0123456789', 'sleep', '600',
+  ])
+
+  const app = await launch()
+  const window = await app.firstWindow()
+  await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(1)
+  await expect(window.getByTestId('tab-abcdef0123456789')).toBeVisible()
+
+  await app.close()
+})
+
+test('closing a tab destroys its session', async () => {
+  const app = await launch()
+  const window = await app.firstWindow()
+  await expect(window.getByTestId('terminal-active')).toBeVisible()
+  await window.getByTestId('new-tab').click()
+  await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(2)
+
+  const closeButtons = window.locator('[data-testid^="close-"]')
+  await closeButtons.first().click()
+
+  await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(1)
+  await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(1)
+
+  await app.close()
 })
