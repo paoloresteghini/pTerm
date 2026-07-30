@@ -9,7 +9,9 @@ declare const MAIN_WINDOW_VITE_NAME: string
 
 let mainWindow: BrowserWindow | null = null
 
-const adapter = new TmuxAdapter()
+// `PRCLI_TMUX_SOCKET` exists so tests run against their own tmux server and can
+// never see, adopt or kill the user's real sessions.
+const adapter = new TmuxAdapter({ socket: process.env.PRCLI_TMUX_SOCKET })
 const manager = new SessionManager(adapter)
 
 function createWindow(): void {
@@ -35,6 +37,10 @@ function createWindow(): void {
 
   mainWindow.on('closed', () => {
     mainWindow = null
+    // On macOS the app outlives its window. Detaching here hands the sessions
+    // back as orphans, so reopening takes the normal reattach path instead of
+    // leaving them attached, invisible and duplicated by a fresh open.
+    manager.detachAll()
   })
 }
 

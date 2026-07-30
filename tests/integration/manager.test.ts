@@ -39,6 +39,18 @@ function waitFor(
   })
 }
 
+/** Resolves with the reason the given tab's client stopped. */
+function nextExit(manager: SessionManager, id: string, ms = 8000): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`timed out waiting for ${id} to exit`)), ms)
+    manager.onExit((emittedId, _code, reason) => {
+      if (emittedId !== id) return
+      clearTimeout(timer)
+      resolve(reason)
+    })
+  })
+}
+
 beforeAll(killServer)
 afterEach(killServer)
 
@@ -80,6 +92,20 @@ describe('SessionManager.write', () => {
   })
 })
 
+describe('SessionManager.open', () => {
+  it('rejects a saved tmux name that disagrees with the id and slug', async () => {
+    const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
+    expect(() =>
+      manager.open({
+        projectSlug: 'lumio',
+        cwd: tmpdir(),
+        id: 'a1b2c3d4e5f60718',
+        tmuxSession: 'prcli-lumio-000000000000000f',
+      }),
+    ).toThrow(/does not match/i)
+  })
+})
+
 describe('SessionManager.detach', () => {
   it('removes the tab from the registry but keeps the tmux session', async () => {
     const adapter = new TmuxAdapter({ socket: SOCKET })
@@ -89,6 +115,16 @@ describe('SessionManager.detach', () => {
     manager.detach(tab.id)
     expect(manager.get(tab.id)).toBeUndefined()
     await expect(adapter.hasSession(tab.tmuxSession)).resolves.toBe(true)
+  })
+
+  // This is what stops a detach from erasing the durable tab record.
+  it('reports the exit as detached, not as the child exiting', async () => {
+    const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
+    const tab = manager.open({ projectSlug: 'lumio', cwd: tmpdir() })
+    await waitFor(manager, tab.id, /\$|%|#/)
+    const exit = nextExit(manager, tab.id)
+    manager.detach(tab.id)
+    await expect(exit).resolves.toBe('detached')
   })
 })
 
@@ -101,6 +137,41 @@ describe('SessionManager.kill', () => {
     await manager.kill(tab.id)
     expect(manager.get(tab.id)).toBeUndefined()
     await expect(adapter.hasSession(tab.tmuxSession)).resolves.toBe(false)
+  })
+
+  it('reports the exit as killed', async () => {
+    const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
+    const tab = manager.open({ projectSlug: 'lumio', cwd: tmpdir() })
+    await waitFor(manager, tab.id, /\$|%|#/)
+    const exit = nextExit(manager, tab.id)
+    await manager.kill(tab.id)
+    await expect(exit).resolves.toBe('killed')
+  })
+
+  // An orphan that cannot be killed from the app is an invisible leak.
+  it('kills a session this app has already detached from', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const manager = new SessionManager(adapter)
+    const tab = manager.open({ projectSlug: 'lumio', cwd: tmpdir() })
+    await waitFor(manager, tab.id, /\$|%|#/)
+    manager.detach(tab.id)
+    await expect(adapter.hasSession(tab.tmuxSession)).resolves.toBe(true)
+
+    await manager.kill(tab.id)
+    await expect(adapter.hasSession(tab.tmuxSession)).resolves.toBe(false)
+  })
+
+  it('throws rather than resolving when there is nothing to kill', async () => {
+    const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
+    await expect(manager.kill('000000000000000f')).rejects.toThrow(/no tmux session found/i)
+  })
+})
+
+describe('SessionManager exit reason', () => {
+  it('is exited when the child ends on its own', async () => {
+    const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
+    const tab = manager.open({ projectSlug: 'lumio', cwd: tmpdir(), command: 'true' })
+    await expect(nextExit(manager, tab.id)).resolves.toBe('exited')
   })
 })
 

@@ -16,13 +16,27 @@ export interface OpenInput {
   command?: string
   /** Supply to reattach an existing tab; omit to create a new one. */
   id?: string
+  /** Saved tmux name, checked against the one this input encodes to. */
+  tmuxSession?: string
   cols?: number
   rows?: number
 }
 
+/**
+ * Why a client stopped. The distinction is load-bearing: `detached` means the
+ * tmux session is still running and must stay in the durable tab list, while
+ * `exited` and `killed` mean it is gone and the record should be pruned.
+ */
+export type ExitReason = 'detached' | 'killed' | 'exited'
+
 interface Entry {
   record: TabRecord
   session: PtySession
+  /**
+   * Set before we deliberately tear a client down, so the PTY's exit callback
+   * can tell a detach or a kill apart from the child genuinely exiting.
+   */
+  intent?: 'detached' | 'killed'
 }
 
 const DEFAULT_COLS = 80
@@ -31,7 +45,9 @@ const DEFAULT_ROWS = 24
 export class SessionManager {
   private readonly entries = new Map<string, Entry>()
   private readonly dataListeners = new Set<(id: string, data: string) => void>()
-  private readonly exitListeners = new Set<(id: string, code: number) => void>()
+  private readonly exitListeners = new Set<
+    (id: string, code: number, reason: ExitReason) => void
+  >()
 
   constructor(private readonly adapter: TmuxAdapter) {}
 
@@ -39,12 +55,23 @@ export class SessionManager {
     const id = input.id ?? newSessionId()
     if (this.entries.has(id)) throw new Error(`session ${id} is already open`)
 
+    const tmuxSession = encodeSessionName({ projectSlug: input.projectSlug, id })
+    // A saved name that disagrees with what this input encodes to means the
+    // record is corrupt. Attaching anyway would silently create an empty
+    // session under the encoded name and strand the real one.
+    if (input.tmuxSession !== undefined && input.tmuxSession !== tmuxSession) {
+      throw new Error(
+        `open: saved tmux session ${JSON.stringify(input.tmuxSession)} ` +
+          `does not match ${JSON.stringify(tmuxSession)}`,
+      )
+    }
+
     const record: TabRecord = {
       id,
       projectSlug: input.projectSlug,
       cwd: input.cwd,
       command: input.command,
-      tmuxSession: encodeSessionName({ projectSlug: input.projectSlug, id }),
+      tmuxSession,
     }
 
     const session = new PtySession(this.adapter, {
@@ -55,15 +82,21 @@ export class SessionManager {
       command: record.command,
     })
 
+    const entry: Entry = { record, session }
+
     session.onData((data) => {
       for (const listener of this.dataListeners) listener(id, data)
     })
     session.onExit((code) => {
-      this.entries.delete(id)
-      for (const listener of this.exitListeners) listener(id, code)
+      // Compare identity, not just the id: a detached tab can be reopened
+      // before its old client's exit lands, and that late event must not
+      // evict the new entry.
+      if (this.entries.get(id) === entry) this.entries.delete(id)
+      const reason: ExitReason = entry.intent ?? 'exited'
+      for (const listener of this.exitListeners) listener(id, code, reason)
     })
 
-    this.entries.set(id, { record, session })
+    this.entries.set(id, entry)
     session.start()
     return record
   }
@@ -88,6 +121,7 @@ export class SessionManager {
   detach(id: string): void {
     const entry = this.entries.get(id)
     if (!entry) return
+    entry.intent = 'detached'
     this.entries.delete(id)
     entry.session.detach()
   }
@@ -96,15 +130,24 @@ export class SessionManager {
     for (const id of [...this.entries.keys()]) this.detach(id)
   }
 
-  /** Destroy the tmux session and everything running in it. */
+  /**
+   * Destroy the tmux session and everything running in it. Works whether or
+   * not this app is attached — a tab detached earlier is still killable.
+   */
   async kill(id: string): Promise<void> {
     const entry = this.entries.get(id)
-    const tmuxSession = entry?.record.tmuxSession ?? undefined
     if (entry) {
+      entry.intent = 'killed'
       this.entries.delete(id)
       entry.session.detach()
+      await this.adapter.killSession(entry.record.tmuxSession)
+      return
     }
-    if (tmuxSession) await this.adapter.killSession(tmuxSession)
+
+    const orphan = (await this.findOrphans()).find((record) => record.id === id)
+    // Resolving here would report success without killing anything.
+    if (!orphan) throw new Error(`kill: no tmux session found for tab ${id}`)
+    await this.adapter.killSession(orphan.tmuxSession)
   }
 
   /**
@@ -135,7 +178,7 @@ export class SessionManager {
     this.dataListeners.add(listener)
   }
 
-  onExit(listener: (id: string, code: number) => void): void {
+  onExit(listener: (id: string, code: number, reason: ExitReason) => void): void {
     this.exitListeners.add(listener)
   }
 }
