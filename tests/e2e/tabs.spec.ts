@@ -296,6 +296,42 @@ test('a detach from inside the pane leaves the tab and its session alone', async
   await app.close()
 })
 
+// ⌘T, ⌘W and ⌘1–9 are the milestone's headline feature and had no test at any
+// level. This drives the renderer's handler, which is where the logic lives;
+// it does not exercise the OS accelerator layer.
+test('the keyboard opens, switches and closes tabs', async () => {
+  const app = await launch()
+  const window = await app.firstWindow()
+  await expect(window.getByTestId('terminal-active')).toBeVisible()
+  await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(1)
+  const firstTab =
+    (await window.locator('[data-testid^="tab-"]').first().getAttribute('data-testid')) ?? ''
+  expect(firstTab).not.toBe('')
+
+  await window.keyboard.press('Meta+t')
+  await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(2)
+  await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(2)
+  // The new tab takes over, so ⌘1 has somewhere to switch back from.
+  await expect(window.locator('[data-active="true"]')).not.toHaveAttribute(
+    'data-testid',
+    firstTab,
+  )
+
+  await window.keyboard.press('Meta+1')
+  await expect(window.locator('[data-active="true"]')).toHaveAttribute('data-testid', firstTab)
+
+  // ⌘W closes the active tab, which is now the first one, and destroys
+  // exactly that session.
+  const firstSession = `prcli-scratch-${firstTab.replace('tab-', '')}`
+  expect(await sessionNames()).toContain(firstSession)
+  await window.keyboard.press('Meta+w')
+  await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(1)
+  await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(1)
+  expect(await sessionNames()).not.toContain(firstSession)
+
+  await app.close()
+})
+
 test('closing a tab destroys its session', async () => {
   const app = await launch()
   const window = await app.firstWindow()
