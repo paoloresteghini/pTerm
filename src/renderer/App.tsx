@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useReducer, useState } from 'react'
 import { Terminal } from './Terminal'
 import { TabBar } from './TabBar'
-import { INITIAL_TABS_STATE, tabsReducer } from './tabs'
+import { activeTabId, INITIAL_WORKSPACE_STATE, workspaceReducer } from './workspace'
 import { cn } from './lib/cn'
 
 // Milestone 2b replaces this with real projects.
 const SCRATCH_PROJECT = { projectSlug: 'scratch', cwd: '/Users/paolo/Code' }
 
 export function App() {
-  const [state, dispatch] = useReducer(tabsReducer, INITIAL_TABS_STATE)
+  const [state, dispatch] = useReducer(workspaceReducer, INITIAL_WORKSPACE_STATE)
+  const activeId = activeTabId(state)
   const [error, setError] = useState<string | null>(null)
   // Set once the workspace exists. Until then this window knows nothing about
   // which tab is active, and must not say anything about it — see the effect
@@ -27,7 +28,7 @@ export function App() {
   }, [fail])
 
   const activateTab = useCallback((id: string) => {
-    dispatch({ type: 'activated', id })
+    dispatch({ type: 'activatedTab', id })
   }, [])
 
   // Closing a tab destroys its session. Detaching instead would leave a
@@ -47,16 +48,9 @@ export function App() {
     let cancelled = false
     void (async () => {
       const { projects, tabs, activeProjectId } = await window.prcli.restore()
-      // Task 13 rewrites this component around projects. Until then the old
-      // reducer still wants one active tab, so take it from the selected
-      // project.
-      const activeTabId =
-        projects.find((project) => project.id === activeProjectId)?.activeTabId ??
-        tabs[0]?.id ??
-        null
       if (cancelled) return
       if (tabs.length > 0) {
-        dispatch({ type: 'restored', tabs, activeId: activeTabId })
+        dispatch({ type: 'restored', projects, tabs, activeProjectId })
         setReady(true)
         return
       }
@@ -83,8 +77,8 @@ export function App() {
   // way to read.
   useEffect(() => {
     if (!ready) return
-    window.prcli.setActive(state.activeId)
-  }, [ready, state.activeId])
+    window.prcli.setActive(activeId)
+  }, [ready, activeId])
 
   // A session that dies on its own must leave the tab bar with it — but a
   // client stopping is not a session dying. `Ctrl-b d` inside a pane, and the
@@ -107,9 +101,9 @@ export function App() {
         openTab()
         return
       }
-      if (event.key === 'w' && state.activeId) {
+      if (event.key === 'w' && activeId) {
         event.preventDefault()
-        closeTab(state.activeId)
+        closeTab(activeId)
         return
       }
       const digit = Number.parseInt(event.key, 10)
@@ -123,13 +117,13 @@ export function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [state.activeId, state.tabs, openTab, closeTab, activateTab])
+  }, [activeId, state.tabs, openTab, closeTab, activateTab])
 
   return (
     <div className="flex h-screen w-screen flex-col bg-bg">
       <TabBar
         tabs={state.tabs}
-        activeId={state.activeId}
+        activeId={activeId}
         onActivate={activateTab}
         onClose={closeTab}
         onNew={openTab}
@@ -147,7 +141,7 @@ export function App() {
         {/* Every terminal stays mounted. Unmounting would dispose its xterm
             and lose local scrollback and viewport position on every switch. */}
         {state.tabs.map((tab) => {
-          const active = tab.id === state.activeId
+          const active = tab.id === activeId
           return (
             <div
               key={tab.id}
