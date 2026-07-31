@@ -126,6 +126,19 @@ export class TmuxAdapter {
   }
 
   /**
+   * Rename a session in place. Everything running inside it is untouched —
+   * this only changes the name, and with it which project the tab matches.
+   *
+   * `=from` is exact-match syntax; without it `prcli-lumio` would match by
+   * prefix. Note the target here takes no trailing colon: unlike
+   * `set-option`/`show-options`, `rename-session`'s `-t` is a session target
+   * already.
+   */
+  async renameSession(from: string, to: string): Promise<void> {
+    await this.exec(['rename-session', '-t', `=${from}`, to])
+  }
+
+  /**
    * `=name:` keeps this on one session; without it tmux matches by prefix.
    * The trailing `:` is required here (unlike `has-session`/`kill-session`):
    * for `set-option`/`show-options` tmux parses a bare `=name` as an

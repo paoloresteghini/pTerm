@@ -152,3 +152,35 @@ describe('TmuxAdapter session options', () => {
       .resolves.not.toBe('off')
   })
 })
+
+describe('TmuxAdapter.renameSession', () => {
+  it('renames a session, keeping it alive', async () => {
+    await createSession('prcli-scratch-a1b2c3d4e5f60718')
+    await adapter.renameSession('prcli-scratch-a1b2c3d4e5f60718', 'prcli-lumio-a1b2c3d4e5f60718')
+    await expect(adapter.hasSession('prcli-lumio-a1b2c3d4e5f60718')).resolves.toBe(true)
+    await expect(adapter.hasSession('prcli-scratch-a1b2c3d4e5f60718')).resolves.toBe(false)
+  })
+
+  it('throws when the source does not exist', async () => {
+    await expect(
+      adapter.renameSession('prcli-scratch-a1b2c3d4e5f60718', 'prcli-lumio-a1b2c3d4e5f60718'),
+    ).rejects.toThrow()
+  })
+
+  it('throws rather than colliding with an existing name', async () => {
+    await createSession('prcli-scratch-a1b2c3d4e5f60718')
+    await createSession('prcli-lumio-00000000000000ff')
+    await expect(
+      adapter.renameSession('prcli-scratch-a1b2c3d4e5f60718', 'prcli-lumio-00000000000000ff'),
+    ).rejects.toThrow()
+    // The source must survive a refused rename.
+    await expect(adapter.hasSession('prcli-scratch-a1b2c3d4e5f60718')).resolves.toBe(true)
+  })
+
+  it('targets exactly one session', async () => {
+    await createSession('prcli-scratch-a1b2c3d4e5f60718')
+    await createSession('prcli-scratch-00000000000000ff')
+    await adapter.renameSession('prcli-scratch-a1b2c3d4e5f60718', 'prcli-lumio-a1b2c3d4e5f60718')
+    await expect(adapter.hasSession('prcli-scratch-00000000000000ff')).resolves.toBe(true)
+  })
+})
