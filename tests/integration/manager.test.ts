@@ -2,6 +2,8 @@ import { describe, it, expect, afterEach, beforeAll } from 'vitest'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
+import { mkdtemp, realpath, rm } from 'node:fs/promises'
+import { join } from 'node:path'
 import { TmuxAdapter } from '../../src/main/tmux/adapter'
 import { SessionManager } from '../../src/main/sessions/manager'
 
@@ -295,6 +297,27 @@ describe('SessionManager.findOrphans', () => {
       projectSlug: 'lumio',
       tmuxSession: tab.tmuxSession,
     })
+  })
+
+  // The cwd used to be synthesised as $HOME, on the reasoning that reattaching
+  // does not change a session's directory — true, but the value is not inert:
+  // it is what a restart re-creates the session with, and what a move would
+  // save over the truth. tmux knows the real one.
+  it('reports the session\'s real working directory, not $HOME', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const first = new SessionManager(adapter)
+    const cwd = await mkdtemp(join(tmpdir(), 'prcli-orphan-cwd-'))
+    const tab = first.open({ projectSlug: 'lumio', cwd })
+    await waitFor(first, tab.id, /\$|%|#/)
+    first.detachAll()
+
+    const orphans = await new SessionManager(adapter).findOrphans()
+
+    // macOS hands out /var/folders/... as a symlink to /private/var/folders,
+    // and tmux reports the resolved path — so compare what the filesystem
+    // agrees on rather than the string mkdtemp happened to return.
+    expect(await realpath(orphans[0].cwd)).toBe(await realpath(cwd))
+    await rm(cwd, { recursive: true, force: true })
   })
 
   it('ignores sessions that are already open', async () => {

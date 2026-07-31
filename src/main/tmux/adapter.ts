@@ -152,4 +152,25 @@ export class TmuxAdapter {
   async getSessionOption(name: string, option: string): Promise<string> {
     return (await this.exec(['show-options', '-t', `=${name}:`, '-v', option])).trim()
   }
+
+  /**
+   * Where the session's pane actually is, or `''` if tmux will not say.
+   *
+   * The trailing colon on the target is the same requirement the option
+   * methods above carry: without it this is an exact-match *window* target and
+   * tmux answers "can't find pane".
+   *
+   * Empty rather than throwing, because every caller has something better to
+   * do with a missing answer than fail: a session whose directory cannot be
+   * read is still a session worth listing, killing and reattaching.
+   */
+  async paneCurrentPath(name: string): Promise<string> {
+    try {
+      return (
+        await this.exec(['display-message', '-p', '-t', `=${name}:`, '#{pane_current_path}'])
+      ).trim()
+    } catch {
+      return ''
+    }
+  }
 }

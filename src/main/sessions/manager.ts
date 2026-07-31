@@ -261,9 +261,17 @@ export class SessionManager {
       orphans.push({
         id: parts.id,
         projectSlug: parts.projectSlug,
-        // The session already has its own working directory; reattaching
-        // does not change it, so any valid path serves here.
-        cwd: process.env.HOME ?? '/',
+        // Asked of tmux rather than synthesised. `$HOME` used to stand in here
+        // on the reasoning that reattaching does not change a session's own
+        // directory — true, but the value is not inert: it is what a restart
+        // re-creates the session with, and what a move would save over the
+        // truth. Callers that already hold the real cwd still pass it in
+        // (`moveToProject`'s `known`, restore's fix-up); this is for the ones
+        // that have nothing else, like a session started outside the app.
+        //
+        // `$HOME` remains the fallback for a pane tmux will not describe: a
+        // directory that certainly exists beats a record that cannot be made.
+        cwd: (await this.adapter.paneCurrentPath(name)) || process.env.HOME || '/',
         tmuxSession: name,
         // An adopted session's launch intent is not recoverable from its
         // name, and 'shell' is the type that claims least.
