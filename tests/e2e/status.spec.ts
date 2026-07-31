@@ -70,8 +70,12 @@ async function seed(projects: object[], activeProjectId: string | null): Promise
       version: 4,
       projects,
       activeProjectId,
-      // Every tab in this suite is opened through the UI, which always
-      // writes a `type` — nothing here hand-seeds a tab row.
+      // Every tab in this suite is opened through the UI: `App.tsx`'s
+      // `launch` now takes its `type` from the caller (the right panel's
+      // `claude` button, a repo/user preset, or the default `shell` for
+      // ⌘T/+) rather than leaving it unset for `SessionManager.open` to
+      // default — see the "a claude tab starts hollow, not silent" test
+      // below. Nothing here hand-seeds a tab row.
       tabs: [],
       notifications: DEFAULT_NOTIFICATIONS,
     }),
@@ -144,6 +148,35 @@ test('a dot appears for an injected event', async () => {
 
   await injectHook(id, 'Notification')
   await expect(window.getByTestId(`dot-${id}`)).toHaveAttribute('data-state', 'waiting')
+
+  await app.close()
+})
+
+// I1: `App.tsx`'s only `open` call site used to send no `type` at all, so
+// `SessionManager.open` defaulted every tab — including one opened through
+// the right panel's dedicated `claude` button — to `shell`. `stateForOpen`
+// never got a chance to draw the hollow `unknown` dot the spec built for
+// exactly this case: a `claude` tab with no hook events yet, so a broken
+// hook install shows as a visible ring rather than as nothing at all.
+test('a claude tab starts hollow, not silent', async () => {
+  const alpha = await candidate('alpha')
+  await seed(
+    [{ id: 'id-alpha', name: 'Alpha', slug: 'alpha', cwd: alpha, presets: [], activeTabId: null }],
+    'id-alpha',
+  )
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  const before = await window.locator('[data-testid^="tab-"]').count()
+  await window.getByTestId('preset-default-claude').click()
+  await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
+  const tabs = window.locator('[data-testid^="tab-"]')
+  await expect(tabs).toHaveCount(before + 1)
+  const testId = await tabs.last().getAttribute('data-testid')
+  const id = (testId ?? '').replace('tab-', '')
+  expect(id).not.toBe('')
+
+  await expect(window.getByTestId(`dot-${id}`)).toHaveAttribute('data-state', 'unknown')
 
   await app.close()
 })
@@ -317,6 +350,43 @@ test('a dead tab lingers, then restarts', async () => {
   await expect
     .poll(async () => (await sessionNames()).includes(name), { timeout: 20_000 })
     .toBe(true)
+
+  await app.close()
+})
+
+// I5: `parseHookLine` only validates the *shape* of `tabId` — sixteen hex
+// characters — not that it names a tab this app actually has. The socket is
+// reachable by anything on the machine that can open it, so an event for an
+// id nothing knows about used to create a permanent entry in the registry:
+// nothing in the UI can ever reach it to dismiss or kill it, so it inflates
+// `waitingCount()` — and the dock badge — until the app restarts.
+test('an event for a tab id nothing knows about does not inflate the dock badge', async () => {
+  const alpha = await candidate('alpha')
+  await seed(
+    [{ id: 'id-alpha', name: 'Alpha', slug: 'alpha', cwd: alpha, presets: [], activeTabId: null }],
+    'id-alpha',
+  )
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  const id = await openTab(window)
+  await injectHook(id, 'Notification')
+  await expect(window.getByTestId(`dot-${id}`)).toHaveAttribute('data-state', 'waiting')
+  await expect
+    .poll(async () => app.evaluate(({ app: electronApp }) => electronApp.dock?.getBadge()))
+    .toBe('1')
+
+  // Well-formed — sixteen hex characters, same as a real id — but not one
+  // this app ever opened: exactly what a stray write to the socket, or an
+  // event that lands after the tab it names was already killed, looks like.
+  await injectHook('0000000000000000', 'Notification')
+  // Nothing to poll toward for a negative assertion: the async membership
+  // check (a `store.read()`) needs a moment to resolve either way, and the
+  // badge must still read what it read before, not "2".
+  await window.waitForTimeout(500)
+  await expect(app.evaluate(({ app: electronApp }) => electronApp.dock?.getBadge())).resolves.toBe(
+    '1',
+  )
 
   await app.close()
 })

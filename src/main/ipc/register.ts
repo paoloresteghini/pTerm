@@ -37,6 +37,11 @@ export function registerIpc(
   // cycle. A no-op default keeps every existing caller — and every test —
   // working unchanged.
   onActiveTabChanged: (id: string | null) => void = () => undefined,
+  // Same reasoning as `onActiveTabChanged`: `NotificationRouter` lives in
+  // `index.ts`, and this is only ever called after a spool replay (silent by
+  // design — see `CHANNELS.restore` below) so the dock badge does not sit
+  // stale until some unrelated tab's next transition happens to refresh it.
+  refreshBadge: () => void = () => undefined,
 ): void {
   // The saved tab list means "reattach these next launch", which is not the
   // same set as "clients attached right now" — a detached tab must stay in it.
@@ -144,21 +149,30 @@ export function registerIpc(
       const sessionAlive = await sessionSurvived(record, reason)
       send(CHANNELS.exit, { id: record.id, code, sessionAlive })
       if (!sessionAlive) {
-        // `killed` is never pruned here: the CHANNELS.kill handler below
-        // already owns that, and forgets the tab immediately after the same
-        // `manager.kill()` this resolved against has succeeded — pruning here
-        // too would only be a redundant second write of the same outcome.
-        if (reason === 'exited') await forgetTab(record.id)
-        // A deliberate kill already owns the registry state too: the
-        // CHANNELS.kill handler below calls `registry.forget` once its own
-        // await on the very same promise settles. Recording a tombstone here
-        // as well races that forget with no ordering guarantee — whichever
-        // runs last wins, and a `forget` that loses would leak a
-        // `crashed`/`ended` entry for a tab already gone from config and the
-        // tab bar, with nothing left that would ever call `forget` again to
-        // clean it up. A kill the user asked for does not need a tombstone —
+        // Stamped ahead of `forgetTab` below, and carrying `record` with it.
+        // `forgetTab` deletes the saved config row, and by the time a
+        // listener as far away as the notification router tries to
+        // rediscover this tab from its id alone, both the live manager entry
+        // (already gone — `manager.ts` deleted it before this callback even
+        // ran) and the saved row can be gone too, resolving to nothing and
+        // leaving `crashed`/`ended` the only two states that could never
+        // toast. Passing `record` sidesteps that race outright rather than
+        // betting on read/write ordering across two independent config-file
+        // operations. `killed` is exempted for the same reason it always
+        // was: the CHANNELS.kill handler below calls `registry.forget` once
+        // its own await on the very same `manager.kill()` promise settles,
+        // and recording a tombstone here too would race that forget with no
+        // ordering guarantee — whichever runs last wins, and a losing
+        // `forget` would leak a `crashed`/`ended` entry nothing would ever
+        // clean up. A kill the user asked for does not need a tombstone —
         // they already know it is gone.
-        if (reason !== 'killed') registry.applyExit(record.id, code)
+        if (reason !== 'killed') registry.applyExit(record.id, code, record)
+        // `killed` is never pruned here either, for the same reason: the
+        // CHANNELS.kill handler already owns that, and forgets the tab
+        // immediately after the same `manager.kill()` this resolved against
+        // has succeeded — pruning here too would only be a redundant second
+        // write of the same outcome.
+        if (reason === 'exited') await forgetTab(record.id)
       }
     })()
   })
@@ -203,13 +217,27 @@ export function registerIpc(
     // an event for a tab tmux no longer has must not resurrect a dot for a
     // session that is gone. A second `restore` in one run (⌘R) costs
     // nothing extra — the spool file drainSpool already took is gone.
+    //
+    // Applied silently: replaying describes a past, and routing each one to
+    // the notification router the way a live transition is would toast the
+    // whole weekend back at the user in a tight loop the moment the app
+    // opens. `refreshBadge` below still catches the badge up in one shot
+    // once the final state is in, rather than leaving it stale until some
+    // unrelated tab's next live transition happens to correct it.
     const live = new Set(result.tabs.map((tab) => tab.id))
     const spooled = await drainSpool(hookPaths().spool, Date.now())
     for (const message of spooled) {
-      if (live.has(message.tabId)) registry.applyHook(message)
+      if (live.has(message.tabId)) registry.applyHook(message, { silent: true })
     }
+    refreshBadge()
 
-    return result
+    // Folded into the same response rather than left for the renderer's own,
+    // separate `status()` call: that call raced this whole reconcile — which
+    // takes seconds at twelve tabs — with no ordering guarantee, and the
+    // renderer's `restored` case resets `status` to `{}`, so the direction
+    // that loses blanks the board at every launch. One response has nothing
+    // left to race against.
+    return { ...result, status: registry.snapshot() }
   })
 
   /**

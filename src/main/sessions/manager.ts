@@ -1,7 +1,13 @@
 import type { TmuxAdapter } from '../tmux/adapter'
 import { PtySession } from '../pty/session'
 import { decodeSessionName, encodeSessionName, newSessionId } from '../tmux/names'
-import type { TabType } from '../../shared/ipc'
+// Declared with the other wire types: the renderer needs to tell a
+// deliberate `killed` apart from a genuine exit too (see `ExitEvent.reason`
+// in shared/ipc.ts), so a second, main-only definition here would only
+// invite drift. Re-exported so existing importers keep working unchanged.
+import type { ExitReason, TabType } from '../../shared/ipc'
+
+export type { ExitReason }
 
 export interface TabRecord {
   id: string
@@ -24,17 +30,6 @@ export interface OpenInput {
   rows?: number
   type?: TabType
 }
-
-/**
- * Why a client stopped.
- *
- * `detached` and `killed` are the cases we caused and therefore know the
- * outcome of. `exited` is everything else — and it says nothing about whether
- * the tmux session survived. `Ctrl-b d`, `tmux detach-client` and a client
- * killed from outside all land here with the session still running. Treating
- * `exited` as "the session is gone" strands live sessions; ask the adapter.
- */
-export type ExitReason = 'detached' | 'killed' | 'exited'
 
 interface Entry {
   record: TabRecord

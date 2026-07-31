@@ -129,6 +129,21 @@ describe('workspaceReducer', () => {
     expect(next.activeProjectId).toBe('p9')
   })
 
+  // I6: `status` used to come from a second, separately raced `status()`
+  // call and `restored` always reset it to `{}`. Now `restore()` returns its
+  // own status snapshot in the same response, so `restored` carries it
+  // through directly instead of discarding it.
+  it('carries the status snapshot restore() returned, when it gave one', () => {
+    const next = workspaceReducer(three, {
+      type: 'restored',
+      projects: [project('p9', 'gco', 'zzz')],
+      tabs: [tab('zzz', 'gco')],
+      activeProjectId: 'p9',
+      status: { zzz: 'waiting' },
+    })
+    expect(next.status).toEqual({ zzz: 'waiting' })
+  })
+
   it('appends an opened tab and makes it its project\'s active one', () => {
     const next = workspaceReducer(three, { type: 'opened', tab: tab('ddd') })
     expect(next.tabs.map((t) => t.id)).toEqual(['aaa', 'bbb', 'ccc', 'ddd'])
@@ -173,6 +188,16 @@ describe('workspaceReducer', () => {
 
   it('ignores removal of an unknown tab', () => {
     expect(workspaceReducer(three, { type: 'removed', id: 'zzz' })).toEqual(three)
+  })
+
+  // I7: a kill drops the tab via `removed`, and the reducer already cleared
+  // `status` for it — but left `dead` holding a tombstone for a tab no
+  // longer in `state.tabs` at all, accumulating one stale entry per close for
+  // the life of the window.
+  it('drops the tombstone too when a dead tab is removed outright', () => {
+    const died = workspaceReducer(three, { type: 'died', id: 'aaa', code: 1 })
+    const next = workspaceReducer(died, { type: 'removed', id: 'aaa' })
+    expect(next.dead).toEqual({})
   })
 
   // Removing a tab from one project must not disturb another's selection.
@@ -295,6 +320,24 @@ describe('workspaceReducer', () => {
     })
 
     expect(stateOfTab(next, 'aaa')).toBe('waiting')
+    expect(stateOfTab(next, 'bbb')).toBe('thinking')
+  })
+
+  // I3: `registry.forget` now emits a transition to `null` — dismissed, or
+  // killed on purpose — over the wire as `statusChanged`'s `state`. Storing
+  // that as a value would let it slip into `stateOfProject`'s ranking (which
+  // filters on `undefined`, not `null`) and sit in `state.status` forever, so
+  // a null clears the key instead of setting it.
+  it('drops the key on a null statusChanged, rather than storing null', () => {
+    const seeded = workspaceReducer(three, {
+      type: 'statusSnapshot',
+      status: { aaa: 'waiting', bbb: 'thinking' },
+    })
+
+    const next = workspaceReducer(seeded, { type: 'statusChanged', tabId: 'aaa', state: null })
+
+    expect(stateOfTab(next, 'aaa')).toBeNull()
+    expect(Object.prototype.hasOwnProperty.call(next.status, 'aaa')).toBe(false)
     expect(stateOfTab(next, 'bbb')).toBe('thinking')
   })
 

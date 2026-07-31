@@ -88,9 +88,18 @@ export class NotificationRouter {
   }
 
   private async notify(transition: StatusTransition): Promise<void> {
-    // Resolved against the live tab set at fire time — the tab may have been
-    // killed between the event arriving and this running.
-    const tab = await this.deps.findTab(transition.tabId)
+    // `to: null` is a forget, not a state — dismissed, or killed on purpose.
+    // There is nothing to describe in a toast; `handle`'s `finally` still
+    // refreshes the badge for it.
+    if (transition.to === null) return
+
+    // The transition's own record first — carried straight from the exit
+    // event for exactly the case where the saved config row may already be
+    // gone by the time this runs (see `StatusTransition.tab`) — and only then
+    // resolved against the live tab set at fire time, for every other
+    // transition, where the tab may have been killed between the event
+    // arriving and this running.
+    const tab = transition.tab ?? (await this.deps.findTab(transition.tabId))
     if (!tab) return
 
     const project = await this.deps.projectOf(tab)

@@ -129,6 +129,44 @@ describe('NotificationRouter', () => {
     expect(toasts[0]?.title).toContain('Unsorted')
   })
 
+  // I4: the exit handler's `forgetTab` deletes a dying tab's saved config row
+  // before the router ever gets a chance to look it up, which used to make
+  // `findTab` resolve to null and make `crashed`/`ended` the only two states
+  // that could never toast. Carrying the tab on the transition itself — as
+  // `registry.applyExit` now does — sidesteps that lookup entirely, so the
+  // toast fires even when `findTab` would find nothing at all.
+  it('toasts from the transition\'s own tab when findTab can no longer find it', async () => {
+    const dyingTab = tab()
+    const { router, toasts } = build({
+      findTab: async () => null,
+      readConfig: async () => ({
+        rules: [{ on: 'crashed', toast: true }],
+        muteWhenFocused: true,
+        quietHours: null,
+      }),
+    })
+
+    await router.handle({ tabId: ID, from: 'running', to: 'crashed', tab: dyingTab })
+
+    expect(toasts).toHaveLength(1)
+    expect(toasts[0]?.tabId).toBe(ID)
+  })
+
+  // I3: `forget` emits `to: null` so a listener can clear whatever it was
+  // showing. That is not a state to describe in a toast — there is nothing
+  // left to say about a tab that was just dismissed or killed on purpose —
+  // but the badge still has to catch up, which `handle`'s `finally` already
+  // guarantees runs regardless.
+  it('says nothing about a forget, but still refreshes the badge', async () => {
+    const { router, toasts, sounds, badges } = build({ waitingCount: () => 2 })
+
+    await router.handle({ tabId: ID, from: 'waiting', to: null })
+
+    expect(toasts).toEqual([])
+    expect(sounds).toEqual([])
+    expect(badges).toEqual([2])
+  })
+
   it('survives a failure to read config without taking the transition down', async () => {
     const { router, badges } = build({
       readConfig: async () => {

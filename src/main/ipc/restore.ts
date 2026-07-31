@@ -95,11 +95,18 @@ export function withUnsorted(
  * then writes, and an interleaved write from `open` or an exit would otherwise
  * be lost.
  */
+/**
+ * Everything `restoreWorkspace` itself can answer. `CHANNELS.restore`'s
+ * handler in `register.ts` adds `status` on top, from the registry it — not
+ * this function — has access to; see `RestoreResult.status`.
+ */
+export type WorkspaceReconcile = Omit<RestoreResult, 'status'>
+
 export async function restoreWorkspace(
   manager: SessionManager,
   store: ConfigStore,
   serialise: <T>(operation: () => Promise<T>) => Promise<T>,
-): Promise<RestoreResult> {
+): Promise<WorkspaceReconcile> {
   return serialise(async () => {
     const saved = await store.read()
 

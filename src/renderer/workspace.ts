@@ -27,6 +27,14 @@ export type WorkspaceAction =
       projects: ProjectDescriptor[]
       tabs: TabDescriptor[]
       activeProjectId: string | null
+      /**
+       * Optional so a test that only cares about `projects`/`tabs` need not
+       * supply it — it defaults to `{}`, same as before this field existed.
+       * Production code always has one: it comes from the same `restore()`
+       * response as everything else here, rather than a second, separately
+       * raced `status()` call — see `RestoreResult.status` in shared/ipc.ts.
+       */
+      status?: Record<string, TabState>
     }
   | { type: 'projects'; projects: ProjectDescriptor[] }
   | { type: 'opened'; tab: TabDescriptor }
@@ -35,7 +43,7 @@ export type WorkspaceAction =
   | { type: 'activatedProject'; id: string }
   | { type: 'movedTab'; tab: TabDescriptor; projects: ProjectDescriptor[] }
   | { type: 'statusSnapshot'; status: Record<string, TabState> }
-  | { type: 'statusChanged'; tabId: string; state: TabState }
+  | { type: 'statusChanged'; tabId: string; state: TabState | null }
   | { type: 'died'; id: string; code: number }
   | { type: 'dismissed'; id: string }
 
@@ -157,7 +165,7 @@ export function workspaceReducer(
         projects: action.projects,
         tabs: action.tabs,
         activeProjectId: action.activeProjectId,
-        status: {},
+        status: action.status ?? {},
         dead: {},
       }
 
@@ -203,7 +211,8 @@ export function workspaceReducer(
 
     case 'removed': {
       const { [action.id]: _dropped, ...status } = state.status
-      return { ...removeTab(state, action.id), status }
+      const { [action.id]: _tombstone, ...dead } = state.dead
+      return { ...removeTab(state, action.id), status, dead }
     }
 
     case 'movedTab': {
@@ -229,8 +238,18 @@ export function workspaceReducer(
     case 'statusSnapshot':
       return { ...state, status: action.status }
 
-    case 'statusChanged':
+    case 'statusChanged': {
+      // Null means the tab was forgotten — dismissed, or killed on purpose —
+      // not a seventh state to draw. Storing it as a value would let it slip
+      // into `stateOfProject`'s ranking (it filters on `undefined`, not on
+      // `null`) and it would sit in `state.status` forever, since nothing
+      // else ever removes a key once `statusChanged` has written it.
+      if (action.state === null) {
+        const { [action.tabId]: _dropped, ...status } = state.status
+        return { ...state, status }
+      }
       return { ...state, status: { ...state.status, [action.tabId]: action.state } }
+    }
 
     case 'died':
       // Deliberately keeps the tab, and keeps it selected. Its scrollback is

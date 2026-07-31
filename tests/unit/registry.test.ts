@@ -145,4 +145,70 @@ describe('StatusRegistry', () => {
     // would show a red dot over a session that is running fine.
     expect(registry.get(ID)).toBe('running')
   })
+
+  // I3: `forget` used to delete the entry with no transition, so nothing —
+  // not the renderer's dot, not the dock badge — ever heard the tab was gone.
+  // A shell restarted after dying would show its stale `ended` dot forever,
+  // and killing a `waiting` tab left the badge counting it until some other,
+  // unrelated tab happened to transition.
+  it('emits a transition to null when a known tab is forgotten', () => {
+    const registry = new StatusRegistry()
+    const seen: StatusTransition[] = []
+    registry.applyHook(hook(ID, 'Notification'))
+    registry.onTransition((transition) => seen.push(transition))
+
+    registry.forget(ID)
+
+    expect(seen).toEqual([{ tabId: ID, from: 'waiting', to: null }])
+  })
+
+  it('emits nothing when forgetting a tab it never knew', () => {
+    const registry = new StatusRegistry()
+    const seen: StatusTransition[] = []
+    registry.onTransition((transition) => seen.push(transition))
+
+    registry.forget(ID)
+
+    // No state to lose, and no badge refresh worth triggering on every
+    // ordinary close of a shell nothing ever ran in.
+    expect(seen).toEqual([])
+  })
+
+  // I4: the exit handler forgets a tab's saved config row before the
+  // notification router gets a chance to resolve it from `tabId` alone, so
+  // `crashed`/`ended` could never reach a toast. Carrying the tab directly on
+  // the transition sidesteps that race instead of betting on read/write
+  // ordering across two independent config-file operations.
+  it('carries the tab on an exit transition when the caller has one in hand', () => {
+    const registry = new StatusRegistry()
+    const seen: StatusTransition[] = []
+    registry.onTransition((transition) => seen.push(transition))
+    const tab = {
+      id: ID,
+      projectSlug: 'lumio',
+      cwd: '/tmp',
+      tmuxSession: `prcli-lumio-${ID}`,
+      type: 'preset' as const,
+    }
+
+    registry.applyExit(ID, 1, tab)
+
+    expect(seen).toEqual([{ tabId: ID, from: null, to: 'crashed', tab }])
+  })
+
+  // Replay describes a past — the spool exists to restore the final state
+  // (that is what stops a `waiting` session coming back blank), not to
+  // re-narrate a weekend of events as live toasts the moment the app opens.
+  it('applies a hook silently on request, with no transition emitted', () => {
+    const registry = new StatusRegistry()
+    const seen: StatusTransition[] = []
+    registry.onTransition((transition) => seen.push(transition))
+
+    registry.applyHook(hook(ID, 'Notification'), { silent: true })
+
+    expect(seen).toEqual([])
+    // The state itself still lands — silence is about the notification, not
+    // about the truth the dot has to show.
+    expect(registry.get(ID)).toBe('waiting')
+  })
 })

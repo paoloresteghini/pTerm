@@ -17,7 +17,7 @@ import {
   workspaceReducer,
 } from './workspace'
 import { projectMuted, toggleProjectMute } from './mute'
-import { UNSORTED_ID, type NotificationConfig, type TabDescriptor } from '../shared/ipc'
+import { UNSORTED_ID, type NotificationConfig, type TabDescriptor, type TabType } from '../shared/ipc'
 
 export function App() {
   const [state, dispatch] = useReducer(workspaceReducer, INITIAL_WORKSPACE_STATE)
@@ -45,18 +45,25 @@ export function App() {
   // cannot host a new terminal.
   const canOpen = Boolean(project) && project?.id !== UNSORTED_ID && project?.available === true
 
+  // `type` is a declaration of intent recorded on the tab, not inferred from
+  // `command` — it decides the launch state a fresh dot starts in
+  // (`stateForOpen` in src/main/status/machine.ts) and, for `claude`, gives a
+  // broken hook install a hollow dot to show instead of nothing. It must be
+  // named by the caller: `RightPanel`'s dedicated `claude` button passes
+  // `'claude'`, a repository or user preset passes `'preset'`, and a bare
+  // ⌘T/+ shell defaults to `'shell'`.
   const launch = useCallback(
-    (command?: string) => {
+    (command: string | undefined, type: TabType = 'shell') => {
       if (!project || !canOpen) return
       window.prcli
-        .open({ projectSlug: project.slug, cwd: project.cwd, command })
+        .open({ projectSlug: project.slug, cwd: project.cwd, command, type })
         .then((tab) => dispatch({ type: 'opened', tab }))
         .catch(fail)
     },
     [project, canOpen, fail],
   )
 
-  const openTab = useCallback(() => launch(), [launch])
+  const openTab = useCallback(() => launch(undefined), [launch])
 
   const closeTab = useCallback(
     (id: string) => {
@@ -71,12 +78,20 @@ export function App() {
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const [{ projects, tabs, activeProjectId }, status, notificationConfig] = await Promise.all(
-        [window.prcli.restore(), window.prcli.status(), window.prcli.notifications()],
-      )
+      // `status` comes back inside the same response as `projects`/`tabs`
+      // rather than from its own, separate `status()` call: that call used
+      // to race `restore()`'s own multi-second reconcile (detach-all,
+      // `findOrphans`, one `tmux new-session -A` per tab) with no ordering
+      // guarantee between the two IPC round trips, and `restored` resets
+      // `status` to `{}` — so the direction that lost blanked the board at
+      // every launch with real sessions running. One response has nothing
+      // left to race against.
+      const [{ projects, tabs, activeProjectId, status }, notificationConfig] = await Promise.all([
+        window.prcli.restore(),
+        window.prcli.notifications(),
+      ])
       if (cancelled) return
-      dispatch({ type: 'restored', projects, tabs, activeProjectId })
-      dispatch({ type: 'statusSnapshot', status })
+      dispatch({ type: 'restored', projects, tabs, activeProjectId, status })
       setNotifications(notificationConfig)
       setReady(true)
     })().catch((reason: unknown) => {
@@ -119,8 +134,18 @@ export function App() {
   // dead, instead of vanishing.
   useEffect(
     () =>
-      window.prcli.onExit(({ id, code, sessionAlive }) => {
+      window.prcli.onExit(({ id, code, sessionAlive, reason }) => {
         if (sessionAlive) return
+        // A kill the user asked for is not a death to render: main already
+        // exempts `killed` from the registry tombstone for exactly this
+        // reason (see register.ts's exit handler and the comment on
+        // `ExitEvent.reason`). Without the same exemption here, every ⌘W
+        // flashed as a dead tab, strikethrough and all, and a fast click on
+        // the ↻ that briefly appeared in that window recreated the tmux
+        // session the user had just killed — right after `removed` (below)
+        // was about to drop the tab from the renderer entirely, leaving a
+        // live session with no tab pointing at it.
+        if (reason === 'killed') return
         dispatch({ type: 'died', id, code })
       }),
     [],
@@ -329,7 +354,9 @@ export function App() {
         </div>
       </div>
 
-      {panelOpen ? <RightPanel project={project} onRun={(command) => launch(command)} /> : null}
+      {panelOpen ? (
+        <RightPanel project={project} onRun={(command, type) => launch(command, type)} />
+      ) : null}
 
       <AddProjectDialog
         open={adding}

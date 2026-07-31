@@ -41,7 +41,31 @@ const store = new ConfigStore(ConfigStore.defaultPath())
  * `PRCLI_CONFIG_DIR` at call time, same as `ConfigStore.defaultPath()` above.
  */
 const hookServer = new HookServer(hookPaths().socket)
-hookServer.onEvent((message) => registry.applyHook(message))
+// The socket is reachable by anything on the machine that can open it, and
+// `parseHookLine` only validates the *shape* of `tabId` — sixteen hex
+// characters — not that it names a tab this app actually has. With no
+// membership check here, an event for an unknown id creates a permanent
+// entry in the registry: nothing in the UI can ever reach it to dismiss or
+// kill it, so `waitingCount()` — and the dock badge — stays off by one until
+// the app restarts. `drainSpool`'s replay already guards the same way
+// against a spooled event for a tab that did not survive reconcile (see
+// register.ts); this is that same check for the live socket path.
+//
+// Checked against both the manager and the saved config, not just one:
+// `manager.get` alone would miss a tab detached earlier in this run — still
+// alive, and still meant to keep updating (see `mergeTab` in notify/router.ts)
+// — and the saved config alone would miss a tab open()ed moments ago, before
+// its `rememberTab` write has landed.
+hookServer.onEvent((message) => {
+  void (async () => {
+    if (manager.get(message.tabId) !== undefined) {
+      registry.applyHook(message)
+      return
+    }
+    const config = await store.read()
+    if (config.tabs.some((tab) => tab.id === message.tabId)) registry.applyHook(message)
+  })()
+})
 
 /** The tab the renderer last said was selected — half of "attended". */
 let attendedTabId: string | null = null
@@ -250,7 +274,9 @@ app.whenReady().then(async () => {
 
   installMenu()
 
-  registerIpc(manager, () => mainWindow, registry, store, setAttendedTab)
+  registerIpc(manager, () => mainWindow, registry, store, setAttendedTab, () =>
+    router.refreshBadge(),
+  )
   createWindow()
 
   app.on('activate', () => {

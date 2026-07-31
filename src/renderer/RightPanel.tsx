@@ -1,11 +1,11 @@
-import type { ProjectDescriptor } from '../shared/ipc'
+import type { ProjectDescriptor, TabType } from '../shared/ipc'
 
 export function RightPanel({
   project,
   onRun,
 }: {
   project: ProjectDescriptor | undefined
-  onRun: (command: string) => void
+  onRun: (command: string, type: TabType) => void
 }) {
   return (
     <div
@@ -21,7 +21,7 @@ export function RightPanel({
         <button
           data-testid="preset-default-claude"
           disabled={!project || !project.available}
-          onClick={() => onRun('claude')}
+          onClick={() => onRun('claude', 'claude')}
           className="w-full cursor-default border-none bg-transparent px-2.5 py-1 text-left text-muted hover:text-fg disabled:opacity-40"
         >
           claude
@@ -31,7 +31,7 @@ export function RightPanel({
             key={preset.id}
             data-testid={`preset-${preset.label}`}
             disabled={!project?.available}
-            onClick={() => onRun(preset.command)}
+            onClick={() => onRun(preset.command, 'preset')}
             title={preset.command}
             className="flex w-full cursor-default items-baseline gap-2 border-none bg-transparent px-2.5 py-1 text-left text-muted hover:text-fg disabled:opacity-40"
           >

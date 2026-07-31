@@ -103,6 +103,19 @@ export interface DataEvent {
   data: string
 }
 
+/**
+ * Why a client stopped.
+ *
+ * `detached` and `killed` are the cases the app caused and therefore knows
+ * the outcome of. `exited` is everything else, and says nothing on its own
+ * about whether the tmux session survived — see `ExitEvent.sessionAlive`.
+ *
+ * Declared here, not only in `src/main/sessions/manager.ts`, because the
+ * renderer needs to tell a deliberate `killed` apart from a genuine death too
+ * — see `ExitEvent.reason`.
+ */
+export type ExitReason = 'detached' | 'killed' | 'exited'
+
 export interface ExitEvent {
   id: string
   code: number
@@ -113,11 +126,20 @@ export interface ExitEvent {
    * exit as a death drops tabs whose work is still there.
    */
   sessionAlive: boolean
+  /**
+   * `killed` is a death the user asked for, not one to render as one: main
+   * already exempts it from the registry tombstone for the same reason (see
+   * `register.ts`'s exit handler), and the renderer must make the same
+   * exemption or every ⌘W flashes as a crash and a fast click on the ↻ that
+   * briefly appears can resurrect the very session just killed.
+   */
+  reason: ExitReason
 }
 
 export interface StatusEvent {
   tabId: string
-  state: TabState
+  /** Null means the tab was forgotten — dismissed, or killed on purpose. */
+  state: TabState | null
 }
 
 /** What Restart needs: the dead tab's record, plus the size to attach at. */
@@ -186,6 +208,15 @@ export interface RestoreResult {
   projects: ProjectDescriptor[]
   tabs: TabDescriptor[]
   activeProjectId: string | null
+  /**
+   * Every tab's state at the moment restore finished — including whatever a
+   * spool replay just applied. Folded in here rather than left for a second,
+   * separate `status()` call: that call raced `restore()`'s own multi-second
+   * reconcile with no ordering guarantee between the two IPC round trips, and
+   * the direction that loses blanks the board at every launch. One response
+   * has no race to lose.
+   */
+  status: Record<string, TabState>
 }
 
 export interface PrcliApi {
