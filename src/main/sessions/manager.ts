@@ -401,27 +401,19 @@ export class SessionManager {
 
     // The new window is created through a LIVE member, not the group name, and
     // EMPTY — the command follows at the end, once the window can survive it.
+    //
+    // Everything from here on is guarded. The window is the first object this
+    // makes that the app cannot see and tmux can: it goes into the tab's
+    // SHARED window list holding a running shell, where only `list-windows`
+    // would ever find it again. The member session that follows is worse — it
+    // is a name `findOrphans` reports as a real pane, so the next restore
+    // resurrects a pane the user never created, attached to a window nothing
+    // has a record of. See `rollbackSplit`.
     const window = await this.adapter.newWindow({
       member: sibling.record.tmuxSession,
       cwd,
       env: { PRCLI_TAB_ID: id },
     })
-    // The env also goes here, not only on `newWindow`: `-e` on `new-window`
-    // reaches the spawned pane's own process (confirmed: a child inside it
-    // sees it) but never the session's environment table — `show-environment`
-    // on the new member reports nothing. `-e` on `new-session -t <group>`
-    // does reach that table, which is where a reattach and any `show-environment`
-    // caller both go looking, so both calls carry it.
-    // The new pane's own window gets the same treatment, by window id, and
-    // before any client has attached to it — so there is no ordering here that
-    // has to hold for the geometry rule to be in force. Without the explicit
-    // resize, `manual` would revert this window to the size tmux recorded when
-    // `newWindow` made it, which is the founder's, not this pane's.
-    await this.adapter.setWindowOption(window.id, 'window-size', 'manual')
-    await this.adapter.resizeWindow(window.id, cols, rows)
-    await this.adapter.newGroupMember(group, tmuxSession, { PRCLI_TAB_ID: id })
-    // By index, with the member named. See the adapter method's comment.
-    await this.adapter.selectWindow(tmuxSession, window.index)
 
     const record: PaneRecord = {
       id,
@@ -432,6 +424,40 @@ export class SessionManager {
       type: input.type ?? 'shell',
     }
 
+    try {
+      // The new pane's own window is sized by window id, and before any client
+      // has attached to it — so there is no ordering here that has to hold for
+      // the geometry rule to be in force. Without the explicit resize,
+      // `manual` would revert this window to the size tmux recorded when
+      // `newWindow` made it, which is the founder's, not this pane's.
+      await this.adapter.setWindowOption(window.id, 'window-size', 'manual')
+      await this.adapter.resizeWindow(window.id, cols, rows)
+      // The env goes here too, not only on `newWindow`: `-e` on `new-window`
+      // reaches the spawned pane's own process (confirmed: a child inside it
+      // sees it) but never the session's environment table — `show-environment`
+      // on the new member reports nothing. `-e` on `new-session -t <group>`
+      // does reach that table, which is where a reattach and any
+      // `show-environment` caller both go looking, so both calls carry it.
+      await this.adapter.newGroupMember(group, tmuxSession, { PRCLI_TAB_ID: id })
+      // By index, with the member named. See the adapter method's comment.
+      await this.adapter.selectWindow(tmuxSession, window.index)
+      return await this.finishSplit(record, window, cols, rows)
+    } catch (error) {
+      await this.rollbackSplit(record, window.id)
+      throw error
+    }
+  }
+
+  /**
+   * The last three steps of a split, kept together so `splitTab`'s try block
+   * reads as one guarded sequence rather than a wall of awaits.
+   */
+  private async finishSplit(
+    record: PaneRecord,
+    window: { id: string; index: string },
+    cols: number,
+    rows: number,
+  ): Promise<PaneRecord> {
     // Wired before the command runs, and after the member session exists.
     //
     // Before, because a command given to `new-window` starts immediately:
@@ -445,15 +471,62 @@ export class SessionManager {
     // fires against a session that does not exist yet, and the reap would take
     // the window while `selectWindow` was still trying to bind to it.
     await this.wireDeathHook(record, window.id)
-    if (input.command) {
+    if (record.command) {
       await this.adapter.respawnPane(window.id, {
-        command: input.command,
-        cwd,
-        env: { PRCLI_TAB_ID: id },
+        command: record.command,
+        cwd: record.cwd,
+        env: { PRCLI_TAB_ID: record.id },
       })
     }
 
     return this.attach(record, { cols, rows, windowId: window.id })
+  }
+
+  /**
+   * Undo a half-built split.
+   *
+   * Without this, a throw anywhere after `newWindow` leaves two things behind
+   * that nothing will ever collect: an orphan window running a shell inside
+   * the tab's shared window list, and — once `newGroupMember` has run — a
+   * member session that `findOrphans` cannot tell from a real pane.
+   *
+   * The failure that reaches here is not hypothetical. The placeholder shell
+   * `newWindow` creates can die on its own before `respawnPane` replaces it (a
+   * login shell failing on a bad rc file, a `cwd` removed under it); the hook
+   * wired a moment earlier then fires, reports an `Exit` for an id the
+   * renderer has never seen, and reaps the window — after which `respawn-pane`
+   * fails with "can't find window" and lands here.
+   *
+   * Which is why both adapter calls being tolerant of an absent target
+   * matters: by the time this runs, the objects it is undoing may already be
+   * gone. Session before window, the same order the death hook uses and for
+   * the same measured reason — a member whose bound window dies first falls
+   * back to a sibling's, and briefly renders that sibling's pane twice.
+   */
+  private async rollbackSplit(record: PaneRecord, windowId: string): Promise<void> {
+    const entry = this.entries.get(record.id)
+    if (entry?.record === record) {
+      // `attach` got as far as registering it. Mark the intent before tearing
+      // the client down, so the exit this raises is not reported as a crash of
+      // a pane the caller has not been given yet.
+      entry.intent = 'killed'
+      this.entries.delete(record.id)
+      entry.session.detach()
+    }
+    // Best effort, both of them: this runs because something has already
+    // failed, and the original error is the one worth propagating. Leaving a
+    // window behind is bad; replacing the caller's error with a second one
+    // about the cleanup is worse — that is finding 6 on this same branch.
+    try {
+      await this.adapter.killSession(record.tmuxSession)
+    } catch {
+      // Nothing further to try.
+    }
+    try {
+      await this.adapter.killWindow(windowId)
+    } catch {
+      // Nothing further to try.
+    }
   }
 
   get(id: string): PaneRecord | undefined {

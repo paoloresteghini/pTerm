@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, beforeAll } from 'vitest'
+import { describe, it, expect, afterEach, beforeAll, vi } from 'vitest'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
@@ -71,6 +71,14 @@ async function windowIdOf(name: string): Promise<string> {
   return stdout.trim()
 }
 
+/** The window ids a tab's group holds, seen through one of its members. */
+async function windowsIn(name: string): Promise<string[]> {
+  const { stdout } = await run('tmux', [
+    '-L', SOCKET, 'list-windows', '-t', `=${name}:`, '-F', '#{window_id}',
+  ])
+  return stdout.split('\n').map((line) => line.trim()).filter(Boolean)
+}
+
 /** Whether a tmux session by this name currently exists. */
 async function sessionExists(name: string): Promise<boolean> {
   try {
@@ -127,7 +135,10 @@ function nextExit(manager: SessionManager, id: string, ms = 8000): Promise<strin
 }
 
 beforeAll(killServer)
-afterEach(killServer)
+afterEach(async () => {
+  vi.restoreAllMocks()
+  await killServer()
+})
 
 describe('SessionManager.open', () => {
   it('returns a record with a generated id and encoded tmux name', async () => {
@@ -369,6 +380,36 @@ describe('SessionManager.splitTab', () => {
 
     await expect.poll(() => windowSize(first.tmuxSession), { timeout: 8000 }).toBe('137x41')
     await expect.poll(() => windowSize(second.tmuxSession), { timeout: 8000 }).toBe('91x22')
+    manager.detachAll()
+  })
+
+  // Everything a split creates after `new-window` is invisible to the app and
+  // visible to tmux. An abandoned window sits in the tab's SHARED window list
+  // running a shell; an abandoned member session is a name `findOrphans`
+  // cannot tell from a real pane, so the next restore would resurrect a pane
+  // the user never created, attached to a window nothing has a record of.
+  //
+  // `respawnPane` is the failure point chosen here because it is the last
+  // step, so both objects exist by the time it throws — which is also the
+  // real-world case: the placeholder shell dying on its own before the
+  // command replaces it.
+  it('leaves no window and no member session behind when a split fails', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const manager = new SessionManager(adapter)
+    const first = manager.open({ projectSlug: 'lumio', cwd: tmpdir() })
+    await waitFor(manager, first.id, /\$|%|#/)
+    const before = await windowsIn(first.tmuxSession)
+    expect(before).toHaveLength(1)
+
+    vi.spyOn(adapter, 'respawnPane').mockRejectedValue(new Error('respawn-pane refused'))
+
+    await expect(
+      manager.splitTab({ paneId: first.id, command: 'sleep 600' }),
+    ).rejects.toThrow(/respawn-pane refused/)
+
+    // The caller's own error, not the cleanup's — and nothing left over.
+    expect(await windowsIn(first.tmuxSession)).toEqual(before)
+    await expect(adapter.listPrcliSessions()).resolves.toEqual([first.tmuxSession])
     manager.detachAll()
   })
 
