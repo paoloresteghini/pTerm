@@ -92,6 +92,24 @@ export class SessionManager {
     const cols = input.cols ?? DEFAULT_COLS
     const rows = input.rows ?? DEFAULT_ROWS
 
+    return this.attach(record, { cols, rows })
+  }
+
+  /**
+   * Wire a PTY session for `record` and register it as the live entry.
+   *
+   * Pulled out of `open()` so `splitTab()` can share the same data/exit
+   * listener wiring. `windowId` is the only thing that differs between the
+   * two callers: `open()` leaves it unset and keeps today's `new-session -A`
+   * behaviour; `splitTab()` already knows the window `newWindow` created and
+   * passes it through so `PtySession` attaches to the existing member instead.
+   */
+  private attach(
+    record: PaneRecord,
+    { cols, rows, windowId }: { cols: number; rows: number; windowId?: string },
+  ): PaneRecord {
+    const id = record.id
+
     const session = new PtySession(this.adapter, {
       tmuxSession: record.tmuxSession,
       cwd: record.cwd,
@@ -115,6 +133,7 @@ export class SessionManager {
       // which is why the id is baked into the command instead of read from it.
       deathReporter: this.options.deathReporter,
       tabId: id,
+      windowId,
     })
 
     const entry: Entry = { record, session, cols, rows }
@@ -137,6 +156,109 @@ export class SessionManager {
     this.entries.set(id, entry)
     session.start()
     return record
+  }
+
+  /**
+   * The tmux group this pane's tab is, or the pane's own session name when the
+   * tab is still a group of one.
+   *
+   * An ungrouped session reports an empty `session_group` (measured), which is
+   * the ordinary state of every tab that has never been split — not an error.
+   * `new-session -t <name>` accepts a session name or a group name, so the
+   * founder's own name is the right thing to hand it either way.
+   */
+  async groupNameOf(paneId: string): Promise<string> {
+    const record = this.entries.get(paneId)?.record
+    if (!record) throw new Error(`groupNameOf: no pane ${paneId}`)
+    const rows = await this.adapter.listSessionsWithGroups()
+    const row = rows.find((candidate) => candidate.name === record.tmuxSession)
+    return row?.group || record.tmuxSession
+  }
+
+  /**
+   * Add a pane to the tab that already holds `paneId`.
+   *
+   * Three tmux objects, in this order and no other:
+   *   1. `new-window -e PRCLI_TAB_ID=<new id>` in the group — holds the process.
+   *   2. `new-session -t <group> -s <new name>` — the view the xterm attaches to.
+   *   3. `select-window` binding 2 to 1, BEFORE any client attaches.
+   *
+   * Step 3 before the attach is not stylistic. A newly joined member's current
+   * window is arbitrary, so a client attaching first lands on a sibling's window
+   * and resizes it.
+   */
+  async splitTab(input: {
+    paneId: string
+    cwd?: string
+    command?: string
+    type?: TabType
+    cols?: number
+    rows?: number
+  }): Promise<PaneRecord> {
+    const sibling = this.entries.get(input.paneId)
+    if (!sibling) throw new Error(`splitTab: no pane ${input.paneId}`)
+
+    const group = await this.groupNameOf(input.paneId)
+    const id = newSessionId()
+    const cwd = input.cwd ?? sibling.record.cwd
+    const tmuxSession = encodeSessionName({
+      projectSlug: sibling.record.projectSlug,
+      id,
+    })
+
+    // Sizing is explicit rather than left to `window-size latest`, which fixes
+    // a window's size when a client BEGINS viewing it and did not re-size on a
+    // later select-window.
+    //
+    // Set on each member by name, never once on the group: two probes disagreed
+    // about whether this option propagates between members, and a setting that
+    // happens to propagate is not a setting that was made. The group name is
+    // also not a valid option target once the founder has gone.
+    //
+    // Switching an already-attached window to manual shrinks it by one row on
+    // this machine — measured 100x30 -> 100x29, status bar already off — as if
+    // tmux applies a cached size from before `status off` took effect. A
+    // window shrinking under its own unmoved client is another sighting of the
+    // 80x24 geometry defect class, just triggered by a different command this
+    // time, so the fix is the same shape: force it back explicitly, to the
+    // founder's own tracked size, right after.
+    const founderWindow = await this.adapter.windowIdOf(sibling.record.tmuxSession)
+    await this.adapter.setSessionOption(sibling.record.tmuxSession, 'window-size', 'manual')
+    if (founderWindow) {
+      await this.adapter.resizeWindow(founderWindow, sibling.cols, sibling.rows)
+    }
+
+    // The new window is created through a LIVE member, not the group name.
+    const window = await this.adapter.newWindow({
+      member: sibling.record.tmuxSession,
+      cwd,
+      command: input.command,
+      env: { PRCLI_TAB_ID: id },
+    })
+    // The env also goes here, not only on `newWindow`: `-e` on `new-window`
+    // reaches the spawned pane's own process (confirmed: a child inside it
+    // sees it) but never the session's environment table — `show-environment`
+    // on the new member reports nothing. `-e` on `new-session -t <group>`
+    // does reach that table, which is where a reattach and any `show-environment`
+    // caller both go looking, so both calls carry it.
+    await this.adapter.newGroupMember(group, tmuxSession, { PRCLI_TAB_ID: id })
+    await this.adapter.setSessionOption(tmuxSession, 'window-size', 'manual')
+    // By index, with the member named. See the adapter method's comment.
+    await this.adapter.selectWindow(tmuxSession, window.index)
+
+    const record: PaneRecord = {
+      id,
+      projectSlug: sibling.record.projectSlug,
+      cwd,
+      command: input.command,
+      tmuxSession,
+      type: input.type ?? 'shell',
+    }
+    return this.attach(record, {
+      cols: input.cols ?? DEFAULT_COLS,
+      rows: input.rows ?? DEFAULT_ROWS,
+      windowId: window.id,
+    })
   }
 
   get(id: string): PaneRecord | undefined {

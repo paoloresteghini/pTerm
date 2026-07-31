@@ -19,6 +19,14 @@ export interface PtySessionOptions {
   deathReporter?: string
   /** The tab id the reporter announces. Required alongside `deathReporter`. */
   tabId?: string
+  /**
+   * The window this session's pane already lives in. Set only when the
+   * session was created ahead of time by `newGroupMember` — a split pane,
+   * never the founder of a tab — so `start()` attaches to it instead of
+   * creating a session, and the death hook is scoped to this window rather
+   * than the whole (shared) session.
+   */
+  windowId?: string
 }
 
 /**
@@ -45,38 +53,42 @@ export class PtySession {
   start(): void {
     if (this.proc) throw new Error(`PtySession ${this.tmuxSession} already started`)
 
-    // `new-session -A` attaches if the session exists and creates it otherwise,
-    // which is exactly the open-or-adopt behaviour we want in one call.
-    const args = [
-      ...this.adapter.baseArgs(),
-      'new-session',
-      '-A',
-      '-s',
-      this.options.tmuxSession,
-      '-c',
-      this.options.cwd,
-    ]
-    // Set session-scoped environment with `-e`, not by putting it in the
-    // spawned tmux client's own process env. tmux's per-session environment
-    // is not populated from the env of whichever process happens to run
-    // `new-session` — that only seeds the server's *global* environment, and
-    // only once, when the server itself starts. Every session created
-    // afterwards on the same (already-running) server would silently read
-    // back the *first* session's value instead of its own, and even that
-    // first session's value would not show up under a session-scoped
-    // `show-environment -t` query, only under `-g`. `-e` is applied before
-    // the initial pane's shell spawns and is scoped to this session, so each
-    // tab gets its own value regardless of server start order.
-    //
-    // On the adopt path (`-A` onto a session that already exists), `-e` is
-    // simply ignored by tmux — which is fine here, because the id is the
-    // second half of the session name and never changes, so a session
-    // created by a previous run already holds the correct value.
-    for (const [key, value] of Object.entries(this.options.env ?? {})) {
-      if (value === undefined) continue
-      args.push('-e', `${key}=${value}`)
+    const args = [...this.adapter.baseArgs()]
+
+    if (this.options.windowId) {
+      // The member session already exists — `newGroupMember` created it
+      // before this runs, and `selectWindow` has already bound it to its own
+      // window — so this attaches to it rather than creating one. `-c` and
+      // `-e` are `new-session` arguments; there is no session left to create
+      // them onto.
+      args.push('attach-session', '-t', `=${this.options.tmuxSession}`)
+    } else {
+      // `new-session -A` attaches if the session exists and creates it otherwise,
+      // which is exactly the open-or-adopt behaviour we want in one call.
+      args.push('new-session', '-A', '-s', this.options.tmuxSession, '-c', this.options.cwd)
+
+      // Set session-scoped environment with `-e`, not by putting it in the
+      // spawned tmux client's own process env. tmux's per-session environment
+      // is not populated from the env of whichever process happens to run
+      // `new-session` — that only seeds the server's *global* environment, and
+      // only once, when the server itself starts. Every session created
+      // afterwards on the same (already-running) server would silently read
+      // back the *first* session's value instead of its own, and even that
+      // first session's value would not show up under a session-scoped
+      // `show-environment -t` query, only under `-g`. `-e` is applied before
+      // the initial pane's shell spawns and is scoped to this session, so each
+      // tab gets its own value regardless of server start order.
+      //
+      // On the adopt path (`-A` onto a session that already exists), `-e` is
+      // simply ignored by tmux — which is fine here, because the id is the
+      // second half of the session name and never changes, so a session
+      // created by a previous run already holds the correct value.
+      for (const [key, value] of Object.entries(this.options.env ?? {})) {
+        if (value === undefined) continue
+        args.push('-e', `${key}=${value}`)
+      }
+      if (this.options.command) args.push(this.options.command)
     }
-    if (this.options.command) args.push(this.options.command)
 
     // Chained into the same invocation rather than issued afterwards: a
     // separate call would race the session actually existing. `;` is tmux's
@@ -112,12 +124,23 @@ export class PtySession {
             reporter: this.options.deathReporter,
             tabId: this.options.tabId,
             tmuxSession: this.tmuxSession,
-            windowId: null, // Task 2 supplies the real one once the session exists
+            // Only a split pane knows its window id this early — the
+            // one-pane `open()` path still resolves it after the session
+            // exists (Task 6). Until then this reproduces the pre-M2c
+            // command exactly.
+            windowId: this.options.windowId ?? null,
           })
         : null
     if (deathHook) {
       args.push(';', 'set-option', 'remain-on-exit', 'on')
-      args.push(';', 'set-hook', 'pane-died', deathHook)
+      // Window-scoped when the window is already known: a session-scoped
+      // `pane-died` hook is shared by every member of the group (measured),
+      // so an unscoped hook here would fire for a sibling's pane too.
+      if (this.options.windowId) {
+        args.push(';', 'set-hook', '-w', '-t', this.options.windowId, 'pane-died', deathHook)
+      } else {
+        args.push(';', 'set-hook', 'pane-died', deathHook)
+      }
     }
 
     // This is the tmux *client* process's own env, not the session's — that

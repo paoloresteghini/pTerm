@@ -265,4 +265,46 @@ export class TmuxAdapter {
   async setWindowHook(windowId: string, hook: string, command: string): Promise<void> {
     await this.exec(['set-hook', '-w', '-t', windowId, hook, command])
   }
+
+  /**
+   * A new window in the group, holding one pane. Returns its window id.
+   *
+   * `-P -F '#{window_id} #{window_index}'` is what makes the id knowable here:
+   * the death hook needs it as a literal, because tmux does not expand formats
+   * in a command argument outside `run-shell`.
+   */
+  async newWindow(input: {
+    /** A LIVE member session, never the group name — see Global Constraints. */
+    member: string
+    cwd: string
+    command?: string
+    env?: Record<string, string>
+  }): Promise<{ id: string; index: string }> {
+    const args = [
+      'new-window', '-d', '-P', '-F', '#{window_id} #{window_index}',
+      '-t', `=${input.member}:`, '-c', input.cwd,
+    ]
+    for (const [key, value] of Object.entries(input.env ?? {})) {
+      args.push('-e', `${key}=${value}`)
+    }
+    if (input.command) args.push(input.command)
+    const [id, index] = (await this.exec(args)).trim().split(' ')
+    return { id, index }
+  }
+
+  /**
+   * Join `name` to `group` as a new view onto its shared window list.
+   *
+   * `env` lands in `name`'s own session-environment table — `show-environment
+   * -t =name` reports it — because this call reuses `new-session`'s `-e`, not
+   * `new-window`'s: measured, `new-window -e` reaches the spawned pane's
+   * process but never that table.
+   */
+  async newGroupMember(group: string, name: string, env?: Record<string, string>): Promise<void> {
+    const args = ['new-session', '-d', '-t', group, '-s', name]
+    for (const [key, value] of Object.entries(env ?? {})) {
+      args.push('-e', `${key}=${value}`)
+    }
+    await this.exec(args)
+  }
 }

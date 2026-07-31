@@ -273,6 +273,51 @@ describe('SessionManager.moveToProject', () => {
   })
 })
 
+describe('SessionManager.splitTab', () => {
+  it('adds a pane with its own session, window and tab id', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const manager = new SessionManager(adapter)
+    const first = manager.open({ projectSlug: 'lumio', cwd: tmpdir() })
+    await waitFor(manager, first.id, /\$|%|#/)
+
+    const second = await manager.splitTab({ paneId: first.id })
+
+    expect(second.id).not.toBe(first.id)
+    expect(second.tmuxSession).toBe(`prcli-lumio-${second.id}`)
+    // Both panes are members of one group, so one tab holds them both.
+    const rows = await adapter.listSessionsWithGroups()
+    const group = rows.find((row) => row.name === first.tmuxSession)?.group
+    expect(group).toBeTruthy()
+    expect(rows.find((row) => row.name === second.tmuxSession)?.group).toBe(group)
+    // And each pane's process carries its OWN id, not the founder's.
+    await expect
+      .poll(() => sessionEnv(second.tmuxSession, 'PRCLI_TAB_ID'), { timeout: 10_000 })
+      .toBe(`PRCLI_TAB_ID=${second.id}`)
+    await expect
+      .poll(() => sessionEnv(first.tmuxSession, 'PRCLI_TAB_ID'), { timeout: 10_000 })
+      .toBe(`PRCLI_TAB_ID=${first.id}`)
+    manager.detachAll()
+  })
+
+  // Bind before attach. A newly joined member's current window is arbitrary —
+  // measured @0 every time — so attaching first gives the new client a
+  // SIBLING's window and, under any non-manual sizing, resizes it. This is the
+  // 80x24 geometry defect class in a new disguise.
+  it('binds the new member to its own window, at its own size', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const manager = new SessionManager(adapter)
+    const first = manager.open({ projectSlug: 'lumio', cwd: tmpdir(), cols: 100, rows: 30 })
+    await waitFor(manager, first.id, /\$|%|#/)
+
+    const second = await manager.splitTab({ paneId: first.id, cols: 200, rows: 50 })
+    await waitFor(manager, second.id, /\$|%|#/)
+
+    await expect.poll(() => windowSize(first.tmuxSession), { timeout: 8000 }).toBe('100x30')
+    await expect.poll(() => windowSize(second.tmuxSession), { timeout: 8000 }).toBe('200x50')
+    manager.detachAll()
+  })
+})
+
 describe('SessionManager exit reason', () => {
   it('is exited when the child ends on its own', async () => {
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
