@@ -33,12 +33,12 @@ export function deathHookCommand(input: {
   reporter: string
   tabId: string
   tmuxSession: string
-  windowId: string
+  windowId: string | null
 }): string | null {
   if (UNSAFE_IN_HOOK.test(input.reporter)) return null
   if (!TAB_ID_RE.test(input.tabId)) return null
   if (UNSAFE_IN_HOOK.test(input.tmuxSession)) return null
-  if (!WINDOW_ID_RE.test(input.windowId)) return null
+  if (input.windowId !== null && !WINDOW_ID_RE.test(input.windowId)) return null
 
   // The reporter is single-quoted so a path with a space in it stays one word,
   // and both formats are expanded by tmux when the hook fires — quoted for the
@@ -50,6 +50,14 @@ export function deathHookCommand(input: {
   const report =
     `PRCLI_TAB_ID=${input.tabId} '${input.reporter}' Exit ` +
     `'#{pane_dead_status}' '#{pane_dead_signal}'`
+
+  // When windowId is null, the session is not yet window-scoped; use the
+  // pre-M2c form. Once Task 2 provides the window id, this will emit the
+  // scoped form that kills the window instead of the whole session.
+  if (input.windowId === null) {
+    return `run-shell "${report}" ; kill-session -t =${input.tmuxSession}`
+  }
+
   return (
     `run-shell "${report}" ; kill-session -t =${input.tmuxSession} ; ` +
     `kill-window -t ${input.windowId}`
