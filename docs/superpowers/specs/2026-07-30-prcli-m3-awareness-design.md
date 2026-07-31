@@ -235,9 +235,11 @@ The dock badge counts tabs in `waiting`. The "Needs you" list shows `waiting` an
 
 ## Also folded in
 
-`npm run lint` has never run. There is no `eslint.config.*` anywhere, and the script still passes `--ext`, removed in ESLint 9 — so three milestones have shipped with no lint gate at all. That is why `lucide-react` sits in `dependencies` imported nowhere.
+`npm run lint` has never run. Checked rather than assumed: ESLint 8.57.1 is installed, `--ext` is valid for that version, and the sole reason the script fails is that no `.eslintrc.*` or `eslint.config.*` exists anywhere in the repo or its ancestors. Three milestones have shipped with no lint gate at all, which is why `lucide-react` sits in `dependencies` imported nowhere.
 
-This milestone adds a shell script, a socket protocol and a rules engine. Task 0 is a flat config using the `@typescript-eslint` and `eslint-plugin-import` packages already installed, a fixed `lint` script, and dropping `lucide-react`.
+The installed `@typescript-eslint` packages are v5, which predates TypeScript 5 — this repo is on 7.0.2. So the fix is not a config file alone: ESLint moves to 9 with flat config and `typescript-eslint` v8, which is the combination that parses the TypeScript actually in use.
+
+This milestone adds a shell script, a socket protocol and a rules engine, all of it new surface. The lint gate goes in first, as Task 1, together with dropping `lucide-react`.
 
 ## Failure handling
 

@@ -863,6 +863,8 @@ Run: `npx vitest run tests/unit/store.test.ts`
 
 Expected: PASS, including the six new cases.
 
+**One existing assertion legitimately changes.** The test asserting `read()` resolves to `{ version: 3, activeProjectId: null, projects: [], tabs: [] }` for a config with bad project rows now resolves to a v4 object carrying `notifications`. Update it to the new shape — this is the schema change being visible, not an assertion being weakened, and the thing it actually tests (bad project rows are dropped) must still be asserted exactly as before. Any *other* existing test that fails, stop and report.
+
 Then: `npm run typecheck`
 
 Expected: **errors**, in `manager.ts`, `restore.ts` and `register.ts` — every place that builds a `TabRecord` now owes a `type`, and every place that writes a config now owes `notifications`. That is the change being visible rather than silent. Fix them:
@@ -4372,35 +4374,35 @@ Add to `tests/unit/workspace.test.ts`. Keep every existing test exactly as it is
   it('takes a whole status snapshot on restore', () => {
     const next = workspaceReducer(three, {
       type: 'statusSnapshot',
-      status: { 'aaaaaaaaaaaaaaaa': 'waiting' },
+      status: { 'aaa': 'waiting' },
     })
-    expect(stateOfTab(next, 'aaaaaaaaaaaaaaaa')).toBe('waiting')
+    expect(stateOfTab(next, 'aaa')).toBe('waiting')
   })
 
   it('updates one tab without disturbing the others', () => {
     const seeded = workspaceReducer(three, {
       type: 'statusSnapshot',
-      status: { 'aaaaaaaaaaaaaaaa': 'idle', 'bbbbbbbbbbbbbbbb': 'thinking' },
+      status: { 'aaa': 'idle', 'bbb': 'thinking' },
     })
 
     const next = workspaceReducer(seeded, {
       type: 'statusChanged',
-      tabId: 'aaaaaaaaaaaaaaaa',
+      tabId: 'aaa',
       state: 'waiting',
     })
 
-    expect(stateOfTab(next, 'aaaaaaaaaaaaaaaa')).toBe('waiting')
-    expect(stateOfTab(next, 'bbbbbbbbbbbbbbbb')).toBe('thinking')
+    expect(stateOfTab(next, 'aaa')).toBe('waiting')
+    expect(stateOfTab(next, 'bbb')).toBe('thinking')
   })
 
   it('has no state for a tab nothing has said anything about', () => {
-    expect(stateOfTab(three, 'aaaaaaaaaaaaaaaa')).toBeNull()
+    expect(stateOfTab(three, 'aaa')).toBeNull()
   })
 
   it('gives a project row the worst state among its tabs', () => {
     const seeded = workspaceReducer(three, {
       type: 'statusSnapshot',
-      status: { 'aaaaaaaaaaaaaaaa': 'idle', 'bbbbbbbbbbbbbbbb': 'waiting' },
+      status: { 'aaa': 'idle', 'bbb': 'waiting' },
     })
 
     expect(stateOfProject(seeded, 'id-lumio')).toBe('waiting')
@@ -4414,78 +4416,82 @@ Add to `tests/unit/workspace.test.ts`. Keep every existing test exactly as it is
     const seeded = workspaceReducer(three, {
       type: 'statusSnapshot',
       status: {
-        'aaaaaaaaaaaaaaaa': 'waiting',
-        'bbbbbbbbbbbbbbbb': 'crashed',
-        'cccccccccccccccc': 'thinking',
+        'aaa': 'waiting',
+        'bbb': 'crashed',
+        'ccc': 'thinking',
       },
     })
 
     const list = needsYou(seeded)
 
     // Only the two states that mean a human is required, and the crash first.
-    expect(list.map((tab) => tab.id)).toEqual(['bbbbbbbbbbbbbbbb', 'aaaaaaaaaaaaaaaa'])
+    expect(list.map((tab) => tab.id)).toEqual(['bbb', 'aaa'])
   })
 
   it('keeps a dead tab in the bar instead of dropping it', () => {
-    const next = workspaceReducer(three, { type: 'died', id: 'aaaaaaaaaaaaaaaa', code: 1 })
+    const next = workspaceReducer(three, { type: 'died', id: 'aaa', code: 1 })
 
     // The behaviour this milestone changes: a crashed `npm run dev` used to
     // vanish and tell you nothing, which made `crashed` unrenderable.
-    expect(next.tabs.some((tab) => tab.id === 'aaaaaaaaaaaaaaaa')).toBe(true)
-    expect(next.dead['aaaaaaaaaaaaaaaa']).toBe(1)
+    expect(next.tabs.some((tab) => tab.id === 'aaa')).toBe(true)
+    expect(next.dead['aaa']).toBe(1)
   })
 
   it('leaves the selection on a tab that died, so its scrollback stays readable', () => {
-    const selected = workspaceReducer(three, { type: 'activatedTab', id: 'aaaaaaaaaaaaaaaa' })
-    const next = workspaceReducer(selected, { type: 'died', id: 'aaaaaaaaaaaaaaaa', code: 1 })
+    const selected = workspaceReducer(three, { type: 'activatedTab', id: 'aaa' })
+    const next = workspaceReducer(selected, { type: 'died', id: 'aaa', code: 1 })
 
-    expect(activeTabId(next)).toBe('aaaaaaaaaaaaaaaa')
+    expect(activeTabId(next)).toBe('aaa')
   })
 
   it('drops the tab and its tombstone on dismiss', () => {
-    const died = workspaceReducer(three, { type: 'died', id: 'aaaaaaaaaaaaaaaa', code: 1 })
+    const died = workspaceReducer(three, { type: 'died', id: 'aaa', code: 1 })
 
-    const next = workspaceReducer(died, { type: 'dismissed', id: 'aaaaaaaaaaaaaaaa' })
+    const next = workspaceReducer(died, { type: 'dismissed', id: 'aaa' })
 
-    expect(next.tabs.some((tab) => tab.id === 'aaaaaaaaaaaaaaaa')).toBe(false)
-    expect(next.dead['aaaaaaaaaaaaaaaa']).toBeUndefined()
+    expect(next.tabs.some((tab) => tab.id === 'aaa')).toBe(false)
+    expect(next.dead['aaa']).toBeUndefined()
   })
 
   it('moves the selection to a neighbour on dismiss, as a close does', () => {
-    const selected = workspaceReducer(three, { type: 'activatedTab', id: 'aaaaaaaaaaaaaaaa' })
-    const died = workspaceReducer(selected, { type: 'died', id: 'aaaaaaaaaaaaaaaa', code: 1 })
+    const selected = workspaceReducer(three, { type: 'activatedTab', id: 'aaa' })
+    const died = workspaceReducer(selected, { type: 'died', id: 'aaa', code: 1 })
 
-    const next = workspaceReducer(died, { type: 'dismissed', id: 'aaaaaaaaaaaaaaaa' })
+    const next = workspaceReducer(died, { type: 'dismissed', id: 'aaa' })
 
-    expect(activeTabId(next)).not.toBe('aaaaaaaaaaaaaaaa')
+    expect(activeTabId(next)).not.toBe('aaa')
   })
 
   it('clears the tombstone when a dead tab is restarted', () => {
-    const died = workspaceReducer(three, { type: 'died', id: 'aaaaaaaaaaaaaaaa', code: 1 })
-    const tab = died.tabs.find((candidate) => candidate.id === 'aaaaaaaaaaaaaaaa')
+    const died = workspaceReducer(three, { type: 'died', id: 'aaa', code: 1 })
+    const tab = died.tabs.find((candidate) => candidate.id === 'aaa')
     if (!tab) throw new Error('fixture lost the tab')
 
     const next = workspaceReducer(died, { type: 'opened', tab })
 
     // Restart reuses the id. A tombstone left behind would keep offering
     // Restart on a session that is already running.
-    expect(next.dead['aaaaaaaaaaaaaaaa']).toBeUndefined()
-    expect(next.tabs.filter((candidate) => candidate.id === 'aaaaaaaaaaaaaaaa')).toHaveLength(1)
+    expect(next.dead['aaa']).toBeUndefined()
+    expect(next.tabs.filter((candidate) => candidate.id === 'aaa')).toHaveLength(1)
   })
 
   it('drops the status of a tab that is closed outright', () => {
     const seeded = workspaceReducer(three, {
       type: 'statusSnapshot',
-      status: { 'aaaaaaaaaaaaaaaa': 'waiting' },
+      status: { 'aaa': 'waiting' },
     })
 
-    const next = workspaceReducer(seeded, { type: 'removed', id: 'aaaaaaaaaaaaaaaa' })
+    const next = workspaceReducer(seeded, { type: 'removed', id: 'aaa' })
 
-    expect(stateOfTab(next, 'aaaaaaaaaaaaaaaa')).toBeNull()
+    expect(stateOfTab(next, 'aaa')).toBeNull()
   })
 ```
 
-Extend the file's `tab()` and fixture helpers so ids are 16 hex characters if they are not already, and add the new imports (`stateOfTab`, `stateOfProject`, `needsYou`). Read the file first and match its existing fixture names rather than introducing parallel ones.
+Add the new imports (`stateOfTab`, `stateOfProject`, `needsYou`) and reuse the file's existing `three` fixture, whose tabs are `'aaa'`, `'bbb'`, `'ccc'` under project `'p1'`.
+
+**Do not lengthen those ids to 16 hex.** They are short on purpose and every existing assertion in the file names them; changing them would mean rewriting tests this task has no business touching. The reducer does not validate id format — only `parseHookLine` and the tmux name codec do, and neither is involved here.
+
+The `three` fixture will need `status: {}` and `dead: {}` added to it, since `WorkspaceState` gains both. That is a fixture completion, not an assertion change.
 
 - [ ] **Step 2: Run to verify they fail**
 
