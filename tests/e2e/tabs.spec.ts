@@ -391,6 +391,51 @@ test('the keyboard opens, switches and closes tabs', async () => {
   await app.close()
 })
 
+/**
+ * Click a File/View menu item by id, from inside the main process.
+ *
+ * Playwright cannot drive the macOS menu bar, so this exercises everything
+ * except the OS drawing it: the item exists, has that id, and its handler runs.
+ */
+async function clickMenuItem(app: ElectronApplication, id: string): Promise<void> {
+  await app.evaluate(({ Menu }, itemId) => {
+    const item = Menu.getApplicationMenu()?.getMenuItemById(itemId)
+    if (!item) throw new Error(`no menu item with id ${itemId}`)
+    item.click()
+  }, id)
+}
+
+// The menu items existed to display their accelerators without claiming them
+// from the renderer, which is right — but clicking one did nothing at all.
+// Three of them, carried since M2a as "same shape as M2b's I2, fix them
+// together".
+test('the File and View menu items do what their accelerators do', async () => {
+  const app = await launch()
+  const window = await app.firstWindow()
+  await window.getByTestId('new-tab').click()
+  await expect(window.getByTestId('terminal-active')).toBeVisible()
+  await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(1)
+
+  await clickMenuItem(app, 'new-tab')
+  await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(2)
+  await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(2)
+
+  await clickMenuItem(app, 'close-tab')
+  await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(1)
+  await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(1)
+
+  // The panel starts open, so one click has to close it and the next reopen
+  // it — a toggle that only ever fired one way would pass a single assertion.
+  const panel = window.getByTestId('rightpanel')
+  await expect(panel).toBeVisible()
+  await clickMenuItem(app, 'toggle-presets')
+  await expect(panel).toBeHidden()
+  await clickMenuItem(app, 'toggle-presets')
+  await expect(panel).toBeVisible()
+
+  await app.close()
+})
+
 test('closing a tab destroys its session', async () => {
   const app = await launch()
   const window = await app.firstWindow()

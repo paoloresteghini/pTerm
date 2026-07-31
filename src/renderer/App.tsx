@@ -201,6 +201,32 @@ export function App() {
     [notifications, fail],
   )
 
+  // A menu item the user clicked rather than reached by its accelerator. The
+  // keystrokes deliberately never reach the menu (`registerAccelerator: false`
+  // in main), which is why these actions live here and main can only ask for
+  // them — and why clicking one used to do nothing at all.
+  useEffect(
+    () =>
+      window.prcli.onMenuCommand((command) => {
+        switch (command) {
+          case 'newTab':
+            openTab()
+            return
+          case 'closeTab':
+            // Same guard the ⌘W handler applies: with no tab there is nothing
+            // to close, and closeTab(null) is not a thing to ask for.
+            if (currentTabId) closeTab(currentTabId)
+            return
+          case 'togglePresets':
+            setPanelOpen((open) => !open)
+            return
+          case 'settings':
+            setSettingsOpen(true)
+        }
+      }),
+    [currentTabId, openTab, closeTab],
+  )
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (!event.metaKey) return

@@ -12,7 +12,7 @@ import { mergeTab, NotificationRouter } from './notify/router'
 import { ConfigStore } from './state/store'
 import { HookServer } from './hooks/server'
 import { hookPaths } from './hooks/install'
-import { CHANNELS } from '../shared/ipc'
+import { CHANNELS, type MenuCommand } from '../shared/ipc'
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string
 declare const MAIN_WINDOW_VITE_NAME: string
@@ -144,6 +144,18 @@ if (!isPrimaryInstance) {
 // every session's client down with it.
 // Same menu as Electron's default, with those items' accelerators shown but
 // not registered.
+/**
+ * Ask the renderer to carry out a clicked menu item.
+ *
+ * The accelerators stay unregistered so the keystroke reaches the renderer's
+ * own handler — that was always right. What was missing is that *clicking* the
+ * item did nothing, because the renderer owns every one of these actions and
+ * main had no way to ask for one.
+ */
+function sendMenuCommand(command: MenuCommand): void {
+  mainWindow?.webContents.send(CHANNELS.menuCommand, command)
+}
+
 function installMenu(): void {
   const template: MenuItemConstructorOptions[] = [
     { role: 'appMenu' },
@@ -151,25 +163,30 @@ function installMenu(): void {
       label: 'File',
       submenu: [
         {
+          // Ids exist so a test can click these without driving the macOS
+          // menu bar, which Playwright cannot reach.
+          id: 'new-tab',
           label: 'New Tab',
           accelerator: 'CmdOrCtrl+T',
           registerAccelerator: false,
-          click: () => undefined,
+          click: () => sendMenuCommand('newTab'),
         },
         {
+          id: 'close-tab',
           label: 'Close Tab',
           accelerator: 'CmdOrCtrl+W',
           // Displayed, but not claimed from the system — the keystroke
           // reaches the renderer instead.
           registerAccelerator: false,
-          click: () => undefined,
+          click: () => sendMenuCommand('closeTab'),
         },
         { type: 'separator' },
         {
+          id: 'settings',
           label: 'Settings…',
           accelerator: 'CmdOrCtrl+,',
           registerAccelerator: false,
-          click: () => undefined,
+          click: () => sendMenuCommand('settings'),
         },
       ],
     },
@@ -178,10 +195,11 @@ function installMenu(): void {
       label: 'View',
       submenu: [
         {
+          id: 'toggle-presets',
           label: 'Toggle Presets',
           accelerator: 'Shift+CmdOrCtrl+\\',
           registerAccelerator: false,
-          click: () => undefined,
+          click: () => sendMenuCommand('togglePresets'),
         },
         { type: 'separator' },
         // `reload` stays: restore reattaches everything, so a reload is how a

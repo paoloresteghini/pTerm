@@ -31,7 +31,19 @@ export const CHANNELS = {
   hooksState: 'prcli:hooksState',
   installHooks: 'prcli:installHooks',
   uninstallHooks: 'prcli:uninstallHooks',
+  menuCommand: 'prcli:menuCommand',
 } as const
+
+/**
+ * What a clicked menu item asks the renderer to do.
+ *
+ * The accelerators themselves stay unregistered (`registerAccelerator: false`)
+ * so the keystroke still reaches the renderer's own handler rather than being
+ * claimed by the menu — that part was always right. What was missing is that
+ * *clicking* the item did nothing at all, because the renderer owns every one
+ * of these actions and main had no way to ask for them.
+ */
+export type MenuCommand = 'newTab' | 'closeTab' | 'togglePresets' | 'settings'
 
 /**
  * What a tab was launched as.
@@ -261,6 +273,8 @@ export interface PrcliApi {
   dismissTab(id: string): void
   /** A clicked toast asking the renderer to select a particular tab. */
   onFocusTab(listener: (tabId: string) => void): () => void
+  /** A menu item the user *clicked*, rather than reached by its accelerator. */
+  onMenuCommand(listener: (command: MenuCommand) => void): () => void
   /** The stored notification rules, for the sidebar's per-project mute toggle. */
   notifications(): Promise<NotificationConfig>
   /** Merges `patch` into the stored notification config and returns the result. */

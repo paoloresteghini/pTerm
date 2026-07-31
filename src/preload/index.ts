@@ -3,6 +3,7 @@ import {
   CHANNELS,
   type DataEvent,
   type ExitEvent,
+  type MenuCommand,
   type OpenRequest,
   type PrcliApi,
   type StatusEvent,
@@ -49,6 +50,11 @@ const api: PrcliApi = {
     const handler = (_event: IpcRendererEvent, tabId: string): void => listener(tabId)
     ipcRenderer.on(CHANNELS.focusTab, handler)
     return () => ipcRenderer.removeListener(CHANNELS.focusTab, handler)
+  },
+  onMenuCommand: (listener: (command: MenuCommand) => void) => {
+    const handler = (_event: IpcRendererEvent, command: MenuCommand): void => listener(command)
+    ipcRenderer.on(CHANNELS.menuCommand, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.menuCommand, handler)
   },
   notifications: () => ipcRenderer.invoke(CHANNELS.notifications),
   updateNotifications: (patch) => ipcRenderer.invoke(CHANNELS.updateNotifications, patch),
