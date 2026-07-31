@@ -62,6 +62,23 @@ export function deathHookCommand(input: {
   if (!canBuildDeathHook(input)) return null
   if (!WINDOW_ID_RE.test(input.windowId)) return null
 
+  // The order is `run-shell`, then `kill-session`, then `kill-window`, and it
+  // is not free. A tmux command list aborts at the first failure — measured:
+  //
+  //   $ tmux kill-session -t '=prcli-gone-0000000000000000' ';' kill-window -t @1
+  //   can't find session: prcli-gone-0000000000000000
+  //   windows after: @0 @1        # @1 survived
+  //
+  // So putting `kill-session` first means any failure of it forfeits the
+  // window reap. It still goes first, because the member's client must be gone
+  // before its window is: measured, a member whose bound window dies first
+  // falls back to a SIBLING's window and two xterms then render the same pane.
+  //
+  // The one way `kill-session` fails in practice is a name that has gone
+  // stale, and the session name here is a literal — it does not follow a
+  // rename. `SessionManager.moveTabToProject` therefore reinstalls this hook
+  // itself, under the new name, before it returns.
+  //
   // The reporter is single-quoted so a path with a space in it stays one word,
   // and both formats are expanded by tmux when the hook fires — quoted for the
   // shell, not hidden from tmux.

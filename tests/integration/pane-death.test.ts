@@ -57,6 +57,12 @@ async function remainOnExit(windowId: string): Promise<string> {
   }
 }
 
+/** The hooks installed on a window, as `show-hooks -w` prints them. */
+async function hooksOf(windowId: string): Promise<string> {
+  const { stdout } = await run('tmux', ['-L', SOCKET, 'show-hooks', '-w', '-t', windowId])
+  return stdout
+}
+
 /** The pid of the process running in a session's pane. */
 async function panePid(name: string): Promise<string> {
   const { stdout } = await run('tmux', [
@@ -318,6 +324,68 @@ describe('a pane that dies', () => {
   // `session.test.ts`'s "PtySession remain-on-exit". Asserting it again from
   // here would produce a test no single mutation can fail, because the option
   // is then held off by two independent mechanisms.
+
+  // A hook names its member session as a literal, so every rename makes one
+  // stale — and a stale name is not cosmetic here. A tmux command list aborts
+  // at the first failure (measured: `kill-session -t '=<gone>' ; kill-window
+  // -t @1` leaves @1 alive), and `kill-session` comes first because the
+  // member's client must be gone before its window is. A pane dying against a
+  // stale hook therefore reports its status correctly and reaps nothing at
+  // all: dead pane preserved, window and session both left behind.
+  //
+  // The reattach at the end of the move installs a correct hook a moment
+  // later anyway, so anything that reads tmux — which means awaiting — gives
+  // the asynchronous one time to land and passes either way. (Measured: it
+  // does. The first draft of this test was that, and it survived deleting the
+  // fix.) What has to be true is that the hook is correct BEFORE
+  // `moveTabToProject` resolves, so the check is made against a recording,
+  // with no await between it and the move.
+  it('reinstalls each death hook under the new name before the move resolves', async () => {
+    const { manager: sessions, adapter } = await harness()
+
+    const founder = sessions.open({
+      projectSlug: 'alpha',
+      cwd: dir,
+      command: 'sh -c "sleep 30"',
+      type: 'preset',
+    })
+    await expect.poll(() => sessionExists(founder.tmuxSession), { timeout: 10_000 }).toBe(true)
+    // The founder's own hook is installed asynchronously after its session
+    // appears, so wait for it before renaming out from under it.
+    await expect
+      .poll(async () => hooksOf(await windowIdOf(founder.tmuxSession)), { timeout: 10_000 })
+      .toContain('pane-died')
+
+    const second = await sessions.splitTab({ paneId: founder.id, command: 'sh -c "sleep 30"' })
+    expect(await windowsIn(founder.tmuxSession)).toHaveLength(2)
+
+    const installed: string[] = []
+    const setDeathHook = adapter.setDeathHook.bind(adapter)
+    vi.spyOn(adapter, 'setDeathHook').mockImplementation(async (windowId, command) => {
+      installed.push(command)
+      return setDeathHook(windowId, command)
+    })
+
+    const moved = await sessions.moveTabToProject(founder.id, 'beta')
+
+    expect(moved.map((pane) => pane.tmuxSession).sort()).toEqual(
+      [`prcli-beta-${founder.id}`, `prcli-beta-${second.id}`].sort(),
+    )
+    // No await above this line since the move returned: the reattach's own
+    // wiring cannot have got past its first tmux call yet.
+    for (const pane of moved) {
+      expect(installed.some((command) => command.includes(`kill-session -t =${pane.tmuxSession}`)))
+        .toBe(true)
+    }
+
+    // And what was installed is what tmux ended up holding.
+    for (const pane of moved) {
+      const hooks = await hooksOf(await windowIdOf(pane.tmuxSession))
+      expect(hooks).toContain(`kill-session -t =${pane.tmuxSession}`)
+      expect(hooks).not.toContain('prcli-alpha-')
+    }
+    sessions.detachAll()
+  })
 
   // `remain-on-exit` is what makes the status readable at all, and it also
   // stops tmux reaping the session on its own. If the hook did not kill it,

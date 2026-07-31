@@ -741,6 +741,37 @@ export class SessionManager {
       )
     }
 
+    // Reinstall every pane's death hook under its new name, before any client
+    // is cycled and before this method returns.
+    //
+    // The hook bakes the member session's name in as a literal, so the renames
+    // above have just made every installed hook stale. That is not a cosmetic
+    // staleness: a tmux command list ABORTS AT THE FIRST FAILURE, measured —
+    //
+    //   $ tmux kill-session -t '=prcli-gone-0000000000000000' ';' kill-window -t @1
+    //   can't find session: prcli-gone-0000000000000000
+    //   windows after: @0 @1        # @1 survived
+    //
+    // — and `kill-session` comes first in the hook, because spec finding 2
+    // requires the member's client to be gone before its window is. So a pane
+    // dying while its hook names the old session reports its status correctly
+    // (`run-shell` runs first, and the red dot is right) and then reaps
+    // NOTHING: the dead pane preserved by `remain-on-exit`, its window and its
+    // session both left behind.
+    //
+    // The reattach below installs a correct hook eventually, but only
+    // asynchronously and only after each client has been torn down and
+    // rebuilt. Doing it here narrows the window from "the whole of a move" to
+    // the milliseconds between one rename and the next.
+    //
+    // Swallowed for the same reason `attach`'s is: a tab whose death shows
+    // grey is not worth failing a move that has already succeeded over, and
+    // the reattach tries again regardless.
+    for (const { pane, to } of targets) {
+      if (to === pane.tmuxSession) continue
+      await this.wireDeathHook({ ...pane, tmuxSession: to }, null).catch(() => {})
+    }
+
     const moved: PaneRecord[] = []
     for (const { pane, to } of targets) {
       const overrides = known?.get(pane.id)
