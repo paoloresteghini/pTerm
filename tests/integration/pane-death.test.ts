@@ -30,6 +30,28 @@ async function sessionExists(name: string): Promise<boolean> {
   }
 }
 
+/** The window ids a tab's group holds, seen through one of its members. */
+async function windowsIn(name: string): Promise<string[]> {
+  const { stdout } = await run('tmux', [
+    '-L', SOCKET, 'list-windows', '-t', `=${name}:`, '-F', '#{window_id}',
+  ])
+  return stdout.split('\n').map((line) => line.trim()).filter(Boolean)
+}
+
+async function windowIdOf(name: string): Promise<string> {
+  const { stdout } = await run('tmux', [
+    '-L', SOCKET, 'display-message', '-p', '-t', `=${name}:`, '#{window_id}',
+  ])
+  return stdout.trim()
+}
+
+async function paneIsDead(windowId: string): Promise<boolean> {
+  const { stdout } = await run('tmux', [
+    '-L', SOCKET, 'display-message', '-p', '-t', windowId, '#{pane_dead}',
+  ])
+  return stdout.trim() === '1'
+}
+
 let dir: string
 let hookServer: HookServer | null = null
 let manager: SessionManager | null = null
@@ -186,6 +208,50 @@ describe('a pane that dies', () => {
     await new Promise((resolve) => setTimeout(resolve, 1_500))
 
     expect(received).toEqual([])
+  })
+
+  // The M2c blocker: a pane of a split tab crashes, and the tab keeps working.
+  //
+  // The window assertion is the one that carries this test. Measured against
+  // the pre-M2c hook, which ended in `kill-session`: it does report the status
+  // and it does reap the dead pane's own member session, so those two pass
+  // either way. What it cannot do is remove the dead pane's WINDOW, because a
+  // session group's windows are shared and killing one member unlinks nothing
+  // from the others. The dead pane is then left in the surviving sibling's
+  // window list, permanently — the stray this project has already had once,
+  // reached through a split instead of a crash.
+  it('takes down only the pane that died, not its siblings', async () => {
+    const { manager: sessions, received } = await harness()
+
+    const survivor = sessions.open({
+      projectSlug: 'alpha',
+      cwd: dir,
+      command: 'sh -c "sleep 30"',
+      type: 'preset',
+    })
+    await expect.poll(() => sessionExists(survivor.tmuxSession), { timeout: 10_000 }).toBe(true)
+    const survivorWindow = await windowIdOf(survivor.tmuxSession)
+
+    const doomed = await sessions.splitTab({ paneId: survivor.id, command: 'sh -c "exit 3"' })
+    // Two panes, two windows, one shared list: the tab this is all about.
+    expect(await windowsIn(survivor.tmuxSession)).toHaveLength(2)
+
+    // The dead pane reported its own status under its own id...
+    await expect.poll(() => received.length, { timeout: 10_000 }).toBeGreaterThan(0)
+    expect(received[0]).toMatchObject({ tabId: doomed.id, event: 'Exit', status: 3 })
+
+    // ...its member session was reaped...
+    await expect.poll(() => sessionExists(doomed.tmuxSession), { timeout: 10_000 }).toBe(false)
+
+    // ...and so was its window, leaving the tab holding only the survivor's.
+    await expect
+      .poll(() => windowsIn(survivor.tmuxSession), { timeout: 10_000 })
+      .toEqual([survivorWindow])
+
+    // ...and the sibling is untouched, with a live pane.
+    expect(await sessionExists(survivor.tmuxSession)).toBe(true)
+    expect(await paneIsDead(survivorWindow)).toBe(false)
+    sessions.detachAll()
   })
 
   // `remain-on-exit` is what makes the status readable at all, and it also

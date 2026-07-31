@@ -107,20 +107,4 @@ describe('deathHookCommand', () => {
       ).toBeNull()
     }
   })
-
-  it('returns the pre-M2c command when windowId is null', () => {
-    const command = deathHookCommand({
-      reporter: '/tmp/prcli/prcli-hook',
-      tabId: 'a1b2c3d4e5f60718',
-      tmuxSession: 'prcli-lumio-a1b2c3d4e5f60718',
-      windowId: null,
-    })
-    // When the session is not yet window-scoped, use the original form that
-    // kills the whole session. Task 2 will provide the real window id.
-    expect(command).toBe(
-      `run-shell "PRCLI_TAB_ID=a1b2c3d4e5f60718 '/tmp/prcli/prcli-hook' Exit ` +
-        `'#{pane_dead_status}' '#{pane_dead_signal}'" ; ` +
-        `kill-session -t =prcli-lumio-a1b2c3d4e5f60718`,
-    )
-  })
 })

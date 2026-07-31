@@ -1,5 +1,6 @@
 import type { TmuxAdapter } from '../tmux/adapter'
 import { PtySession } from '../pty/session'
+import { deathHookCommand } from '../pty/deathHook'
 import { decodeSessionName, encodeSessionName, newSessionId } from '../tmux/names'
 // Declared with the other wire types: the renderer needs to tell a
 // deliberate `killed` apart from a genuine exit too (see `ExitEvent.reason`
@@ -53,6 +54,18 @@ interface Entry {
 const DEFAULT_COLS = 80
 const DEFAULT_ROWS = 24
 
+/**
+ * How long to wait for `open()`'s tmux session to exist, and how often to ask.
+ *
+ * The ceiling matches what the death tests already treat as the outside time
+ * for a session to appear. It is a wait for an object to be created, not a
+ * retry of something that failed: `windowIdOf` answers '' for a session tmux
+ * has never heard of, and `PtySession.start()` returns before the client it
+ * spawned has created one.
+ */
+const WINDOW_ID_TIMEOUT_MS = 10_000
+const WINDOW_ID_POLL_MS = 20
+
 export class SessionManager {
   private readonly entries = new Map<string, Entry>()
   private readonly dataListeners = new Set<(id: string, data: string) => void>()
@@ -100,9 +113,11 @@ export class SessionManager {
    *
    * Pulled out of `open()` so `splitTab()` can share the same data/exit
    * listener wiring. `windowId` is the only thing that differs between the
-   * two callers: `open()` leaves it unset and keeps today's `new-session -A`
-   * behaviour; `splitTab()` already knows the window `newWindow` created and
-   * passes it through so `PtySession` attaches to the existing member instead.
+   * two callers: `open()` leaves it unset and creates its session with
+   * `new-session -A`; `splitTab()` already knows the window `newWindow`
+   * created and passes it through, so `PtySession` attaches to the existing
+   * member instead. It is also what says whether the pane's death hook still
+   * has to be installed, or was installed before its command started.
    */
   private attach(
     record: PaneRecord,
@@ -155,7 +170,81 @@ export class SessionManager {
 
     this.entries.set(id, entry)
     session.start()
+    // A tab that has never been split is a group of one, and its single pane's
+    // window is only knowable after `new-session` has made it — so its hook is
+    // installed here, asynchronously, rather than chained into the spawn. It
+    // needs the window id as a literal.
+    //
+    // `splitTab` is not in this branch because it has already wired its own
+    // window, before the command in it was started; there is nothing left to
+    // race there.
+    if (!windowId) {
+      // Swallowed deliberately. Everything expected is already tolerated
+      // inside the adapter, so what reaches here is a tmux this app cannot
+      // talk to at all — and the cost of that is a tab whose death shows grey
+      // instead of red, which is not worth taking the main process down for.
+      void this.wireDeathHook(record, null).catch(() => {})
+    }
     return record
+  }
+
+  /**
+   * Put the `pane-died` hook on the window a pane lives in, so its death reaps
+   * that window and its own member session and nothing else.
+   *
+   * `windowId` is null for `open()`, which has to wait for tmux to make the
+   * window before it can name it, and set for `splitTab()`, which made the
+   * window itself and knows it before anything is running in it. That
+   * difference is also why `remain-on-exit` is set in two different places:
+   * `open()`'s is chained into `new-session` because a fast command would
+   * otherwise be reaped before a second tmux call could land, while a split's
+   * window is empty until this has finished with it.
+   */
+  private async wireDeathHook(record: PaneRecord, windowId: string | null): Promise<void> {
+    const reporter = this.options.deathReporter
+    if (!reporter) return
+
+    const window = windowId ?? (await this.awaitWindowId(record.tmuxSession))
+    // Nothing to hook and nothing to leak: a session tmux will not name has
+    // gone, taking its window with it.
+    if (!window) return
+
+    const command = deathHookCommand({
+      reporter,
+      tabId: record.id,
+      tmuxSession: record.tmuxSession,
+      windowId: window,
+    })
+    // The two go on together or not at all: `remain-on-exit` with no hook to
+    // reap turns every ordinary `exit` into a window nothing removes. So the
+    // command is built BEFORE the option is set, and a refused one leaves the
+    // window exactly as tmux made it — the cost is a red dot, never a stray.
+    if (!command) return
+
+    // Split path only. `open()`'s window already carries this, chained into
+    // the command that created it. Window-scoped either way, so a sibling
+    // pane's window is untouched — measured: it reads the option unset.
+    if (windowId) await this.adapter.setWindowOption(windowId, 'remain-on-exit', 'on')
+
+    await this.adapter.setDeathHook(window, command)
+  }
+
+  /**
+   * The window a session's pane is in, waited for rather than asked once.
+   *
+   * `PtySession.start()` spawns a tmux client and returns; the session that
+   * client creates does not exist for some milliseconds after that, and
+   * `windowIdOf` answers '' for a session tmux has never heard of. Asking once
+   * would leave most tabs with no hook at all.
+   */
+  private async awaitWindowId(tmuxSession: string): Promise<string> {
+    const deadline = Date.now() + WINDOW_ID_TIMEOUT_MS
+    for (;;) {
+      const windowId = await this.adapter.windowIdOf(tmuxSession)
+      if (windowId) return windowId
+      if (Date.now() >= deadline) return ''
+      await new Promise((resolve) => setTimeout(resolve, WINDOW_ID_POLL_MS))
+    }
   }
 
   /**
@@ -240,11 +329,11 @@ export class SessionManager {
       await this.adapter.resizeWindow(founderWindow, sibling.cols, sibling.rows)
     }
 
-    // The new window is created through a LIVE member, not the group name.
+    // The new window is created through a LIVE member, not the group name, and
+    // EMPTY — the command follows at the end, once the window can survive it.
     const window = await this.adapter.newWindow({
       member: sibling.record.tmuxSession,
       cwd,
-      command: input.command,
       env: { PRCLI_TAB_ID: id },
     })
     // The env also goes here, not only on `newWindow`: `-e` on `new-window`
@@ -266,6 +355,28 @@ export class SessionManager {
       tmuxSession,
       type: input.type ?? 'shell',
     }
+
+    // Wired before the command runs, and after the member session exists.
+    //
+    // Before, because a command given to `new-window` starts immediately:
+    // measured, `sh -c "exit 3"` was gone before `select-window` could run and
+    // took its window and index with it ("can't find window: 1"), because
+    // nothing had set `remain-on-exit` yet. There is no status left to read
+    // once tmux has reaped the pane.
+    //
+    // After, because the hook's first act is to kill this pane's member
+    // session by name. Wiring before `newGroupMember` would leave a hook that
+    // fires against a session that does not exist yet, and the reap would take
+    // the window while `selectWindow` was still trying to bind to it.
+    await this.wireDeathHook(record, window.id)
+    if (input.command) {
+      await this.adapter.respawnPane(window.id, {
+        command: input.command,
+        cwd,
+        env: { PRCLI_TAB_ID: id },
+      })
+    }
+
     return this.attach(record, {
       cols: input.cols ?? DEFAULT_COLS,
       rows: input.rows ?? DEFAULT_ROWS,

@@ -267,17 +267,96 @@ export class TmuxAdapter {
   }
 
   /**
+   * Install the `pane-died` hook on a window, and fire it if the pane is
+   * already dead.
+   *
+   * The catch-up is what makes a late hook harmless. `open()` cannot know its
+   * window id until tmux has made the session, so the hook always arrives after
+   * the pane, and a pane running `exit 3` is dead before it does — measured, on
+   * every run. `remain-on-exit` (chained atomically by `PtySession.start()`)
+   * keeps that dead pane readable, and `set-hook -R` then runs the hook against
+   * it: measured, `#{pane_dead_status}` still expands to 3 and the reap
+   * proceeds exactly as if the hook had been there all along.
+   *
+   * Both halves go in ONE invocation on purpose. tmux runs a command list to
+   * completion inside a single event-loop callback, so no pane death can be
+   * processed between them — which is what stops a pane that dies right here
+   * from being reported twice, once by the hook and once by the catch-up.
+   *
+   * `if-shell -F` tests the format rather than running a shell, so the
+   * condition is tmux's own view of the pane and not a subprocess's.
+   */
+  async setDeathHook(windowId: string, command: string): Promise<void> {
+    try {
+      await this.exec([
+        'set-hook', '-w', '-t', windowId, 'pane-died', command,
+        ';',
+        'if-shell', '-F', '-t', windowId, '#{pane_dead}',
+        `set-hook -w -t ${windowId} -R pane-died`,
+      ])
+    } catch (error) {
+      if (error instanceof TmuxNotInstalledError) throw error
+      // Two expected non-zero exits, both measured, neither a failure:
+      //
+      // "no current target" — what the catch-up run itself exits with. The
+      // hook has already reported and reaped by then; the status came back as
+      // 3 and the session was gone. tmux is complaining that the commands it
+      // just ran had no client to belong to, not that they did nothing. This
+      // is the "exits non-zero and did the work" mirror of the defect class
+      // that produced every other bug here, and the state is what settles it.
+      //
+      // "can't find window" — the window went between being named and being
+      // hooked. Nothing survives to leak, so there is nothing to install.
+      if (/no current target/i.test(stderrOf(error))) return
+      if (/can't find window/i.test(stderrOf(error)) || isNoServer(error)) return
+      throw error
+    }
+  }
+
+  /**
+   * Replace what a pane is running.
+   *
+   * How a split pane's command is started AFTER its window has been wired for
+   * death rather than as part of creating it. Measured: with the command on
+   * `new-window`, `sh -c "exit 3"` was gone before the next tmux call — nothing
+   * had set `remain-on-exit` yet, so tmux reaped the pane, the window and the
+   * index, and `select-window` then failed with "can't find window: 1".
+   *
+   * `-k` kills whatever is in the pane first. Measured: that does NOT fire
+   * `pane-died`, even with `remain-on-exit` on and the hook already installed,
+   * so clearing the placeholder shell cannot report a death of its own.
+   *
+   * `-c` and `-e` are passed rather than assumed: a respawn does not inherit
+   * the start directory or environment the window was created with.
+   */
+  async respawnPane(
+    windowId: string,
+    input: { command: string; cwd: string; env?: Record<string, string> },
+  ): Promise<void> {
+    const args = ['respawn-pane', '-k', '-t', windowId, '-c', input.cwd]
+    for (const [key, value] of Object.entries(input.env ?? {})) {
+      args.push('-e', `${key}=${value}`)
+    }
+    args.push(input.command)
+    await this.exec(args)
+  }
+
+  /**
    * A new window in the group, holding one pane. Returns its window id.
    *
    * `-P -F '#{window_id} #{window_index}'` is what makes the id knowable here:
    * the death hook needs it as a literal, because tmux does not expand formats
    * in a command argument outside `run-shell`.
+   *
+   * It takes no command, and must not: a command given to `new-window` starts
+   * before anything can set `remain-on-exit` on the window it is in, and one
+   * that exits quickly takes the whole window with it. `respawnPane` is how a
+   * command gets in here, once the window is wired.
    */
   async newWindow(input: {
     /** A LIVE member session, never the group name — see Global Constraints. */
     member: string
     cwd: string
-    command?: string
     env?: Record<string, string>
   }): Promise<{ id: string; index: string }> {
     const args = [
@@ -287,7 +366,6 @@ export class TmuxAdapter {
     for (const [key, value] of Object.entries(input.env ?? {})) {
       args.push('-e', `${key}=${value}`)
     }
-    if (input.command) args.push(input.command)
     const [id, index] = (await this.exec(args)).trim().split(' ')
     return { id, index }
   }

@@ -1,6 +1,6 @@
 import { spawn, type IPty } from 'node-pty'
 import type { TmuxAdapter } from '../tmux/adapter'
-import { deathHookCommand } from './deathHook'
+import { canBuildDeathHook } from './deathHook'
 
 export interface PtySessionOptions {
   tmuxSession: string
@@ -13,8 +13,11 @@ export interface PtySessionOptions {
   /**
    * Path to the reporter script tmux runs when this session's pane dies.
    *
-   * Omit and the session gets no `pane-died` wiring at all, which is how every
-   * test that does not care about death keeps its tmux commands unchanged.
+   * Not used here to build anything — `SessionManager` installs the hook — but
+   * this is what says a hook is coming, and so whether `remain-on-exit` should
+   * be chained onto the session as it is created. Omit and the session gets no
+   * `pane-died` wiring at all, which is how every test that does not care about
+   * death keeps its tmux commands unchanged.
    */
   deathReporter?: string
   /** The tab id the reporter announces. Required alongside `deathReporter`. */
@@ -23,8 +26,8 @@ export interface PtySessionOptions {
    * The window this session's pane already lives in. Set only when the
    * session was created ahead of time by `newGroupMember` — a split pane,
    * never the founder of a tab — so `start()` attaches to it instead of
-   * creating a session, and the death hook is scoped to this window rather
-   * than the whole (shared) session.
+   * creating a session. Such a window has already been wired for death by
+   * `SessionManager.splitTab`, before anything was started in it.
    */
   windowId?: string
 }
@@ -98,49 +101,52 @@ export class PtySession {
     // A session attached from a plain terminal will also have it off.
     args.push(';', 'set-option', 'status', 'off')
 
-    // How a dead tab gets a red dot instead of a grey one.
+    // Half of how a dead tab gets a red dot instead of a grey one. The other
+    // half — the `pane-died` hook — is installed by `SessionManager`, and the
+    // split is forced rather than chosen.
     //
     // An attached tmux client exits 0 whether its session was killed, its
     // command crashed, or the user typed `exit` — measured three times. The
     // only place the truth survives is `#{pane_dead_status}` on the pane
     // itself, and reading that requires `remain-on-exit`, which also stops
-    // tmux reaping the session. So the hook reports the status and then kills
-    // the session itself: everything downstream of `manager.onExit` — the
-    // `exited` reason, `sessionAlive`, the dead tab the renderer draws, the
-    // pruned config row — then behaves exactly as it did before this existed.
+    // tmux reaping the pane, its window and (for a group of one) its session.
     //
-    // Unlike `-e` above, these are chained commands rather than arguments to
-    // `new-session`, so they run on the adopt path too. That is what gives a
+    // The hook cannot be chained here any more, because it names the window it
+    // reaps as a literal `@<n>` and `new-session` does not say which window it
+    // just made. Asking takes a second tmux invocation, and measured, a
+    // command like `exit 3` is long gone before one can complete. So this
+    // option goes on ATOMICALLY with the pane instead: the pane dies but is
+    // preserved, its status still readable, and the hook that arrives a moment
+    // later is fired against it by `TmuxAdapter.setDeathHook`.
+    //
+    // Window-scoped (`-w`, no `-t`, so: the window `new-session` just made).
+    // Measured: a window created in this session afterwards reads the option
+    // unset, so a sibling pane added by `splitTab` is untouched by this.
+    //
+    // Unlike `-e` above, this is a chained command rather than an argument to
+    // `new-session`, so it runs on the adopt path too. That is what gives a
     // session created by an older build the wiring the moment it is reattached.
     //
-    // The two go on together or not at all: `remain-on-exit` without a hook to
-    // reap the session again would turn every ordinary `exit` into a session
-    // that never goes away — a stray, the failure this project has already had
-    // once. So a command `deathHookCommand` refuses costs a red dot, never a
-    // leaked session.
-    const deathHook =
-      this.options.deathReporter && this.options.tabId
-        ? deathHookCommand({
-            reporter: this.options.deathReporter,
-            tabId: this.options.tabId,
-            tmuxSession: this.tmuxSession,
-            // Only a split pane knows its window id this early — the
-            // one-pane `open()` path still resolves it after the session
-            // exists (Task 6). Until then this reproduces the pre-M2c
-            // command exactly.
-            windowId: this.options.windowId ?? null,
-          })
-        : null
-    if (deathHook) {
-      args.push(';', 'set-option', 'remain-on-exit', 'on')
-      // Window-scoped when the window is already known: a session-scoped
-      // `pane-died` hook is shared by every member of the group (measured),
-      // so an unscoped hook here would fire for a sibling's pane too.
-      if (this.options.windowId) {
-        args.push(';', 'set-hook', '-w', '-t', this.options.windowId, 'pane-died', deathHook)
-      } else {
-        args.push(';', 'set-hook', 'pane-died', deathHook)
-      }
+    // Only on the `new-session` path: a split pane's window is created empty
+    // and wired by `SessionManager.splitTab` BEFORE its command is respawned
+    // into it, so by the time this attaches, both are already on.
+    //
+    // The two still go on together or not at all — `remain-on-exit` with no
+    // hook to reap turns every ordinary `exit` into a session that never goes
+    // away, the stray this project has already had once. `canBuildDeathHook`
+    // asks exactly what `deathHookCommand` will, minus the window id, which
+    // tmux supplies and which is never the reason it refuses.
+    if (
+      !this.options.windowId &&
+      this.options.deathReporter &&
+      this.options.tabId &&
+      canBuildDeathHook({
+        reporter: this.options.deathReporter,
+        tabId: this.options.tabId,
+        tmuxSession: this.tmuxSession,
+      })
+    ) {
+      args.push(';', 'set-option', '-w', 'remain-on-exit', 'on')
     }
 
     // This is the tmux *client* process's own env, not the session's — that

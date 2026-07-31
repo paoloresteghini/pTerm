@@ -21,6 +21,30 @@ const TAB_ID_RE = /^[0-9a-f]{16}$/
 const WINDOW_ID_RE = /^@\d+$/
 
 /**
+ * Whether a hook could be built, asked without the window id.
+ *
+ * `PtySession.start()` has to decide whether to chain `remain-on-exit` into the
+ * very command that creates a session, and it must decide before tmux has made
+ * the window the hook will be scoped to. The two go on together or not at all,
+ * so it asks this instead of guessing.
+ *
+ * Leaving the window id out costs nothing, because it is never the reason a
+ * hook is refused: it comes back from tmux itself as `@<digits>`, and when tmux
+ * will not name a window there is no session left to leave a stray behind
+ * either.
+ */
+export function canBuildDeathHook(input: {
+  reporter: string
+  tabId: string
+  tmuxSession: string
+}): boolean {
+  if (UNSAFE_IN_HOOK.test(input.reporter)) return false
+  if (!TAB_ID_RE.test(input.tabId)) return false
+  if (UNSAFE_IN_HOOK.test(input.tmuxSession)) return false
+  return true
+}
+
+/**
  * The tmux command run when a pane dies: report the status, then reap.
  *
  * Null when anything going into it could change the command's meaning — the
@@ -33,12 +57,10 @@ export function deathHookCommand(input: {
   reporter: string
   tabId: string
   tmuxSession: string
-  windowId: string | null
+  windowId: string
 }): string | null {
-  if (UNSAFE_IN_HOOK.test(input.reporter)) return null
-  if (!TAB_ID_RE.test(input.tabId)) return null
-  if (UNSAFE_IN_HOOK.test(input.tmuxSession)) return null
-  if (input.windowId !== null && !WINDOW_ID_RE.test(input.windowId)) return null
+  if (!canBuildDeathHook(input)) return null
+  if (!WINDOW_ID_RE.test(input.windowId)) return null
 
   // The reporter is single-quoted so a path with a space in it stays one word,
   // and both formats are expanded by tmux when the hook fires — quoted for the
@@ -50,13 +72,6 @@ export function deathHookCommand(input: {
   const report =
     `PRCLI_TAB_ID=${input.tabId} '${input.reporter}' Exit ` +
     `'#{pane_dead_status}' '#{pane_dead_signal}'`
-
-  // When windowId is null, the session is not yet window-scoped; use the
-  // pre-M2c form. Once Task 2 provides the window id, this will emit the
-  // scoped form that kills the window instead of the whole session.
-  if (input.windowId === null) {
-    return `run-shell "${report}" ; kill-session -t =${input.tmuxSession}`
-  }
 
   return (
     `run-shell "${report}" ; kill-session -t =${input.tmuxSession} ; ` +
