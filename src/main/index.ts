@@ -1,11 +1,15 @@
-import { app, BrowserWindow, dialog, Menu } from 'electron'
+import { app, BrowserWindow, dialog, Menu, Notification } from 'electron'
 import type { MenuItemConstructorOptions } from 'electron'
+import { execFile } from 'node:child_process'
 import path from 'node:path'
 import { TmuxAdapter, TmuxNotInstalledError } from './tmux/adapter'
 import { resolveTmuxBin } from './tmux/resolve'
 import { SessionManager } from './sessions/manager'
 import { registerIpc } from './ipc/register'
 import { StatusRegistry } from './status/registry'
+import { mergeTab, NotificationRouter } from './notify/router'
+import { ConfigStore } from './state/store'
+import { CHANNELS } from '../shared/ipc'
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string
 declare const MAIN_WINDOW_VITE_NAME: string
@@ -22,6 +26,70 @@ const adapter = new TmuxAdapter({
 })
 const manager = new SessionManager(adapter)
 const registry = new StatusRegistry()
+const store = new ConfigStore(ConfigStore.defaultPath())
+
+/** The tab the renderer last said was selected — half of "attended". */
+let attendedTabId: string | null = null
+function setAttendedTab(id: string | null): void {
+  attendedTabId = id
+}
+
+const router = new NotificationRouter({
+  // Read directly, never through the IPC write queue in `register.ts`: that
+  // queue has no reentrancy protection, and a transition can fire from
+  // anywhere at any time. Going through it here would risk a silent deadlock
+  // for something a lost toast should never be able to cause.
+  readConfig: async () => (await store.read()).notifications,
+  findTab: async (tabId) => {
+    // `manager.get` only knows about tabs with a client attached in this app
+    // right now. Detaching is how a session survives, not how it ends — the
+    // tmux session, and whatever is running inside it, keeps going and still
+    // fires hooks with no client on it at all (window closed, a project move
+    // mid-flight). Falling back to the saved row, which a detach never
+    // removes, is what keeps that tab's transitions routed rather than
+    // silently dropped exactly when the dock badge is the only signal left.
+    const config = await store.read()
+    return mergeTab(manager.get(tabId) ?? null, config.tabs, tabId)
+  },
+  projectOf: async (tab) => {
+    const config = await store.read()
+    const project = config.projects.find((candidate) => candidate.slug === tab.projectSlug)
+    return project ? { id: project.id, name: project.name } : null
+  },
+  // Both halves: the window has focus *and* this is the tab on screen. A
+  // background tab going `waiting` still toasts while the window is focused,
+  // which at twelve sessions is the common case.
+  isAttended: (tabId) => mainWindow?.isFocused() === true && attendedTabId === tabId,
+  showToast: (toast) => {
+    const notification = new Notification({
+      title: toast.title,
+      body: toast.body,
+      // Sound is played separately through afplay, so the rules engine's
+      // choice is the only thing that makes noise.
+      silent: true,
+    })
+    notification.on('click', () => {
+      if (!mainWindow) return
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      // `focus()` alone does not reliably bring the app forward on macOS —
+      // the same open note the second-instance handler carries.
+      app.focus({ steal: true })
+      mainWindow.webContents.send(CHANNELS.focusTab, toast.tabId)
+    })
+    notification.show()
+  },
+  playSound: (sound) => {
+    // Fire and forget: a missing sound file must not throw into a transition.
+    execFile('/usr/bin/afplay', [`/System/Library/Sounds/${sound}.aiff`], () => undefined)
+  },
+  setBadge: (count) => {
+    app.dock?.setBadge(count === null ? '' : String(count))
+  },
+  waitingCount: () => registry.waitingCount(),
+  now: () => new Date(),
+})
+
+registry.onTransition((transition) => void router.handle(transition))
 
 // Two instances would each open their own sessions and race on one config
 // file. Real usage hit exactly that: three stray sessions, none reachable
@@ -149,7 +217,7 @@ app.whenReady().then(async () => {
 
   installMenu()
 
-  registerIpc(manager, () => mainWindow, registry)
+  registerIpc(manager, () => mainWindow, registry, store, setAttendedTab)
   createWindow()
 
   app.on('activate', () => {

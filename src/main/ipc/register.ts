@@ -29,6 +29,11 @@ export function registerIpc(
   getWindow: () => BrowserWindow | null,
   registry: StatusRegistry,
   store: ConfigStore = new ConfigStore(ConfigStore.defaultPath()),
+  // Told rather than asked: `register.ts` is constructed by `index.ts`, and an
+  // import back the other way to reach `setAttendedTab` directly would be a
+  // cycle. A no-op default keeps every existing caller — and every test —
+  // working unchanged.
+  onActiveTabChanged: (id: string | null) => void = () => undefined,
 ): void {
   // The saved tab list means "reattach these next launch", which is not the
   // same set as "clients attached right now" — a detached tab must stay in it.
@@ -211,6 +216,11 @@ export function registerIpc(
     withUnsorted(await describeProjects(config.projects, config.tabs), config.tabs)
 
   ipcMain.on(CHANNELS.setActive, (_event, id: string | null) => {
+    // Read directly, never through `serialise`: the queue has no reentrancy
+    // protection, and this callback is what the router's `isAttended` reads
+    // on every transition. Anything downstream of it calling back into
+    // `serialise` would deadlock the queue silently.
+    onActiveTabChanged(id)
     void serialise(async () => {
       if (id === null) return
       const config = await store.read()
