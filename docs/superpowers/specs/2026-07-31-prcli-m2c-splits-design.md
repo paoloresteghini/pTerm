@@ -257,9 +257,27 @@ is still decided by live tmux.
 }
 ```
 
-A leaf in `layout.kids` is a pane id; a node is another `{dir, ratio, kids}`.
+**`layout.kids` is a flat list of pane ids — one axis per tab, never a tree**
+(ruled 2026-07-31). A tab is a row *or* a column of N panes. `ratio` has one
+entry per pane and sums to 1.
+
+The design of record says "panes nest arbitrarily and resize by drag". That is
+deferred, not dropped: nesting costs a recursive layout component, recursive
+pruning with redistribution at every level, and two-dimensional drag-resize —
+realistically doubling the renderer work — while split-right and split-down
+cover how this app is actually used. **Nesting can be added later without
+touching the tmux model at all**, because the model has no opinion about
+arrangement: every pane is a window plus a member session however the renderer
+chooses to lay them out. It is purely a config-shape and renderer concern.
+
 `id` is the founder pane's id — see §Naming and identity for why the group name
 itself is not stored.
+
+**A drag writes config once, on mouse-up** (ruled 2026-07-31). Ratios live in
+renderer state during the gesture and `resize-window` fires live, so the pane
+reflows under the cursor; only persistence waits. Throttled writes during a drag
+would push several writes a second through the `serialise` queue, which is shared
+with restore and the exit handler.
 
 `migrate` gains a v4 branch: every v4 `tabs[]` row becomes a `panes[]` row plus
 a single-pane `tabs[]` row whose layout is that one leaf. This is lossless — a
@@ -355,6 +373,28 @@ design of record's context menu and are deferred rather than dropped.
 
 Letting a preset declare `type: 'claude'` in `.prcli.json`, parked from M3, stays
 parked — it changes a user-facing surface and belongs in its own plan.
+
+## Plan 2 rulings (2026-07-31, after plan 1 merged)
+
+- **Layout is one axis per tab, not a tree.** See §Config v5. Nesting deferred,
+  and deferrable because the tmux model has no opinion about arrangement.
+- **A drag writes config once, on mouse-up.** See §Config v5.
+- **`awaitWindowId` stops returning `''` for three different things.** It returns
+  a discriminated result instead:
+
+  ```ts
+  type WindowLookup =
+    | { kind: 'found'; id: string }
+    | { kind: 'gone' }        // tmux says no such session — nothing to hook, nothing to leak
+    | { kind: 'unreachable' } // tmux would not answer — do NOT read this as 'gone'
+  ```
+
+  Today every failure collapses to `''`, so a tmux that will not answer is
+  indistinguishable from a session that has genuinely gone, and a tab can end up
+  with neither `remain-on-exit` nor a hook while nothing reports it. This closes
+  the hole the plan-1 fix wave documented rather than fixed, and it unblocks
+  cancellation for the poll — which could not be added while `''` already meant
+  two things.
 
 ## Known gaps carried in
 
