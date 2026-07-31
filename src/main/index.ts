@@ -11,7 +11,7 @@ import { StatusRegistry } from './status/registry'
 import { mergeTab, NotificationRouter } from './notify/router'
 import { ConfigStore } from './state/store'
 import { HookServer } from './hooks/server'
-import { hookPaths } from './hooks/install'
+import { hookPaths, writeScript } from './hooks/install'
 import { CHANNELS, type MenuCommand } from '../shared/ipc'
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string
@@ -27,7 +27,12 @@ const adapter = new TmuxAdapter({
   bin: resolveTmuxBin(),
   socket: process.env.PRCLI_TMUX_SOCKET,
 })
-const manager = new SessionManager(adapter)
+// Every session tmux opens gets a `pane-died` hook pointing at this script,
+// which is how a command that exits non-zero reaches the app as a crash rather
+// than as the code 0 an attached client always reports. `hookPaths()` reads
+// `PRCLI_CONFIG_DIR` at call time, so a test's sessions point at the test's
+// own copy.
+const manager = new SessionManager(adapter, { deathReporter: hookPaths().script })
 const registry = new StatusRegistry()
 const store = new ConfigStore(ConfigStore.defaultPath())
 
@@ -58,12 +63,20 @@ const hookServer = new HookServer(hookPaths().socket)
 // its `rememberTab` write has landed.
 hookServer.onEvent((message) => {
   void (async () => {
+    // A dead pane's own status, which is the only trustworthy account of how a
+    // tab died — the client exit that follows it is always 0. It goes through
+    // the same membership check as everything else on this socket: the status
+    // is no more trusted than the events are.
+    const apply = (): void => {
+      if (message.event === 'Exit') registry.applyDead(message.tabId, message.status)
+      else registry.applyHook(message)
+    }
     if (manager.get(message.tabId) !== undefined) {
-      registry.applyHook(message)
+      apply()
       return
     }
     const config = await store.read()
-    if (config.tabs.some((tab) => tab.id === message.tabId)) registry.applyHook(message)
+    if (config.tabs.some((tab) => tab.id === message.tabId)) apply()
   })()
 })
 
@@ -285,6 +298,10 @@ app.whenReady().then(async () => {
   // every dot staying hollow until it is fixed, not a broken app.
   try {
     await mkdir(hookPaths().dir, { recursive: true })
+    // Unconditionally, not only behind the Claude hooks gesture: tmux runs
+    // this to report a crashed pane, and a crashed `npm run dev` has nothing
+    // to do with Claude. See `writeScript`.
+    await writeScript()
     await hookServer.start()
   } catch (error) {
     console.error('PRCLI: failed to start the hook server', error)

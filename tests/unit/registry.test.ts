@@ -91,6 +91,85 @@ describe('StatusRegistry', () => {
     expect(registry.get(ID)).toBe('ended')
   })
 
+  // A dead pane's own status is the only trustworthy verdict on how a tab
+  // died: the tmux client that follows it exits 0 no matter what happened,
+  // measured three times. So `applyDead` outranks `applyExit`, in whichever
+  // order the two arrive — the socket write is backgrounded and the kill is
+  // not, so neither order can be relied on.
+  it('records a dead pane by the status the pane itself reported', () => {
+    const registry = new StatusRegistry()
+    registry.applyOpen(ID, 'preset')
+
+    registry.applyDead(ID, 3)
+
+    expect(registry.get(ID)).toBe('crashed')
+  })
+
+  it('records a dead pane that exited cleanly as ended', () => {
+    const registry = new StatusRegistry()
+    registry.applyOpen(ID, 'preset')
+
+    registry.applyDead(ID, 0)
+
+    expect(registry.get(ID)).toBe('ended')
+  })
+
+  it('does not let the client exit that follows a crash downgrade it to ended', () => {
+    const registry = new StatusRegistry()
+    registry.applyOpen(ID, 'preset')
+
+    registry.applyDead(ID, 3)
+    // tmux kills the session immediately after the pane dies, so the attached
+    // client exits — with code 0, as it always does.
+    registry.applyExit(ID, 0)
+
+    expect(registry.get(ID)).toBe('crashed')
+  })
+
+  it('lets a crash correct an ended that beat it to the registry', () => {
+    const registry = new StatusRegistry()
+    registry.applyOpen(ID, 'preset')
+
+    registry.applyExit(ID, 0)
+    registry.applyDead(ID, 3)
+
+    expect(registry.get(ID)).toBe('crashed')
+  })
+
+  it('lets a restarted tab die cleanly after an earlier crash', () => {
+    const registry = new StatusRegistry()
+    registry.applyOpen(ID, 'preset')
+    registry.applyDead(ID, 3)
+
+    // Restart reuses the id. The old verdict must not outrank the new life.
+    registry.applyOpen(ID, 'preset')
+    registry.applyExit(ID, 0)
+
+    expect(registry.get(ID)).toBe('ended')
+  })
+
+  it('clears the verdict when the tab is forgotten', () => {
+    const registry = new StatusRegistry()
+    registry.applyOpen(ID, 'preset')
+    registry.applyDead(ID, 3)
+
+    registry.forget(ID)
+    registry.applyExit(ID, 0)
+
+    expect(registry.get(ID)).toBe('ended')
+  })
+
+  it('announces a dead pane so a toast and the badge can react', () => {
+    const registry = new StatusRegistry()
+    const seen: StatusTransition[] = []
+    registry.applyOpen(ID, 'preset')
+    registry.onTransition((transition) => seen.push(transition))
+
+    registry.applyDead(ID, 3)
+
+    expect(seen).toEqual([{ tabId: ID, from: 'running', to: 'crashed', tab: undefined }])
+  })
+
   it('forgets a tab entirely on dismiss', () => {
     const registry = new StatusRegistry()
     registry.applyOpen(ID, 'preset')

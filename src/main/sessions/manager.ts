@@ -60,7 +60,10 @@ export class SessionManager {
     (record: TabRecord, code: number, reason: ExitReason) => void
   >()
 
-  constructor(private readonly adapter: TmuxAdapter) {}
+  constructor(
+    private readonly adapter: TmuxAdapter,
+    private readonly options: { deathReporter?: string } = {},
+  ) {}
 
   open(input: OpenInput): TabRecord {
     const id = input.id ?? newSessionId()
@@ -106,6 +109,12 @@ export class SessionManager {
       // is to open a tab and type `claude` into it, and a type field that
       // decided who got an id would leave exactly those sessions dark.
       env: { PRCLI_TAB_ID: id },
+      // The reporter is reached by absolute path rather than through the
+      // session's environment: tmux runs a hook's command with the server's
+      // environment, not the session's, so `$PRCLI_TAB_ID` is not set there —
+      // which is why the id is baked into the command instead of read from it.
+      deathReporter: this.options.deathReporter,
+      tabId: id,
     })
 
     const entry: Entry = { record, session, cols, rows }

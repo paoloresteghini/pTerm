@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { HookServer } from '../../src/main/hooks/server'
-import type { HookEventMessage } from '../../src/main/hooks/protocol'
+import type { HookLine } from '../../src/main/hooks/protocol'
 import { renderScript } from '../../src/main/hooks/install'
 
 const exec = promisify(execFile)
@@ -16,10 +16,10 @@ const ID = '0123456789abcdef'
 let dir: string
 let server: HookServer | null = null
 
-async function start(): Promise<{ server: HookServer; socket: string; seen: HookEventMessage[] }> {
+async function start(): Promise<{ server: HookServer; socket: string; seen: HookLine[] }> {
   dir = await mkdtemp(join(tmpdir(), 'prcli-srv-'))
   const socket = join(dir, 'hook.sock')
-  const seen: HookEventMessage[] = []
+  const seen: HookLine[] = []
   server = new HookServer(socket)
   server.onEvent((message) => seen.push(message))
   await server.start()
@@ -317,7 +317,7 @@ describe('HookServer', () => {
     // seven times a turn across twelve sessions is not somewhere a single
     // bad event should be able to take the whole server down.
     const { socket, seen } = await start()
-    const survived: HookEventMessage[] = []
+    const survived: HookLine[] = []
     server?.onEvent(() => {
       throw new Error('a hypothetical registry bug')
     })

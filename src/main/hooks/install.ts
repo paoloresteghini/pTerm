@@ -131,7 +131,19 @@ export function renderScript(paths: { socket: string; spool: string }): string {
     'esac',
     '',
     'event=${1:-Unknown}',
-    'line="{\\"tabId\\":\\"$PRCLI_TAB_ID\\",\\"event\\":\\"$event\\",\\"at\\":$(($(date +%s) * 1000))}"',
+    'status=${2:-}',
+    'at=$(($(date +%s) * 1000))',
+    '',
+    "# tmux's pane-died hook passes the dead pane's exit status as a second",
+    '# argument; Claude never passes one. It goes into the JSON *unquoted* — a',
+    '# quoted status would arrive as a string and the parser would refuse it —',
+    '# which makes it the one field where an argument could escape its own',
+    '# value. So: digits, or nothing at all.',
+    'case "$status" in',
+    '  \'\') line="{\\"tabId\\":\\"$PRCLI_TAB_ID\\",\\"event\\":\\"$event\\",\\"at\\":$at}" ;;',
+    '  *[!0-9]*) exit 0 ;;',
+    '  *) line="{\\"tabId\\":\\"$PRCLI_TAB_ID\\",\\"event\\":\\"$event\\",\\"status\\":$status,\\"at\\":$at}" ;;',
+    'esac',
     '',
     '{',
     `  printf '%s\\n' "$line" | /usr/bin/nc -U -w 2 "${paths.socket}" ||`,
@@ -383,6 +395,26 @@ async function backupIfPresent(settingsPath: string): Promise<void> {
   }
 }
 
+/**
+ * Write the reporter script and make it executable.
+ *
+ * Called at startup, not only from `installHooks`, because tmux's `pane-died`
+ * hook runs this same script to report a crashed pane — and a crashed
+ * `npm run dev` has nothing to do with whether the user has ever installed
+ * Claude's hooks. Wiring the two together would have made the red dot appear
+ * only for people who had, and vanish the moment they uninstalled.
+ *
+ * Safe to call repeatedly: it rewrites the same bytes, which is also how an
+ * upgrade replaces an older copy.
+ */
+export async function writeScript(): Promise<string> {
+  const paths = hookPaths()
+  await mkdir(dirname(paths.script), { recursive: true })
+  await writeFile(paths.script, renderScript(paths), 'utf8')
+  await chmod(paths.script, 0o755)
+  return paths.script
+}
+
 export async function installHooks(): Promise<HooksState> {
   const settingsPath = claudeSettingsPath()
   const paths = hookPaths()
@@ -400,10 +432,8 @@ export async function installHooks(): Promise<HooksState> {
   // one has landed and before the other has even started.
   const { next, added } = merge(settings, paths.script)
 
-  await mkdir(dirname(paths.script), { recursive: true })
   // Rewritten every install, so an upgrade cannot leave an old copy behind.
-  await writeFile(paths.script, renderScript(paths), 'utf8')
-  await chmod(paths.script, 0o755)
+  await writeScript()
 
   if (added.length > 0) {
     // Timestamp rather than a single `.bak`: a second install a week later

@@ -354,6 +354,45 @@ test('a dead tab lingers, then restarts', async () => {
   await app.close()
 })
 
+// M3's own acceptance criterion, unmet when M3 merged and discharged here: a
+// crashed command "stays put, red". The tab above dies by `kill-session`,
+// which is somebody deliberately destroying a session and correctly reads as
+// `ended`. This one dies the way `npm run dev` dies — its own command exits
+// non-zero — which is the case the red dot exists for.
+test('a tab whose command crashes goes red, stays put, and strands no session', async () => {
+  const alpha = await candidate('alpha')
+  await seed(
+    [{ id: 'id-alpha', name: 'Alpha', slug: 'alpha', cwd: alpha, presets: [], activeTabId: null }],
+    'id-alpha',
+  )
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  const id = await openTab(window)
+  const name = `prcli-alpha-${id}`
+  await expect.poll(async () => (await sessionNames()).includes(name), { timeout: 20_000 }).toBe(true)
+
+  // Typed into the tab's own shell, so the status comes from the pane's
+  // command rather than from anything the app did.
+  // Trailing colon: a pane target, not a session target. Without it tmux says
+  // "can't find pane" — the same gotcha M2a's P7 records.
+  await run('tmux', ['-L', SOCKET, 'send-keys', '-t', `=${name}:`, 'exit 3', 'Enter'])
+
+  await expect(window.getByTestId(`dot-${id}`)).toHaveAttribute('data-state', 'crashed', {
+    timeout: 20_000,
+  })
+  await expect(window.getByTestId(`tab-${id}`)).toBeVisible()
+
+  // `remain-on-exit` is what makes the status readable, and it also stops tmux
+  // reaping the session. If the hook's own `kill-session` ever stopped firing,
+  // every crash would leave a stray behind.
+  await expect
+    .poll(async () => (await sessionNames()).includes(name), { timeout: 20_000 })
+    .toBe(false)
+
+  await app.close()
+})
+
 // I5: `parseHookLine` only validates the *shape* of `tabId` — sixteen hex
 // characters — not that it names a tab this app actually has. The socket is
 // reachable by anything on the machine that can open it, so an event for an

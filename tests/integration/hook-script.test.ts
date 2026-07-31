@@ -21,17 +21,24 @@ async function install(): Promise<{ script: string; socket: string; spool: strin
   return paths
 }
 
-/** Run the script the way Claude does: argv[1] is the event name. */
+/**
+ * Run the script the way Claude does: argv[1] is the event name.
+ *
+ * `status` is the second argument tmux's `pane-died` hook passes and Claude
+ * never does — optional here for exactly that reason, so every Claude-shaped
+ * call in this file stays a one-argument call.
+ */
 function runHook(
   script: string,
   event: string,
   tabId: string | undefined,
+  status?: string,
 ): Promise<{ ms: number; stdout: string; code: number }> {
   const started = Date.now()
   return new Promise((resolve, reject) => {
     execFile(
       script,
-      [event],
+      status === undefined ? [event] : [event, status],
       {
         timeout: 5_000,
         env: tabId === undefined ? { PATH: process.env.PATH ?? '' } : { PATH: process.env.PATH ?? '', PRCLI_TAB_ID: tabId },
@@ -66,6 +73,40 @@ describe('prcli-hook', () => {
       .toBeGreaterThan(0)
     const message = parseHookLine(received.join(''))
     expect(message).toEqual({ tabId: ID, event: 'Notification', at: expect.any(Number) })
+  })
+
+  it("carries a dead pane's exit status when tmux passes one", async () => {
+    const paths = await install()
+    const received: string[] = []
+    server = createServer((connection) => {
+      connection.on('data', (chunk) => received.push(String(chunk)))
+    })
+    await new Promise<void>((resolve) => server?.listen(paths.socket, resolve))
+
+    await runHook(paths.script, 'Exit', ID, '3')
+
+    await expect.poll(() => received.length, { timeout: 4_000 }).toBeGreaterThan(0)
+    expect(parseHookLine(received.join(''))).toEqual({
+      tabId: ID,
+      event: 'Exit',
+      status: 3,
+      at: expect.any(Number),
+    })
+  })
+
+  // The status is interpolated into JSON *unquoted* — it has to be, or it
+  // would arrive as a string and the parser would refuse it. That makes this
+  // the one field where a non-numeric argument would escape its own value, so
+  // the script checks the shape before building the line rather than trusting
+  // where the argument came from.
+  it('writes nothing at all when handed a status that is not a number', async () => {
+    const paths = await install()
+
+    const { code } = await runHook(paths.script, 'Exit', ID, '3,"evil":true')
+
+    expect(code).toBe(0)
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await expect(readFile(paths.spool, 'utf8')).rejects.toThrow()
   })
 
   // The measured reason the write is backgrounded. Apple's nc does not exit

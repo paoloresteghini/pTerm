@@ -1,6 +1,6 @@
 import { connect, createServer, type Server, type Socket } from 'node:net'
 import { rm } from 'node:fs/promises'
-import { MAX_LINE_BYTES, parseHookLine, type HookEventMessage } from './protocol'
+import { MAX_LINE_BYTES, parseHookLine, type HookLine } from './protocol'
 
 /**
  * macOS caps a unix socket path (`sun_path`) near 104 bytes. Past it, `bind`
@@ -66,7 +66,7 @@ function probeListening(path: string): Promise<boolean> {
  */
 export class HookServer {
   private server: Server | null = null
-  private readonly listeners = new Set<(message: HookEventMessage) => void>()
+  private readonly listeners = new Set<(message: HookLine) => void>()
 
   constructor(private readonly socketPath: string) {}
 
@@ -168,7 +168,7 @@ export class HookServer {
     })
   }
 
-  onEvent(listener: (message: HookEventMessage) => void): void {
+  onEvent(listener: (message: HookLine) => void): void {
     this.listeners.add(listener)
   }
 

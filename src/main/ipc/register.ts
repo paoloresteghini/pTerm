@@ -240,7 +240,18 @@ export function registerIpc(
     const live = new Set(result.tabs.map((tab) => tab.id))
     const spooled = await drainSpool(hookPaths().spool, Date.now())
     for (const message of spooled) {
-      if (live.has(message.tabId)) registry.applyHook(message, { silent: true })
+      if (!live.has(message.tabId)) continue
+      // A spooled death is never replayed. A tab that died while the app was
+      // down has no session left, so reconcile has already pruned its row and
+      // the membership check above drops the line anyway — which makes this
+      // branch unreachable in every case that can actually happen, and the
+      // only cases it *could* reach are ones where replaying would be wrong:
+      // an id reopened since would be painted red for a life that already
+      // ended, and `applyDead`'s verdict would then outrank how the new one
+      // really ends. Silence is the same answer in the reachable case and the
+      // safe one in the rest.
+      if (message.event === 'Exit') continue
+      registry.applyHook(message, { silent: true })
     }
     refreshBadge()
 

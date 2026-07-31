@@ -1,5 +1,5 @@
 import { readFile, rename, rm } from 'node:fs/promises'
-import { parseHookLine, type HookEventMessage } from './protocol'
+import { parseHookLine, type HookLine } from './protocol'
 
 /**
  * Roughly a day of seven events across twelve sessions, at a few hundred
@@ -81,7 +81,7 @@ function splitLines(content: string): string[] {
  * tabs tmux no longer has are discarded rather than resurrecting dots for
  * dead sessions.
  */
-export async function drainSpool(spoolPath: string, nowMs: number): Promise<HookEventMessage[]> {
+export async function drainSpool(spoolPath: string, nowMs: number): Promise<HookLine[]> {
   const rotated = `${spoolPath}.draining`
 
   // Whatever a previous interrupted drain left behind, before this one adds to it.
@@ -105,7 +105,7 @@ export async function drainSpool(spoolPath: string, nowMs: number): Promise<Hook
   const rawLines = splitLines(`${leftover}${current}`)
   const capped = rawLines.length > MAX_SPOOL_LINES ? rawLines.slice(-MAX_SPOOL_LINES) : rawLines
 
-  const events: HookEventMessage[] = []
+  const events: HookLine[] = []
   for (const line of capped) {
     const message = parseHookLine(line)
     if (!message) continue

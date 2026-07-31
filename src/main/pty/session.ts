@@ -1,5 +1,6 @@
 import { spawn, type IPty } from 'node-pty'
 import type { TmuxAdapter } from '../tmux/adapter'
+import { deathHookCommand } from './deathHook'
 
 export interface PtySessionOptions {
   tmuxSession: string
@@ -9,6 +10,15 @@ export interface PtySessionOptions {
   /** Command to run when the session is created. Ignored when reattaching. */
   command?: string
   env?: NodeJS.ProcessEnv
+  /**
+   * Path to the reporter script tmux runs when this session's pane dies.
+   *
+   * Omit and the session gets no `pane-died` wiring at all, which is how every
+   * test that does not care about death keeps its tmux commands unchanged.
+   */
+  deathReporter?: string
+  /** The tab id the reporter announces. Required alongside `deathReporter`. */
+  tabId?: string
 }
 
 /**
@@ -75,6 +85,39 @@ export class PtySession {
     // The app draws its own chrome, so tmux's status line is redundant here.
     // A session attached from a plain terminal will also have it off.
     args.push(';', 'set-option', 'status', 'off')
+
+    // How a dead tab gets a red dot instead of a grey one.
+    //
+    // An attached tmux client exits 0 whether its session was killed, its
+    // command crashed, or the user typed `exit` — measured three times. The
+    // only place the truth survives is `#{pane_dead_status}` on the pane
+    // itself, and reading that requires `remain-on-exit`, which also stops
+    // tmux reaping the session. So the hook reports the status and then kills
+    // the session itself: everything downstream of `manager.onExit` — the
+    // `exited` reason, `sessionAlive`, the dead tab the renderer draws, the
+    // pruned config row — then behaves exactly as it did before this existed.
+    //
+    // Unlike `-e` above, these are chained commands rather than arguments to
+    // `new-session`, so they run on the adopt path too. That is what gives a
+    // session created by an older build the wiring the moment it is reattached.
+    //
+    // The two go on together or not at all: `remain-on-exit` without a hook to
+    // reap the session again would turn every ordinary `exit` into a session
+    // that never goes away — a stray, the failure this project has already had
+    // once. So a command `deathHookCommand` refuses costs a red dot, never a
+    // leaked session.
+    const deathHook =
+      this.options.deathReporter && this.options.tabId
+        ? deathHookCommand({
+            reporter: this.options.deathReporter,
+            tabId: this.options.tabId,
+            tmuxSession: this.tmuxSession,
+          })
+        : null
+    if (deathHook) {
+      args.push(';', 'set-option', 'remain-on-exit', 'on')
+      args.push(';', 'set-hook', 'pane-died', deathHook)
+    }
 
     // This is the tmux *client* process's own env, not the session's — that
     // is what the `-e` args above are for. Spreading `this.options.env` in

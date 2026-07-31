@@ -38,6 +38,18 @@ export interface StatusTransition {
 export class StatusRegistry {
   private readonly states = new Map<string, TabState>()
   private readonly listeners = new Set<(transition: StatusTransition) => void>()
+  /**
+   * Tabs whose death has been explained by the pane that died.
+   *
+   * A tmux client exits 0 whether its session was killed, its command crashed
+   * or the user typed `exit` — measured three times, and the reason `crashed`
+   * was unreachable for M3's whole life. The only place the truth exists is
+   * `#{pane_dead_status}` on the dead pane, which arrives here through
+   * `applyDead`. Once it has, the code-0 client exit that tmux's own
+   * `pane-died` hook triggers a moment later carries no information at all,
+   * and must not be allowed to overwrite the answer with `ended`.
+   */
+  private readonly explained = new Set<string>()
 
   private set(
     tabId: string,
@@ -61,6 +73,9 @@ export class StatusRegistry {
 
   /** A tab has been opened, or restarted under the same id. */
   applyOpen(tabId: string, type: TabType): void {
+    // Restart reuses the id, so a verdict on the previous life must not
+    // outrank how this one ends.
+    this.explained.delete(tabId)
     const initial = stateForOpen(type)
     if (initial === null) {
       // A shell gets no dot until something in it speaks. Delete rather than
@@ -81,7 +96,29 @@ export class StatusRegistry {
    * exit path has a record worth passing. See `StatusTransition.tab`.
    */
   applyExit(tabId: string, code: number, tab?: TabDescriptor): void {
+    // The dead pane already said how this tab died, and it is the only party
+    // that knows. See `explained`.
+    if (this.explained.has(tabId)) return
     this.set(tabId, stateForExit(code), { tab })
+  }
+
+  /**
+   * A pane died, reporting the status its command exited with.
+   *
+   * Outranks `applyExit` from here until the tab is reopened or forgotten,
+   * because the client exit that follows a pane death is always 0 regardless
+   * of what happened. The two race — tmux's `pane-died` hook backgrounds its
+   * socket write and then kills the session — so this has to win in whichever
+   * order they land: it overwrites an `ended` that beat it here, and blocks an
+   * `ended` that arrives after.
+   */
+  applyDead(
+    tabId: string,
+    status: number,
+    options: { silent?: boolean; tab?: TabDescriptor } = {},
+  ): void {
+    this.explained.add(tabId)
+    this.set(tabId, stateForExit(status), options)
   }
 
   /**
@@ -95,6 +132,7 @@ export class StatusRegistry {
    * transition, and a badge refresh, on every ordinary close.
    */
   forget(tabId: string): void {
+    this.explained.delete(tabId)
     const from = this.states.get(tabId)
     if (from === undefined) return
     this.states.delete(tabId)
