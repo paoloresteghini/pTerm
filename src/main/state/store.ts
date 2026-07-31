@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile, rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import type { TabRecord } from '../sessions/manager'
+import type { PaneRecord } from '../sessions/manager'
 // Declared with the other wire types: the renderer edits presets and sends them
 // back, and a second structurally identical declaration here would only invite
 // drift. Re-exported so existing importers keep working.
@@ -27,7 +27,7 @@ export interface PrcliConfig {
   /** Array order is sidebar order, and the order ⌘1–9 follows. */
   projects: ProjectRecord[]
   activeProjectId: string | null
-  tabs: TabRecord[]
+  tabs: PaneRecord[]
   notifications: NotificationConfig
 }
 
@@ -83,9 +83,9 @@ function isProject(value: unknown): value is ProjectRecord {
  * `type` is normalised, not dropped — a live session is worth more than a
  * correct type field.
  */
-function isTab(value: unknown): value is TabRecord {
+function isTab(value: unknown): value is PaneRecord {
   if (typeof value !== 'object' || value === null) return false
-  const t = value as Partial<TabRecord>
+  const t = value as Partial<PaneRecord>
   return (
     typeof t.id === 'string' &&
     typeof t.projectSlug === 'string' &&
@@ -96,7 +96,7 @@ function isTab(value: unknown): value is TabRecord {
 
 const TAB_TYPES: readonly TabType[] = ['claude', 'preset', 'shell']
 
-function normaliseTab(tab: TabRecord): TabRecord {
+function normaliseTab(tab: PaneRecord): PaneRecord {
   if (TAB_TYPES.includes(tab.type)) return tab
   // A v3 row cannot say whether it was running Claude, and does not need to —
   // hooks decide that. Only the launch command is knowable from the record.

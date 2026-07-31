@@ -1,9 +1,9 @@
 import { homedir } from 'node:os'
-import type { SessionManager, TabRecord } from '../sessions/manager'
+import type { SessionManager, PaneRecord } from '../sessions/manager'
 import type { ConfigStore, ProjectRecord } from '../state/store'
 import { readManifest, mergePresets } from '../projects/manifest'
 import { isDirectory } from '../fsutil'
-// One definition, shared with the renderer — `TabDescriptor` and `TabRecord`
+// One definition, shared with the renderer — `TabDescriptor` and `PaneRecord`
 // are the same shape, and duplicating the types here would let them drift.
 import {
   UNSORTED_ID,
@@ -121,7 +121,7 @@ export async function restoreWorkspace(
     const byId = new Map(orphans.map((orphan) => [orphan.id, orphan]))
 
     // Saved order first, skipping rows whose session is gone.
-    const ordered: TabRecord[] = []
+    const ordered: PaneRecord[] = []
     for (const row of saved.tabs) {
       const orphan = byId.get(row.id)
       if (!orphan) continue

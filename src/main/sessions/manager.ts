@@ -9,7 +9,7 @@ import type { ExitReason, TabType } from '../../shared/ipc'
 
 export type { ExitReason }
 
-export interface TabRecord {
+export interface PaneRecord {
   id: string
   projectSlug: string
   cwd: string
@@ -32,7 +32,7 @@ export interface OpenInput {
 }
 
 interface Entry {
-  record: TabRecord
+  record: PaneRecord
   session: PtySession
   /**
    * The client's live geometry, kept current by `resize`. A reattach has to
@@ -57,7 +57,7 @@ export class SessionManager {
   private readonly entries = new Map<string, Entry>()
   private readonly dataListeners = new Set<(id: string, data: string) => void>()
   private readonly exitListeners = new Set<
-    (record: TabRecord, code: number, reason: ExitReason) => void
+    (record: PaneRecord, code: number, reason: ExitReason) => void
   >()
 
   constructor(
@@ -65,7 +65,7 @@ export class SessionManager {
     private readonly options: { deathReporter?: string } = {},
   ) {}
 
-  open(input: OpenInput): TabRecord {
+  open(input: OpenInput): PaneRecord {
     const id = input.id ?? newSessionId()
     if (this.entries.has(id)) throw new Error(`session ${id} is already open`)
 
@@ -80,7 +80,7 @@ export class SessionManager {
       )
     }
 
-    const record: TabRecord = {
+    const record: PaneRecord = {
       id,
       projectSlug: input.projectSlug,
       cwd: input.cwd,
@@ -139,11 +139,11 @@ export class SessionManager {
     return record
   }
 
-  get(id: string): TabRecord | undefined {
+  get(id: string): PaneRecord | undefined {
     return this.entries.get(id)?.record
   }
 
-  list(): TabRecord[] {
+  list(): PaneRecord[] {
     return [...this.entries.values()].map((entry) => entry.record)
   }
 
@@ -225,8 +225,8 @@ export class SessionManager {
   async moveToProject(
     id: string,
     projectSlug: string,
-    known?: Pick<TabRecord, 'cwd' | 'command'>,
-  ): Promise<TabRecord> {
+    known?: Pick<PaneRecord, 'cwd' | 'command'>,
+  ): Promise<PaneRecord> {
     const entry = this.entries.get(id)
     const current = entry?.record ?? (await this.findOrphans()).find((row) => row.id === id)
     if (!current) throw new Error(`moveToProject: no session for tab ${id}`)
@@ -259,10 +259,10 @@ export class SessionManager {
    * prcli-owned tmux sessions with no client in this app — left behind by a
    * previous run or a crash. Callers decide whether to reopen them.
    */
-  async findOrphans(): Promise<TabRecord[]> {
+  async findOrphans(): Promise<PaneRecord[]> {
     const open = new Set(this.list().map((record) => record.tmuxSession))
     const names = await this.adapter.listPrcliSessions()
-    const orphans: TabRecord[] = []
+    const orphans: PaneRecord[] = []
     for (const name of names) {
       if (open.has(name)) continue
       const parts = decodeSessionName(name)
@@ -299,7 +299,7 @@ export class SessionManager {
     return this.adapter.hasSession(tmuxSession)
   }
 
-  onExit(listener: (record: TabRecord, code: number, reason: ExitReason) => void): void {
+  onExit(listener: (record: PaneRecord, code: number, reason: ExitReason) => void): void {
     this.exitListeners.add(listener)
   }
 }

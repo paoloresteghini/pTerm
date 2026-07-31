@@ -13,7 +13,7 @@ import {
   type StatusEvent,
   type TabDescriptor,
 } from '../../shared/ipc'
-import type { ExitReason, SessionManager, TabRecord } from '../sessions/manager'
+import type { ExitReason, SessionManager, PaneRecord } from '../sessions/manager'
 import { ConfigStore, type PrcliConfig } from '../state/store'
 import { StatusRegistry } from '../status/registry'
 import { describeProjects, restoreWorkspace, withUnsorted } from './restore'
@@ -126,7 +126,7 @@ export function registerIpc(
    * no pending kill on record, which should not happen but must still get a
    * real answer rather than an assumed one — asks tmux directly.
    */
-  const sessionSurvived = async (record: TabRecord, reason: ExitReason): Promise<boolean> => {
+  const sessionSurvived = async (record: PaneRecord, reason: ExitReason): Promise<boolean> => {
     if (reason === 'detached') return true
     const pending = reason === 'killed' ? pendingKills.get(record.id) : undefined
     if (pending) {
