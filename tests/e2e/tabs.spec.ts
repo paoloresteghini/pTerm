@@ -1,21 +1,64 @@
 import { test, expect, _electron as electron, type ElectronApplication } from '@playwright/test'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const run = promisify(execFile)
 const SOCKET = 'prcli-e2e-tabs'
 
+/**
+ * The active tab in the tab bar.
+ *
+ * Scoped to `tab-` deliberately. The sidebar's project rows carry `data-active`
+ * too, so a bare `[data-active="true"]` matches the selected project as well as
+ * the selected tab and Playwright refuses it as ambiguous. What is asserted
+ * about it is unchanged — only which element is being asked.
+ */
+const ACTIVE_TAB = '[data-testid^="tab-"][data-active="true"]'
+
 let userDataDir: string
 let configDir: string
+let projectsRoot: string
+let projectCwd: string
 
 async function launch(): Promise<ElectronApplication> {
   return electron.launch({
     args: ['.vite/build/main.js', `--user-data-dir=${userDataDir}`],
-    env: { ...process.env, PRCLI_CONFIG_DIR: configDir, PRCLI_TMUX_SOCKET: SOCKET },
+    env: {
+      ...process.env,
+      PRCLI_CONFIG_DIR: configDir,
+      PRCLI_TMUX_SOCKET: SOCKET,
+      // Nothing here opens the add-project dialog, so nothing should scan —
+      // but the default root is the developer's real ~/Code, and defending a
+      // directory that must not be touched costs one line.
+      PRCLI_PROJECTS_ROOT: projectsRoot,
+    },
   })
+}
+
+/**
+ * Write a config holding one project, selected.
+ *
+ * The app no longer opens a terminal on its own: a project has to exist for
+ * `+` to have anywhere to open one. Driving the UI to add it is not possible
+ * here — `choose-folder` opens a native dialog Playwright cannot touch — so
+ * the config file is seeded directly. Returns the project's directory.
+ */
+async function seedProject(slug: string, name: string): Promise<string> {
+  const cwd = await mkdtemp(join(tmpdir(), `prcli-proj-${slug}-`))
+  await writeFile(
+    join(configDir, 'config.json'),
+    JSON.stringify({
+      version: 3,
+      projects: [{ id: `id-${slug}`, name, slug, cwd, presets: [], activeTabId: null }],
+      activeProjectId: `id-${slug}`,
+      tabs: [],
+    }),
+    'utf8',
+  )
+  return cwd
 }
 
 async function killServer(): Promise<void> {
@@ -43,9 +86,15 @@ async function windowSize(name: string): Promise<string> {
   return stdout.trim()
 }
 
+/**
+ * The seeded project's saved active tab. v3 records this once per project
+ * rather than once for the workspace, so it is read off the project row —
+ * a top-level `activeTabId` no longer exists to read.
+ */
 async function savedActiveTabId(): Promise<unknown> {
   const raw: unknown = JSON.parse(await readFile(join(configDir, 'config.json'), 'utf8'))
-  return (raw as { activeTabId?: unknown }).activeTabId
+  const { projects } = raw as { projects?: { id?: string; activeTabId?: unknown }[] }
+  return projects?.find((project) => project.id === 'id-scratch')?.activeTabId
 }
 
 /** Total tmux clients attached across every session on the test socket. */
@@ -72,17 +121,21 @@ test.beforeEach(async () => {
   await killServer()
   userDataDir = await mkdtemp(join(tmpdir(), 'prcli-tabs-user-'))
   configDir = await mkdtemp(join(tmpdir(), 'prcli-tabs-config-'))
+  projectsRoot = await mkdtemp(join(tmpdir(), 'prcli-tabs-root-'))
+  projectCwd = await seedProject('scratch', 'Scratch')
 })
 
 test.afterEach(async () => {
   await killServer()
-  await rm(userDataDir, { recursive: true, force: true })
-  await rm(configDir, { recursive: true, force: true })
+  for (const dir of [userDataDir, configDir, projectsRoot, projectCwd]) {
+    await rm(dir, { recursive: true, force: true })
+  }
 })
 
 test('a second instance exits instead of opening its own session', async () => {
   const first = await launch()
   const firstWindow = await first.firstWindow()
+  await firstWindow.getByTestId('new-tab').click()
   await expect(firstWindow.getByTestId('terminal-active')).toBeVisible()
   await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(1)
 
@@ -113,6 +166,7 @@ test('a second instance exits instead of opening its own session', async () => {
 test('opens several tabs and keeps each one\'s scrollback', async () => {
   const app = await launch()
   const window = await app.firstWindow()
+  await window.getByTestId('new-tab').click()
   await expect(window.getByTestId('terminal-active')).toBeVisible()
 
   await window.getByTestId('terminal-active').click()
@@ -145,6 +199,7 @@ test('opens several tabs and keeps each one\'s scrollback', async () => {
 test('restores every tab and the active one after a relaunch', async () => {
   const first = await launch()
   const firstWindow = await first.firstWindow()
+  await firstWindow.getByTestId('new-tab').click()
   await expect(firstWindow.getByTestId('terminal-active')).toBeVisible()
   await firstWindow.getByTestId('new-tab').click()
   await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(2)
@@ -170,6 +225,7 @@ test('restores every tab and the active one after a relaunch', async () => {
 test('a restored background tab keeps its size instead of being squashed', async () => {
   const first = await launch()
   const firstWindow = await first.firstWindow()
+  await firstWindow.getByTestId('new-tab').click()
   await expect(firstWindow.getByTestId('terminal-active')).toBeVisible()
   await firstWindow.getByTestId('new-tab').click()
   await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(2)
@@ -203,6 +259,7 @@ test('a restored background tab keeps its size instead of being squashed', async
 test('a relaunch lands on the tab that closing another one activated', async () => {
   const first = await launch()
   const firstWindow = await first.firstWindow()
+  await firstWindow.getByTestId('new-tab').click()
   await expect(firstWindow.getByTestId('terminal-active')).toBeVisible()
   await firstWindow.getByTestId('new-tab').click()
   await firstWindow.getByTestId('new-tab').click()
@@ -216,9 +273,9 @@ test('a relaunch lands on the tab that closing another one activated', async () 
   // Work on the middle tab, then close it. The third becomes active — and
   // that, not the first, is where the next launch has to land.
   await firstWindow.getByTestId(ids[1]).click()
-  await expect(firstWindow.locator('[data-active="true"]')).toHaveAttribute('data-testid', ids[1])
+  await expect(firstWindow.locator(ACTIVE_TAB)).toHaveAttribute('data-testid', ids[1])
   await firstWindow.getByTestId(ids[1].replace('tab-', 'close-')).click()
-  await expect(firstWindow.locator('[data-active="true"]')).toHaveAttribute('data-testid', ids[2])
+  await expect(firstWindow.locator(ACTIVE_TAB)).toHaveAttribute('data-testid', ids[2])
   await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(2)
   // Let the config write land before the app goes away.
   await firstWindow.waitForTimeout(1000)
@@ -227,7 +284,7 @@ test('a relaunch lands on the tab that closing another one activated', async () 
   const second = await launch()
   const secondWindow = await second.firstWindow()
   await expect(secondWindow.locator('[data-testid^="tab-"]')).toHaveCount(2)
-  await expect(secondWindow.locator('[data-active="true"]')).toHaveAttribute('data-testid', ids[2])
+  await expect(secondWindow.locator(ACTIVE_TAB)).toHaveAttribute('data-testid', ids[2])
   // A launch that restores tabs must not report an active tab before it knows
   // of one: writing `null` at mount would wipe the value restore is reading.
   await secondWindow.waitForTimeout(1000)
@@ -252,6 +309,7 @@ test('adopts a session the app has never seen', async () => {
 test('reloading the window reattaches what is open instead of stranding it', async () => {
   const app = await launch()
   const window = await app.firstWindow()
+  await window.getByTestId('new-tab').click()
   await expect(window.getByTestId('terminal-active')).toBeVisible()
   await window.getByTestId('new-tab').click()
   await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(2)
@@ -275,6 +333,7 @@ test('reloading the window reattaches what is open instead of stranding it', asy
 test('a detach from inside the pane leaves the tab and its session alone', async () => {
   const app = await launch()
   const window = await app.firstWindow()
+  await window.getByTestId('new-tab').click()
   await expect(window.getByTestId('terminal-active')).toBeVisible()
   await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(1)
   const before = await sessionNames()
@@ -296,12 +355,13 @@ test('a detach from inside the pane leaves the tab and its session alone', async
   await app.close()
 })
 
-// ⌘T, ⌘W and ⌘1–9 are the milestone's headline feature and had no test at any
+// ⌘T, ⌘W and ⌥⌘1–9 are the milestone's headline feature and had no test at any
 // level. This drives the renderer's handler, which is where the logic lives;
 // it does not exercise the OS accelerator layer.
 test('the keyboard opens, switches and closes tabs', async () => {
   const app = await launch()
   const window = await app.firstWindow()
+  await window.getByTestId('new-tab').click()
   await expect(window.getByTestId('terminal-active')).toBeVisible()
   await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(1)
   const firstTab =
@@ -311,14 +371,13 @@ test('the keyboard opens, switches and closes tabs', async () => {
   await window.keyboard.press('Meta+t')
   await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(2)
   await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(2)
-  // The new tab takes over, so ⌘1 has somewhere to switch back from.
-  await expect(window.locator('[data-active="true"]')).not.toHaveAttribute(
-    'data-testid',
-    firstTab,
-  )
+  // The new tab takes over, so ⌥⌘1 has somewhere to switch back from.
+  await expect(window.locator(ACTIVE_TAB)).not.toHaveAttribute('data-testid', firstTab)
 
-  await window.keyboard.press('Meta+1')
-  await expect(window.locator('[data-active="true"]')).toHaveAttribute('data-testid', firstTab)
+  // ⌥⌘1, not ⌘1: this milestone gave ⌘1–9 to the projects in the sidebar and
+  // moved tab switching onto ⌥⌘1–9.
+  await window.keyboard.press('Alt+Meta+1')
+  await expect(window.locator(ACTIVE_TAB)).toHaveAttribute('data-testid', firstTab)
 
   // ⌘W closes the active tab, which is now the first one, and destroys
   // exactly that session.
@@ -335,6 +394,7 @@ test('the keyboard opens, switches and closes tabs', async () => {
 test('closing a tab destroys its session', async () => {
   const app = await launch()
   const window = await app.firstWindow()
+  await window.getByTestId('new-tab').click()
   await expect(window.getByTestId('terminal-active')).toBeVisible()
   await window.getByTestId('new-tab').click()
   await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(2)

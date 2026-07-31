@@ -1,7 +1,7 @@
 import { test, expect, _electron as electron, type ElectronApplication } from '@playwright/test'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -14,6 +14,8 @@ const SOCKET = 'prcli-e2e'
 
 let userDataDir: string
 let configDir: string
+let projectsRoot: string
+let projectCwd: string
 
 async function launch(): Promise<ElectronApplication> {
   return electron.launch({
@@ -23,8 +25,35 @@ async function launch(): Promise<ElectronApplication> {
       // Keep the app's config out of the real ~/.prcli during tests.
       PRCLI_CONFIG_DIR: configDir,
       PRCLI_TMUX_SOCKET: SOCKET,
+      // Nothing here opens the add-project dialog, so nothing should scan —
+      // but the default root is the developer's real ~/Code, and defending a
+      // directory that must not be touched costs one line.
+      PRCLI_PROJECTS_ROOT: projectsRoot,
     },
   })
+}
+
+/**
+ * Write a config holding one project, selected.
+ *
+ * The app no longer opens a terminal on its own: a project has to exist for
+ * `+` to have anywhere to open one. Driving the UI to add it is not possible
+ * here — `choose-folder` opens a native dialog Playwright cannot touch — so
+ * the config file is seeded directly. Returns the project's directory.
+ */
+async function seedProject(slug: string, name: string): Promise<string> {
+  const cwd = await mkdtemp(join(tmpdir(), `prcli-proj-${slug}-`))
+  await writeFile(
+    join(configDir, 'config.json'),
+    JSON.stringify({
+      version: 3,
+      projects: [{ id: `id-${slug}`, name, slug, cwd, presets: [], activeTabId: null }],
+      activeProjectId: `id-${slug}`,
+      tabs: [],
+    }),
+    'utf8',
+  )
+  return cwd
 }
 
 /** Destroy the test tmux server, taking every session this file created with it. */
@@ -41,18 +70,22 @@ test.beforeAll(async () => {
 test.beforeEach(async () => {
   userDataDir = await mkdtemp(join(tmpdir(), 'prcli-e2e-'))
   configDir = await mkdtemp(join(tmpdir(), 'prcli-e2e-config-'))
+  projectsRoot = await mkdtemp(join(tmpdir(), 'prcli-e2e-root-'))
+  projectCwd = await seedProject('scratch', 'Scratch')
 })
 
 test.afterEach(async () => {
   await killServer()
-  await rm(userDataDir, { recursive: true, force: true })
-  await rm(configDir, { recursive: true, force: true })
+  for (const dir of [userDataDir, configDir, projectsRoot, projectCwd]) {
+    await rm(dir, { recursive: true, force: true })
+  }
 })
 
 test('renders a terminal and echoes typed input', async () => {
   const app = await launch()
   const window = await app.firstWindow()
 
+  await window.getByTestId('new-tab').click()
   const terminal = window.getByTestId('terminal')
   await expect(terminal).toBeVisible()
 
@@ -68,6 +101,7 @@ test('renders a terminal and echoes typed input', async () => {
 test('reattaches the same session with scrollback after relaunch', async () => {
   const first = await launch()
   const firstWindow = await first.firstWindow()
+  await firstWindow.getByTestId('new-tab').click()
   await expect(firstWindow.getByTestId('terminal')).toBeVisible()
   await firstWindow.getByTestId('terminal').click()
   await firstWindow.keyboard.type('echo survives-restart')
@@ -91,6 +125,7 @@ test('reattaches the same session with scrollback after relaunch', async () => {
 test('reattaches the same session after closing and reopening the window', async () => {
   const app = await launch()
   const window = await app.firstWindow()
+  await window.getByTestId('new-tab').click()
   await expect(window.getByTestId('terminal')).toBeVisible()
   await window.getByTestId('terminal').click()
   await window.keyboard.type('echo survives-window-close')
