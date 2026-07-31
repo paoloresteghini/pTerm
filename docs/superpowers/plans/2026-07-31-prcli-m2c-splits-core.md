@@ -751,7 +751,15 @@ it('takes down only the pane that died, not its siblings', async () => {
 Run: `npx vitest run tests/integration/pane-death.test.ts -t siblings`
 Expected: FAIL.
 
-- [ ] **Step 3: Resolve the window id on the one-pane path**
+- [ ] **Step 3: Resolve the window id on the one-pane path, and delete the transitional seam**
+
+Task 1 left `deathHookCommand`'s `windowId` as `string | null`, where `null`
+returns the pre-M2c command unchanged. That seam existed only so the branch
+stayed green while Tasks 2–5 landed — a real window id is not knowable until
+tmux has made the session. This task supplies the real one everywhere, so:
+make `windowId` required and non-null again, delete the null branch and its
+test, and confirm no call site passes null. If any still does, that call site
+is the bug, not the signature.
 
 `open()` creates its session with `new-session -A` and does not know the window
 id until tmux has made it. In `SessionManager.attach`, when no `windowId` was
