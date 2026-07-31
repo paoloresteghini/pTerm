@@ -2,6 +2,8 @@ import { dialog, ipcMain, type BrowserWindow } from 'electron'
 import {
   CHANNELS,
   type Candidate,
+  type DataEvent,
+  type ExitEvent,
   type NotificationConfig,
   type OpenRequest,
   type Preset,
@@ -71,7 +73,18 @@ export function registerIpc(
       await store.write({ ...config, tabs })
     })
 
-  const send = (channel: string, payload: unknown): void => {
+  // Keyed to the three channels this file actually pushes unprompted, rather
+  // than left as `(channel: string, payload: unknown)`: `unknown` is exactly
+  // what let `CHANNELS.exit`'s payload go out missing `reason` for as long as
+  // it did — `tsc` has no payload shape to check an omission against. A
+  // per-channel map turns dropping a field back into a compile error.
+  type SentPayloads = {
+    [CHANNELS.data]: DataEvent
+    [CHANNELS.exit]: ExitEvent
+    [CHANNELS.statusChanged]: StatusEvent
+  }
+
+  const send = <C extends keyof SentPayloads>(channel: C, payload: SentPayloads[C]): void => {
     const window = getWindow()
     if (window && !window.isDestroyed()) window.webContents.send(channel, payload)
   }
@@ -147,7 +160,7 @@ export function registerIpc(
     // trip later.
     void (async () => {
       const sessionAlive = await sessionSurvived(record, reason)
-      send(CHANNELS.exit, { id: record.id, code, sessionAlive })
+      send(CHANNELS.exit, { id: record.id, code, sessionAlive, reason })
       if (!sessionAlive) {
         // Stamped ahead of `forgetTab` below, and carrying `record` with it.
         // `forgetTab` deletes the saved config row, and by the time a

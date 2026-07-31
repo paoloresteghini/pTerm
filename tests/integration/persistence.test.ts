@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type {
   Candidate,
+  ExitEvent,
   HooksState,
   NotificationConfig,
   ProjectDescriptor,
@@ -221,10 +222,7 @@ function useManager(bin?: string): void {
 }
 
 /** Wait for the exit event a given tab sends to the renderer. */
-function waitForExitEvent(
-  id: string,
-  ms = 8000,
-): Promise<{ id: string; code: number; sessionAlive: boolean }> {
+function waitForExitEvent(id: string, ms = 8000): Promise<ExitEvent> {
   const deadline = Date.now() + ms
   return new Promise((resolve, reject) => {
     const poll = (): void => {
@@ -233,7 +231,7 @@ function waitForExitEvent(
           event.channel === CHANNELS.exit && (event.payload as { id: string }).id === id,
       )
       if (found) {
-        resolve(found.payload as { id: string; code: number; sessionAlive: boolean })
+        resolve(found.payload as ExitEvent)
         return
       }
       if (Date.now() > deadline) {
@@ -350,6 +348,24 @@ describe('durable tab record', () => {
     const adapter = new TmuxAdapter({ socket: SOCKET })
     await expect(adapter.hasSession(tab.tmuxSession)).resolves.toBe(true)
     expect(await savedIds(store)).toEqual([tab.id])
+  })
+
+  // I7: the renderer tells a kill the user asked for apart from a genuine
+  // death by reading `reason` off the exit event (App.tsx: `if (reason ===
+  // 'killed') return`), so it never draws a tombstone — with its resurrecting
+  // ↻ Restart — for a tab that was just deliberately closed. That guard is
+  // only as good as what `register.ts` puts on the wire: this asserts the
+  // deliberate kill's own exit event actually carries `reason: 'killed'`
+  // through to the renderer, not merely that some internal call was made with
+  // it, which would pass even if `send` dropped the field again.
+  it('carries reason "killed" on the exit event a deliberate kill sends the renderer', async () => {
+    const tab = await openTab()
+    await waitForPrompt(tab.id)
+    const exitEvent = waitForExitEvent(tab.id)
+
+    await killTab(tab.id)
+
+    await expect(exitEvent).resolves.toMatchObject({ id: tab.id, reason: 'killed' })
   })
 
   it('does not lose other tabs when one is pruned', async () => {
