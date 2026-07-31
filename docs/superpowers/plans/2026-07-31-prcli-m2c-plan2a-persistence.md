@@ -36,7 +36,7 @@
 
 **Files:**
 - Modify: `src/main/sessions/manager.ts` (`awaitWindowId`, `wireDeathHook`), `src/main/tmux/adapter.ts` (`windowIdOf`)
-- Test: `tests/integration/manager.test.ts`, `tests/integration/session.test.ts`
+- Test: `tests/integration/adapter.test.ts`, `tests/integration/manager.test.ts`, `tests/integration/session.test.ts`
 
 **Interfaces:**
 - Produces: `type WindowLookup = { kind: 'found'; id: string } | { kind: 'gone' } | { kind: 'unreachable' }`, exported from `src/main/tmux/adapter.ts`. `TmuxAdapter.lookupWindow(session: string): Promise<WindowLookup>` replaces `windowIdOf` at its call sites; keep `windowIdOf` only if something still needs a bare string, otherwise delete it.
@@ -44,6 +44,13 @@
 Today `windowIdOf` swallows every failure and answers `''`, so "tmux says no such session" and "tmux would not answer" are indistinguishable — and a tab can end up with neither `remain-on-exit` nor a hook while nothing reports it. The plan-1 fix wave documented this rather than fixing it.
 
 - [ ] **Step 1: Write the failing tests**
+
+Put all three inside `describe('TmuxAdapter.lookupWindow', …)`, matching the
+`describe('TmuxAdapter.<method>')` convention the file already uses. That is not
+cosmetic: Step 2 filters by name, and a `-t` that matches nothing **exits 0**.
+Measured on this repo just now — `npx vitest run tests/unit/names.test.ts -t
+lookupWindow` reported `Tests 16 skipped` and `EXIT=0`. A green Step 2 with no
+`describe` to match would be a verification that cannot fail.
 
 ```ts
 it('reports a session tmux has never heard of as gone, not as unreachable', async () => {
@@ -71,11 +78,46 @@ For the third case decide deliberately and say which you chose in your report: `
 - [ ] **Step 2: Run to verify they fail**
 
 Run: `npx vitest run tests/integration/adapter.test.ts -t lookupWindow`
-Expected: FAIL — `lookupWindow` is not a function.
+Expected: FAIL — `lookupWindow` is not a function. **Read the test count, not the
+exit code.** `Tests 3 failed` is the expected outcome; `Tests N skipped` with
+exit 0 means the filter matched nothing and you have verified nothing.
 
 - [ ] **Step 3: Implement**
 
-`lookupWindow` distinguishes the cases `windowIdOf` collapsed. Reuse the existing `isNoSuchSession` / `isNoServer` / `stderrOf` helpers — do not re-implement them. A session that is genuinely gone is `gone`; anything else that is not a successful name is `unreachable`.
+`lookupWindow` distinguishes the cases `windowIdOf` collapsed.
+
+**The measurement that decides this, taken on tmux 3.7b during pre-flight:** a
+`display-message` naming a session that does not exist **succeeds**. It does not
+raise anything for `isNoSuchSession` to recognise.
+
+```
+$ tmux -L probe display-message -p -t '=nosuchsession:' '#{window_id}'
+                          # one blank line
+exit=0
+$ tmux -L nosuchsocket display-message -p -t '=nosuch:' '#{window_id}'
+error connecting to /private/tmp/tmux-501/nosuchsocket (No such file or directory)
+exit=1
+```
+
+So the branch order is:
+
+1. The call **succeeded and named a window** → `found`.
+2. The call **succeeded and returned empty** → `gone`. This is the ordinary
+   case — a session tmux has never heard of, and also a session `open()` has
+   asked for before tmux has finished making it. It arrives as success, so no
+   error helper will ever see it.
+3. The call **failed** with `isNoSuchSession` / `isNoServer` (no server at all)
+   → `gone`.
+4. Anything else that failed → `unreachable`.
+
+Reuse `isNoSuchSession` / `isNoServer` / `stderrOf` for 3 and 4 — do not
+re-implement them. Getting 2 wrong is the whole risk in this task: route
+empty-on-success to `unreachable` and `awaitWindowId`, which polls only while
+the answer is `gone`, returns on its first tick for **every** founder pane. Every
+tab then loses its `pane-died` hook and never has `remain-on-exit` taken back
+off — grey dots everywhere and a stray session per exit, with nothing failing
+loudly. Candidate reading, not a mandate: if you measure something that
+contradicts the table above, say so and follow the measurement.
 
 Then thread it through: `awaitWindowId` returns `WindowLookup`, polling only while the answer is `gone` **and** the deadline has not passed (a session being created has not appeared yet, which reads as `gone`). `wireDeathHook` installs on `found`, returns silently on `gone` — nothing to hook and nothing to leak — and on `unreachable` logs one line saying the pane will show grey instead of red, because that is the honest consequence.
 
@@ -130,11 +172,15 @@ it('refuses a session name that is not one this app could have generated', () =>
 
 - [ ] **Step 2: Run to verify it fails**
 
-Expected: FAIL on the `; kill-server` case, which the current charset accepts.
+Expected: FAIL on **all four** cases. `UNSAFE_IN_HOOK` covers only quote, double
+quote, dollar, backtick, backslash, newline and hash. It contains neither `;`
+nor a space, so the injection case, the non-hex case, the
+non-prcli case and the empty string all pass today's guard and all four come
+back non-null.
 
 - [ ] **Step 3: Implement**
 
-Replace the session-name arm of the guard with `isPrcliSession(input.tmuxSession)` (from `../tmux/names`) in both `deathHookCommand` and `canBuildDeathHook`. Leave the reporter's `UNSAFE_IN_HOOK` check exactly as it is — it guards a different string in a different context, and the existing "keeps a path with a space in it as one word" test must still pass. Say in the comment why the two differ.
+Replace the session-name arm of the guard with `isPrcliSession(input.tmuxSession)` (from `../tmux/names`). There is exactly one such arm, `canBuildDeathHook`'s line 45 — `deathHookCommand` has no session check of its own, it delegates. Leave the reporter's `UNSAFE_IN_HOOK` check exactly as it is — it guards a different string in a different context, and the existing "keeps a path with a space in it as one word" test must still pass. Say in the comment why the two differ.
 
 - [ ] **Step 4: Run** — `npx vitest run tests/unit/deathHook.test.ts`, then full `npm test`.
 
@@ -161,20 +207,30 @@ it('kills one pane of a split without leaving its window or its process behind',
   const founder = manager.open({ projectSlug: 'lumio', cwd: tmpdir() })
   await waitFor(manager, founder.id, /\$|%|#/)
   const second = await manager.splitTab({ paneId: founder.id, command: 'sleep 600' })
-  await waitFor(manager, second.id, /\$|%|#/)
+  // Deliberately NO `waitFor` on `second`. Measured during pre-flight: a client
+  // attached to a pane running `sleep 600` emits 791 bytes of screen setup and
+  // not one `$`, `%` or `#`, so waiting for a prompt here times out at 8s and
+  // throws — the test could never pass. There is nothing left to wait for
+  // either: `splitTab` has already awaited every tmux call it makes.
   const windows = await windowsIn(founder.tmuxSession)
   expect(windows).toHaveLength(2)
+  // Read before the kill — afterwards there is no pane left to ask.
+  const pid = await panePid(second.tmuxSession)
+  expect(pid).toMatch(/^\d+$/)
 
   await manager.kill(second.id)
 
   expect(await sessionExists(second.tmuxSession)).toBe(false)
-  // The window, and so the process in it, must be gone too.
   await expect.poll(() => windowsIn(founder.tmuxSession), { timeout: 10_000 }).toHaveLength(1)
+  // The window is gone, and so is what was running inside it. Asserted on the
+  // process rather than inferred from the window count, because "a running
+  // command with no session and no UI" is the actual harm this task prevents.
+  await expect.poll(() => isRunning(pid), { timeout: 10_000 }).toBe(false)
   expect(await sessionExists(founder.tmuxSession)).toBe(true)
 })
 ```
 
-`windowsIn` already exists in this file from plan 1 — reuse it, do not write a second one.
+`windowsIn` and `sessionExists` already exist in this file from plan 1 — reuse them, do not write second copies. `panePid` and `isRunning` do not; add them next to the other helpers. Candidates, not mandates — `display-message -p -t '=<name>:' '#{pane_pid}'` for the first (note the trailing colon: it is pane-scoped) and `process.kill(Number(pid), 0)` in a try/catch for the second. If `pane_pid` turns out to name the `sh` tmux wraps the command in rather than `sleep` itself, that is still the right thing to assert — it is the process the window owns — but say so in your report.
 
 - [ ] **Step 2: Run to verify it fails** — expected: two windows remain.
 
@@ -201,6 +257,15 @@ Plan 1 narrowed this: hooks are reinstalled before any client is cycled. The res
 - [ ] **Step 1: Write the failing test**
 
 Split a tab, then move it, and assert that after the move **every** pane's window carries a hook naming its *current* session — read it back with `show-hooks -w -t <window>` and assert the new slug appears and the old one does not. Assert the pane list is non-empty first.
+
+`show-hooks -w` was measured working on 3.7b during pre-flight, so this read-back is sound:
+
+```
+$ tmux -L probe show-hooks -w -t @0
+pane-died[0] run-shell "echo hi"
+```
+
+(`show-options -w -t @0 -H` prints the same thing alongside the window options, if you would rather have one call.)
 
 Then the harder half: kill one pane's process mid-move. If you cannot make that deterministic, say so and instead assert the invariant directly — that no window's installed hook names a session that no longer exists — which is the property the residue violates. Report which you did.
 
@@ -263,7 +328,24 @@ it('sizes the window to the client on every attach, not only the first', async (
 
 In `attach`, after the client exists and its window is known, `resize-window` that window to the entry's `cols`/`rows`. On the `splitTab` path the window id is already in hand; on the `open` path it comes from Task 1's `lookupWindow`, and a `gone`/`unreachable` answer means skip — never guess a window id.
 
-Say in the comment *why* this is here: `resize-window` makes windows `manual`, so nothing else will do it, and this is the third disguise of a defect that has shipped twice.
+Two traps, both found in pre-flight, both of which produce a test failure that looks like something else:
+
+- **Do not put this inside `wireDeathHook`.** It is the obvious home — the only
+  place `attach` already resolves a window id — and it returns on its first line
+  unless `options.deathReporter` is set. The test above builds a
+  `SessionManager` with no reporter, so a sizing call placed there never runs at
+  all, and the failure reads as "the resize did not work" rather than "the
+  resize did not happen".
+- **Route it through `resizeWindow(entry, cols, rows)`, not
+  `adapter.resizeWindow` directly.** `attach` is synchronous and this call
+  cannot be, so it lands some milliseconds later — after a renderer `resize()`
+  has already moved the window on, if the renderer is quick. The private
+  `resizeWindow` already re-checks `entry.cols`/`entry.rows` before the call
+  lands, for exactly this reason; its comment calls it "last writer wins by
+  accident". Bypassing it reintroduces that, and the symptom is a window that
+  snaps back to its open-time size on every attach.
+
+Say in the comment *why* this is here: `resize-window` makes windows `manual`, so nothing else will do it, and this is the third disguise of a defect that has shipped twice. Measured in pre-flight, so it can be cited as fact: a window created with `window-size` unset reads back `manual` immediately after one `resize-window -x 140 -y 45`.
 
 - [ ] **Step 4: Run** — the file, then full `npm test`, three times (this touches every attach path).
 
@@ -276,8 +358,23 @@ Say in the comment *why* this is here: `resize-window` makes windows `manual`, s
 ### Task 6: Config v5
 
 **Files:**
-- Modify: `src/main/state/store.ts`
+- Modify: `src/main/state/store.ts`, `src/main/ipc/register.ts`, `src/main/index.ts`
 - Test: `tests/unit/store.test.ts`
+
+This task owns **every** reader of `config.tabs`, not just the store. `tabs` keeps its name and changes meaning — from `PaneRecord[]` to `TabRow[]` — so a site that used to mean "the saved pane rows" and now compiles against tab rows is not a compile error, it is a silent behaviour change. Pre-flight found nine such sites and one that goes silent:
+
+| Site | After the change |
+| --- | --- |
+| `register.ts:63` `rememberTab` | errors on `tabs.push(tab)` — a `TabDescriptor` is not a `TabRow` |
+| `register.ts:71-72` `forgetTab` | **compiles clean and is wrong.** `config.tabs.filter(saved => saved.id !== id)` type-checks against `TabRow[]`, so this prunes the tab row and leaves the pane row on disk forever |
+| `register.ts:284` `described` | errors — `describeProjects` wants `TabDescriptor[]` |
+| `register.ts:295` `setActive` | errors on `tab.projectSlug` |
+| `register.ts:375, 385-387` move handler | errors; **Task 8 owns these two**, leave them |
+| `index.ts:57` `readTabs` | feeds the hook inbox — check what `createHookInbox` expects |
+| `index.ts:82` `mergeTab` | feeds notification routing |
+| `restore.ts:125, 173` | Task 7 owns these; the bridge below is all this task does to them |
+
+`forgetTab` is the one that matters most, because it is the one nothing catches. Every other site above is `npm run typecheck`'s to find — run it, and treat a clean typecheck as necessary and not sufficient. Point each of these at `config.panes`; none of them wants a tab row.
 
 **Interfaces:**
 - Produces:
@@ -308,9 +405,13 @@ export interface PrcliConfig {
 
 - [ ] **Step 1: Write the failing tests**
 
-Cover: a v4 file migrating losslessly — every v4 `tabs[]` row becomes one `panes[]` row **and** a one-pane `tabs[]` row whose `layout` is `{dir:'row', ratio:[1], kids:[thatPaneId]}`, with `id` equal to that pane's id; a v5 file round-tripping; a **v6** file returning empty (refusing to guess at a future shape); `write()` still refusing to overwrite a newer version on disk; and a malformed `layout` being normalised away rather than throwing, since `read()` never throws.
+Cover: a v4 file migrating losslessly — every v4 `tabs[]` row becomes one `panes[]` row **and** a one-pane `tabs[]` row whose `layout` is `{dir:'row', ratio:[1], kids:[thatPaneId]}`, with `id` equal to that pane's id **and `activePaneId` equal to it too**; a v5 file round-tripping; a **v6** file returning empty (refusing to guess at a future shape); `write()` still refusing to overwrite a newer version on disk; and a malformed `layout` being normalised away rather than throwing, since `read()` never throws.
+
+`activePaneId` is called out because Step 5's A/B mutates it, and an A/B against an assertion no test makes is one of the ten that could not fail on this project. Assert it or pick a different mutation — do not leave the pair mismatched.
 
 Assert the v4 case pane-by-pane, and assert the tab count first — a `for` loop over an empty `tabs[]` would pass whatever the migration did.
+
+One thing v5 does not settle: `ProjectRecord.activeTabId` is resolved against pane rows today (`describeProjects` matches it against `TabDescriptor[]`), and with tabs and panes now distinct it is ambiguous which it names. Leave the behaviour as it is — resolving against panes — and say so in a comment. Changing it is a renderer-visible decision and belongs to plan 2b; what this task owes is that the ambiguity is written down rather than resolved by accident.
 
 - [ ] **Step 2: Run to verify they fail.**
 
@@ -318,9 +419,9 @@ Assert the v4 case pane-by-pane, and assert the tab count first — a `for` loop
 
 Add the v5 branch and a v4→v5 migration. Keep every existing v1/v2/v3 branch working — they migrate to v4's shape and then through the same v4→v5 step, rather than each growing its own copy. `EMPTY` becomes v5. A row whose `layout.kids` references a pane id not in `panes[]` is dropped from the layout, and a tab left with no kids is dropped entirely.
 
-- [ ] **Step 4: Run** — `npx vitest run tests/unit/store.test.ts`, then full `npm test`. `restore.ts` writes `version: 4` today and will not compile; fixing that is Task 7 — if you need the tree green to commit, have `restore.ts` write the migrated v5 of what it already builds and leave the reconcile itself alone.
+- [ ] **Step 4: Run** — `npx vitest run tests/unit/store.test.ts`, then full `npm test`, then **`npm run typecheck`** — which is not optional here, it is how the table above gets closed out. `restore.ts` writes `version: 4` today and will not compile; fixing that is Task 7 — if you need the tree green to commit, have `restore.ts` write the migrated v5 of what it already builds and leave the reconcile itself alone.
 
-- [ ] **Step 5: A/B** — make the v4→v5 migration drop `activePaneId`, confirm a test fails. Restore; `git diff` empty.
+- [ ] **Step 5: A/B** — twice. First, make the v4→v5 migration drop `activePaneId` and confirm a test fails. Then point `forgetTab` back at `config.tabs` and confirm a test fails — this is the site that stays green through a typecheck, so if nothing fails, it has no coverage and you owe it a test before this task is done. Restore both; `git diff` empty.
 
 - [ ] **Step 6: Commit** — `git commit -m "Take config to v5, with a tab that can hold more than one pane"`
 
@@ -341,17 +442,33 @@ The load-bearing one: open a tab, split it, write config, then reconcile with a 
 
 Then the pruning cases: a layout leaf whose pane's session is gone is removed and **its ratio redistributed so the rest still sum to 1** (assert the sum, not just the length); a tab whose panes have all gone is dropped; a pane tmux has that config never knew about still appears, as a one-pane tab, exactly as an adopted session does today.
 
+And one more, which replaces the bind-before-attach this task originally asked for — see Step 3: **no two live members of a tab report the same `#{window_id}`.** Assert the member list is non-empty and longer than one first, then assert the set of window ids is the same size as the member list. A pane whose window has died and whose member has silently fallen back to a sibling's is what this catches, and it is the only form of that failure restore can actually see.
+
 - [ ] **Step 2: Run to verify they fail.**
 
 - [ ] **Step 3: Implement**
 
 Keep everything the current `restoreWorkspace` doc comment promises — it encodes decisions that cost real defects: the `detachAll()` before `findOrphans` (without it a second restore in one app lifetime strands every session), the saved row's `cwd`/`command`/`type` winning over the orphan's synthesised ones, one failed attach not costing the others, and the whole reconcile running inside the caller's `serialise` queue with nothing inside it calling `serialise` again.
 
-What changes: panes are reattached per pane rather than per tab; tabs are rebuilt from `findOrphanTabs`, with layout taken from config where a saved tab matches and synthesised as a one-pane row where it does not; and each member is bound to its window before its client attaches.
+What changes: panes are reattached per pane rather than per tab; and tabs are rebuilt from `findOrphanTabs`, with layout taken from config where a saved tab matches and synthesised as a one-pane row where it does not.
+
+**Not** "each member is bound to its window before its client attaches", which is what this plan asked for before pre-flight measured it. Two facts kill it:
+
+```
+member current window AFTER select-window:      @1 1
+member current window after `new-session -A`:   @1 1     # binding is server state; it survives
+member current window after its own window died: @0 0    # silent fallback to a sibling's
+```
+
+The binding is tmux server state and outlives every client, so on the restore path a `select-window` is a no-op — the app is reattaching to a server that never forgot. And restore has no stored member→window map to bind *from*: the only source available is the member's own current window, which is either already right (no-op) or the fallback shown above, in which case re-binding writes the sibling's window back and cements the two-xterms-rendering-one-pane bug rather than fixing it.
+
+So: do not bind. Detect instead — the duplicate-`window_id` assertion in Step 1 — and prune the pane whose window is gone, the same way a pane whose session is gone is pruned. If you find a way to recover the true binding that pre-flight missed, say so and take it; this is a candidate, and the measurements above are the reason for it, not the conclusion.
+
+Keep everything else the doc comment promises, listed above.
 
 - [ ] **Step 4: Run** — `npx vitest run tests/integration/restore.test.ts`, then full `npm test` three times.
 
-- [ ] **Step 5: A/B** — twice. Skip the ratio redistribution and confirm a test catches ratios not summing to 1; then remove the bind-before-attach and confirm a test catches it. Restore; `git diff` empty.
+- [ ] **Step 5: A/B** — twice. Skip the ratio redistribution and confirm a test catches ratios not summing to 1; then make the duplicate-`window_id` prune a no-op and confirm a test catches *that*. The second one replaces "remove the bind-before-attach and confirm a test catches it", which pre-flight showed could not fail: the bind is a no-op on this path, so removing it changes nothing and the A/B passes either way. Restore; `git diff` empty.
 
 - [ ] **Step 6: Commit** — `git commit -m "Bring a split tab back as a split tab"`
 
@@ -362,6 +479,8 @@ What changes: panes are reattached per pane rather than per tab; tabs are rebuil
 **Files:**
 - Modify: `src/main/ipc/register.ts` (the `moveTabToProject` handler)
 - Test: `tests/integration/restore.test.ts` or a new `tests/integration/register.test.ts`, whichever fits the existing layout
+
+Task 6 has already repointed every other `config.tabs` reader in this file at `config.panes`; the move handler's `saved` lookup (line 375) and its write-back (385-387) were left for this task on purpose, because they change shape rather than just name.
 
 `register.ts` still calls the **singular** `manager.moveToProject`. Unreachable today because no IPC exposes splitting — and it becomes a live "tab split across two projects" bug the moment plan 2b adds a split command. Fixing it before that command exists is the whole point.
 
@@ -399,3 +518,16 @@ Call `moveTabToProject` and return the whole pane list. The handler's existing `
 - Task 1's `unreachable` case may not be provokable with a real tmux on this machine; the task says to stub and report rather than skip it silently.
 - Task 4's mid-move death may not be deterministic; the task names the invariant to assert instead, and requires saying which route was taken.
 - Task 6 knowingly breaks `restore.ts`'s compile between Tasks 6 and 7; the task says so and gives the minimal bridge rather than leaving an implementer to discover it.
+- Task 6 also owns eight `config.tabs` sites outside the store, one of which (`forgetTab`) survives a typecheck while meaning something else. Named in the task's table rather than left to the branch review.
+
+## Pre-flight scan, 2026-07-31
+
+Run against the code before dispatch, on the branch at 98abe0e. Eleven findings, four blocking, all folded into the tasks above. Everything below was measured on tmux 3.7b on `-L prcli-probe*` and this repo's own vitest, not reasoned about.
+
+**Blocking.** (1) `display-message` naming a session that does not exist **exits 0 with empty stdout** — no error helper sees it — so Task 1's `gone` case has to be recognised on the success path or every founder pane silently loses its death hook. (2) Task 3's test waited for a shell prompt in a pane running `sleep 600`; measured 791 bytes emitted and no `$`, `%` or `#`, so it could never have passed. (3) Task 6's blast radius is nine sites, not one, and `forgetTab` breaks silently through a clean typecheck. (4) Task 7's bind-before-attach is a no-op on the restore path — the binding is server state that survives reattach — so its A/B could not fail; replaced with a duplicate-`window_id` invariant that can.
+
+**Important.** (5) Task 5's sizing must not live in `wireDeathHook`, which returns early with no `deathReporter` — as the task's own test has none. (6) It must route through the private `resizeWindow` so a late attach-time resize cannot revert a renderer resize. (7) Task 1's Step 2 filter matched no test name; measured `Tests 16 skipped`, `EXIT=0` — a verification that could not fail.
+
+**Minor.** (8) Only one session-name guard exists, not two. (9) All four of Task 2's cases fail today, not just the injection one. (10) Task 6's A/B mutated a field no test asserted. (11) `ProjectRecord.activeTabId` is ambiguous under v5 and is now documented rather than silently resolved.
+
+**Confirmed sound, so no task needs to re-derive them.** `resize-window` really does flip `window-size` to `manual` — Task 5's premise, and its test genuinely fails today. `show-hooks -w -t <window>` works on 3.7b, so Task 4's read-back is valid. `windowsIn`, `windowSize`, `sessionExists` and `waitFor` all already exist in `manager.test.ts`; `adapter.test.ts` has `afterEach(killServer)`, so Task 1's two same-named sessions cannot collide. `TmuxNotInstalledError` does throw on a bad `bin`, with a precedent already in `adapter.test.ts`. Task 8's premise holds: `register.ts:376` calls the singular method and no `register.test.ts` exists.
