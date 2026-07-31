@@ -7,6 +7,9 @@ import {
   tabsOfProject,
   activeProject,
   activeTabId,
+  stateOfTab,
+  stateOfProject,
+  needsYou,
   type WorkspaceState,
 } from '../../src/renderer/workspace'
 import { UNSORTED_ID, type ProjectDescriptor, type TabDescriptor } from '../../src/shared/ipc'
@@ -37,6 +40,8 @@ const three: WorkspaceState = {
   projects: [project('p1', 'lumio', 'bbb')],
   tabs: [tab('aaa'), tab('bbb'), tab('ccc')],
   activeProjectId: 'p1',
+  status: {},
+  dead: {},
 }
 
 describe('neighbourOf', () => {
@@ -73,6 +78,8 @@ describe('tabsOfProject', () => {
       projects: [project('p1', 'lumio'), project('p2', 'gco')],
       tabs: [tab('aaa', 'lumio'), tab('bbb', 'gco'), tab('ccc', 'lumio')],
       activeProjectId: 'p1',
+      status: {},
+      dead: {},
     }
     expect(tabsOfProject(state, 'p1').map((t) => t.id)).toEqual(['aaa', 'ccc'])
   })
@@ -82,6 +89,8 @@ describe('tabsOfProject', () => {
       projects: [project('p1', 'lumio')],
       tabs: [tab('aaa', 'lumio'), tab('bbb', 'scratch'), tab('ccc', 'old')],
       activeProjectId: 'p1',
+      status: {},
+      dead: {},
     }
     expect(tabsOfProject(state, UNSORTED_ID).map((t) => t.id)).toEqual(['bbb', 'ccc'])
   })
@@ -100,7 +109,13 @@ describe('activeProject and activeTabId', () => {
 
 describe('workspaceReducer', () => {
   it('starts empty', () => {
-    expect(INITIAL_WORKSPACE_STATE).toEqual({ projects: [], tabs: [], activeProjectId: null })
+    expect(INITIAL_WORKSPACE_STATE).toEqual({
+      projects: [],
+      tabs: [],
+      activeProjectId: null,
+      status: {},
+      dead: {},
+    })
   })
 
   it('replaces everything on restore', () => {
@@ -148,6 +163,8 @@ describe('workspaceReducer', () => {
       projects: [project('p1', 'lumio', 'aaa')],
       tabs: [tab('aaa')],
       activeProjectId: 'p1',
+      status: {},
+      dead: {},
     }
     const next = workspaceReducer(one, { type: 'removed', id: 'aaa' })
     expect(next.tabs).toEqual([])
@@ -164,6 +181,8 @@ describe('workspaceReducer', () => {
       projects: [project('p1', 'lumio', 'aaa'), project('p2', 'gco', 'bbb')],
       tabs: [tab('aaa', 'lumio'), tab('bbb', 'gco')],
       activeProjectId: 'p2',
+      status: {},
+      dead: {},
     }
     const next = workspaceReducer(state, { type: 'removed', id: 'aaa' })
     expect(next.projects[1].activeTabId).toBe('bbb')
@@ -200,6 +219,8 @@ describe('workspaceReducer', () => {
       projects: [project('p1', 'lumio')],
       tabs: [tab('aaa', 'scratch'), tab('bbb', 'scratch')],
       activeProjectId: 'p1',
+      status: {},
+      dead: {},
     }
     const next = workspaceReducer(state, {
       type: 'movedTab',
@@ -217,6 +238,8 @@ describe('workspaceReducer', () => {
       projects: [project('p1', 'lumio'), project(UNSORTED_ID, UNSORTED_ID, 'aaa')],
       tabs: [tab('aaa', 'scratch')],
       activeProjectId: UNSORTED_ID,
+      status: {},
+      dead: {},
     }
     const next = workspaceReducer(state, {
       type: 'movedTab',
@@ -232,6 +255,8 @@ describe('workspaceReducer', () => {
       projects: [project('p1', 'lumio'), project('p2', 'gco'), project(UNSORTED_ID, UNSORTED_ID)],
       tabs: [tab('aaa', 'scratch'), tab('bbb', 'scratch')],
       activeProjectId: 'p2',
+      status: {},
+      dead: {},
     }
     const next = workspaceReducer(state, {
       type: 'movedTab',
@@ -247,5 +272,133 @@ describe('workspaceReducer', () => {
     workspaceReducer(three, { type: 'opened', tab: tab('ddd') })
     workspaceReducer(three, { type: 'activatedTab', id: 'aaa' })
     expect(JSON.stringify(three)).toBe(before)
+  })
+
+  it('takes a whole status snapshot on restore', () => {
+    const next = workspaceReducer(three, {
+      type: 'statusSnapshot',
+      status: { 'aaa': 'waiting' },
+    })
+    expect(stateOfTab(next, 'aaa')).toBe('waiting')
+  })
+
+  it('updates one tab without disturbing the others', () => {
+    const seeded = workspaceReducer(three, {
+      type: 'statusSnapshot',
+      status: { 'aaa': 'idle', 'bbb': 'thinking' },
+    })
+
+    const next = workspaceReducer(seeded, {
+      type: 'statusChanged',
+      tabId: 'aaa',
+      state: 'waiting',
+    })
+
+    expect(stateOfTab(next, 'aaa')).toBe('waiting')
+    expect(stateOfTab(next, 'bbb')).toBe('thinking')
+  })
+
+  it('has no state for a tab nothing has said anything about', () => {
+    expect(stateOfTab(three, 'aaa')).toBeNull()
+  })
+
+  it('gives a project row the worst state among its tabs', () => {
+    const seeded = workspaceReducer(three, {
+      type: 'statusSnapshot',
+      status: { 'aaa': 'idle', 'bbb': 'waiting' },
+    })
+
+    expect(stateOfProject(seeded, 'p1')).toBe('waiting')
+  })
+
+  it('gives a project with nothing to report no dot at all', () => {
+    expect(stateOfProject(three, 'p1')).toBeNull()
+  })
+
+  it('lists every tab that is blocking a human, worst first', () => {
+    const seeded = workspaceReducer(three, {
+      type: 'statusSnapshot',
+      status: {
+        'aaa': 'waiting',
+        'bbb': 'crashed',
+        'ccc': 'thinking',
+      },
+    })
+
+    const list = needsYou(seeded)
+
+    // Only the two states that mean a human is required, and the crash first.
+    expect(list.map((tab) => tab.id)).toEqual(['bbb', 'aaa'])
+  })
+
+  it('keeps a dead tab in the bar instead of dropping it', () => {
+    const next = workspaceReducer(three, { type: 'died', id: 'aaa', code: 1 })
+
+    // The behaviour this milestone changes: a crashed `npm run dev` used to
+    // vanish and tell you nothing, which made `crashed` unrenderable.
+    expect(next.tabs.some((tab) => tab.id === 'aaa')).toBe(true)
+    expect(next.dead['aaa']).toBe(1)
+  })
+
+  it('leaves the selection on a tab that died, so its scrollback stays readable', () => {
+    const selected = workspaceReducer(three, { type: 'activatedTab', id: 'aaa' })
+    const next = workspaceReducer(selected, { type: 'died', id: 'aaa', code: 1 })
+
+    expect(activeTabId(next)).toBe('aaa')
+  })
+
+  it('drops the tab and its tombstone on dismiss', () => {
+    const died = workspaceReducer(three, { type: 'died', id: 'aaa', code: 1 })
+
+    const next = workspaceReducer(died, { type: 'dismissed', id: 'aaa' })
+
+    expect(next.tabs.some((tab) => tab.id === 'aaa')).toBe(false)
+    expect(next.dead['aaa']).toBeUndefined()
+  })
+
+  it('moves the selection to a neighbour on dismiss, as a close does', () => {
+    const selected = workspaceReducer(three, { type: 'activatedTab', id: 'aaa' })
+    const died = workspaceReducer(selected, { type: 'died', id: 'aaa', code: 1 })
+
+    const next = workspaceReducer(died, { type: 'dismissed', id: 'aaa' })
+
+    expect(activeTabId(next)).not.toBe('aaa')
+  })
+
+  it('clears the tombstone when a dead tab is restarted', () => {
+    const died = workspaceReducer(three, { type: 'died', id: 'aaa', code: 1 })
+    const tab = died.tabs.find((candidate) => candidate.id === 'aaa')
+    if (!tab) throw new Error('fixture lost the tab')
+
+    const next = workspaceReducer(died, { type: 'opened', tab })
+
+    // Restart reuses the id. A tombstone left behind would keep offering
+    // Restart on a session that is already running.
+    expect(next.dead['aaa']).toBeUndefined()
+    expect(next.tabs.filter((candidate) => candidate.id === 'aaa')).toHaveLength(1)
+  })
+
+  it('drops the status of a tab that is closed outright', () => {
+    const seeded = workspaceReducer(three, {
+      type: 'statusSnapshot',
+      status: { 'aaa': 'waiting' },
+    })
+
+    const next = workspaceReducer(seeded, { type: 'removed', id: 'aaa' })
+
+    expect(stateOfTab(next, 'aaa')).toBeNull()
+  })
+
+  it('resets status and tombstones on restore', () => {
+    const seeded = workspaceReducer(three, { type: 'died', id: 'aaa', code: 1 })
+    const next = workspaceReducer(seeded, {
+      type: 'restored',
+      projects: seeded.projects,
+      tabs: seeded.tabs,
+      activeProjectId: seeded.activeProjectId,
+    })
+
+    expect(next.status).toEqual({})
+    expect(next.dead).toEqual({})
   })
 })
