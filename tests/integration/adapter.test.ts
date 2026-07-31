@@ -288,4 +288,73 @@ describe('TmuxAdapter groups and windows', () => {
     expect(await adapter.hasSession('f')).toBe(true)
     await expect(adapter.killWindow(doomed)).resolves.toBeUndefined()
   })
+
+  // Group members can each be looking at a different window in the shared
+  // list from the moment they're created (measured: a freshly joined member
+  // does not inherit its founder's current window). selectWindow is what
+  // makes that deliberate rather than accidental, so both halves of the
+  // assertion matter: the named member moves, and the other member — bound
+  // separately just before — is not dragged along with it.
+  it('binds the member it names to the window by index, leaving its groupmate alone', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-s', 'f', 'sleep', '600'])
+    const firstIndex = (
+      await run('tmux', ['-L', SOCKET, 'display-message', '-p', '-t', '=f:', '#{window_index}'])
+    ).stdout.trim()
+    const secondIndex = (
+      await run('tmux', [
+        '-L', SOCKET, 'new-window', '-t', '=f:', '-P', '-F', '#{window_index}', 'sleep', '600',
+      ])
+    ).stdout.trim()
+    await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-t', 'f', '-s', 'm'])
+
+    await adapter.selectWindow('f', firstIndex)
+    await adapter.selectWindow('m', secondIndex)
+
+    const windowIndexOf = async (name: string) =>
+      (
+        await run('tmux', [
+          '-L', SOCKET, 'display-message', '-p', '-t', `=${name}:`, '#{window_index}',
+        ])
+      ).stdout.trim()
+
+    expect(await windowIndexOf('m')).toBe(secondIndex)
+    expect(await windowIndexOf('f')).toBe(firstIndex)
+  })
+
+  it('sets the option on that window only, leaving its sibling unset', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-s', 'f', 'sleep', '600'])
+    const first = await adapter.windowIdOf('f')
+    await run('tmux', ['-L', SOCKET, 'new-window', '-t', '=f:', 'sleep', '600'])
+    const second = await adapter.windowIdOf('f')
+
+    await adapter.setWindowOption(second, 'remain-on-exit', 'on')
+
+    const remainOnExitOf = async (windowId: string) =>
+      (
+        await run('tmux', [
+          '-L', SOCKET, 'show-options', '-w', '-t', windowId, '-v', 'remain-on-exit',
+        ])
+      ).stdout.trim()
+
+    expect(await remainOnExitOf(second)).toBe('on')
+    expect(await remainOnExitOf(first)).not.toBe('on')
+  })
+
+  it('installs the hook on that window only, leaving its sibling clean', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-s', 'f', 'sleep', '600'])
+    const first = await adapter.windowIdOf('f')
+    await run('tmux', ['-L', SOCKET, 'new-window', '-t', '=f:', 'sleep', '600'])
+    const second = await adapter.windowIdOf('f')
+
+    await adapter.setWindowHook(second, 'pane-died', "run-shell 'true'")
+
+    const hooksOf = async (windowId: string) =>
+      (await run('tmux', ['-L', SOCKET, 'show-hooks', '-w', '-t', windowId])).stdout
+
+    expect(await hooksOf(second)).toContain('pane-died')
+    expect(await hooksOf(first)).not.toContain('pane-died')
+  })
 })
