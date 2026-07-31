@@ -230,11 +230,13 @@ export class SessionManager {
       : await this.awaitWindowId(record.tmuxSession)
 
     if (lookup.kind === 'gone') {
-      // A session tmux has never heard of. Nothing to hook and nothing to
-      // leak: this only reaches `gone` on the `open()` path (`splitTab`
-      // always hands in a known id), where nothing has set `remain-on-exit`
-      // yet either, so there is no option this pane is owed having taken back
-      // off.
+      // A session tmux has never heard of. `remain-on-exit` is a WINDOW
+      // option, chained into the very `new-session` that would have created
+      // this one (`PtySession.start()`) — so a session tmux has never heard
+      // of either never ran that chain to completion, or the window it set
+      // the option on has since died and been reaped along with the session
+      // itself (a kill racing this wait). Either way there is no window left
+      // here to take the option back off of, and nothing left to leak.
       return
     }
 
