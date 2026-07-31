@@ -252,6 +252,54 @@ test('an Unsorted tab can be filed into a project, keeping its session', async (
   await app.close()
 })
 
+test('a project can be renamed in place, keeping its slug', async () => {
+  const lumio = await candidate('lumio')
+  await seed(
+    [{ id: 'id-lumio', name: 'Lumio', slug: 'lumio', cwd: lumio, presets: [], activeTabId: null }],
+    'id-lumio',
+  )
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  await window.getByTestId('pmenu-id-lumio').click()
+  await window.getByTestId('prename-id-lumio').click()
+  const input = window.getByTestId('rename-input-id-lumio')
+  await input.fill('Renamed')
+  await input.press('Enter')
+
+  await expect(window.getByTestId('project-id-lumio')).toContainText('Renamed')
+  await expect(window.getByTestId('sidebar')).not.toContainText('Lumio')
+
+  // Escape discards. The blur that follows unmounting the input must not then
+  // commit what Escape threw away.
+  await window.getByTestId('pmenu-id-lumio').click()
+  await window.getByTestId('prename-id-lumio').click()
+  await window.getByTestId('rename-input-id-lumio').fill('Discarded')
+  await window.getByTestId('rename-input-id-lumio').press('Escape')
+  await expect(window.getByTestId('project-id-lumio')).toContainText('Renamed')
+  await expect(window.getByTestId('sidebar')).not.toContainText('Discarded')
+
+  // Focus leaving the field commits, so a rename is not lost by clicking away.
+  await window.getByTestId('pmenu-id-lumio').click()
+  await window.getByTestId('prename-id-lumio').click()
+  await window.getByTestId('rename-input-id-lumio').fill('Blurred')
+  await window.getByTestId('rename-input-id-lumio').press('Tab')
+  await expect(window.getByTestId('project-id-lumio')).toContainText('Blurred')
+
+  // The slug is baked into the tmux name of every session this project has
+  // opened, so renaming must not re-slug: doing so would orphan all of them.
+  // A new tab still lands under the original slug.
+  await window.getByTestId('new-tab').click()
+  await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
+  await expect
+    .poll(async () => (await sessionNames()).map((name) => name.replace(/-[0-9a-f]{16}$/, '')), {
+      timeout: 20_000,
+    })
+    .toEqual(['prcli-lumio'])
+
+  await app.close()
+})
+
 test('a session whose project was removed shows under Unsorted, still alive', async () => {
   const lumio = await candidate('lumio')
   await seed(

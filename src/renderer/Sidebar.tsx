@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { UNSORTED_ID, type ProjectDescriptor, type TabDescriptor } from '../shared/ipc'
 import { cn } from './lib/cn'
 import { Button } from './ui/Button'
@@ -29,6 +29,31 @@ export function Sidebar({
   onAdd: () => void
 }) {
   const [menuFor, setMenuFor] = useState<string | null>(null)
+  // Renaming happens in the row itself. `window.prompt` is not implemented in
+  // Electron — it returns null, so the rename it used to guard never fired at
+  // all — and an inline edit suits a keyboard-driven app better than a modal.
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+  // Which edit is still open, readable synchronously so that whichever of the
+  // two commit paths arrives second is a no-op. Enter and Escape both unmount
+  // the input, which today's Chromium does not follow with a blur — but the
+  // handlers must not depend on that to avoid committing twice, or committing
+  // what Escape discarded.
+  const editing = useRef<string | null>(null)
+
+  const startRename = (project: ProjectDescriptor): void => {
+    editing.current = project.id
+    setDraft(project.name)
+    setRenamingId(project.id)
+  }
+
+  const finishRename = (id: string, commit: boolean): void => {
+    if (editing.current !== id) return
+    editing.current = null
+    setRenamingId(null)
+    const name = draft.trim()
+    if (commit && name) onRename(id, name)
+  }
 
   return (
     <div
@@ -57,7 +82,25 @@ export function Sidebar({
               >
                 {/* ⌘1–9 follows sidebar order, so the number is the shortcut. */}
                 <span className="w-3 text-faint">{index < 9 ? index + 1 : ''}</span>
-                <span className="flex-1 truncate">{project.name}</span>
+                {renamingId === project.id ? (
+                  <input
+                    data-testid={`rename-input-${project.id}`}
+                    aria-label={`Rename ${project.name}`}
+                    autoFocus
+                    value={draft}
+                    // Without this, typing in the row also selects the project.
+                    onClick={(event) => event.stopPropagation()}
+                    onChange={(event) => setDraft(event.target.value)}
+                    onBlur={() => finishRename(project.id, true)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') finishRename(project.id, true)
+                      if (event.key === 'Escape') finishRename(project.id, false)
+                    }}
+                    className="min-w-0 flex-1 border border-border bg-bg px-1 text-fg outline-none"
+                  />
+                ) : (
+                  <span className="flex-1 truncate">{project.name}</span>
+                )}
                 {!project.available ? (
                   <span title={`${project.cwd} is missing`} className="text-danger">
                     !
@@ -87,8 +130,7 @@ export function Sidebar({
                     label="Rename…"
                     onClick={() => {
                       setMenuFor(null)
-                      const name = window.prompt('Project name', project.name)
-                      if (name && name.trim()) onRename(project.id, name.trim())
+                      startRename(project)
                     }}
                   />
                   <MenuItem
