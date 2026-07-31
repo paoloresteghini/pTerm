@@ -350,6 +350,28 @@ describe('SessionManager.splitTab', () => {
   //
   // It matters because plan 2's restore attaches a client to this window, and
   // a `latest` window follows whatever size that client arrives at.
+  // The other half of `window-size manual`: once it is on, resizing the tmux
+  // CLIENT does nothing at all — measured, a manual window ignores a client of
+  // a different size — so `resize` has to drive `resize-window` too. Without
+  // it a founder pane is frozen at its split-time geometry for the rest of its
+  // life, while its sibling (created at the new size) is not, and the two
+  // halves of one tab disagree about how wide the tab is.
+  it('resizes a split tab\'s window, not only its client', async () => {
+    const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
+    const first = manager.open({ projectSlug: 'lumio', cwd: tmpdir(), cols: 100, rows: 30 })
+    await waitFor(manager, first.id, /\$|%|#/)
+    const second = await manager.splitTab({ paneId: first.id, cols: 100, rows: 30 })
+    await waitFor(manager, second.id, /\$|%|#/)
+    expect(await windowSize(first.tmuxSession)).toBe('100x30')
+
+    manager.resize(first.id, 137, 41)
+    manager.resize(second.id, 91, 22)
+
+    await expect.poll(() => windowSize(first.tmuxSession), { timeout: 8000 }).toBe('137x41')
+    await expect.poll(() => windowSize(second.tmuxSession), { timeout: 8000 }).toBe('91x22')
+    manager.detachAll()
+  })
+
   it('puts window-size manual on the new pane\'s own window, not the founder\'s', async () => {
     const adapter = new TmuxAdapter({ socket: SOCKET })
     const manager = new SessionManager(adapter)

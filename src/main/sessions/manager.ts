@@ -45,6 +45,16 @@ interface Entry {
   cols: number
   rows: number
   /**
+   * The window this pane's process lives in, once anything has had to name it.
+   *
+   * Known up front for a split pane (`splitTab` made the window itself) and
+   * looked up lazily for a founder, whose window does not exist yet when its
+   * entry is created. A pane's window does not change for the entry's
+   * lifetime — a move disposes the entry and makes a new one — so this is
+   * cached rather than asked for on every resize.
+   */
+  windowId?: string
+  /**
    * Set before we deliberately tear a client down, so the PTY's exit callback
    * can tell a detach or a kill apart from the child genuinely exiting.
    */
@@ -151,7 +161,7 @@ export class SessionManager {
       windowId,
     })
 
-    const entry: Entry = { record, session, cols, rows }
+    const entry: Entry = { record, session, cols, rows, windowId }
 
     session.onData((data) => {
       for (const listener of this.dataListeners) listener(id, data)
@@ -413,6 +423,37 @@ export class SessionManager {
     entry.cols = cols
     entry.rows = rows
     entry.session.resize(cols, rows)
+    // Resizing the client is not enough once a tab has been split. `splitTab`
+    // puts `window-size manual` on every pane's window, and a manual window
+    // ignores its client's size outright — measured: a 200x50 client attached
+    // to a manual 100x30 window left it at 100x30. So without this the founder
+    // pane freezes at whatever geometry it had when the split happened, and
+    // the two halves of one tab behave differently.
+    //
+    // Detached rather than awaited, because `resize` is called from the
+    // renderer's resize path and has always been synchronous. Failures are
+    // swallowed for the same reason the death hook's are: a tmux this app
+    // cannot talk to is not worth taking the main process down for, and the
+    // next resize tries again.
+    void this.resizeWindow(entry, cols, rows).catch(() => {})
+  }
+
+  /**
+   * Push a pane's size onto the tmux window its process lives in.
+   *
+   * Ordered against itself rather than against the clock: a drag emits resizes
+   * faster than tmux answers them, so the size is re-checked against the
+   * entry's current one before the call lands. Without that, a slow early
+   * resize could arrive last and leave the window at a size the renderer has
+   * already moved on from — the same "last writer wins by accident" that the
+   * geometry rule exists to remove.
+   */
+  private async resizeWindow(entry: Entry, cols: number, rows: number): Promise<void> {
+    const windowId = entry.windowId ?? (await this.adapter.windowIdOf(entry.record.tmuxSession))
+    if (!windowId) return
+    entry.windowId = windowId
+    if (entry.cols !== cols || entry.rows !== rows) return
+    await this.adapter.resizeWindow(windowId, cols, rows)
   }
 
   /** Detach the client. The tmux session keeps running. */
