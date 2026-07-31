@@ -100,7 +100,7 @@ describe('StatusRegistry', () => {
     const registry = new StatusRegistry()
     registry.applyOpen(ID, 'preset')
 
-    registry.applyDead(ID, 3)
+    registry.applyDead(ID, { status: 3 })
 
     expect(registry.get(ID)).toBe('crashed')
   })
@@ -109,16 +109,28 @@ describe('StatusRegistry', () => {
     const registry = new StatusRegistry()
     registry.applyOpen(ID, 'preset')
 
-    registry.applyDead(ID, 0)
+    registry.applyDead(ID, { status: 0 })
 
     expect(registry.get(ID)).toBe('ended')
+  })
+
+  // A segfault or an OOM kill reports no status at all — tmux gives the
+  // signal's name instead — so reading a missing status as 0 would paint the
+  // crashes that matter most a calm grey.
+  it('records a pane killed by a signal as crashed, though it reports no status', () => {
+    const registry = new StatusRegistry()
+    registry.applyOpen(ID, 'preset')
+
+    registry.applyDead(ID, { signal: 'kill' })
+
+    expect(registry.get(ID)).toBe('crashed')
   })
 
   it('does not let the client exit that follows a crash downgrade it to ended', () => {
     const registry = new StatusRegistry()
     registry.applyOpen(ID, 'preset')
 
-    registry.applyDead(ID, 3)
+    registry.applyDead(ID, { status: 3 })
     // tmux kills the session immediately after the pane dies, so the attached
     // client exits — with code 0, as it always does.
     registry.applyExit(ID, 0)
@@ -131,7 +143,7 @@ describe('StatusRegistry', () => {
     registry.applyOpen(ID, 'preset')
 
     registry.applyExit(ID, 0)
-    registry.applyDead(ID, 3)
+    registry.applyDead(ID, { status: 3 })
 
     expect(registry.get(ID)).toBe('crashed')
   })
@@ -139,7 +151,7 @@ describe('StatusRegistry', () => {
   it('lets a restarted tab die cleanly after an earlier crash', () => {
     const registry = new StatusRegistry()
     registry.applyOpen(ID, 'preset')
-    registry.applyDead(ID, 3)
+    registry.applyDead(ID, { status: 3 })
 
     // Restart reuses the id. The old verdict must not outrank the new life.
     registry.applyOpen(ID, 'preset')
@@ -151,7 +163,7 @@ describe('StatusRegistry', () => {
   it('clears the verdict when the tab is forgotten', () => {
     const registry = new StatusRegistry()
     registry.applyOpen(ID, 'preset')
-    registry.applyDead(ID, 3)
+    registry.applyDead(ID, { status: 3 })
 
     registry.forget(ID)
     registry.applyExit(ID, 0)
@@ -165,7 +177,7 @@ describe('StatusRegistry', () => {
     registry.applyOpen(ID, 'preset')
     registry.onTransition((transition) => seen.push(transition))
 
-    registry.applyDead(ID, 3)
+    registry.applyDead(ID, { status: 3 })
 
     expect(seen).toEqual([{ tabId: ID, from: 'running', to: 'crashed', tab: undefined }])
   })

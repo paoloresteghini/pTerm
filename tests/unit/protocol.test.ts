@@ -83,11 +83,37 @@ describe('parseHookLine, exit lines', () => {
     expect(parseHookLine(formatHookLine(message))).toEqual(message)
   })
 
+  // tmux fills in one half or the other, never both: a status with no signal,
+  // or a signal *name* with no status.
+  it('reads a pane killed by a signal, which reports no status at all', () => {
+    expect(parseHookLine(`{"tabId":"${ID}","event":"Exit","signal":"kill","at":1}`)).toEqual({
+      tabId: ID,
+      event: 'Exit',
+      signal: 'kill',
+      at: 1,
+    })
+  })
+
+  it('round-trips what formatHookLine writes for a signal death', () => {
+    const message = { tabId: ID, event: 'Exit' as const, signal: 'segv', at: 42 }
+    expect(parseHookLine(formatHookLine(message))).toEqual(message)
+  })
+
   // An exit line reaches the same untrusted socket as everything else, and its
   // status is about to be turned into a red dot. A status nobody can explain is
   // dropped rather than guessed at.
   it.each([
-    ['an exit with no status at all', `{"tabId":"${ID}","event":"Exit","at":1}`],
+    ['an exit with neither a status nor a signal', `{"tabId":"${ID}","event":"Exit","at":1}`],
+    ['a signal that is not a string', `{"tabId":"${ID}","event":"Exit","signal":9,"at":1}`],
+    ['an empty signal', `{"tabId":"${ID}","event":"Exit","signal":"","at":1}`],
+    [
+      'a signal outside the shape tmux produces',
+      `{"tabId":"${ID}","event":"Exit","signal":"kill; rm -rf /","at":1}`,
+    ],
+    [
+      'an absurdly long signal name',
+      `{"tabId":"${ID}","event":"Exit","signal":"${'k'.repeat(40)}","at":1}`,
+    ],
     ['a negative status', `{"tabId":"${ID}","event":"Exit","status":-1,"at":1}`],
     ['a fractional status', `{"tabId":"${ID}","event":"Exit","status":1.5,"at":1}`],
     ['a status that is not a number', `{"tabId":"${ID}","event":"Exit","status":"3","at":1}`],

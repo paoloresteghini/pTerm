@@ -105,6 +105,36 @@ describe('a pane that dies', () => {
     expect(received[0]).toMatchObject({ tabId: record.id, event: 'Exit', status: 0 })
   })
 
+  // The case a status alone cannot describe: tmux reports an empty
+  // `#{pane_dead_status}` and the signal's name instead. A segfault and an OOM
+  // kill both land here, and reading the missing status as 0 would show them
+  // grey.
+  it('reports the signal name when the pane was killed rather than exited', async () => {
+    const { manager: sessions, received } = await harness()
+
+    const record = sessions.open({
+      projectSlug: 'alpha',
+      cwd: dir,
+      command: 'sh -c "sleep 30"',
+      type: 'preset',
+    })
+
+    // `open()` returns before the tmux client it spawned has created anything.
+    await expect
+      .poll(() => sessionExists(record.tmuxSession), { timeout: 10_000 })
+      .toBe(true)
+
+    // The pane's own process, killed the way the OOM killer would.
+    const { stdout } = await run('tmux', [
+      '-L', SOCKET, 'display-message', '-p', '-t', `=${record.tmuxSession}:`, '#{pane_pid}',
+    ])
+    await run('kill', ['-9', stdout.trim()])
+
+    await expect.poll(() => received.length, { timeout: 10_000 }).toBeGreaterThan(0)
+    expect(received[0]).toMatchObject({ tabId: record.id, event: 'Exit', signal: 'kill' })
+    expect(received[0]).not.toHaveProperty('status')
+  })
+
   // `remain-on-exit` is what makes the status readable at all, and it also
   // stops tmux reaping the session on its own. If the hook did not kill it,
   // every crashed tab would leave a session behind — the stray-session failure

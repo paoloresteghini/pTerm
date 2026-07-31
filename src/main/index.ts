@@ -68,8 +68,11 @@ hookServer.onEvent((message) => {
     // the same membership check as everything else on this socket: the status
     // is no more trusted than the events are.
     const apply = (): void => {
-      if (message.event === 'Exit') registry.applyDead(message.tabId, message.status)
-      else registry.applyHook(message)
+      if (message.event === 'Exit') {
+        registry.applyDead(message.tabId, { status: message.status, signal: message.signal })
+      } else {
+        registry.applyHook(message)
+      }
     }
     if (manager.get(message.tabId) !== undefined) {
       apply()

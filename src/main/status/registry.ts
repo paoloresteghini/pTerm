@@ -1,7 +1,7 @@
 import type { TabDescriptor, TabType } from '../../shared/ipc'
 import type { TabState } from '../../shared/status'
 import type { HookEventMessage } from '../hooks/protocol'
-import { stateForExit, stateForHook, stateForOpen } from './machine'
+import { stateForDeath, stateForExit, stateForHook, stateForOpen, type PaneDeath } from './machine'
 
 export interface StatusTransition {
   tabId: string
@@ -43,9 +43,10 @@ export class StatusRegistry {
    *
    * A tmux client exits 0 whether its session was killed, its command crashed
    * or the user typed `exit` — measured three times, and the reason `crashed`
-   * was unreachable for M3's whole life. The only place the truth exists is
-   * `#{pane_dead_status}` on the dead pane, which arrives here through
-   * `applyDead`. Once it has, the code-0 client exit that tmux's own
+   * was unreachable for M3's whole life. The only place the truth exists is on
+   * the dead pane — `#{pane_dead_status}`, or `#{pane_dead_signal}` when
+   * something killed it — which arrives here through `applyDead`. Once it has,
+   * the code-0 client exit that tmux's own
    * `pane-died` hook triggers a moment later carries no information at all,
    * and must not be allowed to overwrite the answer with `ended`.
    */
@@ -103,7 +104,8 @@ export class StatusRegistry {
   }
 
   /**
-   * A pane died, reporting the status its command exited with.
+   * A pane died, reporting the status it exited with or the signal that
+   * killed it.
    *
    * Outranks `applyExit` from here until the tab is reopened or forgotten,
    * because the client exit that follows a pane death is always 0 regardless
@@ -114,11 +116,11 @@ export class StatusRegistry {
    */
   applyDead(
     tabId: string,
-    status: number,
+    death: PaneDeath,
     options: { silent?: boolean; tab?: TabDescriptor } = {},
   ): void {
     this.explained.add(tabId)
-    this.set(tabId, stateForExit(status), options)
+    this.set(tabId, stateForDeath(death), options)
   }
 
   /**

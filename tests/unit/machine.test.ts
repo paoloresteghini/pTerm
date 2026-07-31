@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   HOOK_EVENTS,
+  stateForDeath,
   stateForExit,
   stateForHook,
   stateForOpen,
@@ -55,6 +56,33 @@ describe('stateForExit', () => {
     expect(stateForExit(1)).toBe('crashed')
     expect(stateForExit(130)).toBe('crashed')
     expect(stateForExit(-1)).toBe('crashed')
+  })
+})
+
+// tmux reports the two halves of a death separately, and never both:
+// `#{pane_dead_status}` carries an exit status with `#{pane_dead_signal}`
+// empty, or the signal's *name* — "kill", "segv" — with the status empty.
+// Measured on tmux 3.7b. A segfault or an OOM kill therefore has no status at
+// all, and reading a missing one as 0 would paint the crash grey.
+describe('stateForDeath', () => {
+  it('reads a non-zero status as a crash', () => {
+    expect(stateForDeath({ status: 3 })).toBe('crashed')
+  })
+
+  it('reads a zero status as an ordinary end', () => {
+    expect(stateForDeath({ status: 0 })).toBe('ended')
+  })
+
+  it('reads a killing signal as a crash, whatever the status says', () => {
+    expect(stateForDeath({ signal: 'kill' })).toBe('crashed')
+    expect(stateForDeath({ status: 0, signal: 'segv' })).toBe('crashed')
+  })
+
+  // Nothing should ever produce this — the parser refuses a death that
+  // reports neither half — but guessing `ended` for a death nobody can
+  // explain is the failure this whole change exists to remove.
+  it('treats a death that explains nothing as a crash, not as an ordinary end', () => {
+    expect(stateForDeath({})).toBe('crashed')
   })
 })
 

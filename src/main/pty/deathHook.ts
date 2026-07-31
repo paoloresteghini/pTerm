@@ -36,8 +36,14 @@ export function deathHookCommand(input: {
   if (UNSAFE_IN_HOOK.test(input.tmuxSession)) return null
 
   // The reporter is single-quoted so a path with a space in it stays one word,
-  // and `#{pane_dead_status}` is expanded by tmux when the hook fires — quoted
-  // for the shell, not hidden from tmux.
-  const report = `PRCLI_TAB_ID=${input.tabId} '${input.reporter}' Exit '#{pane_dead_status}'`
+  // and both formats are expanded by tmux when the hook fires — quoted for the
+  // shell, not hidden from tmux.
+  //
+  // Both halves are always asked for, because tmux fills in exactly one: a
+  // status with no signal, or a signal *name* with no status. Asking only for
+  // the status is what left a segfault or an OOM kill reporting nothing.
+  const report =
+    `PRCLI_TAB_ID=${input.tabId} '${input.reporter}' Exit ` +
+    `'#{pane_dead_status}' '#{pane_dead_signal}'`
   return `run-shell "${report}" ; kill-session -t =${input.tmuxSession}`
 }

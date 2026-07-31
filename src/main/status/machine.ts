@@ -59,6 +59,32 @@ export function stateForExit(code: number): TabState {
   return code === 0 ? 'ended' : 'crashed'
 }
 
+/** How a pane died, as tmux reports it. Never both halves at once. */
+export interface PaneDeath {
+  /** `#{pane_dead_status}` — absent when a signal killed the pane. */
+  status?: number
+  /** `#{pane_dead_signal}` — tmux gives the *name*: "kill", "segv", "term". */
+  signal?: string
+}
+
+/**
+ * What a dead pane's own report means.
+ *
+ * tmux fills in exactly one of the two: a status with no signal, or a signal
+ * name with no status — measured on 3.7b. So a segfault or an OOM kill has no
+ * status at all, and reading a missing one as 0 would paint exactly the
+ * crashes that matter most a calm grey.
+ *
+ * A death reporting neither is a crash too. Nothing should produce one — the
+ * parser refuses a line with neither half — but guessing `ended` for a death
+ * nobody can explain is the failure this whole path exists to remove.
+ */
+export function stateForDeath(death: PaneDeath): TabState {
+  if (death.signal) return 'crashed'
+  if (death.status === undefined) return 'crashed'
+  return stateForExit(death.status)
+}
+
 /**
  * The state a freshly opened tab starts in, or null for no dot at all.
  *

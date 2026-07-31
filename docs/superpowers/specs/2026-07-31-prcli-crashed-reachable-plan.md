@@ -133,11 +133,13 @@ with a crashed sibling asserting the red dot.
 
 ## Known gaps, deliberately left
 
-- **A pane killed by a signal reports nothing.** `#{pane_dead_status}` is empty
-  when `#{pane_dead_signal}` is set, so the script sends an `Exit` with no
-  status, the parser refuses it, and the tab falls back to the client-exit path
-  and shows `ended`. Segfaults and OOM kills therefore still read grey. The fix
-  is to pass the signal as well and decide what it maps to.
+- ~~**A pane killed by a signal reports nothing.**~~ **Closed.** Measured: a
+  `kill -9` leaves `#{pane_dead_status}` empty and `#{pane_dead_signal}` set to
+  the signal's *name* (`kill`), so the shell's 128+N convention cannot be
+  computed and the name goes on the wire instead. `ExitEventMessage` now
+  carries `status?` **or** `signal?`, the parser refuses a death reporting
+  neither, and `stateForDeath` reads any signal — and any death that explains
+  nothing — as `crashed`. Proved with a real `kill -9` on a real pane's pid.
 - **The hook kills the whole session when any pane dies.** Correct today, when
   every session has exactly one pane. Milestone 2c is splits, and this becomes
   wrong the moment a session has two panes — one crashed split would take the

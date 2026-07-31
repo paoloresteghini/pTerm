@@ -33,12 +33,16 @@ function runHook(
   event: string,
   tabId: string | undefined,
   status?: string,
+  signal?: string,
 ): Promise<{ ms: number; stdout: string; code: number }> {
   const started = Date.now()
+  const args = [event]
+  if (status !== undefined) args.push(status)
+  if (signal !== undefined) args.push(signal)
   return new Promise((resolve, reject) => {
     execFile(
       script,
-      status === undefined ? [event] : [event, status],
+      args,
       {
         timeout: 5_000,
         env: tabId === undefined ? { PATH: process.env.PATH ?? '' } : { PATH: process.env.PATH ?? '', PRCLI_TAB_ID: tabId },
@@ -92,6 +96,47 @@ describe('prcli-hook', () => {
       status: 3,
       at: expect.any(Number),
     })
+  })
+
+  // A pane killed by a signal reports an empty status and the signal's name,
+  // so the line has to carry the name or the crash arrives explaining nothing.
+  it('carries the signal name when the pane was killed rather than exited', async () => {
+    const paths = await install()
+    const received: string[] = []
+    server = createServer((connection) => {
+      connection.on('data', (chunk) => received.push(String(chunk)))
+    })
+    await new Promise<void>((resolve) => server?.listen(paths.socket, resolve))
+
+    await runHook(paths.script, 'Exit', ID, '', 'kill')
+
+    await expect.poll(() => received.length, { timeout: 4_000 }).toBeGreaterThan(0)
+    expect(parseHookLine(received.join(''))).toEqual({
+      tabId: ID,
+      event: 'Exit',
+      signal: 'kill',
+      at: expect.any(Number),
+    })
+  })
+
+  it('writes nothing when a death reports neither a status nor a signal', async () => {
+    const paths = await install()
+
+    const { code } = await runHook(paths.script, 'Exit', ID, '', '')
+
+    expect(code).toBe(0)
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await expect(readFile(paths.spool, 'utf8')).rejects.toThrow()
+  })
+
+  it('writes nothing at all when handed a signal that is not a name', async () => {
+    const paths = await install()
+
+    const { code } = await runHook(paths.script, 'Exit', ID, '', 'kill","evil":"1')
+
+    expect(code).toBe(0)
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await expect(readFile(paths.spool, 'utf8')).rejects.toThrow()
   })
 
   // The status is interpolated into JSON *unquoted* — it has to be, or it

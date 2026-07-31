@@ -13,9 +13,23 @@ describe('deathHookCommand', () => {
     })
 
     expect(command).toBe(
-      `run-shell "PRCLI_TAB_ID=${ID} '/Users/paolo/.prcli/prcli-hook' Exit '#{pane_dead_status}'" ; ` +
+      `run-shell "PRCLI_TAB_ID=${ID} '/Users/paolo/.prcli/prcli-hook' Exit ` +
+        `'#{pane_dead_status}' '#{pane_dead_signal}'" ; ` +
         `kill-session -t =${SESSION}`,
     )
+  })
+
+  // tmux fills in one or the other, so both are always passed and the script
+  // decides. Asking for only the status is what left a signal-killed pane —
+  // a segfault, an OOM kill — reporting nothing at all.
+  it('asks for the signal as well as the status', () => {
+    const command = deathHookCommand({
+      reporter: '/Users/paolo/.prcli/prcli-hook',
+      tabId: ID,
+      tmuxSession: SESSION,
+    })
+
+    expect(command).toContain("'#{pane_dead_signal}'")
   })
 
   it('keeps a path with a space in it as one word', () => {
