@@ -45,6 +45,14 @@ async function killServer(): Promise<void> {
   }
 }
 
+/** What tmux says a window measures, by window id. */
+async function windowSizeOf(windowId: string): Promise<string> {
+  const { stdout } = await run('tmux', [
+    '-L', SOCKET, 'display-message', '-p', '-t', windowId, '#{window_width}x#{window_height}',
+  ])
+  return stdout.trim()
+}
+
 beforeAll(killServer)
 afterEach(killServer)
 
@@ -232,5 +240,52 @@ describe('TmuxAdapter.killSession, exact targeting', () => {
     await expect(adapter.killSession('prcli-lumio-a1b2c3d4e5f6071')).resolves.toBeUndefined()
 
     await expect(adapter.hasSession('prcli-lumio-a1b2c3d4e5f60718')).resolves.toBe(true)
+  })
+})
+
+describe('TmuxAdapter groups and windows', () => {
+  it('reports an empty group for an ungrouped session and the group name for members', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-s', 'solo', 'sleep', '600'])
+    await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-s', 'founder', 'sleep', '600'])
+    await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-t', 'founder', '-s', 'member'])
+
+    const rows = await adapter.listSessionsWithGroups()
+
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        { name: 'solo', group: '' },
+        { name: 'founder', group: 'founder' },
+        { name: 'member', group: 'founder' },
+      ]),
+    )
+  })
+
+  it('resizes one window without touching its sibling', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-s', 'f', '-x', '80', '-y', '24', 'sleep', '600'])
+    const first = await adapter.windowIdOf('f')
+    await run('tmux', ['-L', SOCKET, 'new-window', '-t', '=f:', 'sleep', '600'])
+    const second = await adapter.windowIdOf('f')
+    expect(second).not.toBe(first)
+
+    await adapter.setSessionOption('f', 'window-size', 'manual')
+    await adapter.resizeWindow(first, 100, 30)
+    await adapter.resizeWindow(second, 200, 50)
+
+    expect(await windowSizeOf(first)).toBe('100x30')
+    expect(await windowSizeOf(second)).toBe('200x50')
+  })
+
+  it('kills a window without killing the session that also holds another', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-s', 'f', 'sleep', '600'])
+    await run('tmux', ['-L', SOCKET, 'new-window', '-t', '=f:', 'sleep', '600'])
+    const doomed = await adapter.windowIdOf('f')
+
+    await adapter.killWindow(doomed)
+
+    expect(await adapter.hasSession('f')).toBe(true)
+    await expect(adapter.killWindow(doomed)).resolves.toBeUndefined()
   })
 })
