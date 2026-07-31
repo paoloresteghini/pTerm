@@ -689,10 +689,18 @@ describe('status registry', () => {
   // `crashed`/`ended` could never reach a toast. `applyExit` now receives the
   // dying tab's own record directly from the exit handler, sidestepping that
   // lookup outright rather than betting on read/write ordering.
-  it("passes the dying tab's own record into applyExit, not just its id", async () => {
+  // Asserted on the transition the registry emits, not on the arguments
+  // `applyExit` was called with: a spy on a positional argument restates the
+  // implementation and would keep passing if the record arrived and went
+  // nowhere. What a listener actually receives is the contract — it is all
+  // the notification router ever sees.
+  it('carries the dying tab on its transition, though the saved row is already gone', async () => {
     const tab = await invoke<TabDescriptor>(CHANNELS.open, { projectSlug: 'lumio', cwd: tmpdir() })
     await waitForPrompt(tab.id)
-    const applyExit = vi.spyOn(registry, 'applyExit')
+    const seen: { to: TabState | null; tab?: TabDescriptor }[] = []
+    registry.onTransition((transition) => {
+      if (transition.tabId === tab.id) seen.push({ to: transition.to, tab: transition.tab })
+    })
 
     // Exactly what a crash outside the app leaves behind, with nothing
     // routed through manager.kill() or CHANNELS.kill — the `exited` path,
@@ -702,11 +710,15 @@ describe('status registry', () => {
     await exitEvent
     await settle(200)
 
-    expect(applyExit).toHaveBeenCalledTimes(1)
-    expect(applyExit.mock.calls[0]?.[2]).toMatchObject({
-      id: tab.id,
-      tmuxSession: tab.tmuxSession,
-    })
+    expect(seen).toHaveLength(1)
+    expect(seen[0].to).toBe('ended')
+    expect(seen[0].tab).toMatchObject({ id: tab.id, tmuxSession: tab.tmuxSession })
+
+    // The half that makes carrying the record necessary rather than tidy: by
+    // now there is nothing left to look the tab up in. A listener handed only
+    // an id would find nothing and drop the notification.
+    await expect(store.read().then((config) => config.tabs.map((row) => row.id))).resolves.not
+      .toContain(tab.id)
   })
 
   // restoreWorkspace reattaches every tab through `manager.open` directly,
