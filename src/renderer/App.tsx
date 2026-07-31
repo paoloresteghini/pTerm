@@ -231,6 +231,19 @@ export function App() {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (!event.metaKey) return
 
+      // A ⌘ shortcut typed into one of the app's own text fields belongs to
+      // that field. Without this, ⌘W during a project rename closed a tab and
+      // destroyed its session, throwing the half-typed rename away with it.
+      //
+      // The opt-out is an explicit attribute rather than a blanket
+      // "is this an input?" check, because xterm's focus target is a
+      // `<textarea>`: a general guard would silently disable ⌘T and ⌘W
+      // whenever a terminal had focus, which is the case this whole app is
+      // about.
+      if (event.target instanceof Element && event.target.closest('[data-shortcuts="off"]')) {
+        return
+      }
+
       // `event.code`, not `event.key`: on macOS ⌥ rewrites `key`, so ⌥⌘1
       // arrives as "¡" and a key-based check would never fire.
       if (event.code === 'KeyT' && !event.altKey) {

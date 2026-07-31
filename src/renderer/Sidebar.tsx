@@ -106,6 +106,10 @@ export function Sidebar({
                 {renamingId === project.id ? (
                   <input
                     data-testid={`rename-input-${project.id}`}
+                    // The window-level ⌘ handler skips anything inside this,
+                    // so ⌘W typed mid-rename edits the text instead of closing
+                    // a tab and destroying its session. See App.tsx's keydown.
+                    data-shortcuts="off"
                     aria-label={`Rename ${project.name}`}
                     autoFocus
                     value={draft}

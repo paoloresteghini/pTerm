@@ -252,6 +252,55 @@ test('an Unsorted tab can be filed into a project, keeping its session', async (
   await app.close()
 })
 
+// The window-level ⌘ handler stayed live while the rename field had focus, so
+// a ⌘W typed mid-rename closed a tab and threw the rename away with it. Two
+// losses from one keystroke, and the tab is the expensive one.
+test('a shortcut typed into the rename field does not reach the tab handler', async () => {
+  const alpha = await candidate('alpha')
+  await seed(
+    [{ id: 'id-alpha', name: 'Alpha', slug: 'alpha', cwd: alpha, presets: [], activeTabId: null }],
+    'id-alpha',
+  )
+  const app = await launch()
+  const window = await app.firstWindow()
+  await window.getByTestId('new-tab').click()
+  await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
+  await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(1)
+
+  await window.getByTestId('pmenu-id-alpha').click()
+  await window.getByTestId('prename-id-alpha').click()
+  const renaming = window.getByTestId('rename-input-id-alpha')
+  await renaming.fill('Half typed')
+
+  await renaming.press('Meta+w')
+
+  // The tab is still there, its session with it, and the edit is still open.
+  await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(1)
+  await expect.poll(async () => (await sessionNames()).length, { timeout: 5_000 }).toBe(1)
+  await expect(renaming).toBeVisible()
+  await expect(renaming).toHaveValue('Half typed')
+
+  // ⌘T is the same handler and the same mistake.
+  await renaming.press('Meta+t')
+  await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(1)
+
+  // And the shortcut still works the moment the field is gone.
+  await renaming.press('Enter')
+  await expect(window.getByTestId('project-id-alpha')).toContainText('Half typed')
+  await window.keyboard.press('Meta+t')
+  await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(2)
+
+  // The case the guard could easily have broken: xterm's focus target is a
+  // `<textarea>`, so a blanket "ignore shortcuts inside form fields" rule
+  // would disable ⌘W exactly where this app is used. With a terminal focused,
+  // ⌘W must still close its tab.
+  await window.getByTestId('terminal-active').click()
+  await window.keyboard.press('Meta+w')
+  await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(1)
+
+  await app.close()
+})
+
 test('a project can be renamed in place, keeping its slug', async () => {
   const alpha = await candidate('alpha')
   await seed(
@@ -284,6 +333,15 @@ test('a project can be renamed in place, keeping its slug', async () => {
   await window.getByTestId('prename-id-alpha').click()
   await window.getByTestId('rename-input-id-alpha').fill('Blurred')
   await window.getByTestId('rename-input-id-alpha').press('Tab')
+  await expect(window.getByTestId('project-id-alpha')).toContainText('Blurred')
+
+  // A name of nothing but spaces is not a rename. The guard has existed since
+  // M2b with no test biting on it, so this is that test: a blank commit leaves
+  // the previous name in place rather than an empty row nobody can identify.
+  await window.getByTestId('pmenu-id-alpha').click()
+  await window.getByTestId('prename-id-alpha').click()
+  await window.getByTestId('rename-input-id-alpha').fill('   ')
+  await window.getByTestId('rename-input-id-alpha').press('Enter')
   await expect(window.getByTestId('project-id-alpha')).toContainText('Blurred')
 
   // The slug is baked into the tmux name of every session this project has
