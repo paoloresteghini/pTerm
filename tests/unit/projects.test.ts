@@ -8,9 +8,15 @@ import {
   reorderProjects,
   projectForSlug,
 } from '../../src/main/projects/projects'
-import type { PrcliConfig } from '../../src/main/state/store'
+import { DEFAULT_NOTIFICATIONS, type PrcliConfig } from '../../src/main/state/store'
 
-const EMPTY: PrcliConfig = { version: 3, projects: [], activeProjectId: null, tabs: [] }
+const EMPTY: PrcliConfig = {
+  version: 4,
+  projects: [],
+  activeProjectId: null,
+  tabs: [],
+  notifications: DEFAULT_NOTIFICATIONS,
+}
 
 function withProjects(...names: string[]): PrcliConfig {
   return names.reduce<PrcliConfig>(
@@ -101,6 +107,7 @@ describe('removeProject', () => {
           projectSlug: 'lumio',
           cwd: '/tmp/lumio',
           tmuxSession: 'prcli-lumio-a1b2c3d4e5f60718',
+          type: 'shell',
         },
       ],
     }

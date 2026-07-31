@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TmuxAdapter } from '../../src/main/tmux/adapter'
 import { SessionManager } from '../../src/main/sessions/manager'
-import { ConfigStore, type PrcliConfig } from '../../src/main/state/store'
+import { ConfigStore, type ProjectRecord } from '../../src/main/state/store'
 import { restoreWorkspace } from '../../src/main/ipc/restore'
 import { UNSORTED_ID } from '../../src/shared/ipc'
 
@@ -30,7 +30,20 @@ async function createStray(name: string): Promise<void> {
   await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-s', name, 'sleep', '600'])
 }
 
-async function configWith(config: Omit<PrcliConfig, 'version'>): Promise<ConfigStore> {
+/** A tab row exactly as a real v3 file has it — no `type`, which migration infers. */
+interface V3Tab {
+  id: string
+  projectSlug: string
+  cwd: string
+  command?: string
+  tmuxSession: string
+}
+
+async function configWith(config: {
+  projects: ProjectRecord[]
+  activeProjectId: string | null
+  tabs: V3Tab[]
+}): Promise<ConfigStore> {
   const dir = await mkdtemp(join(tmpdir(), 'prcli-restore-'))
   const file = join(dir, 'config.json')
   await writeFile(file, JSON.stringify({ version: 3, ...config }), 'utf8')

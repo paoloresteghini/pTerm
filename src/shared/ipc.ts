@@ -1,3 +1,7 @@
+import type { TabState } from './status'
+
+export type { TabState }
+
 export const CHANNELS = {
   open: 'prcli:open',
   list: 'prcli:list',
@@ -19,12 +23,43 @@ export const CHANNELS = {
   exit: 'prcli:exit',
 } as const
 
+/**
+ * What a tab was launched as.
+ *
+ * A declaration of intent, not a gate on status: it decides the launch command
+ * and whether an expecting-hooks dot is drawn before any event has arrived.
+ * Every tab carries PRCLI_TAB_ID regardless, so a `claude` typed by hand into
+ * a shell tab gets full status the moment its first hook lands.
+ */
+export type TabType = 'claude' | 'preset' | 'shell'
+
+/** A notification rule, exactly as it is stored. */
+export interface Rule {
+  /** Absent matches every state. */
+  on?: TabState
+  /** Project id. Absent is global. */
+  project?: string
+  toast?: boolean
+  /** A macOS system sound name, e.g. "Funk". Null is silence. */
+  sound?: string | null
+  urgency?: 'low' | 'high'
+}
+
+export interface NotificationConfig {
+  rules: Rule[]
+  /** Suppress a toast for the tab you are already looking at. */
+  muteWhenFocused: boolean
+  /** Honoured by the rules engine; no editor ships in M3. */
+  quietHours: { from: string; to: string } | null
+}
+
 export interface TabDescriptor {
   id: string
   projectSlug: string
   cwd: string
   command?: string
   tmuxSession: string
+  type: TabType
 }
 
 export interface OpenRequest {
@@ -34,6 +69,8 @@ export interface OpenRequest {
   id?: string
   cols?: number
   rows?: number
+  /** Defaults to 'shell' when absent. */
+  type?: TabType
 }
 
 export interface DataEvent {

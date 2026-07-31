@@ -12,7 +12,13 @@ import {
 import { UNSORTED_ID, type ProjectDescriptor, type TabDescriptor } from '../../src/shared/ipc'
 
 function tab(id: string, projectSlug = 'lumio'): TabDescriptor {
-  return { id, projectSlug, cwd: '/tmp', tmuxSession: `prcli-${projectSlug}-${id}` }
+  return {
+    id,
+    projectSlug,
+    cwd: '/tmp',
+    tmuxSession: `prcli-${projectSlug}-${id}`,
+    type: 'shell',
+  }
 }
 
 function project(id: string, slug: string, activeTabId: string | null = null): ProjectDescriptor {

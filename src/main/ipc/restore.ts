@@ -119,8 +119,10 @@ export async function restoreWorkspace(
       const orphan = byId.get(row.id)
       if (!orphan) continue
       byId.delete(row.id)
-      // The saved row carries the real cwd; the orphan's is synthesised.
-      ordered.push({ ...orphan, cwd: row.cwd, command: row.command })
+      // The saved row carries the real cwd, command and type; the orphan's
+      // are synthesised and, for type, always 'shell' — using them here would
+      // downgrade a claude or preset tab back to plain shell on every restore.
+      ordered.push({ ...orphan, cwd: row.cwd, command: row.command, type: row.type })
     }
     // Then anything tmux has that config did not know about.
     ordered.push(...byId.values())
@@ -135,6 +137,7 @@ export async function restoreWorkspace(
             cwd: record.cwd,
             command: record.command,
             tmuxSession: record.tmuxSession,
+            type: record.type,
           }),
         )
       } catch {
@@ -160,7 +163,7 @@ export async function restoreWorkspace(
       null
 
     await store.write({
-      version: 3,
+      version: 4,
       // Only real projects are persisted; the Unsorted row is synthetic.
       // Matched by id rather than by index: `describeProjects` returns one row
       // per project today, but adding a `filter` or a `continue` to it would
@@ -176,6 +179,7 @@ export async function restoreWorkspace(
       }),
       activeProjectId,
       tabs,
+      notifications: saved.notifications,
     })
 
     return { projects, tabs, activeProjectId }

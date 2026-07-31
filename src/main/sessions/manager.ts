@@ -1,6 +1,7 @@
 import type { TmuxAdapter } from '../tmux/adapter'
 import { PtySession } from '../pty/session'
 import { decodeSessionName, encodeSessionName, newSessionId } from '../tmux/names'
+import type { TabType } from '../../shared/ipc'
 
 export interface TabRecord {
   id: string
@@ -8,6 +9,7 @@ export interface TabRecord {
   cwd: string
   command?: string
   tmuxSession: string
+  type: TabType
 }
 
 export interface OpenInput {
@@ -20,6 +22,7 @@ export interface OpenInput {
   tmuxSession?: string
   cols?: number
   rows?: number
+  type?: TabType
 }
 
 /**
@@ -85,6 +88,7 @@ export class SessionManager {
       cwd: input.cwd,
       command: input.command,
       tmuxSession,
+      type: input.type ?? 'shell',
     }
 
     const cols = input.cols ?? DEFAULT_COLS
@@ -225,7 +229,15 @@ export class SessionManager {
     const size = entry ? { cols: entry.cols, rows: entry.rows } : {}
     await this.adapter.renameSession(current.tmuxSession, tmuxSession)
     if (entry) this.detach(id)
-    return this.open({ id, projectSlug, cwd, command, tmuxSession, ...size })
+    return this.open({
+      id,
+      projectSlug,
+      cwd,
+      command,
+      tmuxSession,
+      type: current.type,
+      ...size,
+    })
   }
 
   /**
@@ -247,6 +259,9 @@ export class SessionManager {
         // does not change it, so any valid path serves here.
         cwd: process.env.HOME ?? '/',
         tmuxSession: name,
+        // An adopted session's launch intent is not recoverable from its
+        // name, and 'shell' is the type that claims least.
+        type: 'shell',
       })
     }
     return orphans

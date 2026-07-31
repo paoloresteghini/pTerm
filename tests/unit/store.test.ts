@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, rm, readFile, writeFile, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ConfigStore, type PrcliConfig } from '../../src/main/state/store'
+import { ConfigStore, DEFAULT_NOTIFICATIONS, type PrcliConfig } from '../../src/main/state/store'
 
 let dir: string
 let file: string
@@ -17,8 +17,14 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true })
 })
 
+/** Write an arbitrary raw shape to a fresh config file and open a store on it. */
+async function storeWith(raw: unknown): Promise<ConfigStore> {
+  await writeFile(file, JSON.stringify(raw), 'utf8')
+  return new ConfigStore(file)
+}
+
 const sampleConfig: PrcliConfig = {
-  version: 3,
+  version: 4,
   activeProjectId: 'p1',
   projects: [
     {
@@ -36,37 +42,42 @@ const sampleConfig: PrcliConfig = {
       projectSlug: 'lumio',
       cwd: '/Users/paolo/Code/Lumio',
       tmuxSession: 'prcli-lumio-a1b2c3d4e5f60718',
+      type: 'shell',
     },
   ],
+  notifications: DEFAULT_NOTIFICATIONS,
 }
 
 describe('ConfigStore.read', () => {
   it('returns an empty config when the file does not exist', async () => {
     await expect(new ConfigStore(file).read()).resolves.toEqual({
-      version: 3,
+      version: 4,
       activeProjectId: null,
       projects: [],
       tabs: [],
+      notifications: DEFAULT_NOTIFICATIONS,
     })
   })
 
   it('returns an empty config when the file is corrupt', async () => {
     await writeFile(file, '{not json', 'utf8')
     await expect(new ConfigStore(file).read()).resolves.toEqual({
-      version: 3,
+      version: 4,
       activeProjectId: null,
       projects: [],
       tabs: [],
+      notifications: DEFAULT_NOTIFICATIONS,
     })
   })
 
   it('returns an empty config when the shape is wrong', async () => {
     await writeFile(file, JSON.stringify({ version: 1, tabs: 'nope' }), 'utf8')
     await expect(new ConfigStore(file).read()).resolves.toEqual({
-      version: 3,
+      version: 4,
       activeProjectId: null,
       projects: [],
       tabs: [],
+      notifications: DEFAULT_NOTIFICATIONS,
     })
   })
 })
@@ -92,7 +103,7 @@ describe('ConfigStore.write', () => {
   it('does not corrupt the existing file when given unserialisable input', async () => {
     const store = new ConfigStore(file)
     await store.write(sampleConfig)
-    const circular = { version: 3, tabs: [] } as unknown as PrcliConfig
+    const circular = { version: 4, tabs: [] } as unknown as PrcliConfig
     ;(circular as unknown as { self: unknown }).self = circular
     await expect(store.write(circular)).rejects.toThrow()
     await expect(store.read()).resolves.toEqual(sampleConfig)
@@ -131,10 +142,10 @@ describe('ConfigStore migration', () => {
     ],
   }
 
-  it('reads a v2 file as v3, keeping tab order', async () => {
+  it('reads a v2 file as v4, keeping tab order', async () => {
     await writeFile(file, JSON.stringify(v2), 'utf8')
     const config = await new ConfigStore(file).read()
-    expect(config.version).toBe(3)
+    expect(config.version).toBe(4)
     expect(config.tabs.map((tab) => tab.id)).toEqual(['a1b2c3d4e5f60718', '00000000000000ff'])
   })
 
@@ -154,10 +165,10 @@ describe('ConfigStore migration', () => {
     expect(config).not.toHaveProperty('activeTabId')
   })
 
-  it('still reads a v1 file, two versions back', async () => {
+  it('still reads a v1 file, three versions back', async () => {
     await writeFile(file, JSON.stringify(v1), 'utf8')
     const config = await new ConfigStore(file).read()
-    expect(config.version).toBe(3)
+    expect(config.version).toBe(4)
     expect(config.tabs.map((tab) => tab.id)).toEqual(['a1b2c3d4e5f60718'])
     expect(config.projects).toEqual([])
   })
@@ -170,7 +181,32 @@ describe('ConfigStore migration', () => {
   })
 
   it('keeps projects and their per-project active tabs on a v3 file', async () => {
-    await writeFile(file, JSON.stringify(sampleConfig), 'utf8')
+    // A genuine v3 file: no tab `type`, no `notifications` block — both are
+    // v4 additions sampleConfig now carries, so this is its own fixture
+    // rather than a reuse of it.
+    const v3Sample = {
+      version: 3,
+      activeProjectId: 'p1',
+      projects: [
+        {
+          id: 'p1',
+          name: 'Lumio',
+          slug: 'lumio',
+          cwd: '/Users/paolo/Code/Lumio',
+          presets: [{ id: 'pr1', label: 'dev', command: 'npm run dev' }],
+          activeTabId: 'a1b2c3d4e5f60718',
+        },
+      ],
+      tabs: [
+        {
+          id: 'a1b2c3d4e5f60718',
+          projectSlug: 'lumio',
+          cwd: '/Users/paolo/Code/Lumio',
+          tmuxSession: 'prcli-lumio-a1b2c3d4e5f60718',
+        },
+      ],
+    }
+    await writeFile(file, JSON.stringify(v3Sample), 'utf8')
     const config = await new ConfigStore(file).read()
     expect(config.projects.map((p) => p.slug)).toEqual(['lumio'])
     expect(config.projects[0].activeTabId).toBe('a1b2c3d4e5f60718')
@@ -203,8 +239,132 @@ describe('ConfigStore migration', () => {
 
   it('rejects an unknown future version rather than guessing', async () => {
     await writeFile(file, JSON.stringify({ version: 99, tabs: [] }), 'utf8')
-    await expect(new ConfigStore(file).read())
-      .resolves.toEqual({ version: 3, activeProjectId: null, projects: [], tabs: [] })
+    await expect(new ConfigStore(file).read()).resolves.toEqual({
+      version: 4,
+      activeProjectId: null,
+      projects: [],
+      tabs: [],
+      notifications: DEFAULT_NOTIFICATIONS,
+    })
+  })
+
+  it('migrates a v3 config to v4, typing tabs by whether they carry a command', async () => {
+    const store = await storeWith({
+      version: 3,
+      projects: [],
+      activeProjectId: null,
+      tabs: [
+        { id: 'a'.repeat(16), projectSlug: 'lumio', cwd: '/tmp', tmuxSession: 'prcli-lumio-' + 'a'.repeat(16) },
+        {
+          id: 'b'.repeat(16),
+          projectSlug: 'lumio',
+          cwd: '/tmp',
+          command: 'npm run dev',
+          tmuxSession: 'prcli-lumio-' + 'b'.repeat(16),
+        },
+      ],
+    })
+
+    const config = await store.read()
+
+    expect(config.version).toBe(4)
+    // A v3 tab cannot say whether it was running Claude, and it does not need
+    // to: hooks decide. Only the launch command is knowable from the record.
+    expect(config.tabs[0]?.type).toBe('shell')
+    expect(config.tabs[1]?.type).toBe('preset')
+  })
+
+  it('gives a migrated config the default notification rules', async () => {
+    const store = await storeWith({ version: 3, projects: [], activeProjectId: null, tabs: [] })
+
+    const config = await store.read()
+
+    expect(config.notifications.muteWhenFocused).toBe(true)
+    expect(config.notifications.quietHours).toBeNull()
+    // Sound is off by design: this machine's ~/.claude/settings.json already
+    // plays Funk on Notification and Glass on Stop, so shipping the parent
+    // spec's default sounds would double-fire them.
+    expect(config.notifications.rules.every((rule) => rule.sound === null)).toBe(true)
+    expect(config.notifications.rules.some((rule) => rule.on === 'waiting')).toBe(true)
+  })
+
+  it('substitutes defaults for a v4 notifications block that is not an object', async () => {
+    const store = await storeWith({
+      version: 4,
+      projects: [],
+      activeProjectId: null,
+      tabs: [],
+      notifications: 'nonsense',
+    })
+
+    const config = await store.read()
+
+    // Losing every open tab because a rules array was hand-edited badly is not
+    // a trade read()'s never-throws contract permits.
+    expect(config.notifications.muteWhenFocused).toBe(true)
+    expect(Array.isArray(config.notifications.rules)).toBe(true)
+  })
+
+  it('keeps a v4 notifications block the user has edited', async () => {
+    const store = await storeWith({
+      version: 4,
+      projects: [],
+      activeProjectId: null,
+      tabs: [],
+      notifications: {
+        rules: [{ on: 'waiting', toast: true, sound: 'Funk', urgency: 'high' }],
+        muteWhenFocused: false,
+        quietHours: { from: '22:00', to: '07:00' },
+      },
+    })
+
+    const config = await store.read()
+
+    expect(config.notifications.rules).toEqual([
+      { on: 'waiting', toast: true, sound: 'Funk', urgency: 'high' },
+    ])
+    expect(config.notifications.muteWhenFocused).toBe(false)
+    expect(config.notifications.quietHours).toEqual({ from: '22:00', to: '07:00' })
+  })
+
+  // The carried-forward hole. `read()` promises never to throw, and it did not
+  // — it handed restore.ts a null it then dereferenced, which is the same
+  // failure one frame later.
+  it('drops a tab element that is not a tab, rather than handing it on', async () => {
+    const store = await storeWith({
+      version: 4,
+      projects: [],
+      activeProjectId: null,
+      tabs: [
+        null,
+        { id: 'c'.repeat(16), projectSlug: 'lumio', cwd: '/tmp', tmuxSession: 'prcli-lumio-' + 'c'.repeat(16), type: 'shell' },
+        { id: 'no-cwd', projectSlug: 'lumio', tmuxSession: 'x' },
+      ],
+      notifications: { rules: [], muteWhenFocused: true, quietHours: null },
+    })
+
+    const config = await store.read()
+
+    expect(config.tabs).toHaveLength(1)
+    expect(config.tabs[0]?.id).toBe('c'.repeat(16))
+  })
+
+  it('defaults a v4 tab missing its type rather than dropping the tab', async () => {
+    const store = await storeWith({
+      version: 4,
+      projects: [],
+      activeProjectId: null,
+      tabs: [
+        { id: 'd'.repeat(16), projectSlug: 'lumio', cwd: '/tmp', tmuxSession: 'prcli-lumio-' + 'd'.repeat(16) },
+      ],
+      notifications: { rules: [], muteWhenFocused: true, quietHours: null },
+    })
+
+    const config = await store.read()
+
+    // A live session is worth more than a correct type field.
+    expect(config.tabs).toHaveLength(1)
+    expect(config.tabs[0]?.type).toBe('shell')
   })
 })
 
