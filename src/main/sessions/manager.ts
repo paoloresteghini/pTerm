@@ -1,7 +1,7 @@
 import type { TmuxAdapter } from '../tmux/adapter'
 import { PtySession } from '../pty/session'
 import { deathHookCommand } from '../pty/deathHook'
-import { decodeSessionName, encodeSessionName, newSessionId } from '../tmux/names'
+import { decodeSessionName, encodeSessionName, newSessionId, tabIdFromGroupName } from '../tmux/names'
 // Declared with the other wire types: the renderer needs to tell a
 // deliberate `killed` apart from a genuine exit too (see `ExitEvent.reason`
 // in shared/ipc.ts), so a second, main-only definition here would only
@@ -533,6 +533,33 @@ export class SessionManager {
       })
     }
     return orphans
+  }
+
+  /**
+   * Orphaned panes assembled back into the tabs they belong to.
+   *
+   * Live tmux decides what exists, grouping included: the tab a pane belongs to
+   * is its `session_group`, and an empty group means a tab that has never been
+   * split. Nothing stored is consulted.
+   *
+   * The tab id comes from the group name's id half only. Its slug is whatever
+   * the founder was called when the group was made and may be several projects
+   * out of date — see `tabIdFromGroupName`.
+   */
+  async findOrphanTabs(): Promise<{ tabId: string; panes: PaneRecord[] }[]> {
+    const panes = await this.findOrphans()
+    const rows = await this.adapter.listSessionsWithGroups()
+    const groupOf = new Map(rows.map((row) => [row.name, row.group]))
+
+    const tabs = new Map<string, PaneRecord[]>()
+    for (const pane of panes) {
+      const group = groupOf.get(pane.tmuxSession) || pane.tmuxSession
+      const tabId = tabIdFromGroupName(group) ?? pane.id
+      const existing = tabs.get(tabId)
+      if (existing) existing.push(pane)
+      else tabs.set(tabId, [pane])
+    }
+    return [...tabs].map(([tabId, grouped]) => ({ tabId, panes: grouped }))
   }
 
   onData(listener: (id: string, data: string) => void): void {

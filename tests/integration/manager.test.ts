@@ -6,6 +6,7 @@ import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { TmuxAdapter } from '../../src/main/tmux/adapter'
 import { SessionManager } from '../../src/main/sessions/manager'
+import { encodeSessionName } from '../../src/main/tmux/names'
 
 const run = promisify(execFile)
 const SOCKET = 'prcli-test'
@@ -378,6 +379,69 @@ describe('SessionManager.findOrphans', () => {
     await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-s', 'not-ours', 'sleep', '600'])
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
     await expect(manager.findOrphans()).resolves.toEqual([])
+  })
+})
+
+describe('SessionManager.findOrphanTabs', () => {
+  it('groups a split tab\'s panes under one tab id', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const first = new SessionManager(adapter)
+    const founder = first.open({ projectSlug: 'lumio', cwd: tmpdir() })
+    await waitFor(first, founder.id, /\$|%|#/)
+    const second = await first.splitTab({ paneId: founder.id })
+    await waitFor(first, second.id, /\$|%|#/)
+    first.detachAll()
+
+    const tabs = await new SessionManager(adapter).findOrphanTabs()
+
+    expect(tabs).toHaveLength(1)
+    expect(tabs[0].tabId).toBe(founder.id)
+    expect(tabs[0].panes.map((pane) => pane.id).sort()).toEqual([founder.id, second.id].sort())
+  })
+
+  it('reports a never-split session as a one-pane tab', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const first = new SessionManager(adapter)
+    const only = first.open({ projectSlug: 'lumio', cwd: tmpdir() })
+    await waitFor(first, only.id, /\$|%|#/)
+    first.detachAll()
+
+    const tabs = await new SessionManager(adapter).findOrphanTabs()
+
+    expect(tabs).toEqual([
+      expect.objectContaining({ tabId: only.id, panes: [expect.objectContaining({ id: only.id })] }),
+    ])
+  })
+
+  // A group keeps the name its founding session had when the group was
+  // created and does not follow a rename (see tabIdFromGroupName) — so once
+  // the founder has moved to a different project, the group name still says
+  // 'lumio' while the founder's own session name says otherwise. Each pane's
+  // projectSlug must come from that pane's own session name, never the
+  // group's — a stale slug read off the group would report the founder as
+  // still belonging to 'lumio'.
+  it('reads each pane\'s own project slug, not the group\'s stale one', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const first = new SessionManager(adapter)
+    const founder = first.open({ projectSlug: 'lumio', cwd: tmpdir() })
+    await waitFor(first, founder.id, /\$|%|#/)
+    const second = await first.splitTab({ paneId: founder.id })
+    await waitFor(first, second.id, /\$|%|#/)
+
+    // Rename the founder's session directly, the way a project move would,
+    // without going through SessionManager — the group name tmux tracks is
+    // unaffected either way.
+    const moved = encodeSessionName({ projectSlug: 'atlas', id: founder.id })
+    await adapter.renameSession(founder.tmuxSession, moved)
+
+    first.detachAll()
+
+    const tabs = await new SessionManager(adapter).findOrphanTabs()
+
+    expect(tabs).toHaveLength(1)
+    const panes = tabs[0].panes
+    expect(panes.find((pane) => pane.id === founder.id)).toMatchObject({ projectSlug: 'atlas' })
+    expect(panes.find((pane) => pane.id === second.id)).toMatchObject({ projectSlug: 'lumio' })
   })
 })
 
