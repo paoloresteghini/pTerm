@@ -258,6 +258,12 @@ test('a session whose project was removed shows under Unsorted, still alive', as
 
   await window.getByTestId('new-tab').click()
   await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
+  // Wait for tmux, not just for the tab. `open` returns once `tmux new-session`
+  // has been forked, which is before the server has created the session — so a
+  // visible terminal does not yet mean a listable session, and reading the list
+  // straight away sees an empty one. Every other session count here polls for
+  // the same reason.
+  await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(1)
   const before = await sessionNames()
   expect(before).toHaveLength(1)
 
