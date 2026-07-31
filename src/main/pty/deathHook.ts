@@ -28,10 +28,12 @@ const WINDOW_ID_RE = /^@\d+$/
  * the window the hook will be scoped to. The two go on together or not at all,
  * so it asks this instead of guessing.
  *
- * Leaving the window id out costs nothing, because it is never the reason a
- * hook is refused: it comes back from tmux itself as `@<digits>`, and when tmux
- * will not name a window there is no session left to leave a stray behind
- * either.
+ * Leaving the window id out is safe, because it is never the *reason* a hook is
+ * refused: it comes back from tmux itself as `@<digits>`, which
+ * `deathHookCommand` accepts.
+ *
+ * What happens when tmux will not name a window at all is a different question,
+ * and not this guard's to answer — see `SessionManager.wireDeathHook`.
  */
 export function canBuildDeathHook(input: {
   reporter: string
