@@ -158,6 +158,50 @@ export class SessionManager {
   }
 
   /**
+   * Move a tab into another project by renaming its tmux session.
+   *
+   * The tab id is the second half of the name and does not change, so the
+   * session keeps its scrollback and everything running inside it — only the
+   * slug moves, and with it which project the tab matches.
+   *
+   * The rename goes first, before our own client is touched. tmux renames a
+   * session out from under an attached client quite happily (the client follows
+   * the session, not the name), and it refuses a rename onto a name already in
+   * use — leaving the source exactly as it was. Detaching first would turn that
+   * refusal into a tab with no client and a live session behind it, recoverable
+   * only by relaunching. This way a refused rename changes nothing at all and
+   * simply throws. The client is then cycled anyway, which reattaches under the
+   * new name and makes tmux redraw the pane into the waiting xterm.
+   *
+   * `known` carries the tab's real cwd and command when the caller has them on
+   * record. A tab whose client has already gone — detached, and still perfectly
+   * movable — is found through `findOrphans`, which synthesises a cwd and knows
+   * no command, so moving one without this would return $HOME as its directory
+   * for the caller to save over the truth. Restore does the same fix-up when it
+   * reattaches a saved row over an orphan.
+   */
+  async moveToProject(
+    id: string,
+    projectSlug: string,
+    known?: Pick<TabRecord, 'cwd' | 'command'>,
+  ): Promise<TabRecord> {
+    const entry = this.entries.get(id)
+    const current = entry?.record ?? (await this.findOrphans()).find((row) => row.id === id)
+    if (!current) throw new Error(`moveToProject: no session for tab ${id}`)
+
+    const cwd = known?.cwd ?? current.cwd
+    const command = known?.command ?? current.command
+    const tmuxSession = encodeSessionName({ projectSlug, id })
+    // Already there: nothing to rename, and nothing worth tearing a working
+    // client down for.
+    if (tmuxSession === current.tmuxSession) return { ...current, cwd, command }
+
+    await this.adapter.renameSession(current.tmuxSession, tmuxSession)
+    if (entry) this.detach(id)
+    return this.open({ id, projectSlug, cwd, command, tmuxSession })
+  }
+
+  /**
    * prcli-owned tmux sessions with no client in this app — left behind by a
    * previous run or a crash. Callers decide whether to reopen them.
    */

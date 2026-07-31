@@ -1,8 +1,25 @@
-import { ipcMain, type BrowserWindow } from 'electron'
-import { CHANNELS, type OpenRequest, type RestoreResult, type TabDescriptor } from '../../shared/ipc'
+import { dialog, ipcMain, type BrowserWindow } from 'electron'
+import {
+  CHANNELS,
+  type Candidate,
+  type OpenRequest,
+  type Preset,
+  type ProjectDescriptor,
+  type RestoreResult,
+  type TabDescriptor,
+} from '../../shared/ipc'
 import type { ExitReason, SessionManager, TabRecord } from '../sessions/manager'
-import { ConfigStore } from '../state/store'
-import { restoreWorkspace } from './restore'
+import { ConfigStore, type PrcliConfig } from '../state/store'
+import { describeProjects, restoreWorkspace, withUnsorted } from './restore'
+import { isDirectory } from '../fsutil'
+import { scanCandidates } from '../projects/discovery'
+import {
+  addProject,
+  projectForSlug,
+  removeProject,
+  reorderProjects,
+  updateProject,
+} from '../projects/projects'
 
 export function registerIpc(
   manager: SessionManager,
@@ -106,6 +123,12 @@ export function registerIpc(
   })
 
   ipcMain.handle(CHANNELS.open, async (_event, request: OpenRequest): Promise<TabDescriptor> => {
+    // node-pty does not throw on a missing cwd — it yields a live process that
+    // produces nothing, so the tab renders permanently blank while its tmux
+    // session is perfectly fine. Say what is actually wrong instead.
+    if (!(await isDirectory(request.cwd))) {
+      throw new Error(`Cannot open a terminal: ${request.cwd} is not a directory`)
+    }
     const record = manager.open(request)
     await rememberTab(record)
     return record
@@ -120,9 +143,126 @@ export function registerIpc(
     (): Promise<RestoreResult> => restoreWorkspace(manager, store, serialise),
   )
 
-  ipcMain.on(CHANNELS.setActive, (_event, _id: string | null) => {
-    // Task 8 reinstates this against per-project active tabs.
+  /**
+   * The project list a mutation answers with — Unsorted included.
+   *
+   * Restore is the only other place that builds this, and it builds it the same
+   * way, so a mutation and a relaunch cannot disagree. Skipping the Unsorted row
+   * here would mean a removed project's still-running sessions dropped off the
+   * screen until the next launch, which is the opposite of leaving them alive
+   * and reachable.
+   *
+   * The tab set is config's, not the manager's. A detached tab stays in the tab
+   * bar — its session is running and only its client is gone — so describing
+   * against live clients alone would drop the Unsorted row such a tab needs.
+   * Every caller below runs inside the write queue, where config's tab list is a
+   * superset of the manager's: an `open` records its tab through the same queue
+   * before anything else can read it.
+   */
+  const described = async (config: PrcliConfig): Promise<ProjectDescriptor[]> =>
+    withUnsorted(await describeProjects(config.projects, config.tabs), config.tabs)
+
+  ipcMain.on(CHANNELS.setActive, (_event, id: string | null) => {
+    void serialise(async () => {
+      if (id === null) return
+      const config = await store.read()
+      const tab = config.tabs.find((saved) => saved.id === id)
+      if (!tab) return
+      const owner = projectForSlug(config, tab.projectSlug)
+      // A tab under Unsorted has no row to record this on, by design.
+      if (!owner) return
+      await store.write({
+        ...config,
+        projects: config.projects.map((project) =>
+          project.id === owner.id ? { ...project, activeTabId: id } : project,
+        ),
+      })
+    })
   })
+
+  ipcMain.on(CHANNELS.setActiveProject, (_event, id: string | null) => {
+    void serialise(async () => {
+      const config = await store.read()
+      await store.write({ ...config, activeProjectId: id })
+    })
+  })
+
+  ipcMain.handle(CHANNELS.addProject, (_event, input: { name: string; cwd: string }) =>
+    serialise(async () => {
+      const { config } = addProject(await store.read(), input)
+      await store.write(config)
+      return described(config)
+    }),
+  )
+
+  ipcMain.handle(
+    CHANNELS.updateProject,
+    (_event, id: string, patch: { name?: string; presets?: Preset[] }) =>
+      serialise(async () => {
+        const config = updateProject(await store.read(), id, patch)
+        await store.write(config)
+        return described(config)
+      }),
+  )
+
+  ipcMain.handle(CHANNELS.removeProject, (_event, id: string) =>
+    serialise(async () => {
+      // The project's sessions keep running. They stop matching a project and
+      // surface under Unsorted, so nothing is stranded and nothing is killed.
+      const config = removeProject(await store.read(), id)
+      await store.write(config)
+      return described(config)
+    }),
+  )
+
+  ipcMain.handle(CHANNELS.reorderProjects, (_event, ids: string[]) =>
+    serialise(async () => {
+      const config = reorderProjects(await store.read(), ids)
+      await store.write(config)
+      return described(config)
+    }),
+  )
+
+  ipcMain.handle(CHANNELS.scanCandidates, async (): Promise<Candidate[]> => {
+    const config = await store.read()
+    return scanCandidates(config.projects.map((project) => project.cwd))
+  })
+
+  ipcMain.handle(CHANNELS.pickFolder, async (): Promise<string | null> => {
+    const window = getWindow()
+    const result = window
+      ? await dialog.showOpenDialog(window, { properties: ['openDirectory'] })
+      : await dialog.showOpenDialog({ properties: ['openDirectory'] })
+    return result.canceled ? null : (result.filePaths[0] ?? null)
+  })
+
+  ipcMain.handle(CHANNELS.moveTabToProject, (_event, tabId: string, projectId: string) =>
+    serialise(async () => {
+      const config = await store.read()
+      const target = config.projects.find((project) => project.id === projectId)
+      if (!target) throw new Error(`moveTabToProject: no project ${projectId}`)
+
+      // Renames the tmux session, so this either moves the tab or throws —
+      // there is no half-applied outcome to unpick here. The saved row goes
+      // along because a tab whose client has gone is found through
+      // `findOrphans`, which has to synthesise a cwd; config holds the real one.
+      const saved = config.tabs.find((row) => row.id === tabId)
+      const tab = await manager.moveToProject(tabId, target.slug, saved)
+      // Replace in place where config already lists the tab, so the tab bar
+      // keeps its order; append where it does not. A plain `map` would quietly
+      // drop the new record for a tab config had never written — the invariant
+      // that restore always writes one first holds on every path this milestone
+      // exercises, but it is an invariant, not a guarantee, and the cost of it
+      // failing is a session running under a name nothing on disk knows. This
+      // invents nothing: the rename above succeeded, so the session is there.
+      const tabs = saved
+        ? config.tabs.map((row) => (row.id === tabId ? tab : row))
+        : [...config.tabs, tab]
+      const updated: PrcliConfig = { ...config, tabs }
+      await store.write(updated)
+      return { projects: await described(updated), tab }
+    }),
+  )
 
   ipcMain.on(CHANNELS.input, (_event, id: string, data: string) => manager.write(id, data))
 

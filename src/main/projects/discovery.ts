@@ -1,13 +1,11 @@
 import { readdir, access } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+// Declared with the other wire types: the renderer draws the picker these fill.
+// Re-exported so existing importers keep working.
+import type { Candidate } from '../../shared/ipc'
 
-export interface Candidate {
-  name: string
-  cwd: string
-  /** Which of the markers below matched, so the picker can show why. */
-  markers: string[]
-}
+export type { Candidate }
 
 /** A directory holding one of these is a project worth offering. */
 const MARKERS = ['.git', 'package.json', 'composer.json']

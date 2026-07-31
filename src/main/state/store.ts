@@ -2,12 +2,12 @@ import { mkdir, readFile, rename, writeFile, rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { TabRecord } from '../sessions/manager'
+// Declared with the other wire types: the renderer edits presets and sends them
+// back, and a second structurally identical declaration here would only invite
+// drift. Re-exported so existing importers keep working.
+import type { Preset } from '../../shared/ipc'
 
-export interface Preset {
-  id: string
-  label: string
-  command: string
-}
+export type { Preset }
 
 export interface ProjectRecord {
   id: string

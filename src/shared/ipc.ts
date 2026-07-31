@@ -7,6 +7,14 @@ export const CHANNELS = {
   kill: 'prcli:kill',
   restore: 'prcli:restore',
   setActive: 'prcli:setActive',
+  addProject: 'prcli:addProject',
+  updateProject: 'prcli:updateProject',
+  removeProject: 'prcli:removeProject',
+  reorderProjects: 'prcli:reorderProjects',
+  setActiveProject: 'prcli:setActiveProject',
+  scanCandidates: 'prcli:scanCandidates',
+  pickFolder: 'prcli:pickFolder',
+  moveTabToProject: 'prcli:moveTabToProject',
   data: 'prcli:data',
   exit: 'prcli:exit',
 } as const
@@ -52,6 +60,18 @@ export interface ExitEvent {
 export const UNSORTED_ID = 'unsorted'
 
 /**
+ * A user-defined preset, exactly as it is stored. Declared here rather than in
+ * src/main/state/store.ts, which now imports it, because the renderer both
+ * draws these and sends them back through `updateProject` — and cannot import
+ * from src/main to do it.
+ */
+export interface Preset {
+  id: string
+  label: string
+  command: string
+}
+
+/**
  * A preset as the renderer sees it: user and repo presets already merged.
  * Declared here rather than in src/main/projects/manifest.ts, which now
  * imports it — two structurally identical types under two names is exactly
@@ -75,6 +95,18 @@ export interface ProjectDescriptor {
   available: boolean
 }
 
+/**
+ * A directory that looks like a project and is not one yet. Declared here
+ * rather than in src/main/projects/discovery.ts, which now imports it, because
+ * the renderer draws the picker these fill.
+ */
+export interface Candidate {
+  name: string
+  cwd: string
+  /** Which markers matched, so the picker can show why. */
+  markers: string[]
+}
+
 export interface RestoreResult {
   /** Sidebar order. Unsorted, when present, is always last. */
   projects: ProjectDescriptor[]
@@ -88,6 +120,27 @@ export interface PrcliApi {
   /** Reattach tabs persisted by the previous run; returns what came back. */
   restore(): Promise<RestoreResult>
   setActive(id: string | null): void
+  /**
+   * Every project mutation resolves to the whole list the sidebar should draw,
+   * Unsorted included — built by the same code path restore uses, so a mutation
+   * and a relaunch can never disagree about what the workspace looks like.
+   */
+  addProject(input: { name: string; cwd: string }): Promise<ProjectDescriptor[]>
+  updateProject(
+    id: string,
+    patch: { name?: string; presets?: Preset[] },
+  ): Promise<ProjectDescriptor[]>
+  removeProject(id: string): Promise<ProjectDescriptor[]>
+  reorderProjects(ids: string[]): Promise<ProjectDescriptor[]>
+  setActiveProject(id: string | null): void
+  scanCandidates(): Promise<Candidate[]>
+  /** The chosen folder, or null when the user cancelled. */
+  pickFolder(): Promise<string | null>
+  /** Moves the tab by renaming its tmux session; everything in it keeps running. */
+  moveTabToProject(
+    tabId: string,
+    projectId: string,
+  ): Promise<{ projects: ProjectDescriptor[]; tab: TabDescriptor }>
   input(id: string, data: string): void
   resize(id: string, cols: number, rows: number): void
   detach(id: string): void

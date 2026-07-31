@@ -1,8 +1,8 @@
-import { stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import type { SessionManager, TabRecord } from '../sessions/manager'
 import type { ConfigStore, ProjectRecord } from '../state/store'
 import { readManifest, mergePresets } from '../projects/manifest'
+import { isDirectory } from '../fsutil'
 // One definition, shared with the renderer — `TabDescriptor` and `TabRecord`
 // are the same shape, and duplicating the types here would let them drift.
 import {
@@ -12,12 +12,38 @@ import {
   type TabDescriptor,
 } from '../../shared/ipc'
 
-async function isDirectory(path: string): Promise<boolean> {
-  try {
-    return (await stat(path)).isDirectory()
-  } catch {
-    return false
+/**
+ * Turn stored project rows into what the renderer draws: presets merged with
+ * the repo's own, each project's active tab resolved against the tabs it is
+ * given, and whether its directory still exists.
+ *
+ * Returns one descriptor per project, in the order the projects came in, so a
+ * caller holding both lists can index one by the other.
+ *
+ * Appending Unsorted is `withUnsorted`'s job, not this one's: restore resolves
+ * the selected project against the appended list, and the mutation handlers
+ * write config before appending. Both wrap this, and neither wants the append
+ * buried in it.
+ */
+export async function describeProjects(
+  projects: ProjectRecord[],
+  tabs: TabDescriptor[],
+): Promise<ProjectDescriptor[]> {
+  const described: ProjectDescriptor[] = []
+  for (const project of projects) {
+    const own = tabs.filter((tab) => tab.projectSlug === project.slug)
+    described.push({
+      id: project.id,
+      name: project.name,
+      slug: project.slug,
+      cwd: project.cwd,
+      presets: mergePresets(project.presets, await readManifest(project.cwd)),
+      // The saved choice when its session came back, else this project's first.
+      activeTabId: own.find((tab) => tab.id === project.activeTabId)?.id ?? own[0]?.id ?? null,
+      available: await isDirectory(project.cwd),
+    })
   }
+  return described
 }
 
 /**
@@ -120,26 +146,9 @@ export async function restoreWorkspace(
       }
     }
 
-    /** The saved choice when its session came back, else this project's first. */
-    const resolveActive = (project: ProjectRecord): string | null => {
-      const own = tabs.filter((tab) => tab.projectSlug === project.slug)
-      return own.find((tab) => tab.id === project.activeTabId)?.id ?? own[0]?.id ?? null
-    }
-
     // One descriptor per saved project, in saved order — so the write below can
     // take each resolved active tab from here rather than resolving twice.
-    const real: ProjectDescriptor[] = []
-    for (const project of saved.projects) {
-      real.push({
-        id: project.id,
-        name: project.name,
-        slug: project.slug,
-        cwd: project.cwd,
-        presets: mergePresets(project.presets, await readManifest(project.cwd)),
-        activeTabId: resolveActive(project),
-        available: await isDirectory(project.cwd),
-      })
-    }
+    const real = await describeProjects(saved.projects, tabs)
 
     const projects = withUnsorted(real, tabs)
 

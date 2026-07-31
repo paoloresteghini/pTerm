@@ -1,16 +1,18 @@
 import { describe, it, expect, afterAll, afterEach, beforeEach, beforeAll, vi } from 'vitest'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { RestoreResult } from '../../src/shared/ipc'
+import type { Candidate, ProjectDescriptor, RestoreResult, TabDescriptor } from '../../src/shared/ipc'
 
 // registerIpc reaches for electron's ipcMain, which does not exist outside the
 // main process. Capturing the handlers lets the real persistence path run.
 const ipc = vi.hoisted(() => ({
   handlers: new Map<string, (...args: never[]) => unknown>(),
   listeners: new Map<string, (...args: never[]) => unknown>(),
+  /** What the next folder dialog answers with. */
+  folderChoice: { canceled: true, filePaths: [] as string[] },
 }))
 
 vi.mock('electron', () => ({
@@ -18,9 +20,13 @@ vi.mock('electron', () => ({
     handle: (channel: string, fn: (...args: never[]) => unknown) => ipc.handlers.set(channel, fn),
     on: (channel: string, fn: (...args: never[]) => unknown) => ipc.listeners.set(channel, fn),
   },
+  // The folder picker reaches for this. It has to be here or vitest throws on
+  // the missing export the moment that handler runs — the mock stands for the
+  // whole electron module, so every part of it registerIpc touches belongs in it.
+  dialog: { showOpenDialog: () => Promise.resolve(ipc.folderChoice) },
 }))
 
-const { CHANNELS } = await import('../../src/shared/ipc')
+const { CHANNELS, UNSORTED_ID } = await import('../../src/shared/ipc')
 const { TmuxAdapter } = await import('../../src/main/tmux/adapter')
 const { SessionManager } = await import('../../src/main/sessions/manager')
 const { ConfigStore } = await import('../../src/main/state/store')
@@ -88,6 +94,22 @@ function openTab(command?: string): Promise<{ id: string; tmuxSession: string }>
     id: string
     tmuxSession: string
   }>
+}
+
+/** Like `openTab`, for the tests that care which project the tab lands in. */
+function openTabIn(projectSlug: string): Promise<{ id: string; tmuxSession: string }> {
+  const handler = ipc.handlers.get(CHANNELS.open)
+  if (!handler) throw new Error('open handler was not registered')
+  return handler(null as never, { projectSlug, cwd: tmpdir() } as never) as Promise<{
+    id: string
+    tmuxSession: string
+  }>
+}
+
+function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
+  const handler = ipc.handlers.get(channel)
+  if (!handler) throw new Error(`no handler registered for ${channel}`)
+  return handler(null as never, ...(args as never[])) as Promise<T>
 }
 
 function detachTab(id: string): void {
@@ -203,6 +225,7 @@ beforeAll(killServer)
 beforeEach(async () => {
   configDir = await mkdtemp(join(tmpdir(), 'prcli-persist-'))
   store = new ConfigStore(join(configDir, 'config.json'))
+  ipc.folderChoice = { canceled: true, filePaths: [] }
   useManager()
 })
 
@@ -320,5 +343,242 @@ describe('durable tab record', () => {
     const restored = await restoreTabs()
     expect(restored.tabs.map((entry) => entry.id)).toEqual([tab.id])
     expect(await savedIds(store)).toEqual([tab.id])
+  })
+})
+
+describe('project channels', () => {
+  it('adds a project and returns the new list', async () => {
+    const projects = await invoke<ProjectDescriptor[]>(CHANNELS.addProject, {
+      name: 'Lumio',
+      cwd: tmpdir(),
+    })
+    expect(projects.map((p) => p.name)).toEqual(['Lumio'])
+    await expect(store.read().then((c) => c.projects.map((p) => p.slug))).resolves.toEqual(['lumio'])
+  })
+
+  it('refuses the same folder twice', async () => {
+    await invoke(CHANNELS.addProject, { name: 'Lumio', cwd: tmpdir() })
+    await expect(invoke(CHANNELS.addProject, { name: 'Other', cwd: tmpdir() })).rejects.toThrow(
+      /already/i,
+    )
+  })
+
+  it('renames without moving the slug', async () => {
+    const [added] = await invoke<ProjectDescriptor[]>(CHANNELS.addProject, {
+      name: 'Lumio',
+      cwd: tmpdir(),
+    })
+    const after = await invoke<ProjectDescriptor[]>(CHANNELS.updateProject, added.id, {
+      name: 'Lumio Ltd',
+    })
+    expect(after[0].name).toBe('Lumio Ltd')
+    expect(after[0].slug).toBe('lumio')
+  })
+
+  it('reorders projects', async () => {
+    const [first] = await invoke<ProjectDescriptor[]>(CHANNELS.addProject, {
+      name: 'Lumio',
+      cwd: tmpdir(),
+    })
+    const second = (
+      await invoke<ProjectDescriptor[]>(CHANNELS.addProject, {
+        name: 'Studio',
+        cwd: join(tmpdir(), 'studio'),
+      })
+    )[1]
+    const after = await invoke<ProjectDescriptor[]>(CHANNELS.reorderProjects, [
+      second.id,
+      first.id,
+    ])
+    expect(after.map((p) => p.slug)).toEqual(['studio', 'lumio'])
+    await expect(store.read().then((c) => c.projects.map((p) => p.slug))).resolves.toEqual([
+      'studio',
+      'lumio',
+    ])
+  })
+
+  // The milestone's promise: removing a project does not touch its sessions.
+  // The reply has to say where they went, or they drop off the screen until the
+  // next launch — which is why every mutation appends Unsorted.
+  it('keeps a removed project’s sessions reachable under Unsorted', async () => {
+    const [project] = await invoke<ProjectDescriptor[]>(CHANNELS.addProject, {
+      name: 'Lumio',
+      cwd: tmpdir(),
+    })
+    const tab = await openTabIn('lumio')
+    await waitForPrompt(tab.id)
+
+    const after = await invoke<ProjectDescriptor[]>(CHANNELS.removeProject, project.id)
+
+    expect(after.map((p) => p.id)).toEqual([UNSORTED_ID])
+    expect(after[0].activeTabId).toBe(tab.id)
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    await expect(adapter.hasSession(tab.tmuxSession)).resolves.toBe(true)
+  })
+
+  // A detached tab is still in the tab bar: only its client is gone, and its
+  // session is still running. So the tab set a mutation describes against is
+  // the config's, not the manager's — the latter would drop the Unsorted row
+  // this stray needs and leave it nowhere to be drawn.
+  it('lists Unsorted for a stray whose client has detached', async () => {
+    const tab = await openTabIn('stray')
+    await waitForPrompt(tab.id)
+    detachTab(tab.id)
+    await settle(500)
+
+    const projects = await invoke<ProjectDescriptor[]>(CHANNELS.addProject, {
+      name: 'Lumio',
+      cwd: tmpdir(),
+    })
+    expect(projects.map((p) => p.slug)).toEqual(['lumio', UNSORTED_ID])
+  })
+
+  it('records the active tab against the project that owns it', async () => {
+    await invoke(CHANNELS.addProject, { name: 'Lumio', cwd: tmpdir() })
+    const tab = await openTabIn('lumio')
+    ipc.listeners.get(CHANNELS.setActive)?.(null as never, tab.id as never)
+    await settle(200)
+    await expect(store.read().then((c) => c.projects[0].activeTabId)).resolves.toBe(tab.id)
+  })
+
+  // A tab under Unsorted has no project row to record it against, and its
+  // active tab is deliberately not persisted.
+  it('ignores setActive for a tab belonging to no project', async () => {
+    const tab = await openTab()
+    ipc.listeners.get(CHANNELS.setActive)?.(null as never, tab.id as never)
+    await settle(200)
+    await expect(store.read().then((c) => c.projects)).resolves.toEqual([])
+  })
+
+  it('remembers which project is selected', async () => {
+    const [project] = await invoke<ProjectDescriptor[]>(CHANNELS.addProject, {
+      name: 'Lumio',
+      cwd: tmpdir(),
+    })
+    ipc.listeners.get(CHANNELS.setActiveProject)?.(null as never, project.id as never)
+    await settle(200)
+    await expect(store.read().then((c) => c.activeProjectId)).resolves.toBe(project.id)
+  })
+
+  // The tab starts under a slug no project holds: having nowhere to live is
+  // what makes it worth moving.
+  it('moves a tab into a project by renaming its tmux session', async () => {
+    const [project] = await invoke<ProjectDescriptor[]>(CHANNELS.addProject, {
+      name: 'Lumio',
+      cwd: tmpdir(),
+    })
+    const tab = await openTabIn('stray')
+    // The session only exists once tmux has actually created it.
+    await waitForPrompt(tab.id)
+    const before = tab.tmuxSession
+
+    const moved = await invoke<{ projects: ProjectDescriptor[]; tab: TabDescriptor }>(
+      CHANNELS.moveTabToProject,
+      tab.id,
+      project.id,
+    )
+
+    expect(moved.tab.projectSlug).toBe('lumio')
+    expect(moved.tab.id).toBe(tab.id)
+    expect(moved.tab.tmuxSession).toBe(`prcli-lumio-${tab.id}`)
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    await expect(adapter.hasSession(moved.tab.tmuxSession)).resolves.toBe(true)
+    await expect(adapter.hasSession(before)).resolves.toBe(false)
+    // Nothing is stray any more, so there is nothing for Unsorted to hold.
+    expect(moved.projects.map((p) => p.id)).toEqual([project.id])
+    await expect(store.read().then((c) => c.tabs.map((t) => t.tmuxSession))).resolves.toEqual([
+      moved.tab.tmuxSession,
+    ])
+  })
+
+  // The same session name, so there is nothing to rename and nothing to
+  // reattach — the tab keeps its client rather than being torn down for a move
+  // that is already made.
+  it('leaves a tab alone when it is already in the target project', async () => {
+    const [project] = await invoke<ProjectDescriptor[]>(CHANNELS.addProject, {
+      name: 'Lumio',
+      cwd: tmpdir(),
+    })
+    const tab = await openTabIn('lumio')
+    await waitForPrompt(tab.id)
+
+    const moved = await invoke<{ projects: ProjectDescriptor[]; tab: TabDescriptor }>(
+      CHANNELS.moveTabToProject,
+      tab.id,
+      project.id,
+    )
+
+    expect(moved.tab.tmuxSession).toBe(tab.tmuxSession)
+    expect(manager.get(tab.id)?.tmuxSession).toBe(tab.tmuxSession)
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    await expect(adapter.hasSession(tab.tmuxSession)).resolves.toBe(true)
+  })
+
+  // A detached tab is still movable: its session is running, it just has no
+  // client here. The move finds it through `findOrphans`, which has to
+  // synthesise a cwd — so the directory config already holds has to survive.
+  it('moves a detached tab without losing its working directory', async () => {
+    const [project] = await invoke<ProjectDescriptor[]>(CHANNELS.addProject, {
+      name: 'Lumio',
+      cwd: tmpdir(),
+    })
+    const tab = await openTabIn('stray')
+    await waitForPrompt(tab.id)
+    const before = (await store.read()).tabs.find((row) => row.id === tab.id)?.cwd
+    expect(before).toBe(tmpdir())
+    detachTab(tab.id)
+    await settle(500)
+
+    const moved = await invoke<{ tab: TabDescriptor }>(
+      CHANNELS.moveTabToProject,
+      tab.id,
+      project.id,
+    )
+
+    expect(moved.tab.tmuxSession).toBe(`prcli-lumio-${tab.id}`)
+    expect(moved.tab.cwd).toBe(before)
+    await expect(store.read().then((c) => c.tabs.map((t) => t.cwd))).resolves.toEqual([before])
+  })
+
+  it('refuses to move a tab into a project that does not exist', async () => {
+    const tab = await openTab()
+    await expect(invoke(CHANNELS.moveTabToProject, tab.id, 'nope')).rejects.toThrow(/no project/i)
+  })
+
+  // The scan must never see the developer's real ~/Code.
+  it('offers candidates from the projects root, minus the ones already added', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'prcli-root-'))
+    const previous = process.env.PRCLI_PROJECTS_ROOT
+    process.env.PRCLI_PROJECTS_ROOT = root
+    try {
+      for (const name of ['lumio', 'studio']) {
+        await mkdir(join(root, name), { recursive: true })
+        await writeFile(join(root, name, 'package.json'), '{}', 'utf8')
+      }
+      await invoke(CHANNELS.addProject, { name: 'Studio', cwd: join(root, 'studio') })
+
+      const candidates = await invoke<Candidate[]>(CHANNELS.scanCandidates)
+      expect(candidates.map((c) => c.name)).toEqual(['lumio'])
+      expect(candidates[0].markers).toEqual(['package.json'])
+    } finally {
+      if (previous === undefined) delete process.env.PRCLI_PROJECTS_ROOT
+      else process.env.PRCLI_PROJECTS_ROOT = previous
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('answers the folder picker with the chosen path, and null when cancelled', async () => {
+    await expect(invoke(CHANNELS.pickFolder)).resolves.toBeNull()
+    ipc.folderChoice = { canceled: false, filePaths: [tmpdir()] }
+    await expect(invoke(CHANNELS.pickFolder)).resolves.toBe(tmpdir())
+  })
+
+  it('refuses to open a terminal in a directory that is not there', async () => {
+    await expect(
+      invoke(CHANNELS.open, {
+        projectSlug: 'lumio',
+        cwd: join(tmpdir(), 'definitely-not-here-9f3a'),
+      }),
+    ).rejects.toThrow(/not a directory/i)
   })
 })
