@@ -2,6 +2,7 @@ import { dialog, ipcMain, type BrowserWindow } from 'electron'
 import {
   CHANNELS,
   type Candidate,
+  type NotificationConfig,
   type OpenRequest,
   type Preset,
   type ProjectDescriptor,
@@ -386,4 +387,17 @@ export function registerIpc(
     registry.forget(id)
     lastGeometry.delete(id)
   })
+
+  ipcMain.handle(CHANNELS.notifications, async () => (await store.read()).notifications)
+
+  ipcMain.handle(
+    CHANNELS.updateNotifications,
+    (_event, patch: Partial<NotificationConfig>): Promise<NotificationConfig> =>
+      serialise(async () => {
+        const config = await store.read()
+        const notifications = { ...config.notifications, ...patch }
+        await store.write({ ...config, notifications })
+        return notifications
+      }),
+  )
 }

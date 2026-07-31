@@ -26,6 +26,8 @@ export const CHANNELS = {
   restartTab: 'prcli:restartTab',
   dismissTab: 'prcli:dismissTab',
   focusTab: 'prcli:focusTab',
+  notifications: 'prcli:notifications',
+  updateNotifications: 'prcli:updateNotifications',
 } as const
 
 /**
@@ -210,4 +212,8 @@ export interface PrcliApi {
   dismissTab(id: string): void
   /** A clicked toast asking the renderer to select a particular tab. */
   onFocusTab(listener: (tabId: string) => void): () => void
+  /** The stored notification rules, for the sidebar's per-project mute toggle. */
+  notifications(): Promise<NotificationConfig>
+  /** Merges `patch` into the stored notification config and returns the result. */
+  updateNotifications(patch: Partial<NotificationConfig>): Promise<NotificationConfig>
 }

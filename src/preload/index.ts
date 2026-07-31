@@ -50,6 +50,8 @@ const api: PrcliApi = {
     ipcRenderer.on(CHANNELS.focusTab, handler)
     return () => ipcRenderer.removeListener(CHANNELS.focusTab, handler)
   },
+  notifications: () => ipcRenderer.invoke(CHANNELS.notifications),
+  updateNotifications: (patch) => ipcRenderer.invoke(CHANNELS.updateNotifications, patch),
 }
 
 contextBridge.exposeInMainWorld('prcli', api)

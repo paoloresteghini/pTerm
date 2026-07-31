@@ -1,4 +1,5 @@
-import type { TabDescriptor } from '../shared/ipc'
+import type { TabDescriptor, TabState } from '../shared/ipc'
+import { StatusDot } from './StatusDot'
 import { cn } from './lib/cn'
 
 /** The tmux id is 16 hex characters; the first six are plenty to tell tabs apart. */
@@ -9,15 +10,23 @@ function label(tab: TabDescriptor): string {
 export function TabBar({
   tabs,
   activeId,
+  status,
+  dead,
   onActivate,
   onClose,
+  onRestart,
+  onDismiss,
   onNew,
   canOpen,
 }: {
   tabs: TabDescriptor[]
   activeId: string | null
+  status: Record<string, TabState>
+  dead: Record<string, number>
   onActivate: (id: string) => void
   onClose: (id: string) => void
+  onRestart: (tab: TabDescriptor) => void
+  onDismiss: (id: string) => void
   onNew: () => void
   canOpen: boolean
 }) {
@@ -39,19 +48,54 @@ export function TabBar({
               active ? 'bg-bg text-fg shadow-[inset_0_-1px_0_var(--color-accent)]' : 'text-muted',
             )}
           >
-            <span>{label(tab)}</span>
-            <button
-              data-testid={`close-${tab.id}`}
-              aria-label={`Close ${label(tab)}`}
-              onClick={(event) => {
-                // Without this the click also activates the tab being closed.
-                event.stopPropagation()
-                onClose(tab.id)
-              }}
-              className="cursor-default border-none bg-transparent p-0 text-xs leading-none text-inherit"
-            >
-              ×
-            </button>
+            <StatusDot state={status[tab.id] ?? null} testid={`dot-${tab.id}`} />
+            <span className={cn(dead[tab.id] !== undefined && 'line-through opacity-60')}>
+              {label(tab)}
+            </span>
+            {dead[tab.id] !== undefined ? (
+              <>
+                {/* A dead tab keeps its scrollback and offers the two things
+                    worth doing with it. Restart recreates the session under
+                    the same id, cwd, command and type. */}
+                <button
+                  data-testid={`restart-${tab.id}`}
+                  aria-label={`Restart ${label(tab)}`}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onRestart(tab)
+                  }}
+                  className="cursor-default border-none bg-transparent p-0 text-[10px] text-muted hover:text-fg"
+                >
+                  ↻
+                </button>
+                <button
+                  data-testid={`dismiss-${tab.id}`}
+                  aria-label={`Dismiss ${label(tab)}`}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onDismiss(tab.id)
+                  }}
+                  className="cursor-default border-none bg-transparent p-0 text-xs leading-none text-muted hover:text-fg"
+                >
+                  ×
+                </button>
+              </>
+            ) : (
+              // The close button stays exactly as it was for a live tab —
+              // closing kills, and killing a dead session has nothing to do.
+              <button
+                data-testid={`close-${tab.id}`}
+                aria-label={`Close ${label(tab)}`}
+                onClick={(event) => {
+                  // Without this the click also activates the tab being closed.
+                  event.stopPropagation()
+                  onClose(tab.id)
+                }}
+                className="cursor-default border-none bg-transparent p-0 text-xs leading-none text-inherit"
+              >
+                ×
+              </button>
+            )}
           </div>
         )
       })}

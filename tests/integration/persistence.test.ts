@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type {
   Candidate,
+  NotificationConfig,
   ProjectDescriptor,
   RestoreResult,
   TabDescriptor,
@@ -669,5 +670,34 @@ describe('status registry', () => {
     await restoreTabs()
 
     expect((await status())[tab.id]).toBe('waiting')
+  })
+})
+
+describe('notification channels', () => {
+  it('reads the defaults with nothing written yet', async () => {
+    const config = await invoke<NotificationConfig>(CHANNELS.notifications)
+    expect(config.rules.some((rule) => rule.on === 'waiting')).toBe(true)
+  })
+
+  it('merges a patch and persists it to disk', async () => {
+    const before = await invoke<NotificationConfig>(CHANNELS.notifications)
+    const rules = [...before.rules, { project: 'p1', toast: false }]
+
+    const after = await invoke<NotificationConfig>(CHANNELS.updateNotifications, { rules })
+
+    expect(after.rules).toEqual(rules)
+    expect((await store.read()).notifications.rules).toEqual(rules)
+  })
+
+  // updateNotifications merges the patch onto the existing config, so a caller
+  // that only sends `rules` — the sidebar's mute toggle — must not blank out
+  // fields it never mentioned.
+  it('does not disturb fields the patch does not mention', async () => {
+    const before = await invoke<NotificationConfig>(CHANNELS.notifications)
+
+    const after = await invoke<NotificationConfig>(CHANNELS.updateNotifications, { rules: [] })
+
+    expect(after.muteWhenFocused).toBe(before.muteWhenFocused)
+    expect(after.quietHours).toEqual(before.quietHours)
   })
 })

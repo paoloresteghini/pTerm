@@ -9,10 +9,14 @@ import {
   INITIAL_WORKSPACE_STATE,
   activeProject,
   activeTabId,
+  needsYou,
+  projectIdForTab,
+  stateOfProject,
   tabsOfProject,
   workspaceReducer,
 } from './workspace'
-import { UNSORTED_ID } from '../shared/ipc'
+import { projectMuted, toggleProjectMute } from './mute'
+import { UNSORTED_ID, type NotificationConfig, type TabDescriptor } from '../shared/ipc'
 
 export function App() {
   const [state, dispatch] = useReducer(workspaceReducer, INITIAL_WORKSPACE_STATE)
@@ -22,6 +26,11 @@ export function App() {
   // Set once the workspace exists. Until then this window knows nothing about
   // what is selected and must not say anything about it — see the effects.
   const [ready, setReady] = useState(false)
+  // Fetched once alongside status, and kept current from whatever
+  // `updateNotifications` hands back. Null until the initial fetch resolves,
+  // which the mute toggle treats as "nothing to toggle yet" rather than
+  // guessing at a shape it has not seen.
+  const [notifications, setNotifications] = useState<NotificationConfig | null>(null)
 
   const fail = useCallback((reason: unknown) => {
     setError(reason instanceof Error ? reason.message : String(reason))
@@ -60,9 +69,13 @@ export function App() {
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const { projects, tabs, activeProjectId } = await window.prcli.restore()
+      const [{ projects, tabs, activeProjectId }, status, notificationConfig] = await Promise.all(
+        [window.prcli.restore(), window.prcli.status(), window.prcli.notifications()],
+      )
       if (cancelled) return
       dispatch({ type: 'restored', projects, tabs, activeProjectId })
+      dispatch({ type: 'statusSnapshot', status })
+      setNotifications(notificationConfig)
       setReady(true)
     })().catch((reason: unknown) => {
       // `ready` stays false: with no workspace there is nothing to report,
@@ -73,6 +86,16 @@ export function App() {
       cancelled = true
     }
   }, [fail])
+
+  // Every later state comes through here — the initial fetch above only
+  // covers what had already happened before the renderer mounted.
+  useEffect(
+    () =>
+      window.prcli.onStatus(({ tabId, state: tabState }) =>
+        dispatch({ type: 'statusChanged', tabId, state: tabState }),
+      ),
+    [],
+  )
 
   // The one place that tells the main process what is selected, so every path
   // is covered — including the ones nothing calls directly, like a close or a
@@ -89,14 +112,66 @@ export function App() {
 
   // A client stopping is not a session dying. `Ctrl-b d` inside a pane, and
   // the detach restore does before it reattaches, both arrive here with the
-  // session still running, and those tabs must stay.
+  // session still running, and those tabs must stay. What changes when the
+  // session really has died is what happens next — the tab stays, marked
+  // dead, instead of vanishing.
   useEffect(
     () =>
-      window.prcli.onExit(({ id, sessionAlive }) => {
+      window.prcli.onExit(({ id, code, sessionAlive }) => {
         if (sessionAlive) return
-        dispatch({ type: 'removed', id })
+        dispatch({ type: 'died', id, code })
       }),
     [],
+  )
+
+  // A clicked toast asking for a tab that may belong to a project other than
+  // the one on screen. Depends on `state.tabs`/`state.projects` rather than
+  // `[]` so the closure always has the current lookup tables instead of the
+  // ones from first mount — the resubscribe this costs is a synchronous
+  // `removeListener`/`on` pair on every workspace change, cheap next to a
+  // stale closure silently failing to find a tab that has since moved.
+  useEffect(
+    () =>
+      window.prcli.onFocusTab((tabId) => {
+        const tab = state.tabs.find((candidate) => candidate.id === tabId)
+        if (!tab) return
+        dispatch({ type: 'activatedProject', id: projectIdForTab(state.projects, tab) })
+        dispatch({ type: 'activatedTab', id: tabId })
+      }),
+    [state.tabs, state.projects],
+  )
+
+  const restartTab = useCallback(
+    (tab: TabDescriptor) => {
+      // No explicit cols/rows: the tab's Terminal is still mounted, so
+      // `register.ts`'s `lastGeometry` — the size its last resize reported —
+      // is what main attaches at, and the fit that follows the reattach
+      // corrects anything stale. The renderer has nothing fresher to offer.
+      window.prcli
+        .restartTab({ tab })
+        .then((restarted) => dispatch({ type: 'opened', tab: restarted }))
+        .catch(fail)
+    },
+    [fail],
+  )
+
+  const dismissTab = useCallback((id: string) => {
+    window.prcli.dismissTab(id)
+    dispatch({ type: 'dismissed', id })
+  }, [])
+
+  const muted = useCallback(
+    (projectId: string) => (notifications ? projectMuted(notifications.rules, projectId) : false),
+    [notifications],
+  )
+
+  const toggleMute = useCallback(
+    (projectId: string) => {
+      if (!notifications) return
+      const rules = toggleProjectMute(notifications.rules, projectId)
+      window.prcli.updateNotifications({ rules }).then(setNotifications).catch(fail)
+    },
+    [notifications, fail],
   )
 
   useEffect(() => {
@@ -149,6 +224,15 @@ export function App() {
         activeProjectId={state.activeProjectId}
         tabsOf={(id) => tabsOfProject(state, id)}
         activeTabId={currentTabId}
+        status={state.status}
+        projectStateOf={(id) => stateOfProject(state, id)}
+        needsYou={needsYou(state)}
+        onSelectNeedy={(tab) => {
+          dispatch({ type: 'activatedProject', id: projectIdForTab(state.projects, tab) })
+          dispatch({ type: 'activatedTab', id: tab.id })
+        }}
+        muted={muted}
+        onToggleMute={toggleMute}
         onSelectProject={(id) => dispatch({ type: 'activatedProject', id })}
         onSelectTab={(id) => dispatch({ type: 'activatedTab', id })}
         onAdd={() => setAdding(true)}
@@ -191,8 +275,12 @@ export function App() {
         <TabBar
           tabs={currentTabs}
           activeId={currentTabId}
+          status={state.status}
+          dead={state.dead}
           onActivate={(id) => dispatch({ type: 'activatedTab', id })}
           onClose={closeTab}
+          onRestart={restartTab}
+          onDismiss={dismissTab}
           onNew={openTab}
           canOpen={canOpen}
         />

@@ -1,13 +1,21 @@
 import { useRef, useState } from 'react'
-import { UNSORTED_ID, type ProjectDescriptor, type TabDescriptor } from '../shared/ipc'
+import { UNSORTED_ID, type ProjectDescriptor, type TabDescriptor, type TabState } from '../shared/ipc'
 import { cn } from './lib/cn'
 import { Button } from './ui/Button'
+import { NeedsYou } from './NeedsYou'
+import { StatusDot } from './StatusDot'
 
 export function Sidebar({
   projects,
   activeProjectId,
   tabsOf,
   activeTabId,
+  status,
+  projectStateOf,
+  needsYou,
+  onSelectNeedy,
+  muted,
+  onToggleMute,
   onSelectProject,
   onSelectTab,
   onRename,
@@ -20,6 +28,12 @@ export function Sidebar({
   activeProjectId: string | null
   tabsOf: (projectId: string) => TabDescriptor[]
   activeTabId: string | null
+  status: Record<string, TabState>
+  projectStateOf: (projectId: string) => TabState | null
+  needsYou: TabDescriptor[]
+  onSelectNeedy: (tab: TabDescriptor) => void
+  muted: (projectId: string) => boolean
+  onToggleMute: (projectId: string) => void
   onSelectProject: (id: string) => void
   onSelectTab: (id: string) => void
   onRename: (id: string, name: string) => void
@@ -61,6 +75,8 @@ export function Sidebar({
       data-testid="sidebar"
       className="flex w-52 shrink-0 flex-col border-r border-border bg-surface font-mono text-[11px] select-none"
     >
+      <NeedsYou tabs={needsYou} projects={projects} status={status} onSelect={onSelectNeedy} />
+
       <div className="px-2.5 pb-1 pt-3 text-[10px] uppercase tracking-wider text-faint">
         Projects
       </div>
@@ -70,6 +86,7 @@ export function Sidebar({
           const active = project.id === activeProjectId
           const synthetic = project.id === UNSORTED_ID
           const tabs = tabsOf(project.id)
+          const isMuted = muted(project.id)
           return (
             <div key={project.id}>
               <div
@@ -83,6 +100,7 @@ export function Sidebar({
               >
                 {/* ⌘1–9 follows sidebar order, so the number is the shortcut. */}
                 <span className="w-3 text-faint">{index < 9 ? index + 1 : ''}</span>
+                <StatusDot state={projectStateOf(project.id)} testid={`pdot-${project.id}`} />
                 {renamingId === project.id ? (
                   <input
                     data-testid={`rename-input-${project.id}`}
@@ -152,6 +170,14 @@ export function Sidebar({
                     }}
                   />
                   <MenuItem
+                    testid={`pmute-${project.id}`}
+                    label={isMuted ? 'Unmute project' : 'Mute project'}
+                    onClick={() => {
+                      setMenuFor(null)
+                      onToggleMute(project.id)
+                    }}
+                  />
+                  <MenuItem
                     testid={`premove-${project.id}`}
                     label="Remove project"
                     onClick={() => {
@@ -165,6 +191,7 @@ export function Sidebar({
               {active
                 ? tabs.map((tab) => (
                     <div key={tab.id} className="flex items-center gap-1 pl-8 pr-2.5">
+                      <StatusDot state={status[tab.id] ?? null} testid={`sdot-${tab.id}`} />
                       <div
                         data-testid={`stab-${tab.id}`}
                         onClick={() => onSelectTab(tab.id)}
