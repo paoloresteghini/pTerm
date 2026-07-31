@@ -33,6 +33,9 @@ discharged and proved against real tmux.
 - All tmux goes through `TmuxAdapter`.
 - **Target syntax.** `=name` is exact-match. Window- and pane-scoped commands (`set-option`, `show-options`, `display-message`, `split-window`, `list-panes`) need a **trailing colon**: `=name:`. Session-target commands (`has-session`, `kill-session`, `rename-session`, `list-clients`, `show-environment`) must **not** have it. This produced a plausible wrong answer three separate times during design probes — `can't find pane`, `no such window`, an empty format — never an obvious failure.
 - **tmux expands `#{...}` inside `run-shell`'s argument, but not in other command arguments.** `kill-window -t #{window_id}` fails with `-t expects an argument`. Every id in a hook command outside `run-shell` must be a literal, baked in at install time.
+- **A group name is for joining only.** `new-session -t <group>` accepts it even after the founding session is gone (measured). `set-option -t '=<group>:'` does **not** — it fails `no such window` once the founder dies. Every option, window and pane target must name a *live member session*, never the group.
+- **Never rely on a tmux option being shared between group members.** Two design probes disagreed on whether `window-size` propagates. Set every option explicitly on the member (or window) it must apply to. A setting that happens to propagate is not a setting that was made.
+- **Binding a member to a window needs the window INDEX, not just its id.** `select-window -t '=<member>:<index>'`. A bare `select-window -t @7` picks a session tmux chooses, not the one you meant, and a doubled `-t` silently keeps only the last — both bind nothing while exiting 0.
 - A/B every load-bearing assertion: sabotage the production code and watch the test fail. Three tests were found passing against broken code this way on 2026-07-31.
 
 ---
@@ -145,9 +148,10 @@ git commit -m "Let the death hook reap one pane instead of the whole tab"
   - `listSessionsWithGroups(): Promise<{ name: string; group: string }[]>` — `group` is `''` for an ungrouped session.
   - `windowIdOf(session: string): Promise<string>` — the session's current window id, `''` if tmux will not say.
   - `killWindow(windowId: string): Promise<void>` — tolerates an already-gone window.
-  - `selectWindow(session: string, windowId: string): Promise<void>`
+  - `selectWindow(session: string, windowIndex: string): Promise<void>` — binds a member to a window **by index**, not by id.
   - `resizeWindow(windowId: string, cols: number, rows: number): Promise<void>`
   - `setWindowHook(windowId: string, hook: string, command: string): Promise<void>`
+  - `setWindowOption(windowId: string, option: string, value: string): Promise<void>`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -281,9 +285,26 @@ Append to `TmuxAdapter` in `src/main/tmux/adapter.ts`:
     }
   }
 
-  /** Bind a member session to the window it is the view of. */
-  async selectWindow(name: string, windowId: string): Promise<void> {
-    await this.exec(['select-window', '-t', windowId, '-t', `=${name}:`])
+  /**
+   * Bind a member session to the window it is the view of.
+   *
+   * By INDEX, and with the member named. Measured: a bare `select-window -t @7`
+   * binds whichever session tmux picks — in the probe, the wrong one — and a
+   * doubled `-t` silently keeps only the last, so both bind nothing and exit 0.
+   * Members of a group share one window list, so the index is the same for all
+   * of them and naming the member is what makes this unambiguous.
+   */
+  async selectWindow(name: string, windowIndex: string): Promise<void> {
+    await this.exec(['select-window', '-t', `=${name}:${windowIndex}`])
+  }
+
+  /**
+   * A window-scoped option. `remain-on-exit` is set this way rather than on the
+   * session so a sibling pane's window is left alone — measured: the sibling
+   * window reads unset afterwards.
+   */
+  async setWindowOption(windowId: string, option: string, value: string): Promise<void> {
+    await this.exec(['set-option', '-w', '-t', windowId, option, value])
   }
 
   async resizeWindow(windowId: string, cols: number, rows: number): Promise<void> {
@@ -304,12 +325,6 @@ Append to `TmuxAdapter` in `src/main/tmux/adapter.ts`:
 
 Run: `npx vitest run tests/integration/adapter.test.ts`
 Expected: PASS.
-
-Note on `selectWindow`: if tmux rejects the doubled `-t`, use
-`['select-window', '-t', windowId]` and confirm by test that it binds the
-intended member — `select-window` acts on the window's session, and a member
-sharing the window list needs the session named explicitly. Whichever form
-passes the Task 5 binding test is the correct one; do not guess.
 
 - [ ] **Step 5: Commit**
 
@@ -581,18 +596,25 @@ In `src/main/sessions/manager.ts`:
 
     // Sizing is explicit rather than left to `window-size latest`, which fixes
     // a window's size when a client BEGINS viewing it and did not re-size on a
-    // later select-window. Set on the group once; the option is shared by every
-    // member (measured).
-    await this.adapter.setSessionOption(group, 'window-size', 'manual')
+    // later select-window.
+    //
+    // Set on each member by name, never once on the group: two probes disagreed
+    // about whether this option propagates between members, and a setting that
+    // happens to propagate is not a setting that was made. The group name is
+    // also not a valid option target once the founder has gone.
+    await this.adapter.setSessionOption(sibling.record.tmuxSession, 'window-size', 'manual')
 
-    const windowId = await this.adapter.newWindow({
-      group,
+    // The new window is created through a LIVE member, not the group name.
+    const window = await this.adapter.newWindow({
+      member: sibling.record.tmuxSession,
       cwd,
       command: input.command,
       env: { PRCLI_TAB_ID: id },
     })
     await this.adapter.newGroupMember(group, tmuxSession)
-    await this.adapter.selectWindow(tmuxSession, windowId)
+    await this.adapter.setSessionOption(tmuxSession, 'window-size', 'manual')
+    // By index, with the member named. See the adapter method's comment.
+    await this.adapter.selectWindow(tmuxSession, window.index)
 
     const record: PaneRecord = {
       id,
@@ -605,7 +627,7 @@ In `src/main/sessions/manager.ts`:
     return this.attach(record, {
       cols: input.cols ?? DEFAULT_COLS,
       rows: input.rows ?? DEFAULT_ROWS,
-      windowId,
+      windowId: window.id,
     })
   }
 ```
@@ -626,17 +648,22 @@ Add the two adapter methods this uses, beside those from Task 2:
    * argument outside `run-shell`.
    */
   async newWindow(input: {
-    group: string
+    /** A LIVE member session, never the group name — see Global Constraints. */
+    member: string
     cwd: string
     command?: string
     env?: Record<string, string>
-  }): Promise<string> {
-    const args = ['new-window', '-d', '-P', '-F', '#{window_id}', '-t', `=${input.group}:`, '-c', input.cwd]
+  }): Promise<{ id: string; index: string }> {
+    const args = [
+      'new-window', '-d', '-P', '-F', '#{window_id} #{window_index}',
+      '-t', `=${input.member}:`, '-c', input.cwd,
+    ]
     for (const [key, value] of Object.entries(input.env ?? {})) {
       args.push('-e', `${key}=${value}`)
     }
     if (input.command) args.push(input.command)
-    return (await this.exec(args)).trim()
+    const [id, index] = (await this.exec(args)).trim().split(' ')
+    return { id, index }
   }
 
   /** Join `name` to `group` as a new view onto its shared window list. */
@@ -750,7 +777,10 @@ supplied, resolve it after `session.start()` and install the hook then:
         if (!command) return
         // The two go on together or not at all: `remain-on-exit` without a hook
         // to reap turns every ordinary `exit` into a session nothing removes.
-        await this.adapter.setSessionOption(record.tmuxSession, 'remain-on-exit', 'on')
+        //
+        // Both are window-scoped, so a sibling pane's window is untouched by
+        // either — measured: the sibling window reads the option unset.
+        await this.adapter.setWindowOption(windowId, 'remain-on-exit', 'on')
         await this.adapter.setWindowHook(windowId, 'pane-died', command)
       })()
     }
@@ -984,7 +1014,8 @@ Written after this plan lands, against the same spec:
 
 **Spec coverage.** Object model → Tasks 5–7. Naming and identity → Task 3, asserted in Task 8. Geometry → Task 5. Death and the blocker → Tasks 1, 6. Finding 1 (`window_panes` counts dead panes) → not needed; the model gives one pane per window, recorded in the spec so nobody reaches for it. Finding 2 (member falls back to a sibling's window) → Task 1's ordering test. Finding 3 (bind before attach) → Task 5's A/B. Finding 4 (colon rule) → Global Constraints, exercised throughout Task 2. Config v5, restore, IPC, renderer, `⊞n`, aggregation → plan 2, listed above.
 
+**Pre-flight scan (2026-07-31), five defects found in this plan and fixed before dispatch.** All measured on `-L prcli-test`: `selectWindow`'s doubled `-t` was a silent no-op that exits 0 and binds nothing; `newWindow` had to return the window index as well as its id, because binding needs the index; `remain-on-exit` moved to a window option so siblings are untouched; the claim that options propagate between group members was contradicted by a second probe and is now forbidden to rely on; and a group name stops being a valid option target once its founder dies, so it is used for `new-session -t` only. Every one of these would have produced a passing-looking command that did nothing.
+
 **Known soft spots, stated rather than hidden.**
-- Task 2's `selectWindow` argument form is not yet verified; the task says so and makes the Task 5 binding test the arbiter rather than guessing.
 - Task 6 moves hook installation off the spawn and onto an async resolution, which introduces a genuine race with a fast-exiting command. The task names the two existing tests that cover it and the fix if they go flaky, rather than assuming they won't.
 - `moveToProject`'s rollback is specified as a rule and a test but not as literal code; it is the one place in this plan where the implementer writes the body from a stated contract.

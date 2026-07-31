@@ -31,7 +31,10 @@ false on tmux 3.7b.
 | grouped members, one client each | **Independent current window per member.** |
 | window sizes, `window-size latest` | Each window holds its own size, fixed when a client begins viewing it. |
 | window sizes, `window-size manual` + `resize-window` | Exact, independent, identical as read from every member. |
-| `window-size` set on one member | **Shared across the group** — set on `g0`, reads `manual` on `g1`, global still `latest`. |
+| `window-size` set on one member | **Contradicted.** One probe read it back as shared across the group; a later probe set it on the founder and read the member back as unset. Nothing may rely on propagation — set every option explicitly on the member it must apply to. |
+| `select-window -t @<id>` alone, or with a doubled `-t` | **Binds nothing, exits 0.** Binding a member needs `-t '=<member>:<index>'`. |
+| `set-option -t '=<group>:'` after the founder dies | **`no such window`.** A group name is valid for `new-session -t` only; option and window targets must name a live member. |
+| `set-option -w -t <windowId> remain-on-exit on` | Per window; the sibling window reads it unset. |
 | `#{session_group}` on an ungrouped session | **Empty.** |
 | `#{session_group}` on members | The founding session's name, readable via `-t '=name:'`. |
 | founding member killed | Group name and windows survive; `group_size` drops. |
@@ -150,8 +153,12 @@ pinned to one window and attaches once — and it is exactly the kind of
 "works because of an incidental ordering" that has already shipped as an 80×24
 defect twice. Manual sizing is deterministic and states the intent.
 
-`window-size` is shared across group members (measured), so it is set once per
-group rather than per member.
+`window-size` is set explicitly on **every member session**, not once on the
+group. An early probe read the option back as shared between members and a later
+one did not, so propagation is not a property this design may lean on — and a
+group name stops being a valid option target the moment its founding session
+dies. `remain-on-exit` is narrower still and goes on the *window*
+(`set-option -w`), which measured as leaving a sibling pane's window untouched.
 
 ## Death, and the blocker this discharges
 
