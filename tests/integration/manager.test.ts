@@ -650,6 +650,52 @@ describe('SessionManager.moveTabToProject', () => {
     for (const pane of panes) expect(pane.projectSlug).toBe('lumio')
     manager.detachAll()
   })
+
+  // The rollback needs one of its own. A rename back can be refused too —
+  // something took the source name in the meantime — and the loop used to
+  // abort on the spot: every pane it had not reached yet stayed in the
+  // destination project, and the error the caller saw was the UNDO's, which
+  // describes the recovery rather than the cause and describes it for a tab
+  // that is in fact broken.
+  it('keeps undoing after one undo is refused, and says the tab may be split', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const manager = new SessionManager(adapter)
+    const founder = manager.open({ projectSlug: 'lumio', cwd: tmpdir() })
+    await waitFor(manager, founder.id, /\$|%|#/)
+    for (let i = 0; i < 2; i++) {
+      const pane = await manager.splitTab({ paneId: founder.id })
+      await waitFor(manager, pane.id, /\$|%|#/)
+    }
+
+    // The rename order is `panesOfTab`'s, so take it from there rather than
+    // assuming which sibling tmux lists first.
+    const order = await manager.panesOfTab(founder.id)
+    expect(order).toHaveLength(3)
+    const [first, middle, last] = order
+
+    const rename = adapter.renameSession.bind(adapter)
+    vi.spyOn(adapter, 'renameSession').mockImplementation(async (from, to) => {
+      // The move itself fails on the last pane, so the first two need undoing.
+      if (to === `prcli-gco-${last.id}`) throw new Error('destination name in use')
+      // And the middle pane's undo is refused, the way a recreated source
+      // name would refuse it.
+      if (from === `prcli-gco-${middle.id}`) throw new Error('source name in use')
+      return rename(from, to)
+    })
+
+    await expect(manager.moveTabToProject(founder.id, 'gco')).rejects.toThrow(
+      /may now be split across projects/,
+    )
+
+    // The undo the loop reached AFTER the refused one still ran.
+    expect(await sessionExists(first.tmuxSession)).toBe(true)
+    // The one that was refused is where it was left, which is what the
+    // message warns about.
+    expect(await sessionExists(`prcli-gco-${middle.id}`)).toBe(true)
+    // And the pane whose rename failed never moved at all.
+    expect(await sessionExists(last.tmuxSession)).toBe(true)
+    manager.detachAll()
+  })
 })
 
 describe('SessionManager tab id in the session environment', () => {

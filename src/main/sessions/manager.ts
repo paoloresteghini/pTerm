@@ -712,10 +712,33 @@ export class SessionManager {
         renamed.push({ from: pane.tmuxSession, to })
       }
     } catch (error) {
-      for (const { from, to } of renamed.reverse()) {
-        await this.adapter.renameSession(to, from)
+      // Every undo is attempted, and one that is refused does not stop the
+      // rest. A rename back can genuinely fail — something took the source
+      // name in the meantime, tmux is transiently unavailable — and abandoning
+      // the loop there would leave the already-moved panes in the destination
+      // project: the tab split across two projects, which is the single
+      // outcome this method exists to prevent, arrived at silently.
+      const undoFailures: unknown[] = []
+      for (const { from, to } of [...renamed].reverse()) {
+        try {
+          await this.adapter.renameSession(to, from)
+        } catch (undoError) {
+          undoFailures.push(undoError)
+        }
       }
-      throw error
+      // When the undo worked, the caller hears about what actually went
+      // wrong. Replacing it with an undo's error — which is what happened
+      // before — describes the recovery instead of the cause, and describes
+      // it for a tab that is in fact intact.
+      if (undoFailures.length === 0) throw error
+      // When it did not, that is the more serious condition and has to be
+      // said outright rather than inferred from a rename error. The original
+      // rides along first, so nothing is lost.
+      throw new AggregateError(
+        [error, ...undoFailures],
+        `moveTabToProject: tab ${tabId} may now be split across projects — ` +
+          `${undoFailures.length} of ${renamed.length} renames could not be undone`,
+      )
     }
 
     const moved: PaneRecord[] = []
