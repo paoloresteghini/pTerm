@@ -112,6 +112,7 @@ export class PtySession {
             reporter: this.options.deathReporter,
             tabId: this.options.tabId,
             tmuxSession: this.tmuxSession,
+            windowId: '', // Task 6 supplies the real one
           })
         : null
     if (deathHook) {

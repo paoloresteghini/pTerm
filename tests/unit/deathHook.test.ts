@@ -10,12 +10,13 @@ describe('deathHookCommand', () => {
       reporter: '/Users/paolo/.prcli/prcli-hook',
       tabId: ID,
       tmuxSession: SESSION,
+      windowId: '@7',
     })
 
     expect(command).toBe(
       `run-shell "PRCLI_TAB_ID=${ID} '/Users/paolo/.prcli/prcli-hook' Exit ` +
         `'#{pane_dead_status}' '#{pane_dead_signal}'" ; ` +
-        `kill-session -t =${SESSION}`,
+        `kill-session -t =${SESSION} ; kill-window -t @7`,
     )
   })
 
@@ -27,6 +28,7 @@ describe('deathHookCommand', () => {
       reporter: '/Users/paolo/.prcli/prcli-hook',
       tabId: ID,
       tmuxSession: SESSION,
+      windowId: '@7',
     })
 
     expect(command).toContain("'#{pane_dead_signal}'")
@@ -37,6 +39,7 @@ describe('deathHookCommand', () => {
       reporter: '/Users/paolo/Application Support/prcli-hook',
       tabId: ID,
       tmuxSession: SESSION,
+      windowId: '@7',
     })
 
     expect(command).toContain("'/Users/paolo/Application Support/prcli-hook'")
@@ -58,7 +61,7 @@ describe('deathHookCommand', () => {
     // is deliberately full of them.
     ['a hash', '/Users/paolo/#{x}/prcli-hook'],
   ])('refuses a reporter path containing %s', (_label, reporter) => {
-    expect(deathHookCommand({ reporter, tabId: ID, tmuxSession: SESSION })).toBeNull()
+    expect(deathHookCommand({ reporter, tabId: ID, tmuxSession: SESSION, windowId: '@7' })).toBeNull()
   })
 
   it('refuses a tab id that is not sixteen hex characters', () => {
@@ -67,7 +70,41 @@ describe('deathHookCommand', () => {
         reporter: '/Users/paolo/.prcli/prcli-hook',
         tabId: "abc'; rm -rf /",
         tmuxSession: SESSION,
+        windowId: '@7',
       }),
     ).toBeNull()
+  })
+
+  it('reaps the dying pane\'s window and member session, in that order', () => {
+    const command = deathHookCommand({
+      reporter: '/tmp/prcli/prcli-hook',
+      tabId: 'a1b2c3d4e5f60718',
+      tmuxSession: 'prcli-lumio-a1b2c3d4e5f60718',
+      windowId: '@7',
+    })
+    // The member's client must be gone before its window is: a member whose
+    // bound window dies first falls back to a SIBLING's window, and two xterms
+    // then render the same pane. Measured 2026-07-31.
+    expect(command).toBe(
+      `run-shell "PRCLI_TAB_ID=a1b2c3d4e5f60718 '/tmp/prcli/prcli-hook' Exit ` +
+        `'#{pane_dead_status}' '#{pane_dead_signal}'" ; ` +
+        `kill-session -t =prcli-lumio-a1b2c3d4e5f60718 ; kill-window -t @7`,
+    )
+  })
+
+  // tmux does not expand formats in a command argument outside run-shell, so the
+  // window id is baked in literally. A format arriving here would reach tmux
+  // unexpanded and kill-window would fail with "-t expects an argument".
+  it('refuses a window id that is not a literal @<digits>', () => {
+    for (const windowId of ['#{window_id}', '@', '7', '@7;kill-server', '']) {
+      expect(
+        deathHookCommand({
+          reporter: '/tmp/prcli/prcli-hook',
+          tabId: 'a1b2c3d4e5f60718',
+          tmuxSession: 'prcli-lumio-a1b2c3d4e5f60718',
+          windowId,
+        }),
+      ).toBeNull()
+    }
   })
 })
