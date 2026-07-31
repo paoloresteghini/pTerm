@@ -52,6 +52,26 @@ async function reattachedSize(name: string, stalePid: string): Promise<string[]>
     .map((client) => client.split(' ')[1])
 }
 
+/** Whether a tmux session by this name currently exists. */
+async function sessionExists(name: string): Promise<boolean> {
+  try {
+    await run('tmux', ['-L', SOCKET, 'has-session', '-t', `=${name}`])
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** What tmux's session-scoped environment holds for `key`, or `''` if unset. */
+async function sessionEnv(name: string, key: string): Promise<string> {
+  try {
+    const { stdout } = await run('tmux', ['-L', SOCKET, 'show-environment', '-t', `=${name}`, key])
+    return stdout.trim()
+  } catch {
+    return ''
+  }
+}
+
 function waitFor(
   manager: SessionManager,
   id: string,
@@ -290,5 +310,95 @@ describe('SessionManager.findOrphans', () => {
     await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-s', 'not-ours', 'sleep', '600'])
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
     await expect(manager.findOrphans()).resolves.toEqual([])
+  })
+})
+
+describe('SessionManager tab id in the session environment', () => {
+  it('puts the tab id in the session environment, where a hook can read it', async () => {
+    const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
+    const record = manager.open({ projectSlug: 'lumio', cwd: tmpdir(), type: 'shell' })
+
+    // Ask tmux what the session's environment holds, rather than asking the
+    // shell — the shell may not have finished starting, and the session
+    // environment is the thing that outlives this client anyway.
+    await expect
+      .poll(() => sessionEnv(record.tmuxSession, 'PRCLI_TAB_ID'), { timeout: 10_000 })
+      .toBe(`PRCLI_TAB_ID=${record.id}`)
+
+    manager.detach(record.id)
+  })
+
+  it('keeps the same tab id in the environment across a detach and reattach', async () => {
+    const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
+    const record = manager.open({ projectSlug: 'lumio', cwd: tmpdir(), type: 'shell' })
+    await expect.poll(async () => sessionExists(record.tmuxSession), { timeout: 10_000 }).toBe(true)
+
+    manager.detach(record.id)
+    const again = manager.open({
+      id: record.id,
+      projectSlug: 'lumio',
+      cwd: tmpdir(),
+      tmuxSession: record.tmuxSession,
+      type: 'shell',
+    })
+
+    // The id is the second half of the session name and does not change, so a
+    // reattached session's environment is already correct — which is why tmux
+    // not updating it on reattach is right rather than a limitation.
+    expect(again.id).toBe(record.id)
+    await expect
+      .poll(() => sessionEnv(record.tmuxSession, 'PRCLI_TAB_ID'), { timeout: 10_000 })
+      .toBe(`PRCLI_TAB_ID=${record.id}`)
+
+    manager.detach(record.id)
+  })
+
+  // The literal fix — merging the id into the spawned tmux client's own
+  // process env — passes the two tests above but fails this one: tmux does
+  // not populate a session's environment from the env of whatever process
+  // happened to run `new-session`. That only seeds the tmux *server's*
+  // global environment, and only once, at server start. A second session
+  // opened later on the same (already-running) server would silently read
+  // back the *first* session's id instead of its own. `-e` on `new-session`
+  // is what actually scopes it per session.
+  it('gives two sessions on the same server their own distinct tab id', async () => {
+    const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
+    const first = manager.open({ projectSlug: 'lumio', cwd: tmpdir(), type: 'shell' })
+    const second = manager.open({ projectSlug: 'gco', cwd: tmpdir(), type: 'shell' })
+    expect(first.id).not.toBe(second.id)
+
+    await expect
+      .poll(() => sessionEnv(first.tmuxSession, 'PRCLI_TAB_ID'), { timeout: 10_000 })
+      .toBe(`PRCLI_TAB_ID=${first.id}`)
+    await expect
+      .poll(() => sessionEnv(second.tmuxSession, 'PRCLI_TAB_ID'), { timeout: 10_000 })
+      .toBe(`PRCLI_TAB_ID=${second.id}`)
+
+    manager.detach(first.id)
+    manager.detach(second.id)
+  })
+
+  it('carries the tab type on the record and through a move', async () => {
+    const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
+    const record = manager.open({
+      projectSlug: 'lumio',
+      cwd: tmpdir(),
+      command: 'sleep 600',
+      type: 'preset',
+    })
+    await expect.poll(async () => sessionExists(record.tmuxSession), { timeout: 10_000 }).toBe(true)
+
+    const moved = await manager.moveToProject(record.id, 'gco')
+
+    // A tab that was a preset before the move is still a preset after it.
+    expect(moved.type).toBe('preset')
+    manager.detach(moved.id)
+  })
+
+  it('defaults an unspecified type to shell', () => {
+    const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
+    const record = manager.open({ projectSlug: 'lumio', cwd: tmpdir() })
+    expect(record.type).toBe('shell')
+    manager.detach(record.id)
   })
 })

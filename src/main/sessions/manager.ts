@@ -100,6 +100,17 @@ export class SessionManager {
       cols,
       rows,
       command: record.command,
+      // What the hook script reads to say which tab an event came from.
+      //
+      // tmux gives a session the client environment it was *created* with, and
+      // a reattach does not update it. That is right rather than a limitation:
+      // the id is the second half of the session name and never changes, so a
+      // session created by a previous run already holds the correct value.
+      //
+      // Every tab gets this, not only `claude` tabs. The way this app is used
+      // is to open a tab and type `claude` into it, and a type field that
+      // decided who got an id would leave exactly those sessions dark.
+      env: { PRCLI_TAB_ID: id },
     })
 
     const entry: Entry = { record, session, cols, rows }

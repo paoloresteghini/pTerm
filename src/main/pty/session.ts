@@ -46,6 +46,26 @@ export class PtySession {
       '-c',
       this.options.cwd,
     ]
+    // Set session-scoped environment with `-e`, not by putting it in the
+    // spawned tmux client's own process env. tmux's per-session environment
+    // is not populated from the env of whichever process happens to run
+    // `new-session` — that only seeds the server's *global* environment, and
+    // only once, when the server itself starts. Every session created
+    // afterwards on the same (already-running) server would silently read
+    // back the *first* session's value instead of its own, and even that
+    // first session's value would not show up under a session-scoped
+    // `show-environment -t` query, only under `-g`. `-e` is applied before
+    // the initial pane's shell spawns and is scoped to this session, so each
+    // tab gets its own value regardless of server start order.
+    //
+    // On the adopt path (`-A` onto a session that already exists), `-e` is
+    // simply ignored by tmux — which is fine here, because the id is the
+    // second half of the session name and never changes, so a session
+    // created by a previous run already holds the correct value.
+    for (const [key, value] of Object.entries(this.options.env ?? {})) {
+      if (value === undefined) continue
+      args.push('-e', `${key}=${value}`)
+    }
     if (this.options.command) args.push(this.options.command)
 
     // Chained into the same invocation rather than issued afterwards: a
@@ -56,7 +76,11 @@ export class PtySession {
     // A session attached from a plain terminal will also have it off.
     args.push(';', 'set-option', 'status', 'off')
 
-    const env = { ...process.env, ...this.options.env }
+    // This is the tmux *client* process's own env, not the session's — that
+    // is what the `-e` args above are for. Spreading `this.options.env` in
+    // here too would be dead weight at best (it does not reach the session)
+    // and misleading at worst.
+    const env = { ...process.env }
     // Electron sets this when re-execing as Node; leaking it breaks child shells.
     delete env.ELECTRON_RUN_AS_NODE
     env.TERM = 'xterm-256color'
