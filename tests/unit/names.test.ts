@@ -90,10 +90,23 @@ describe('tabIdFromGroupName', () => {
   // decodeSessionName: a group name keeps the slug it was founded with, so
   // after a move to `gco` the group still says `lumio`. The id is the only
   // field that stays true, and it is the only one anything may read.
-  it('returns the same id after the tab has moved project', () => {
-    const founded = 'prcli-lumio-a1b2c3d4e5f60718'
-    expect(tabIdFromGroupName(founded)).toBe('a1b2c3d4e5f60718')
-    expect(decodeSessionName(founded)?.projectSlug).toBe('lumio')
+  // A pure function cannot be made to move anything, and the previous version
+  // of this test did not try — it read a constant twice and asserted both
+  // halves of it, which the test above already covers. What a move actually
+  // leaves behind is two names for one tab that agree on nothing but the id,
+  // so that is what is built here and compared. The proof that a real move
+  // produces that state is `manager.test.ts`'s "reads each pane's own project
+  // slug, not the group's stale one", which renames through tmux.
+  it('reads the same id out of the founding group name and the moved member name', () => {
+    const id = 'a1b2c3d4e5f60718'
+    const founded = encodeSessionName({ projectSlug: 'lumio', id })
+    const moved = encodeSessionName({ projectSlug: 'gco', id })
+
+    expect(tabIdFromGroupName(founded)).toBe(decodeSessionName(moved)?.id)
+    // And the field nothing may read has genuinely diverged, so the assertion
+    // above is not passing because the two names are the same string.
+    expect(decodeSessionName(founded)?.projectSlug)
+      .not.toBe(decodeSessionName(moved)?.projectSlug)
   })
 
   it('returns null for anything that is not an encoded prcli name', () => {

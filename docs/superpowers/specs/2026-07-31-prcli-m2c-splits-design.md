@@ -190,12 +190,19 @@ stays in the group's shared window list holding a dead pane. So the hook reaps
 both:
 
 ```
-run-shell "<report>" ; kill-window -t <window> ; kill-session -t =<member>
+run-shell "<report>" ; kill-session -t =<member> ; kill-window -t <window>
 ```
 
-Order matters, and is covered by finding 2 below. When the dying pane is the
-tab's only pane, `kill-window` takes the last window and every member with it —
-which is the correct outcome, and is what happens today.
+Order matters, and is covered by finding 2 below: the member's client must be
+gone before its window is, or the member falls back to a sibling's window and
+two xterms render the same pane. When the dying pane is the tab's only pane,
+`kill-window` takes the last window and every member with it — which is the
+correct outcome, and is what happens today.
+
+The cost of that order is that a tmux command list aborts at the first failure
+(measured), so a `kill-session` that fails — a name gone stale after a move —
+forfeits the `kill-window` behind it. `moveTabToProject` therefore reinstalls
+each hook under the new name before it returns.
 
 `deathHookCommand`'s guard applies unchanged to the added target, and it keeps
 its all-or-nothing rule: a command it refuses means no `remain-on-exit` either,
