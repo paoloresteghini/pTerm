@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { projectMuted, toggleProjectMute } from '../../src/renderer/mute'
-import type { Rule } from '../../src/shared/ipc'
+import { resolve } from '../../src/main/notify/rules'
+import type { NotificationConfig, Rule } from '../../src/shared/ipc'
 
 describe('projectMuted', () => {
   it('is false with no rules at all', () => {
@@ -35,7 +36,10 @@ describe('projectMuted', () => {
 describe('toggleProjectMute', () => {
   it('appends the mute rule when unmuted', () => {
     const after = toggleProjectMute([], 'p1')
-    expect(after).toEqual([{ project: 'p1', toast: false }])
+    // `sound: null` too, not just `toast: false` — otherwise a muted project
+    // still plays whatever sound the global rule for that state names. See
+    // `toggleProjectMute`'s comment.
+    expect(after).toEqual([{ project: 'p1', toast: false, sound: null }])
   })
 
   it('removes the mute rule when muted', () => {
@@ -75,5 +79,30 @@ describe('toggleProjectMute', () => {
       { project: 'p1', toast: false },
     ]
     expect(toggleProjectMute(rules, 'p1')).toEqual([])
+  })
+
+  // The actual bug, end to end through `resolve` rather than just the shape
+  // of the written rule: a user who has picked a sound for `waiting`
+  // globally must hear nothing at all for a project they have muted — not
+  // "no popup, but still the chime". Before the fix this failed because
+  // `resolve` only overrides `sound` from a rule that states it, and the
+  // mute rule stated only `toast: false`.
+  it('silences the sound too, not just the popup', () => {
+    const config: NotificationConfig = {
+      rules: [
+        { on: 'waiting', toast: true, sound: 'Funk', urgency: 'high' },
+        ...toggleProjectMute([], 'p1'),
+      ],
+      muteWhenFocused: false,
+      quietHours: null,
+    }
+    const outcome = resolve(config, {
+      state: 'waiting',
+      projectId: 'p1',
+      attended: false,
+      now: new Date('2026-07-30T14:00:00'),
+    })
+    expect(outcome.toast).toBe(false)
+    expect(outcome.sound).toBeNull()
   })
 })

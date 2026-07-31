@@ -1,4 +1,4 @@
-import { createServer, type Server, type Socket } from 'node:net'
+import { connect, createServer, type Server, type Socket } from 'node:net'
 import { rm } from 'node:fs/promises'
 import { MAX_LINE_BYTES, parseHookLine, type HookEventMessage } from './protocol'
 
@@ -31,6 +31,25 @@ const MAX_SOCKET_PATH_BYTES = 104
 const MAX_BUFFER_BYTES = MAX_LINE_BYTES * 128
 
 /**
+ * Whether a live process is actually accepting connections on `path`.
+ *
+ * A unix socket file can exist with nothing behind it — exactly what a
+ * crashed process leaves, and what makes `listen` fail `EADDRINUSE` on the
+ * next launch. Connecting is the only way to tell that apart from a second
+ * live process genuinely holding the socket open.
+ */
+function probeListening(path: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = connect(path)
+    socket.once('connect', () => {
+      socket.destroy()
+      resolve(true)
+    })
+    socket.once('error', () => resolve(false))
+  })
+}
+
+/**
  * Listens for hook events on a unix socket.
  *
  * Holds no state and decides nothing: it parses lines and emits them. What a
@@ -60,21 +79,42 @@ export class HookServer {
       )
     }
 
-    // A unix socket file outlives the process that created it, so a crash
-    // leaves one behind and `listen` fails EADDRINUSE on the next launch.
-    // Removing it is safe only because `requestSingleInstanceLock` guarantees
-    // there is no second live instance to steal the socket from.
-    await rm(this.socketPath, { force: true })
-
-    const server = createServer((connection) => this.accept(connection))
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject)
-      server.listen(this.socketPath, () => {
-        server.removeListener('error', reject)
-        resolve()
+    const attempt = (): Promise<Server> =>
+      new Promise<Server>((resolve, reject) => {
+        const server = createServer((connection) => this.accept(connection))
+        server.once('error', reject)
+        server.listen(this.socketPath, () => {
+          server.removeListener('error', reject)
+          resolve(server)
+        })
       })
-    })
-    this.server = server
+
+    try {
+      this.server = await attempt()
+      return
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw error
+    }
+
+    // A unix socket file outlives the process that created it, so a crash
+    // leaves one behind and `listen` fails EADDRINUSE on the next launch —
+    // that failure alone does not say which of those two this is.
+    // `requestSingleInstanceLock` does not settle it either: it guards one
+    // Electron *app identity*, and this machine runs a packaged
+    // `/Applications/PRCLI.app` alongside a dev `electron-forge start` at the
+    // same time, each with its own identity and its own lock (the ledger
+    // records this — it is how a config-mtime drift was explained). Under
+    // that real condition, unlinking unconditionally would steal the socket
+    // out from under the first instance, which would then go deaf with no
+    // error anywhere. Probing first tells the two apart: a live process
+    // answering means genuinely in use, so this refuses loudly instead.
+    if (await probeListening(this.socketPath)) {
+      throw new Error(
+        `HookServer: ${this.socketPath} is already in use by another live process — refusing to steal it.`,
+      )
+    }
+    await rm(this.socketPath, { force: true })
+    this.server = await attempt()
   }
 
   private accept(connection: Socket): void {

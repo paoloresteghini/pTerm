@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { connect } from 'node:net'
+import { connect, createServer } from 'node:net'
 import { mkdtemp, rm, writeFile, mkdir, chmod } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -217,6 +217,54 @@ describe('HookServer', () => {
 
     server = new HookServer(socket)
     await expect(server.start()).resolves.toBeUndefined()
+  })
+
+  // M2: the old comment justified an unconditional unlink-before-bind with
+  // "safe only because requestSingleInstanceLock guarantees there is no
+  // second live instance" — a guarantee the ledger's own notes record as
+  // false on this exact machine, where a packaged /Applications/PRCLI.app
+  // and a dev `electron-forge start` are different app identities and each
+  // acquires its own lock. Under that real condition, unlinking
+  // unconditionally would steal the socket out from under the first
+  // instance, which would then go deaf with no error anywhere.
+  it('does not steal a socket a live process is actually using', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'prcli-srv-'))
+    const socket = join(dir, 'hook.sock')
+
+    // A real listener on the path — stands in for a second live instance —
+    // not the plain-file stand-in the "stale socket" test above uses. Its
+    // connection handler destroys immediately: this test only needs to prove
+    // the *bind* survives, not exercise a full protocol round trip.
+    const owner = createServer((c) => c.destroy())
+    await new Promise<void>((resolve, reject) => {
+      owner.once('error', reject)
+      owner.listen(socket, () => {
+        owner.removeAllListeners('error')
+        resolve()
+      })
+    })
+
+    try {
+      server = new HookServer(socket)
+      await expect(server.start()).rejects.toThrow(/already in use/i)
+      server = null
+
+      // Still bound to `owner` — not unlinked out from under it. A fresh
+      // connection succeeding is proof: an unlinked-and-abandoned path would
+      // refuse it (ENOENT) instead.
+      await expect(
+        new Promise<void>((resolve, reject) => {
+          const probe = connect(socket)
+          probe.once('connect', () => {
+            probe.destroy()
+            resolve()
+          })
+          probe.once('error', reject)
+        }),
+      ).resolves.toBeUndefined()
+    } finally {
+      await new Promise<void>((resolve) => owner.close(() => resolve()))
+    }
   })
 
   it('says plainly when the path is too long for a unix socket', async () => {

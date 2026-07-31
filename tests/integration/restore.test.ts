@@ -173,6 +173,45 @@ describe('restoreWorkspace', () => {
       activeProjectId: null,
     })
   })
+
+  // M6: every fixture above is a v3 row with no `type` at all, so the one
+  // line here that matters most — `{ ...orphan, cwd: row.cwd, command:
+  // row.command, type: row.type }` in restoreWorkspace — is only ever
+  // exercised against a type migration *inferred*, never against a real v4
+  // row that already says `claude`. Its absence would silently downgrade
+  // every claude/preset tab back to plain shell on every relaunch, and
+  // nothing above would notice.
+  it('carries a v4 row\'s own type through the reconcile, not the shell default the orphan synthesises', async () => {
+    await createStray('prcli-lumio-1111111111111111')
+    const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
+    const dir = await mkdtemp(join(tmpdir(), 'prcli-restore-v4-'))
+    const file = join(dir, 'config.json')
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 4,
+        projects: [project('Lumio', 'lumio', tmpdir())],
+        activeProjectId: 'id-lumio',
+        tabs: [
+          {
+            id: '1111111111111111',
+            projectSlug: 'lumio',
+            cwd: tmpdir(),
+            tmuxSession: 'prcli-lumio-1111111111111111',
+            type: 'claude',
+          },
+        ],
+        notifications: { rules: [], muteWhenFocused: true, quietHours: null },
+      }),
+      'utf8',
+    )
+    const store = new ConfigStore(file)
+
+    const result = await restoreWorkspace(manager, store, immediate)
+
+    expect(result.tabs[0]?.type).toBe('claude')
+    manager.detachAll()
+  })
 })
 
 describe('restoreWorkspace projects', () => {

@@ -162,6 +162,36 @@ function hooksOf(settings: ClaudeSettings): Record<string, HookGroup[]> {
 }
 
 /**
+ * Whether `settings.hooks` is a shape `hooksOf` can carry through untouched.
+ *
+ * `hooksOf` treats any event whose value is not an array — and `hooks` itself
+ * being anything other than an object — as absent, which means a write built
+ * from it (`merge`'s `{ ...base, hooks: nextHooks }`) silently drops that key
+ * from the user's file. That is fine for a garbage *entry inside* an array —
+ * `commandsOf`/`isOurs` already tolerate that, deliberately, and leave the
+ * entry itself untouched in place — but a whole event key holding something
+ * other than an array is a different, more serious shape this module does
+ * not understand well enough to repair, and the spec's own failure table
+ * says a malformed settings file should make install refuse, not repair.
+ */
+function hasUnrecognisedHooksShape(settings: ClaudeSettings): boolean {
+  const hooks = settings.hooks
+  if (hooks === undefined) return false
+  if (!isRecord(hooks)) return true
+  return Object.values(hooks).some((value) => !Array.isArray(value))
+}
+
+/** Throws rather than silently repairing — see `hasUnrecognisedHooksShape`. */
+function assertRecognisedHooksShape(settings: ClaudeSettings, settingsPath: string): void {
+  if (!hasUnrecognisedHooksShape(settings)) return
+  throw new Error(
+    `${settingsPath}: "hooks" has a shape PRCLI does not recognise (an event whose value ` +
+      'is not an array, or "hooks" itself not being an object) — refusing to modify it. ' +
+      'Fix or remove the offending entry by hand.',
+  )
+}
+
+/**
  * Every `command` string a group actually carries.
  *
  * `settings` arrives as `unknown`, so a "group" here is not guaranteed to
@@ -324,6 +354,7 @@ export async function readHooksState(): Promise<HooksState> {
   const settingsPath = claudeSettingsPath()
   const { script } = hookPaths()
   const settings = await readSettings(settingsPath)
+  assertRecognisedHooksShape(settings, settingsPath)
   const { next } = merge(settings, script)
   return {
     installed: isInstalled(settings, script),
@@ -359,6 +390,7 @@ export async function installHooks(): Promise<HooksState> {
   // Parse before anything is written: a settings file we cannot read is a
   // settings file we must not replace.
   const settings = await readSettings(settingsPath)
+  assertRecognisedHooksShape(settings, settingsPath)
 
   // Computed before either write below: merge() is pure and total over any
   // parsed settings object (see the malformed-shape tests in install.test.ts),
@@ -386,6 +418,7 @@ export async function uninstallHooks(): Promise<HooksState> {
   const settingsPath = claudeSettingsPath()
   const { script } = hookPaths()
   const settings = await readSettings(settingsPath)
+  assertRecognisedHooksShape(settings, settingsPath)
   const { next, removed } = unmerge(settings, script)
   if (removed.length > 0) {
     await backupIfPresent(settingsPath)

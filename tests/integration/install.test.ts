@@ -211,3 +211,72 @@ describe('a backup that fails for a reason other than "nothing to back up"', () 
     expect(state.installed).toBe(true)
   })
 })
+
+/**
+ * `hooksOf` (install.ts) treats any event whose value is not an array —
+ * `hooks` itself being anything other than an object counts too — as absent.
+ * Left unguarded, an install or an uninstall would silently delete that key
+ * from the user's file: `merge`/`unmerge` build their write from `hooksOf`'s
+ * output, which never had the malformed key in it to begin with. The spec's
+ * own failure table calls for install to refuse a malformed file, not repair
+ * it — this is that shape, distinct from a garbage *entry inside* an array
+ * (which `commandsOf`/`isOurs` already, deliberately, carry through
+ * untouched — see the "malformed hook shapes" describe block in
+ * tests/unit/install.test.ts).
+ */
+describe('a settings file whose "hooks" has a shape PRCLI does not recognise', () => {
+  it('refuses to install, and writes nothing', async () => {
+    await writeFile(
+      settings,
+      JSON.stringify({ ...ORIGINAL, hooks: { ...ORIGINAL.hooks, PreToolUse: 'not-an-array' } }),
+      'utf8',
+    )
+    const before = await readFile(settings, 'utf8')
+
+    await expect(installHooks()).rejects.toThrow(/does not recognise/i)
+
+    expect(await readFile(settings, 'utf8')).toBe(before)
+  })
+
+  it('refuses to uninstall, and writes nothing', async () => {
+    await installHooks()
+    // Corrupt it only after a real install, so there is something to unmerge
+    // and this actually exercises uninstallHooks's own guard rather than the
+    // install path's.
+    const installed = JSON.parse(await readFile(settings, 'utf8')) as { hooks: unknown }
+    await writeFile(
+      settings,
+      JSON.stringify({ ...installed, hooks: 'not-even-an-object' }),
+      'utf8',
+    )
+    const before = await readFile(settings, 'utf8')
+
+    await expect(uninstallHooks()).rejects.toThrow(/does not recognise/i)
+
+    expect(await readFile(settings, 'utf8')).toBe(before)
+  })
+
+  it('throws from readHooksState, so the settings pane never renders a doomed Install button', async () => {
+    await writeFile(
+      settings,
+      JSON.stringify({ ...ORIGINAL, hooks: { Stop: {} } }),
+      'utf8',
+    )
+
+    await expect(readHooksState()).rejects.toThrow(/does not recognise/i)
+  })
+
+  // Not this: a garbage element sitting inside an array-valued event is the
+  // shape `commandsOf`/`isOurs` already tolerate on purpose, appended past
+  // rather than refused. Only a whole event key holding a non-array trips
+  // the guard.
+  it('does not refuse a legitimately array-valued event holding garbage entries', async () => {
+    await writeFile(
+      settings,
+      JSON.stringify({ ...ORIGINAL, hooks: { ...ORIGINAL.hooks, Stop: [null, 'garbage', 42] } }),
+      'utf8',
+    )
+
+    await expect(readHooksState()).resolves.toBeTruthy()
+  })
+})

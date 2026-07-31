@@ -31,5 +31,11 @@ export function toggleProjectMute(rules: readonly Rule[], projectId: string): Ru
       (rule) => !(rule.project === projectId && rule.on === undefined && rule.toast === false),
     )
   }
-  return [...rules, { project: projectId, toast: false }]
+  // `sound: null` alongside `toast: false`: `resolve` (rules.ts) only
+  // overrides `sound` from a rule that states it, so a mute rule that left
+  // `sound` unstated would silence the popup but not whatever sound the
+  // global rule for that state names — "mute" doing only half of what it
+  // says. Harmless while every shipped default sound is already null, and
+  // immediately surprising the moment a user picks one in Settings.
+  return [...rules, { project: projectId, toast: false, sound: null }]
 }

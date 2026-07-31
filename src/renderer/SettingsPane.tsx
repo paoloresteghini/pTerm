@@ -29,6 +29,10 @@ export function SettingsPane({
   // the whole app.
   const [hooksError, setHooksError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // Its own error, separate from the hooks one above: a failed notification
+  // write must say so rather than leaving an unhandled rejection and a
+  // checkbox that silently reverts the next time this pane opens.
+  const [notifError, setNotifError] = useState<string | null>(null)
 
   // Refetched every time the pane opens: another PRCLI window, or a hand
   // edit, could have changed the file since it was last read.
@@ -66,14 +70,24 @@ export function SettingsPane({
   const updateRule = (state: TabState, patch: Partial<Rule>): void => {
     if (!notifications) return
     const rules = setGlobalRule(notifications.rules, state, patch)
-    window.prcli.updateNotifications({ rules }).then(onNotificationsChange)
+    window.prcli
+      .updateNotifications({ rules })
+      .then((config) => {
+        setNotifError(null)
+        onNotificationsChange(config)
+      })
+      .catch((reason: unknown) => setNotifError(errorMessage(reason)))
   }
 
   const toggleMuteWhenFocused = (): void => {
     if (!notifications) return
     window.prcli
       .updateNotifications({ muteWhenFocused: !notifications.muteWhenFocused })
-      .then(onNotificationsChange)
+      .then((config) => {
+        setNotifError(null)
+        onNotificationsChange(config)
+      })
+      .catch((reason: unknown) => setNotifError(errorMessage(reason)))
   }
 
   return (
@@ -145,6 +159,11 @@ export function SettingsPane({
           <div className="mb-2 text-[11px] uppercase tracking-wider text-faint">
             Notifications
           </div>
+          {notifError ? (
+            <p data-testid="notifications-error" className="mb-2 text-[11px] text-danger">
+              {notifError}
+            </p>
+          ) : null}
           <table className="w-full text-[11px]">
             <thead>
               <tr className="text-faint">

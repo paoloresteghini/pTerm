@@ -140,6 +140,20 @@ function restoreTabs(): Promise<RestoreResult> {
   return handler(null as never) as Promise<RestoreResult>
 }
 
+function resizeTab(id: string, cols: number, rows: number): void {
+  const listener = ipc.listeners.get(CHANNELS.resize)
+  if (!listener) throw new Error('resize listener was not registered')
+  listener(null as never, id as never, cols as never, rows as never)
+}
+
+/** What tmux itself thinks the session's window measures. */
+async function windowSize(name: string): Promise<string> {
+  const { stdout } = await run('tmux', [
+    '-L', SOCKET, 'display-message', '-p', '-t', `=${name}:`, '#{window_width}x#{window_height}',
+  ])
+  return stdout.trim()
+}
+
 /** Resolves once the given tab's client has stopped, whatever the reason. */
 function nextExit(id: string, ms = 8000): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -355,6 +369,36 @@ describe('durable tab record', () => {
     const restored = await restoreTabs()
     expect(restored.tabs.map((entry) => entry.id)).toEqual([tab.id])
     expect(await savedIds(store)).toEqual([tab.id])
+  })
+})
+
+// M3: `restartTab` had no test of any kind. The geometry code itself
+// (`lastGeometry` in register.ts) was already right — this is the codebase's
+// second attempt at exactly this defect (`SessionManager.moveToProject` has
+// its own regression test in manager.test.ts:233) — but restart had shipped
+// with no proof at all, which is precisely the shape a third attempt at the
+// same defect goes unnoticed in.
+describe('restartTab', () => {
+  it('reattaches at the size lastGeometry remembered, not the 80x24 default', async () => {
+    const tab = await invoke<TabDescriptor>(CHANNELS.open, { projectSlug: 'lumio', cwd: tmpdir() })
+    await waitForPrompt(tab.id)
+
+    resizeTab(tab.id, 111, 41)
+    await expect.poll(() => windowSize(tab.tmuxSession), { timeout: 8000 }).toBe('111x41')
+
+    // Exactly what a crash outside the app leaves behind: the client is gone
+    // and so is the session, with nothing routed through manager.kill().
+    const exitEvent = waitForExitEvent(tab.id)
+    await run('tmux', ['-L', SOCKET, 'kill-session', '-t', `=${tab.tmuxSession}`])
+    await exitEvent
+
+    const restarted = await invoke<TabDescriptor>(CHANNELS.restartTab, { tab })
+
+    expect(restarted.tmuxSession).toBe(tab.tmuxSession)
+    // No cols/rows in the request above, so this can only have come from
+    // `lastGeometry` — the attach-at-80x24-default defect this codebase has
+    // now shipped twice, proven fixed a second, independent way.
+    await expect.poll(() => windowSize(restarted.tmuxSession), { timeout: 8000 }).toBe('111x41')
   })
 })
 
@@ -620,6 +664,33 @@ describe('status registry', () => {
     await settle(300)
 
     expect((await status())[tab.id]).toBeUndefined()
+  })
+
+  // I4: the exit handler used to forget the tab's saved config row before
+  // stamping the registry, so by the time anything tried to resolve the tab
+  // from its id alone — which is exactly what the notification router does —
+  // both the live manager entry and the saved row could already be gone, and
+  // `crashed`/`ended` could never reach a toast. `applyExit` now receives the
+  // dying tab's own record directly from the exit handler, sidestepping that
+  // lookup outright rather than betting on read/write ordering.
+  it("passes the dying tab's own record into applyExit, not just its id", async () => {
+    const tab = await invoke<TabDescriptor>(CHANNELS.open, { projectSlug: 'lumio', cwd: tmpdir() })
+    await waitForPrompt(tab.id)
+    const applyExit = vi.spyOn(registry, 'applyExit')
+
+    // Exactly what a crash outside the app leaves behind, with nothing
+    // routed through manager.kill() or CHANNELS.kill — the `exited` path,
+    // where the config row is forgotten in this very same handler.
+    const exitEvent = waitForExitEvent(tab.id)
+    await run('tmux', ['-L', SOCKET, 'kill-session', '-t', `=${tab.tmuxSession}`])
+    await exitEvent
+    await settle(200)
+
+    expect(applyExit).toHaveBeenCalledTimes(1)
+    expect(applyExit.mock.calls[0]?.[2]).toMatchObject({
+      id: tab.id,
+      tmuxSession: tab.tmuxSession,
+    })
   })
 
   // restoreWorkspace reattaches every tab through `manager.open` directly,
