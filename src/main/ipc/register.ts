@@ -17,6 +17,7 @@ import { StatusRegistry } from '../status/registry'
 import { describeProjects, restoreWorkspace, withUnsorted } from './restore'
 import { isDirectory } from '../fsutil'
 import { scanCandidates } from '../projects/discovery'
+import { installHooks, readHooksState, uninstallHooks } from '../hooks/install'
 import {
   addProject,
   projectForSlug,
@@ -400,4 +401,13 @@ export function registerIpc(
         return notifications
       }),
   )
+
+  // installHooks/uninstallHooks write ~/.claude/settings.json, not PRCLI's own
+  // config file, so these deliberately do not go through `serialise` above.
+  // That queue has no reentrancy protection, and nothing reached from inside
+  // it may call back into it — going through it here would risk a silent
+  // deadlock for a screen the user is looking straight at.
+  ipcMain.handle(CHANNELS.hooksState, () => readHooksState())
+  ipcMain.handle(CHANNELS.installHooks, () => installHooks())
+  ipcMain.handle(CHANNELS.uninstallHooks, () => uninstallHooks())
 }

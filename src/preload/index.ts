@@ -52,6 +52,9 @@ const api: PrcliApi = {
   },
   notifications: () => ipcRenderer.invoke(CHANNELS.notifications),
   updateNotifications: (patch) => ipcRenderer.invoke(CHANNELS.updateNotifications, patch),
+  hooksState: () => ipcRenderer.invoke(CHANNELS.hooksState),
+  installHooks: () => ipcRenderer.invoke(CHANNELS.installHooks),
+  uninstallHooks: () => ipcRenderer.invoke(CHANNELS.uninstallHooks),
 }
 
 contextBridge.exposeInMainWorld('prcli', api)

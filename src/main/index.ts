@@ -125,6 +125,13 @@ function installMenu(): void {
           registerAccelerator: false,
           click: () => undefined,
         },
+        { type: 'separator' },
+        {
+          label: 'Settings…',
+          accelerator: 'CmdOrCtrl+,',
+          registerAccelerator: false,
+          click: () => undefined,
+        },
       ],
     },
     { role: 'editMenu' },

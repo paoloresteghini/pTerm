@@ -1,7 +1,14 @@
+import { chmod, copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { HOOK_EVENTS, type HookEvent } from '../status/machine'
 import { configRoot } from '../state/store'
+// Declared with the other wire types, since the renderer's settings pane
+// reads this shape directly and cannot import from src/main. Re-exported
+// below so every existing importer of this module keeps working unchanged.
+import type { HooksState } from '../../shared/ipc'
+
+export type { HooksState }
 
 export type ClaudeSettings = Record<string, unknown>
 
@@ -286,4 +293,105 @@ export function soundCollisions(settings: unknown): { event: string; command: st
     }
   }
   return found
+}
+
+/**
+ * Read the settings file, or `{}` when there is none.
+ *
+ * A file that exists and cannot be used throws rather than being treated as
+ * empty — whether because it does not parse, or because it could not be read
+ * at all (permissions, a full disk, anything but "the file is not there").
+ * Overwriting a settings.json the user actually had with a fresh one would be
+ * the single worst thing this module could do, and ENOENT is the only case
+ * that genuinely means there was nothing to lose. Every caller of this
+ * function — install, uninstall, and the read-only state the pane renders
+ * before either — must let that throw reach the user rather than swallowing
+ * it, or the pane would show "not installed" with an Install button that is
+ * certain to fail the moment it is pressed.
+ */
+async function readSettings(path: string): Promise<ClaudeSettings> {
+  let raw: string
+  try {
+    raw = await readFile(path, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {}
+    throw error
+  }
+  return asSettings(JSON.parse(raw))
+}
+
+export async function readHooksState(): Promise<HooksState> {
+  const settingsPath = claudeSettingsPath()
+  const { script } = hookPaths()
+  const settings = await readSettings(settingsPath)
+  const { next } = merge(settings, script)
+  return {
+    installed: isInstalled(settings, script),
+    settingsPath,
+    hookPath: script,
+    pending: JSON.stringify(next.hooks, null, 2),
+    collisions: soundCollisions(settings),
+  }
+}
+
+/**
+ * Back up `settingsPath` before it is about to be overwritten.
+ *
+ * ENOENT is the one failure this tolerates: it means there was no file to
+ * lose, which is exactly the "creates a settings file when there is none"
+ * path. Anything else — permissions, a full disk, a path that is a directory
+ * — must abort the install rather than be swallowed, because the very next
+ * line would otherwise overwrite the original with nothing backing it up.
+ */
+async function backupIfPresent(settingsPath: string): Promise<void> {
+  try {
+    await copyFile(settingsPath, `${settingsPath}.${Date.now()}.bak`)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+    throw error
+  }
+}
+
+export async function installHooks(): Promise<HooksState> {
+  const settingsPath = claudeSettingsPath()
+  const paths = hookPaths()
+
+  // Parse before anything is written: a settings file we cannot read is a
+  // settings file we must not replace.
+  const settings = await readSettings(settingsPath)
+
+  // Computed before either write below: merge() is pure and total over any
+  // parsed settings object (see the malformed-shape tests in install.test.ts),
+  // so this cannot itself leave a half-applied state. Doing it first means the
+  // two writes that follow — the script, then settings.json — are the only
+  // steps left that can fail, with nothing in between that could throw after
+  // one has landed and before the other has even started.
+  const { next, added } = merge(settings, paths.script)
+
+  await mkdir(dirname(paths.script), { recursive: true })
+  // Rewritten every install, so an upgrade cannot leave an old copy behind.
+  await writeFile(paths.script, renderScript(paths), 'utf8')
+  await chmod(paths.script, 0o755)
+
+  if (added.length > 0) {
+    // Timestamp rather than a single `.bak`: a second install a week later
+    // must not overwrite the copy that predates PRCLI entirely.
+    await backupIfPresent(settingsPath)
+    await writeFile(settingsPath, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
+  }
+  return readHooksState()
+}
+
+export async function uninstallHooks(): Promise<HooksState> {
+  const settingsPath = claudeSettingsPath()
+  const { script } = hookPaths()
+  const settings = await readSettings(settingsPath)
+  const { next, removed } = unmerge(settings, script)
+  if (removed.length > 0) {
+    await backupIfPresent(settingsPath)
+    await writeFile(settingsPath, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
+  }
+  // The script itself stays on disk. It exits 0 with nothing installed, and
+  // leaving it means a reinstall is one click rather than a reinstall.
+  return readHooksState()
 }

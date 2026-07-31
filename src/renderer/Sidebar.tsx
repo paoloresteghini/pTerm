@@ -23,6 +23,7 @@ export function Sidebar({
   onRemove,
   onMoveTab,
   onAdd,
+  onOpenSettings,
 }: {
   projects: ProjectDescriptor[]
   activeProjectId: string | null
@@ -41,6 +42,7 @@ export function Sidebar({
   onRemove: (id: string) => void
   onMoveTab: (tabId: string, projectId: string) => void
   onAdd: () => void
+  onOpenSettings: () => void
 }) {
   const [menuFor, setMenuFor] = useState<string | null>(null)
   // Renaming happens in the row itself. `window.prompt` is not implemented in
@@ -233,9 +235,17 @@ export function Sidebar({
         })}
       </div>
 
-      <div className="border-t border-border p-2">
+      <div className="flex flex-col gap-1 border-t border-border p-2">
         <Button data-testid="add-project" variant="ghost" onClick={onAdd} className="w-full">
           + Add project
+        </Button>
+        <Button
+          data-testid="settings-open"
+          variant="ghost"
+          onClick={onOpenSettings}
+          className="w-full"
+        >
+          Settings…
         </Button>
       </div>
     </div>

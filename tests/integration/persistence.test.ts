@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type {
   Candidate,
+  HooksState,
   NotificationConfig,
   ProjectDescriptor,
   RestoreResult,
@@ -699,5 +700,71 @@ describe('notification channels', () => {
 
     expect(after.muteWhenFocused).toBe(before.muteWhenFocused)
     expect(after.quietHours).toEqual(before.quietHours)
+  })
+})
+
+describe('hooks channels', () => {
+  // These reach ~/.claude/settings.json for real once outside a test — see
+  // src/main/hooks/install.ts. Both escape hatches are set here, restored
+  // after, exactly as install.test.ts does, so this suite can never touch the
+  // developer's real file even though it drives the channels through
+  // registerIpc rather than the functions directly.
+  let hooksDir: string
+  let hooksSettings: string
+  const savedEnv = { config: process.env.PRCLI_CONFIG_DIR, claude: process.env.PRCLI_CLAUDE_SETTINGS }
+
+  beforeEach(async () => {
+    hooksDir = await mkdtemp(join(tmpdir(), 'prcli-hooks-ipc-'))
+    hooksSettings = join(hooksDir, 'settings.json')
+    process.env.PRCLI_CONFIG_DIR = hooksDir
+    process.env.PRCLI_CLAUDE_SETTINGS = hooksSettings
+  })
+
+  afterEach(async () => {
+    process.env.PRCLI_CONFIG_DIR = savedEnv.config
+    process.env.PRCLI_CLAUDE_SETTINGS = savedEnv.claude
+    await rm(hooksDir, { recursive: true, force: true })
+  })
+
+  it('wires hooksState/installHooks/uninstallHooks through to install.ts', async () => {
+    const before = await invoke<HooksState>(CHANNELS.hooksState)
+    expect(before.installed).toBe(false)
+    expect(before.settingsPath).toBe(hooksSettings)
+
+    const installed = await invoke<HooksState>(CHANNELS.installHooks)
+    expect(installed.installed).toBe(true)
+
+    const uninstalled = await invoke<HooksState>(CHANNELS.uninstallHooks)
+    expect(uninstalled.installed).toBe(false)
+  })
+
+  // installHooks/uninstallHooks write a different file than the config write
+  // queue owns, and must never be routed through it: that queue has no
+  // reentrancy protection, so anything sharing it with a stuck operation
+  // would hang right along with it. Gating store.read() mid-flight and
+  // holding a queued addProject there proves installHooks resolves anyway.
+  it('does not queue behind a pending config write', async () => {
+    let release: () => void = () => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const originalRead = store.read.bind(store)
+    const readSpy = vi.spyOn(store, 'read').mockImplementationOnce(async () => {
+      await gate
+      return originalRead()
+    })
+
+    const stuck = invoke<ProjectDescriptor[]>(CHANNELS.addProject, { name: 'Stuck', cwd: tmpdir() })
+
+    const raced = await Promise.race([
+      invoke<HooksState>(CHANNELS.installHooks).then((state) => ({ hung: false as const, state })),
+      new Promise<{ hung: true }>((resolve) => setTimeout(() => resolve({ hung: true }), 2000)),
+    ])
+    expect(raced.hung).toBe(false)
+    if (!raced.hung) expect(raced.state.installed).toBe(true)
+
+    release()
+    await stuck
+    readSpy.mockRestore()
   })
 })

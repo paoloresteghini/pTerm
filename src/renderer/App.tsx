@@ -4,6 +4,7 @@ import { TabBar } from './TabBar'
 import { Sidebar } from './Sidebar'
 import { RightPanel } from './RightPanel'
 import { AddProjectDialog } from './AddProjectDialog'
+import { SettingsPane } from './SettingsPane'
 import { cn } from './lib/cn'
 import {
   INITIAL_WORKSPACE_STATE,
@@ -22,6 +23,7 @@ export function App() {
   const [state, dispatch] = useReducer(workspaceReducer, INITIAL_WORKSPACE_STATE)
   const [error, setError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [panelOpen, setPanelOpen] = useState(true)
   // Set once the workspace exists. Until then this window knows nothing about
   // what is selected and must not say anything about it — see the effects.
@@ -195,6 +197,11 @@ export function App() {
         setPanelOpen((open) => !open)
         return
       }
+      if (event.code === 'Comma') {
+        event.preventDefault()
+        setSettingsOpen(true)
+        return
+      }
 
       const digit = /^Digit([1-9])$/.exec(event.code)
       if (!digit) return
@@ -236,6 +243,7 @@ export function App() {
         onSelectProject={(id) => dispatch({ type: 'activatedProject', id })}
         onSelectTab={(id) => dispatch({ type: 'activatedTab', id })}
         onAdd={() => setAdding(true)}
+        onOpenSettings={() => setSettingsOpen(true)}
         onMoveTab={(tabId, projectId) => {
           // Renames the tmux session. The tab id is the other half of the
           // name, so it keeps its scrollback and everything running in it.
@@ -336,6 +344,13 @@ export function App() {
             })
             .catch(fail)
         }}
+      />
+
+      <SettingsPane
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        notifications={notifications}
+        onNotificationsChange={setNotifications}
       />
     </div>
   )

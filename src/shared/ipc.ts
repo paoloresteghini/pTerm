@@ -28,6 +28,9 @@ export const CHANNELS = {
   focusTab: 'prcli:focusTab',
   notifications: 'prcli:notifications',
   updateNotifications: 'prcli:updateNotifications',
+  hooksState: 'prcli:hooksState',
+  installHooks: 'prcli:installHooks',
+  uninstallHooks: 'prcli:uninstallHooks',
 } as const
 
 /**
@@ -58,6 +61,21 @@ export interface NotificationConfig {
   muteWhenFocused: boolean
   /** Honoured by the rules engine; no editor ships in M3. */
   quietHours: { from: string; to: string } | null
+}
+
+/**
+ * What the settings pane needs to draw the hooks row, before and after the
+ * install gesture. Declared here rather than in `src/main/hooks/install.ts`,
+ * which now imports it, for the same reason `NotificationConfig` is: the
+ * renderer reads this shape directly and cannot import from `src/main`.
+ */
+export interface HooksState {
+  installed: boolean
+  settingsPath: string
+  hookPath: string
+  /** The JSON that would be added, for the screen to show before it happens. */
+  pending: string
+  collisions: { event: string; command: string }[]
 }
 
 export interface TabDescriptor {
@@ -216,4 +234,10 @@ export interface PrcliApi {
   notifications(): Promise<NotificationConfig>
   /** Merges `patch` into the stored notification config and returns the result. */
   updateNotifications(patch: Partial<NotificationConfig>): Promise<NotificationConfig>
+  /** Whether PRCLI's hooks are installed, and what installing would add. */
+  hooksState(): Promise<HooksState>
+  /** Writes a timestamped backup, then merges PRCLI's hooks into settings.json. */
+  installHooks(): Promise<HooksState>
+  /** Removes only PRCLI's own hook groups, restoring the file it found. */
+  uninstallHooks(): Promise<HooksState>
 }
