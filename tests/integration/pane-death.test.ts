@@ -135,6 +135,59 @@ describe('a pane that dies', () => {
     expect(received[0]).not.toHaveProperty('status')
   })
 
+  // A carry-forward since M2a: "a session that dies while DETACHED is never
+  // observed at all (no client, so no exit event); its state is corrected only
+  // at the next restore reconcile." The exit path that statement is about is
+  // the *client's*, and a detached tab has none. tmux's hooks are the server's
+  // and do not care, so this asks directly whether the gap is still there.
+  it('reports a death that happens while no client is attached', async () => {
+    const { manager: sessions, received } = await harness()
+
+    const record = sessions.open({
+      projectSlug: 'alpha',
+      cwd: dir,
+      command: 'sh -c "sleep 30"',
+      type: 'preset',
+    })
+    await expect.poll(() => sessionExists(record.tmuxSession), { timeout: 10_000 }).toBe(true)
+
+    // Detach every client, then kill what is running inside. Nothing is
+    // watching from this process at all.
+    sessions.detachAll()
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    const { stdout } = await run('tmux', [
+      '-L', SOCKET, 'display-message', '-p', '-t', `=${record.tmuxSession}:`, '#{pane_pid}',
+    ])
+    await run('kill', ['-9', stdout.trim()])
+
+    await expect.poll(() => received.length, { timeout: 10_000 }).toBeGreaterThan(0)
+    expect(received[0]).toMatchObject({ tabId: record.id, event: 'Exit', signal: 'kill' })
+  })
+
+  // Where the gap that remains actually is. `pane-died` fires when a pane's
+  // command dies; destroying the session outright kills the pane without one,
+  // so an outsider's `tmux kill-session` on a detached tab still goes
+  // unnoticed until restore reconciles. Recorded as a bounded wait rather than
+  // left as a belief.
+  it('does not notice an outsider destroying a detached session', async () => {
+    const { manager: sessions, received } = await harness()
+
+    const record = sessions.open({
+      projectSlug: 'alpha',
+      cwd: dir,
+      command: 'sh -c "sleep 30"',
+      type: 'preset',
+    })
+    await expect.poll(() => sessionExists(record.tmuxSession), { timeout: 10_000 }).toBe(true)
+    sessions.detachAll()
+    await new Promise((resolve) => setTimeout(resolve, 300))
+
+    await run('tmux', ['-L', SOCKET, 'kill-session', '-t', `=${record.tmuxSession}`])
+    await new Promise((resolve) => setTimeout(resolve, 1_500))
+
+    expect(received).toEqual([])
+  })
+
   // `remain-on-exit` is what makes the status readable at all, and it also
   // stops tmux reaping the session on its own. If the hook did not kill it,
   // every crashed tab would leave a session behind — the stray-session failure

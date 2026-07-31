@@ -8,6 +8,7 @@ import { resolveTmuxBin } from './tmux/resolve'
 import { SessionManager } from './sessions/manager'
 import { registerIpc } from './ipc/register'
 import { StatusRegistry } from './status/registry'
+import { createHookInbox } from './status/inbox'
 import { mergeTab, NotificationRouter } from './notify/router'
 import { ConfigStore } from './state/store'
 import { HookServer } from './hooks/server'
@@ -46,42 +47,16 @@ const store = new ConfigStore(ConfigStore.defaultPath())
  * `PRCLI_CONFIG_DIR` at call time, same as `ConfigStore.defaultPath()` above.
  */
 const hookServer = new HookServer(hookPaths().socket)
-// The socket is reachable by anything on the machine that can open it, and
-// `parseHookLine` only validates the *shape* of `tabId` — sixteen hex
-// characters — not that it names a tab this app actually has. With no
-// membership check here, an event for an unknown id creates a permanent
-// entry in the registry: nothing in the UI can ever reach it to dismiss or
-// kill it, so `waitingCount()` — and the dock badge — stays off by one until
-// the app restarts. `drainSpool`'s replay already guards the same way
-// against a spooled event for a tab that did not survive reconcile (see
-// register.ts); this is that same check for the live socket path.
-//
-// Checked against both the manager and the saved config, not just one:
-// `manager.get` alone would miss a tab detached earlier in this run — still
-// alive, and still meant to keep updating (see `mergeTab` in notify/router.ts)
-// — and the saved config alone would miss a tab open()ed moments ago, before
-// its `rememberTab` write has landed.
-hookServer.onEvent((message) => {
-  void (async () => {
-    // A dead pane's own status, which is the only trustworthy account of how a
-    // tab died — the client exit that follows it is always 0. It goes through
-    // the same membership check as everything else on this socket: the status
-    // is no more trusted than the events are.
-    const apply = (): void => {
-      if (message.event === 'Exit') {
-        registry.applyDead(message.tabId, { status: message.status, signal: message.signal })
-      } else {
-        registry.applyHook(message)
-      }
-    }
-    if (manager.get(message.tabId) !== undefined) {
-      apply()
-      return
-    }
-    const config = await store.read()
-    if (config.tabs.some((tab) => tab.id === message.tabId)) apply()
-  })()
+// Which events are admitted, and in what order, is `inbox.ts`'s business —
+// both rules are written down there, next to the tests that hold them. This
+// file only supplies the two things it cannot know: who is attached right now,
+// and what is on disk.
+const inbox = createHookInbox({
+  registry,
+  isOpen: (tabId) => manager.get(tabId) !== undefined,
+  readTabs: async () => (await store.read()).tabs,
 })
+hookServer.onEvent((message) => void inbox.handle(message))
 
 /** The tab the renderer last said was selected — half of "attended". */
 let attendedTabId: string | null = null
