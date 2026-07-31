@@ -215,13 +215,25 @@ export class SessionManager {
     // happens to propagate is not a setting that was made. The group name is
     // also not a valid option target once the founder has gone.
     //
-    // Switching an already-attached window to manual shrinks it by one row on
-    // this machine — measured 100x30 -> 100x29, status bar already off — as if
-    // tmux applies a cached size from before `status off` took effect. A
-    // window shrinking under its own unmoved client is another sighting of the
-    // 80x24 geometry defect class, just triggered by a different command this
-    // time, so the fix is the same shape: force it back explicitly, to the
-    // founder's own tracked size, right after.
+    // `window-size manual` does not merely stop tracking the client — it
+    // reverts the window to the size recorded at window CREATION, discarding
+    // whatever it grew to afterward. Measured on two sequences:
+    //   detached `new-session` (no `-x`/`-y`, no client), client attaches
+    //     later: recorded size is tmux's `default-size`, 80x24; manual mode
+    //     reverts straight to it, discarding the 100x30-ish client entirely.
+    //   `new-session -A` with a client attaching in the SAME chained command
+    //     `open()` actually uses (`; set-option status off` runs after, not
+    //     before): the window is negotiated against the client with the
+    //     status line still on — one row short of what's visible once it's
+    //     turned off — and THAT is what gets recorded. A founder opened at
+    //     100x30 records 100x29, and manual mode reverts to that: measured,
+    //     repeatably, on this exact chain.
+    // Either way the founder's own client is silently overridden, which is
+    // the 80x24 geometry defect class again, just reached through
+    // `window-size manual` instead of a bare reattach. The fix is the same
+    // shape: force the window back explicitly, to the founder's own tracked
+    // size, right after. This resize is load-bearing — removing it silently
+    // reintroduces a founder pane wrapped one row short of its real size.
     const founderWindow = await this.adapter.windowIdOf(sibling.record.tmuxSession)
     await this.adapter.setSessionOption(sibling.record.tmuxSession, 'window-size', 'manual')
     if (founderWindow) {
