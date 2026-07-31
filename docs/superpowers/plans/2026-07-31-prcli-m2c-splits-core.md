@@ -483,7 +483,10 @@ git commit -m "Call a pane record a pane record"
 - Produces on `SessionManager`:
   - `splitTab(input: { paneId: string; cwd?: string; command?: string; type?: TabType; cols?: number; rows?: number }): Promise<PaneRecord>` — adds a pane to the tab containing `paneId` and returns the new pane's record.
   - `groupNameOf(paneId: string): Promise<string>` — the tab's group name, or the pane's own session name when it is still a group of one.
-- `PtySession` gains `windowId?: string` and `bindWindow?: boolean` options.
+- `PtySession` gains a `windowId?: string` option. (An earlier draft also listed
+  `bindWindow?: boolean`; nothing ever defined its behaviour and nothing needs
+  it — binding happens through `selectWindow` in `SessionManager`. The Task 5
+  implementer refused to guess at it and flagged it instead, which was right.)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -925,12 +928,21 @@ Renaming one member of a split tab would split the tab across two projects,
 because project membership is per member session name.
 
 **Files:**
-- Modify: `src/main/sessions/manager.ts:225-256`
+- Modify: `src/main/sessions/manager.ts` (`moveToProject` and around it — the line numbers an earlier draft gave are stale, Tasks 4–6 rewrote that file)
 - Test: `tests/integration/manager.test.ts`
 
 **Interfaces:**
-- Consumes: `findOrphanTabs` (Task 7), `groupNameOf` (Task 5).
-- Produces: `moveTabToProject(tabId: string, projectSlug: string, known?: Map<string, Pick<PaneRecord, 'cwd' | 'command'>>): Promise<PaneRecord[]>`. `moveToProject` stays for the single-pane path and is implemented in terms of it.
+- Consumes: `groupNameOf` (Task 5), `listSessionsWithGroups` (Task 2), `tabIdFromGroupName` (Task 3).
+- Produces:
+  - `panesOfTab(tabId: string): Promise<PaneRecord[]>` — every pane of a tab, **open ones included**. This is new and it is why the task needs it: `findOrphanTabs` deliberately excludes panes this app has a client for, so it returns nothing at all for a live tab. Build it from `listSessionsWithGroups` plus the manager's own open entries.
+  - `moveTabToProject(tabId: string, projectSlug: string, known?: Map<string, Pick<PaneRecord, 'cwd' | 'command'>>): Promise<PaneRecord[]>`. `moveToProject` stays for the single-pane path and is implemented in terms of it.
+
+**A trap this task must not fall into.** An earlier draft of the test below
+asserted `tabs.every(...)` over the result of `findOrphanTabs()` while both panes
+were still open. That call returns `[]` for a live tab, and `[].every(...)` is
+`true` — so the assertion could not fail, whatever the code did. Any assertion
+over a collection here must first assert the collection is non-empty, or it is
+not an assertion.
 
 **Partial-failure rule.** tmux refuses a rename onto a name already in use and
 leaves the source untouched, so a refusal part-way leaves earlier panes renamed
@@ -961,9 +973,38 @@ describe('SessionManager.moveTabToProject', () => {
     // it does only if nothing reads the slug out of the group name.
     const group = await manager.groupNameOf(founder.id)
     expect(group).toContain('lumio')
-    const tabs = await manager.findOrphanTabs()
-    for (const pane of moved) expect(pane.projectSlug).toBe('gco')
-    expect(tabs.every((tab) => tab.panes.every((pane) => pane.projectSlug === 'gco'))).toBe(true)
+
+    // Both panes, read back from live tmux rather than from the return value.
+    const panes = await manager.panesOfTab(founder.id)
+    expect(panes).toHaveLength(2)          // never assert over a collection
+    for (const pane of panes) expect(pane.projectSlug).toBe('gco')
+    manager.detachAll()
+  })
+
+  // The partial-failure rule, which is the whole reason this is one operation
+  // rather than a loop of single-pane moves. A tab split across two projects is
+  // the one outcome that must not happen, and tmux refuses a rename onto a name
+  // already in use — so the second rename failing must undo the first.
+  it('rolls back every rename when one of them fails', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const manager = new SessionManager(adapter)
+    const founder = manager.open({ projectSlug: 'lumio', cwd: tmpdir() })
+    await waitFor(manager, founder.id, /\$|%|#/)
+    const second = await manager.splitTab({ paneId: founder.id })
+    await waitFor(manager, second.id, /\$|%|#/)
+
+    // Occupy the name the SECOND pane would move to, so its rename is refused
+    // while the first pane's has already gone through.
+    await run('tmux', [
+      '-L', SOCKET, 'new-session', '-d', '-s', `prcli-gco-${second.id}`, 'sleep', '600',
+    ])
+
+    await expect(manager.moveTabToProject(founder.id, 'gco')).rejects.toThrow()
+
+    // Neither pane moved: the tab is still whole, and still in lumio.
+    const panes = await manager.panesOfTab(founder.id)
+    expect(panes).toHaveLength(2)
+    for (const pane of panes) expect(pane.projectSlug).toBe('lumio')
     manager.detachAll()
   })
 })
