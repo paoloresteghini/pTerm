@@ -831,32 +831,56 @@ export class SessionManager {
    * and does not follow a rename (see `tabIdFromGroupName`), so reading a
    * slug off it would report a moved pane under its old project.
    *
-   * The founder — the pane whose own id is `tabId` — always comes first in
-   * the returned array, and every other member follows in whatever order
-   * tmux gave them. `list-sessions` (and so `listSessionsWithGroups`) orders
-   * sessions alphabetically by name, not by creation order (measured: a
-   * session named `aaa-*` sorts before one named `zzz-*` regardless of which
-   * was created first), and a pane's name carries a random hex id — so
-   * leaving tmux's order in place would make founder-vs-sibling position a
-   * coin flip on every call. `moveTabToProject` renames in this order; its
-   * rollback undoes whatever succeeded regardless of position, so nothing
-   * downstream of this depends on it today, but a caller has no way to name
-   * "the founder's pane" out of the result at all without a fixed position
-   * to look at, so this fixes one.
+   * The founder — the pane whose own id is `tabId` — comes first in the
+   * returned array when it is still alive, and every other member follows in
+   * whatever order tmux gave them. `list-sessions` (and so
+   * `listSessionsWithGroups`) orders sessions alphabetically by name, not by
+   * creation order (measured: a session named `aaa-*` sorts before one named
+   * `zzz-*` regardless of which was created first), and a pane's name carries
+   * a random hex id — so leaving tmux's order in place would make
+   * founder-vs-sibling position a coin flip on every call. `moveTabToProject`
+   * renames in this order; its rollback undoes whatever succeeded regardless
+   * of position, so nothing downstream of this depends on it today, but a
+   * caller has no way to name "the founder's pane" out of the result at all
+   * without a fixed position to look at, so this fixes one.
+   *
+   * A tab can outlive its founder, and then there is no such position: see
+   * the fallback below.
    */
   async panesOfTab(tabId: string): Promise<PaneRecord[]> {
     const rows = await this.adapter.listSessionsWithGroups()
     const founder = rows.find((row) => decodeSessionName(row.name)?.id === tabId)
-    if (!founder) return []
 
     // An empty group means a tab that has never been split — just the
     // founder's own row. A non-empty one is shared by every member,
     // including the founder itself (see `groupNameOf`) — filtered back out
     // here so it can be put first explicitly instead of wherever tmux's
     // alphabetical order happens to put it.
-    const members = founder.group
-      ? [founder, ...rows.filter((row) => row.group === founder.group && row !== founder)]
-      : [founder]
+    let members: { name: string; group: string }[]
+    if (founder) {
+      members = founder.group
+        ? [founder, ...rows.filter((row) => row.group === founder.group && row !== founder)]
+        : [founder]
+    } else {
+      // No session's OWN id is the tab id, and the tab may still exist: a
+      // group outlives its founder (measured — the group name and its windows
+      // survive, only `group_size` drops), which is precisely the case this
+      // milestone is built around, a founder pane crashed with its sibling
+      // still running.
+      //
+      // `findOrphanTabs` handles it already because it takes the tab id from
+      // the frozen group name. Reading nothing but that same id here is what
+      // stops the two tab-resolution paths disagreeing about whether a tab
+      // exists — the disagreement cost `moveTabToProject` a "no session for
+      // tab" throw and left such a tab stuck in its project for as long as it
+      // lived. The group name's SLUG is still never read; it is several
+      // renames out of date by definition.
+      const group = rows.find((row) => tabIdFromGroupName(row.group) === tabId)?.group
+      if (!group) return []
+      // Nothing to put first: the pane whose id names this tab has gone, so
+      // the order is tmux's and no caller may read a founder out of it.
+      members = rows.filter((row) => row.group === group)
+    }
 
     const panes: PaneRecord[] = []
     for (const row of members) {

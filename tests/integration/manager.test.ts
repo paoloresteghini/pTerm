@@ -556,6 +556,47 @@ describe('SessionManager.findOrphanTabs', () => {
   })
 })
 
+describe('SessionManager.panesOfTab', () => {
+  // A group outlives its founder — measured: the group name and its windows
+  // survive and only `group_size` drops. `findOrphanTabs` handled that already
+  // because it reads the tab id out of the frozen group name; `panesOfTab`
+  // looked for a session whose OWN id was the tab id and answered `[]` when
+  // there was none. So the two disagreed about whether a tab existed at
+  // exactly the moment this milestone is built around — the founder pane
+  // crashed, its sibling still running — and the visible cost was a tab that
+  // could never be moved to another project again.
+  it('still finds a tab whose founder pane has gone', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const manager = new SessionManager(adapter)
+    const founder = manager.open({ projectSlug: 'lumio', cwd: tmpdir() })
+    await waitFor(manager, founder.id, /\$|%|#/)
+    const second = await manager.splitTab({ paneId: founder.id })
+    await waitFor(manager, second.id, /\$|%|#/)
+
+    // Straight through the adapter: a founder that died, not one this app
+    // closed. The tab id stays the dead founder's, because that is what the
+    // group is named after and a group name never follows anything.
+    await adapter.killSession(founder.tmuxSession)
+    await expect.poll(() => sessionExists(founder.tmuxSession), { timeout: 8000 }).toBe(false)
+
+    const panes = await manager.panesOfTab(founder.id)
+    expect(panes.map((pane) => pane.id)).toEqual([second.id])
+
+    // And the tab is movable again, which is what the empty array cost.
+    const moved = await manager.moveTabToProject(founder.id, 'gco')
+    expect(moved.map((pane) => pane.tmuxSession)).toEqual([`prcli-gco-${second.id}`])
+    manager.detachAll()
+  })
+
+  it('reports nothing for a tab id no live session or group carries', async () => {
+    const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
+    const tab = manager.open({ projectSlug: 'lumio', cwd: tmpdir() })
+    await waitFor(manager, tab.id, /\$|%|#/)
+    await expect(manager.panesOfTab('000000000000000f')).resolves.toEqual([])
+    manager.detachAll()
+  })
+})
+
 describe('SessionManager.moveTabToProject', () => {
   it('renames every pane, and the tab still lists under the destination', async () => {
     const adapter = new TmuxAdapter({ socket: SOCKET })
