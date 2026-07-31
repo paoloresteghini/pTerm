@@ -46,7 +46,14 @@ export function App() {
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const { tabs, activeTabId } = await window.prcli.restore()
+      const { projects, tabs, activeProjectId } = await window.prcli.restore()
+      // Task 13 rewrites this component around projects. Until then the old
+      // reducer still wants one active tab, so take it from the selected
+      // project.
+      const activeTabId =
+        projects.find((project) => project.id === activeProjectId)?.activeTabId ??
+        tabs[0]?.id ??
+        null
       if (cancelled) return
       if (tabs.length > 0) {
         dispatch({ type: 'restored', tabs, activeId: activeTabId })

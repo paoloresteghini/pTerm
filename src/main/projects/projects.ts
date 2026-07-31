@@ -1,12 +1,13 @@
 import { randomBytes } from 'node:crypto'
 import { slugify } from '../tmux/names'
 import type { PrcliConfig, Preset, ProjectRecord } from '../state/store'
+import { UNSORTED_ID } from '../../shared/ipc'
 
-/**
- * The synthetic project that collects tabs whose slug matches nothing real.
- * Reserved so a user-created project can never shadow it.
- */
-export const UNSORTED_ID = 'unsorted'
+// The synthetic project that collects tabs whose slug matches nothing real,
+// reserved so a user-created project can never shadow it. Declared in
+// src/shared/ipc.ts because the renderer needs it too; re-exported here so
+// callers reaching for it alongside RESERVED_SLUGS keep working.
+export { UNSORTED_ID }
 
 export const RESERVED_SLUGS: ReadonlySet<string> = new Set([UNSORTED_ID])
 

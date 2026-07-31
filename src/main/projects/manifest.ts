@@ -1,11 +1,11 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Preset } from '../state/store'
+// Declared with the other wire types: the renderer draws the preset menu, and
+// a second structurally identical declaration here would only invite drift.
+import type { ResolvedPreset } from '../../shared/ipc'
 
-export interface ResolvedPreset extends Preset {
-  /** Where this came from, so the panel can show which the repo supplied. */
-  origin: 'user' | 'repo'
-}
+export type { ResolvedPreset }
 
 const MANIFEST = '.prcli.json'
 

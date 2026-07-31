@@ -113,7 +113,12 @@ export function registerIpc(
 
   ipcMain.handle(CHANNELS.list, (): TabDescriptor[] => manager.list())
 
-  ipcMain.handle(CHANNELS.restore, (): Promise<RestoreResult> => restoreWorkspace(manager, store))
+  // The reconcile reads and then writes, so it has to hold the queue for the
+  // whole operation rather than racing an `open` or an exit between the two.
+  ipcMain.handle(
+    CHANNELS.restore,
+    (): Promise<RestoreResult> => restoreWorkspace(manager, store, serialise),
+  )
 
   ipcMain.on(CHANNELS.setActive, (_event, _id: string | null) => {
     // Task 8 reinstates this against per-project active tabs.
