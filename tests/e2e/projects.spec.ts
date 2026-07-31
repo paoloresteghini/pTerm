@@ -85,21 +85,21 @@ test('starts with no projects and opens no session', async () => {
 })
 
 test('adds a scanned candidate and opens a tab in it', async () => {
-  await candidate('lumio')
+  await candidate('alpha')
   const app = await launch()
   const window = await app.firstWindow()
 
   await window.getByTestId('add-project').click()
-  await window.getByTestId('candidate-lumio').click()
+  await window.getByTestId('candidate-alpha').click()
   // The id is generated at add time, so assert on the count and the name
   // rather than on a testid we cannot predict.
   await expect(window.locator('[data-testid^="project-"]')).toHaveCount(1)
-  await expect(window.getByTestId('sidebar')).toContainText('lumio')
+  await expect(window.getByTestId('sidebar')).toContainText('alpha')
 
   await window.getByTestId('new-tab').click()
   await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
   await expect
-    .poll(async () => (await sessionNames()).filter((n) => n.startsWith('prcli-lumio-')).length, {
+    .poll(async () => (await sessionNames()).filter((n) => n.startsWith('prcli-alpha-')).length, {
       timeout: 20_000,
     })
     .toBe(1)
@@ -108,14 +108,14 @@ test('adds a scanned candidate and opens a tab in it', async () => {
 })
 
 test('the tab bar shows only the active project\'s tabs', async () => {
-  const lumio = await candidate('lumio')
-  const gco = await candidate('gco')
+  const alpha = await candidate('alpha')
+  const beta = await candidate('beta')
   await seed(
     [
-      { id: 'id-lumio', name: 'Lumio', slug: 'lumio', cwd: lumio, presets: [], activeTabId: null },
-      { id: 'id-gco', name: 'GCO', slug: 'gco', cwd: gco, presets: [], activeTabId: null },
+      { id: 'id-alpha', name: 'Alpha', slug: 'alpha', cwd: alpha, presets: [], activeTabId: null },
+      { id: 'id-beta', name: 'Beta', slug: 'beta', cwd: beta, presets: [], activeTabId: null },
     ],
-    'id-lumio',
+    'id-alpha',
   )
   const app = await launch()
   const window = await app.firstWindow()
@@ -124,8 +124,8 @@ test('the tab bar shows only the active project\'s tabs', async () => {
   await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
   await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(1)
 
-  await window.getByTestId('project-id-gco').click()
-  // GCO has no tabs yet, so the bar empties rather than showing Lumio's.
+  await window.getByTestId('project-id-beta').click()
+  // Beta has no tabs yet, so the bar empties rather than showing Alpha's.
   await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(0)
   await window.getByTestId('new-tab').click()
   await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(2)
@@ -135,14 +135,14 @@ test('the tab bar shows only the active project\'s tabs', async () => {
 })
 
 test('⌘1 and ⌘2 switch project; ⌥⌘1 and ⌥⌘2 switch tab', async () => {
-  const lumio = await candidate('lumio')
-  const gco = await candidate('gco')
+  const alpha = await candidate('alpha')
+  const beta = await candidate('beta')
   await seed(
     [
-      { id: 'id-lumio', name: 'Lumio', slug: 'lumio', cwd: lumio, presets: [], activeTabId: null },
-      { id: 'id-gco', name: 'GCO', slug: 'gco', cwd: gco, presets: [], activeTabId: null },
+      { id: 'id-alpha', name: 'Alpha', slug: 'alpha', cwd: alpha, presets: [], activeTabId: null },
+      { id: 'id-beta', name: 'Beta', slug: 'beta', cwd: beta, presets: [], activeTabId: null },
     ],
-    'id-lumio',
+    'id-alpha',
   )
   const app = await launch()
   const window = await app.firstWindow()
@@ -153,9 +153,9 @@ test('⌘1 and ⌘2 switch project; ⌥⌘1 and ⌥⌘2 switch tab', async () =>
   await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(2)
 
   await window.keyboard.press('Meta+Digit2')
-  await expect(window.getByTestId('project-id-gco')).toHaveAttribute('data-active', 'true')
+  await expect(window.getByTestId('project-id-beta')).toHaveAttribute('data-active', 'true')
   await window.keyboard.press('Meta+Digit1')
-  await expect(window.getByTestId('project-id-lumio')).toHaveAttribute('data-active', 'true')
+  await expect(window.getByTestId('project-id-alpha')).toHaveAttribute('data-active', 'true')
 
   const tabs = window.locator('[data-testid^="tab-"]')
   const first = await tabs.first().getAttribute('data-testid')
@@ -166,12 +166,12 @@ test('⌘1 and ⌘2 switch project; ⌥⌘1 and ⌥⌘2 switch tab', async () =>
 })
 
 test('a preset declared by the repository launches its command', async () => {
-  const lumio = await candidate('lumio', {
+  const alpha = await candidate('alpha', {
     presets: [{ label: 'marker', command: 'echo preset-ran; sleep 600' }],
   })
   await seed(
-    [{ id: 'id-lumio', name: 'Lumio', slug: 'lumio', cwd: lumio, presets: [], activeTabId: null }],
-    'id-lumio',
+    [{ id: 'id-alpha', name: 'Alpha', slug: 'alpha', cwd: alpha, presets: [], activeTabId: null }],
+    'id-alpha',
   )
   const app = await launch()
   const window = await app.firstWindow()
@@ -185,45 +185,45 @@ test('a preset declared by the repository launches its command', async () => {
 })
 
 test('restores the active project and each project\'s active tab', async () => {
-  const lumio = await candidate('lumio')
-  const gco = await candidate('gco')
+  const alpha = await candidate('alpha')
+  const beta = await candidate('beta')
   await seed(
     [
-      { id: 'id-lumio', name: 'Lumio', slug: 'lumio', cwd: lumio, presets: [], activeTabId: null },
-      { id: 'id-gco', name: 'GCO', slug: 'gco', cwd: gco, presets: [], activeTabId: null },
+      { id: 'id-alpha', name: 'Alpha', slug: 'alpha', cwd: alpha, presets: [], activeTabId: null },
+      { id: 'id-beta', name: 'Beta', slug: 'beta', cwd: beta, presets: [], activeTabId: null },
     ],
-    'id-lumio',
+    'id-alpha',
   )
   const first = await launch()
   const firstWindow = await first.firstWindow()
 
   await firstWindow.getByTestId('new-tab').click()
   await expect(firstWindow.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
-  await firstWindow.getByTestId('project-id-gco').click()
+  await firstWindow.getByTestId('project-id-beta').click()
   await firstWindow.getByTestId('new-tab').click()
   await expect(firstWindow.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
   await firstWindow.getByTestId('terminal-active').click()
-  await firstWindow.keyboard.type('echo gco-marker')
+  await firstWindow.keyboard.type('echo beta-marker')
   await firstWindow.keyboard.press('Enter')
-  await expect(firstWindow.getByTestId('terminal-active')).toContainText('gco-marker', {
+  await expect(firstWindow.getByTestId('terminal-active')).toContainText('beta-marker', {
     timeout: 20_000,
   })
   await first.close()
 
   const second = await launch()
   const secondWindow = await second.firstWindow()
-  await expect(secondWindow.getByTestId('project-id-gco')).toHaveAttribute('data-active', 'true')
-  await expect(secondWindow.getByTestId('terminal-active')).toContainText('gco-marker', {
+  await expect(secondWindow.getByTestId('project-id-beta')).toHaveAttribute('data-active', 'true')
+  await expect(secondWindow.getByTestId('terminal-active')).toContainText('beta-marker', {
     timeout: 20_000,
   })
   await second.close()
 })
 
 test('an Unsorted tab can be filed into a project, keeping its session', async () => {
-  const lumio = await candidate('lumio')
+  const alpha = await candidate('alpha')
   await seed(
-    [{ id: 'id-lumio', name: 'Lumio', slug: 'lumio', cwd: lumio, presets: [], activeTabId: null }],
-    'id-lumio',
+    [{ id: 'id-alpha', name: 'Alpha', slug: 'alpha', cwd: alpha, presets: [], activeTabId: null }],
+    'id-alpha',
   )
   // A session created behind the app's back, as a crash would leave.
   await run('tmux', [
@@ -234,57 +234,57 @@ test('an Unsorted tab can be filed into a project, keeping its session', async (
   const window = await app.firstWindow()
 
   await window.getByTestId('project-unsorted').click()
-  await window.getByTestId('smove-abcdef0123456789').selectOption('id-lumio')
+  await window.getByTestId('smove-abcdef0123456789').selectOption('id-alpha')
 
   await expect
-    .poll(async () => (await sessionNames()).includes('prcli-lumio-abcdef0123456789'), {
+    .poll(async () => (await sessionNames()).includes('prcli-alpha-abcdef0123456789'), {
       timeout: 20_000,
     })
     .toBe(true)
   // Renamed, not recreated: exactly one session, and the old name is gone.
-  expect(await sessionNames()).toEqual(['prcli-lumio-abcdef0123456789'])
+  expect(await sessionNames()).toEqual(['prcli-alpha-abcdef0123456789'])
   // The point of filing a stray is to be able to see it afterwards. Unsorted is
-  // empty now, so the window has to follow the tab into Lumio rather than stay
+  // empty now, so the window has to follow the tab into Alpha rather than stay
   // pointed at a row that no longer exists.
-  await expect(window.getByTestId('project-id-lumio')).toHaveAttribute('data-active', 'true')
+  await expect(window.getByTestId('project-id-alpha')).toHaveAttribute('data-active', 'true')
   await expect(window.getByTestId('tab-abcdef0123456789')).toBeVisible()
 
   await app.close()
 })
 
 test('a project can be renamed in place, keeping its slug', async () => {
-  const lumio = await candidate('lumio')
+  const alpha = await candidate('alpha')
   await seed(
-    [{ id: 'id-lumio', name: 'Lumio', slug: 'lumio', cwd: lumio, presets: [], activeTabId: null }],
-    'id-lumio',
+    [{ id: 'id-alpha', name: 'Alpha', slug: 'alpha', cwd: alpha, presets: [], activeTabId: null }],
+    'id-alpha',
   )
   const app = await launch()
   const window = await app.firstWindow()
 
-  await window.getByTestId('pmenu-id-lumio').click()
-  await window.getByTestId('prename-id-lumio').click()
-  const input = window.getByTestId('rename-input-id-lumio')
+  await window.getByTestId('pmenu-id-alpha').click()
+  await window.getByTestId('prename-id-alpha').click()
+  const input = window.getByTestId('rename-input-id-alpha')
   await input.fill('Renamed')
   await input.press('Enter')
 
-  await expect(window.getByTestId('project-id-lumio')).toContainText('Renamed')
-  await expect(window.getByTestId('sidebar')).not.toContainText('Lumio')
+  await expect(window.getByTestId('project-id-alpha')).toContainText('Renamed')
+  await expect(window.getByTestId('sidebar')).not.toContainText('Alpha')
 
   // Escape discards. The blur that follows unmounting the input must not then
   // commit what Escape threw away.
-  await window.getByTestId('pmenu-id-lumio').click()
-  await window.getByTestId('prename-id-lumio').click()
-  await window.getByTestId('rename-input-id-lumio').fill('Discarded')
-  await window.getByTestId('rename-input-id-lumio').press('Escape')
-  await expect(window.getByTestId('project-id-lumio')).toContainText('Renamed')
+  await window.getByTestId('pmenu-id-alpha').click()
+  await window.getByTestId('prename-id-alpha').click()
+  await window.getByTestId('rename-input-id-alpha').fill('Discarded')
+  await window.getByTestId('rename-input-id-alpha').press('Escape')
+  await expect(window.getByTestId('project-id-alpha')).toContainText('Renamed')
   await expect(window.getByTestId('sidebar')).not.toContainText('Discarded')
 
   // Focus leaving the field commits, so a rename is not lost by clicking away.
-  await window.getByTestId('pmenu-id-lumio').click()
-  await window.getByTestId('prename-id-lumio').click()
-  await window.getByTestId('rename-input-id-lumio').fill('Blurred')
-  await window.getByTestId('rename-input-id-lumio').press('Tab')
-  await expect(window.getByTestId('project-id-lumio')).toContainText('Blurred')
+  await window.getByTestId('pmenu-id-alpha').click()
+  await window.getByTestId('prename-id-alpha').click()
+  await window.getByTestId('rename-input-id-alpha').fill('Blurred')
+  await window.getByTestId('rename-input-id-alpha').press('Tab')
+  await expect(window.getByTestId('project-id-alpha')).toContainText('Blurred')
 
   // The slug is baked into the tmux name of every session this project has
   // opened, so renaming must not re-slug: doing so would orphan all of them.
@@ -295,16 +295,16 @@ test('a project can be renamed in place, keeping its slug', async () => {
     .poll(async () => (await sessionNames()).map((name) => name.replace(/-[0-9a-f]{16}$/, '')), {
       timeout: 20_000,
     })
-    .toEqual(['prcli-lumio'])
+    .toEqual(['prcli-alpha'])
 
   await app.close()
 })
 
 test('a session whose project was removed shows under Unsorted, still alive', async () => {
-  const lumio = await candidate('lumio')
+  const alpha = await candidate('alpha')
   await seed(
-    [{ id: 'id-lumio', name: 'Lumio', slug: 'lumio', cwd: lumio, presets: [], activeTabId: null }],
-    'id-lumio',
+    [{ id: 'id-alpha', name: 'Alpha', slug: 'alpha', cwd: alpha, presets: [], activeTabId: null }],
+    'id-alpha',
   )
   const app = await launch()
   const window = await app.firstWindow()
@@ -320,8 +320,8 @@ test('a session whose project was removed shows under Unsorted, still alive', as
   const before = await sessionNames()
   expect(before).toHaveLength(1)
 
-  await window.getByTestId('pmenu-id-lumio').click()
-  await window.getByTestId('premove-id-lumio').click()
+  await window.getByTestId('pmenu-id-alpha').click()
+  await window.getByTestId('premove-id-alpha').click()
 
   await expect(window.getByTestId('project-unsorted')).toBeVisible()
   // Removing a project destroys nothing: the session is still running.

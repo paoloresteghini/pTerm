@@ -67,18 +67,21 @@ describe('restoreWorkspace', () => {
 
   it('drops a config row whose session no longer exists', async () => {
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
-    // No projects, so nothing can be selected once the dead row is dropped —
-    // the v3 stand-in for the global active tab this test used to null out.
+    // The project's only tab is the dead one, so once it is dropped there is
+    // nothing left for its saved active tab to resolve to — the v3 stand-in for
+    // the global active tab this test used to null out. Asserting that against
+    // an empty project list, as the port first did, asserted nothing: with no
+    // projects it is null on every code path.
     const store = await configWith({
-      projects: [],
-      activeProjectId: 'id-gone',
+      projects: [project('Lumio', 'lumio', tmpdir(), '00000000000000ff')],
+      activeProjectId: 'id-lumio',
       tabs: [tab('00000000000000ff')],
     })
 
     const result = await restoreWorkspace(manager, store, immediate)
 
     expect(result.tabs).toEqual([])
-    expect(result.activeProjectId).toBeNull()
+    expect(result.projects[0].activeTabId).toBeNull()
     await expect(store.read().then((c) => c.tabs)).resolves.toEqual([])
   })
 
@@ -349,6 +352,33 @@ describe('restoreWorkspace projects', () => {
     await expect(store.read().then((c) => c.projects[0].activeTabId)).resolves.toBe(
       '1111111111111111',
     )
+    manager.detachAll()
+  })
+
+  // Two projects with different answers, so a row written against the wrong
+  // project is visible. One project cannot show that: every mapping, right or
+  // wrong, produces the same file.
+  it('writes each resolved active tab against its own project row', async () => {
+    await createStray('prcli-lumio-1111111111111111')
+    await createStray('prcli-gco-3333333333333333')
+    const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
+    const store = await configWith({
+      projects: [
+        project('Lumio', 'lumio', tmpdir()),
+        project('GCO', 'gco', tmpdir()),
+      ],
+      activeProjectId: 'id-lumio',
+      tabs: [],
+    })
+
+    await restoreWorkspace(manager, store, immediate)
+
+    await expect(
+      store.read().then((c) => c.projects.map((p) => [p.id, p.activeTabId])),
+    ).resolves.toEqual([
+      ['id-lumio', '1111111111111111'],
+      ['id-gco', '3333333333333333'],
+    ])
     manager.detachAll()
   })
 })

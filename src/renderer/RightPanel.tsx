@@ -16,8 +16,10 @@ export function RightPanel({
         Presets
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
+        {/* Not `preset-claude`: a repository declaring a preset labelled
+            `claude` would otherwise produce two elements with that testid. */}
         <button
-          data-testid="preset-claude"
+          data-testid="preset-default-claude"
           disabled={!project || !project.available}
           onClick={() => onRun('claude')}
           className="w-full cursor-default border-none bg-transparent px-2.5 py-1 text-left text-muted hover:text-fg disabled:opacity-40"
@@ -38,9 +40,11 @@ export function RightPanel({
             {preset.origin === 'repo' ? <span className="text-faint">repo</span> : null}
           </button>
         ))}
+        {/* "declared": the `claude` button above is always there, so the panel
+            is never actually empty. */}
         {project && project.presets.length === 0 ? (
           <p className="px-2.5 py-1 text-faint">
-            No presets. Add a .prcli.json to the repository.
+            No declared presets. Add a .prcli.json to the repository.
           </p>
         ) : null}
       </div>

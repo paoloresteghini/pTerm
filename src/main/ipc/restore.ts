@@ -162,9 +162,15 @@ export async function restoreWorkspace(
     await store.write({
       version: 3,
       // Only real projects are persisted; the Unsorted row is synthetic.
-      projects: saved.projects.map((project, index) => ({
+      // Matched by id rather than by index: `describeProjects` returns one row
+      // per project today, but adding a `filter` or a `continue` to it would
+      // otherwise shift every project's active tab onto its neighbour, and
+      // without `noUncheckedIndexedAccess` that would typecheck cleanly and
+      // leave the suite green.
+      projects: saved.projects.map((project) => ({
         ...project,
-        activeTabId: real[index].activeTabId,
+        activeTabId:
+          real.find((described) => described.id === project.id)?.activeTabId ?? project.activeTabId,
       })),
       activeProjectId,
       tabs,

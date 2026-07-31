@@ -23,7 +23,10 @@ async function fakeTmuxFailingWith(stderr: string): Promise<TmuxAdapter> {
   const bin = join(fakeBinDir, `tmux-${Math.random().toString(16).slice(2)}`)
   await writeFile(bin, `#!/bin/sh\nprintf '%s\\n' ${JSON.stringify(stderr)} >&2\nexit 1\n`, 'utf8')
   await chmod(bin, 0o755)
-  return new TmuxAdapter({ bin })
+  // The socket is redundant — this stub ignores its arguments entirely — but a
+  // socket-less adapter is the one mistake in this project that can reach the
+  // user's real tmux server, so no adapter anywhere gets to be the exception.
+  return new TmuxAdapter({ bin, socket: SOCKET })
 }
 
 afterAll(async () => {
