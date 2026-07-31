@@ -466,38 +466,114 @@ export class SessionManager {
    * changes size across a move — the container's box is identical and the tab
    * stays visible — so no refit follows to correct a default-sized attach, and
    * the pane would simply stay wrapped at 80 columns.
+   *
+   * The single-pane path through `moveTabToProject`, kept as its own method
+   * because most callers only have one pane's `known` to offer and a `Pick`
+   * is a plainer thing to pass than a one-entry `Map`.
    */
   async moveToProject(
     id: string,
     projectSlug: string,
     known?: Pick<PaneRecord, 'cwd' | 'command'>,
   ): Promise<PaneRecord> {
-    const entry = this.entries.get(id)
-    const current = entry?.record ?? (await this.findOrphans()).find((row) => row.id === id)
-    if (!current) throw new Error(`moveToProject: no session for tab ${id}`)
-
-    const cwd = known?.cwd ?? current.cwd
-    const command = known?.command ?? current.command
-    const tmuxSession = encodeSessionName({ projectSlug, id })
-    // Already there: nothing to rename, and nothing worth tearing a working
-    // client down for.
-    if (tmuxSession === current.tmuxSession) return { ...current, cwd, command }
-
-    // Read before the detach disposes the entry. A detached tab has none, and
-    // no client to take a size from either, so the default is all there is —
-    // no worse than today, and the renderer refits it when it is next shown.
-    const size = entry ? { cols: entry.cols, rows: entry.rows } : {}
-    await this.adapter.renameSession(current.tmuxSession, tmuxSession)
-    if (entry) this.detach(id)
-    return this.open({
+    const [moved] = await this.moveTabToProject(
       id,
       projectSlug,
-      cwd,
-      command,
-      tmuxSession,
-      type: current.type,
-      ...size,
-    })
+      known && new Map([[id, known]]),
+    )
+    return moved
+  }
+
+  /**
+   * Move every pane of a tab into another project, or none of them.
+   *
+   * A split tab's project membership lives in each member session's own name,
+   * so a rename of one pane and not the rest would leave the tab split across
+   * two projects — the one outcome this must never produce. tmux refuses a
+   * rename onto a name already in use and leaves the source untouched, so a
+   * refusal part-way through a naive loop would do exactly that. The fix:
+   * rename every member first, and if any rename throws, rename the ones that
+   * already succeeded back before rethrowing. Only once every rename has gone
+   * through does any client get cycled — same ordering as `moveToProject`,
+   * and for the same reason: a client survives a rename out from under it, so
+   * touching clients only after every rename has succeeded means a refusal
+   * changes nothing at all rather than leaving some panes detached.
+   *
+   * `panesOfTab`, not `findOrphanTabs`, resolves the tab's members: this is
+   * routinely called on a tab this app has open, and `findOrphanTabs`
+   * deliberately excludes exactly those panes.
+   *
+   * `known` carries each pane's real cwd/command, keyed by pane id, for the
+   * same reason `moveToProject` takes one — a pane found through
+   * `panesOfTab` rather than an open entry has a tmux-synthesised cwd and no
+   * command.
+   *
+   * Each reattach carries that pane's own live geometry forward, same as
+   * `moveToProject` — nothing in the renderer changes size across a move, so
+   * no refit follows to correct a default-sized attach.
+   */
+  async moveTabToProject(
+    tabId: string,
+    projectSlug: string,
+    known?: Map<string, Pick<PaneRecord, 'cwd' | 'command'>>,
+  ): Promise<PaneRecord[]> {
+    const panes = await this.panesOfTab(tabId)
+    if (panes.length === 0) throw new Error(`moveTabToProject: no session for tab ${tabId}`)
+
+    const targets = panes.map((pane) => ({
+      pane,
+      to: encodeSessionName({ projectSlug, id: pane.id }),
+    }))
+
+    // Rename every member before any client is touched. Undo, in reverse
+    // order, whatever succeeded before the failure — that is what keeps a
+    // refused rename from leaving the tab split across two projects.
+    const renamed: { from: string; to: string }[] = []
+    try {
+      for (const { pane, to } of targets) {
+        if (to === pane.tmuxSession) continue
+        await this.adapter.renameSession(pane.tmuxSession, to)
+        renamed.push({ from: pane.tmuxSession, to })
+      }
+    } catch (error) {
+      for (const { from, to } of renamed.reverse()) {
+        await this.adapter.renameSession(to, from)
+      }
+      throw error
+    }
+
+    const moved: PaneRecord[] = []
+    for (const { pane, to } of targets) {
+      const overrides = known?.get(pane.id)
+      const cwd = overrides?.cwd ?? pane.cwd
+      const command = overrides?.command ?? pane.command
+      // Already there: nothing was renamed, and nothing worth tearing a
+      // working client down for.
+      if (to === pane.tmuxSession) {
+        moved.push({ ...pane, cwd, command })
+        continue
+      }
+
+      // Read before the detach disposes the entry. A detached pane has none,
+      // and no client to take a size from either, so the default is all
+      // there is — no worse than today, and the renderer refits it when it
+      // is next shown.
+      const entry = this.entries.get(pane.id)
+      const size = entry ? { cols: entry.cols, rows: entry.rows } : {}
+      if (entry) this.detach(pane.id)
+      moved.push(
+        this.open({
+          id: pane.id,
+          projectSlug,
+          cwd,
+          command,
+          tmuxSession: to,
+          type: pane.type,
+          ...size,
+        }),
+      )
+    }
+    return moved
   }
 
   /**
@@ -560,6 +636,78 @@ export class SessionManager {
       else tabs.set(tabId, [pane])
     }
     return [...tabs].map(([tabId, grouped]) => ({ tabId, panes: grouped }))
+  }
+
+  /**
+   * Every pane of a tab, including ones this app currently holds a client
+   * for.
+   *
+   * `findOrphanTabs` looks like the tool for this and is not: it is built
+   * from `findOrphans`, which deliberately excludes any session this app has
+   * open, so for a live tab — the ordinary case a move is called on — it
+   * returns nothing at all. This instead starts from live tmux and folds in
+   * the manager's own open entries, so an open pane's record is its own
+   * entry (real cwd, real command) rather than one synthesised from tmux the
+   * way an orphan's is.
+   *
+   * Each pane's `projectSlug` comes from decoding that pane's OWN session
+   * name, never the group's: a group name is frozen at group-creation time
+   * and does not follow a rename (see `tabIdFromGroupName`), so reading a
+   * slug off it would report a moved pane under its old project.
+   *
+   * The founder — the pane whose own id is `tabId` — always comes first in
+   * the returned array, and every other member follows in whatever order
+   * tmux gave them. `list-sessions` (and so `listSessionsWithGroups`) orders
+   * sessions alphabetically by name, not by creation order (measured: a
+   * session named `aaa-*` sorts before one named `zzz-*` regardless of which
+   * was created first), and a pane's name carries a random hex id — so
+   * leaving tmux's order in place would make founder-vs-sibling position a
+   * coin flip on every call. `moveTabToProject` renames in this order; its
+   * rollback undoes whatever succeeded regardless of position, so nothing
+   * downstream of this depends on it today, but a caller has no way to name
+   * "the founder's pane" out of the result at all without a fixed position
+   * to look at, so this fixes one.
+   */
+  async panesOfTab(tabId: string): Promise<PaneRecord[]> {
+    const rows = await this.adapter.listSessionsWithGroups()
+    const founder = rows.find((row) => decodeSessionName(row.name)?.id === tabId)
+    if (!founder) return []
+
+    // An empty group means a tab that has never been split — just the
+    // founder's own row. A non-empty one is shared by every member,
+    // including the founder itself (see `groupNameOf`) — filtered back out
+    // here so it can be put first explicitly instead of wherever tmux's
+    // alphabetical order happens to put it.
+    const members = founder.group
+      ? [founder, ...rows.filter((row) => row.group === founder.group && row !== founder)]
+      : [founder]
+
+    const panes: PaneRecord[] = []
+    for (const row of members) {
+      const parts = decodeSessionName(row.name)
+      if (!parts) continue
+      const open = this.entries.get(parts.id)
+      if (open) {
+        // `id`, `projectSlug` and `tmuxSession` come from `row.name` — the
+        // name tmux has right now — not from the cached entry, which can be
+        // one rename behind: `moveTabToProject` renames every member before
+        // it cycles any client, so a caller asking mid-move, or after a
+        // rollback, would otherwise be told the pre-rename name even though
+        // tmux itself already disagrees. `cwd`/`command`/`type` still come
+        // from the entry: tmux does not remember a command at all, and a
+        // shell's current directory can have moved on from where it opened.
+        panes.push({ ...open.record, id: parts.id, projectSlug: parts.projectSlug, tmuxSession: row.name })
+        continue
+      }
+      panes.push({
+        id: parts.id,
+        projectSlug: parts.projectSlug,
+        cwd: (await this.adapter.paneCurrentPath(row.name)) || process.env.HOME || '/',
+        tmuxSession: row.name,
+        type: 'shell',
+      })
+    }
+    return panes
   }
 
   onData(listener: (id: string, data: string) => void): void {

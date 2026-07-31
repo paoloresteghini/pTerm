@@ -445,6 +445,61 @@ describe('SessionManager.findOrphanTabs', () => {
   })
 })
 
+describe('SessionManager.moveTabToProject', () => {
+  it('renames every pane, and the tab still lists under the destination', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const manager = new SessionManager(adapter)
+    const founder = manager.open({ projectSlug: 'lumio', cwd: tmpdir() })
+    await waitFor(manager, founder.id, /\$|%|#/)
+    const second = await manager.splitTab({ paneId: founder.id })
+    await waitFor(manager, second.id, /\$|%|#/)
+
+    const moved = await manager.moveTabToProject(founder.id, 'gco')
+
+    expect(moved.map((pane) => pane.tmuxSession).sort()).toEqual(
+      [`prcli-gco-${founder.id}`, `prcli-gco-${second.id}`].sort(),
+    )
+    // The stale-slug trap: the GROUP name still says lumio, because a group
+    // name does not follow a rename. The tab must still list under gco, which
+    // it does only if nothing reads the slug out of the group name.
+    const group = await manager.groupNameOf(founder.id)
+    expect(group).toContain('lumio')
+
+    // Both panes, read back from live tmux rather than from the return value.
+    const panes = await manager.panesOfTab(founder.id)
+    expect(panes).toHaveLength(2)          // never assert over a collection
+    for (const pane of panes) expect(pane.projectSlug).toBe('gco')
+    manager.detachAll()
+  })
+
+  // The partial-failure rule, which is the whole reason this is one operation
+  // rather than a loop of single-pane moves. A tab split across two projects is
+  // the one outcome that must not happen, and tmux refuses a rename onto a name
+  // already in use — so the second rename failing must undo the first.
+  it('rolls back every rename when one of them fails', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const manager = new SessionManager(adapter)
+    const founder = manager.open({ projectSlug: 'lumio', cwd: tmpdir() })
+    await waitFor(manager, founder.id, /\$|%|#/)
+    const second = await manager.splitTab({ paneId: founder.id })
+    await waitFor(manager, second.id, /\$|%|#/)
+
+    // Occupy the name the SECOND pane would move to, so its rename is refused
+    // while the first pane's has already gone through.
+    await run('tmux', [
+      '-L', SOCKET, 'new-session', '-d', '-s', `prcli-gco-${second.id}`, 'sleep', '600',
+    ])
+
+    await expect(manager.moveTabToProject(founder.id, 'gco')).rejects.toThrow()
+
+    // Neither pane moved: the tab is still whole, and still in lumio.
+    const panes = await manager.panesOfTab(founder.id)
+    expect(panes).toHaveLength(2)
+    for (const pane of panes) expect(pane.projectSlug).toBe('lumio')
+    manager.detachAll()
+  })
+})
+
 describe('SessionManager tab id in the session environment', () => {
   it('puts the tab id in the session environment, where a hook can read it', async () => {
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
