@@ -100,6 +100,49 @@ describe('ConfigStore.write', () => {
     await expect(readdir(dir)).resolves.toEqual(['config.json'])
   })
 
+  // The carry-forward that stopped being theoretical the moment a v4 config
+  // existed. `read()` returns empty for a version it does not understand, and
+  // restore then writes a full file over it — so running an older build once,
+  // with a newer one's config on disk, destroys every project and rule in it.
+  // Two builds have in fact been sharing that file all day.
+  it('refuses to overwrite a config written by a newer version', async () => {
+    const future = { version: 99, projects: [], tabs: [], somethingNew: true }
+    await writeFile(file, JSON.stringify(future), 'utf8')
+    const store = new ConfigStore(file)
+
+    await store.write(sampleConfig)
+
+    await expect(readFile(file, 'utf8').then(JSON.parse)).resolves.toEqual(future)
+  })
+
+  it('does not throw when it refuses, so an old build still runs', async () => {
+    await writeFile(file, JSON.stringify({ version: 99, tabs: [] }), 'utf8')
+
+    // Losing layout is the cost of running the old build; a rejected promise
+    // here would surface as a failed IPC call on every ordinary edit.
+    await expect(new ConfigStore(file).write(sampleConfig)).resolves.toBeUndefined()
+  })
+
+  it('still upgrades a config written by an older version', async () => {
+    await writeFile(file, JSON.stringify({ version: 3, tabs: [], projects: [] }), 'utf8')
+    const store = new ConfigStore(file)
+
+    await store.write(sampleConfig)
+
+    await expect(store.read()).resolves.toEqual(sampleConfig)
+  })
+
+  it('writes over a file too damaged to state a version', async () => {
+    // Or a single corrupt byte would lock the config against every future
+    // write, which is a worse failure than the one this guard prevents.
+    await writeFile(file, 'not json at all', 'utf8')
+    const store = new ConfigStore(file)
+
+    await store.write(sampleConfig)
+
+    await expect(store.read()).resolves.toEqual(sampleConfig)
+  })
+
   it('does not corrupt the existing file when given unserialisable input', async () => {
     const store = new ConfigStore(file)
     await store.write(sampleConfig)
@@ -107,6 +150,36 @@ describe('ConfigStore.write', () => {
     ;(circular as unknown as { self: unknown }).self = circular
     await expect(store.write(circular)).rejects.toThrow()
     await expect(store.read()).resolves.toEqual(sampleConfig)
+  })
+})
+
+describe('ConfigStore.read, hostile shapes', () => {
+  // Carried forward since v3 as "migrate() does not validate the elements of
+  // tabs, so `tabs: [null]` defeats read()'s never-throws contract". It does
+  // validate them — `isTab` rejects null before touching a property — and this
+  // is the test that says so, rather than the item being closed on a reading.
+  it('drops a null tab row instead of throwing through read()', async () => {
+    const store = await storeWith({ version: 4, projects: [], tabs: [null], activeProjectId: null })
+
+    await expect(store.read()).resolves.toMatchObject({ tabs: [] })
+  })
+
+  it('drops tab rows of every wrong shape, keeping the good one', async () => {
+    const good = {
+      id: 'a1b2c3d4e5f60718',
+      projectSlug: 'lumio',
+      cwd: '/tmp',
+      tmuxSession: 'prcli-lumio-a1b2c3d4e5f60718',
+      type: 'shell',
+    }
+    const store = await storeWith({
+      version: 4,
+      projects: [],
+      activeProjectId: null,
+      tabs: [null, 'a string', 42, [], { id: 'no other fields' }, good],
+    })
+
+    await expect(store.read()).resolves.toMatchObject({ tabs: [good] })
   })
 })
 

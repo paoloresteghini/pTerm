@@ -220,9 +220,47 @@ export class ConfigStore {
     }
   }
 
+  /**
+   * The `version` the file on disk claims, or null if it does not claim one.
+   *
+   * Null covers a missing file, a damaged one, and a file with no version
+   * field — all cases where writing must go ahead. A single corrupt byte
+   * locking the config against every future write would be a worse failure
+   * than the one the guard below prevents.
+   */
+  private async versionOnDisk(): Promise<number | null> {
+    try {
+      const value = JSON.parse(await readFile(this.filePath, 'utf8')) as { version?: unknown }
+      return typeof value.version === 'number' ? value.version : null
+    } catch {
+      return null
+    }
+  }
+
   /** Serialise first, then write to a temp file and rename over the target. */
   async write(config: PrcliConfig): Promise<void> {
+    // Before the guard, so unserialisable input still rejects rather than
+    // being quietly swallowed by a refusal it has nothing to do with.
     const json = JSON.stringify(config, null, 2)
+
+    // `migrate` returns empty for a version it does not understand, so an
+    // older build reads a newer config as "no config" and then writes a full
+    // one over it — losing every project, preset and rule in it. That was
+    // theoretical until a v4 file existed; a packaged build and a dev build
+    // have since shared one all day.
+    //
+    // Refused rather than thrown: the cost of running the old build is losing
+    // layout changes, and a rejected promise here would surface as a failed
+    // IPC call on every ordinary edit instead.
+    const existing = await this.versionOnDisk()
+    if (existing !== null && existing > config.version) {
+      console.warn(
+        `PRCLI: refusing to overwrite ${this.filePath} — it is version ${existing} and this ` +
+          `build writes version ${config.version}. Run the newer build, or move that file aside.`,
+      )
+      return
+    }
+
     await mkdir(dirname(this.filePath), { recursive: true })
     const temp = `${this.filePath}.${process.pid}.tmp`
     try {
