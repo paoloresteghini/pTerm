@@ -1,7 +1,9 @@
-import { describe, it, expect, afterEach, beforeAll } from 'vitest'
+import { describe, it, expect, afterEach, beforeAll, afterAll } from 'vitest'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { TmuxAdapter } from '../../src/main/tmux/adapter'
 import { PtySession } from '../../src/main/pty/session'
 
@@ -112,6 +114,99 @@ describe('PtySession', () => {
     const session = open()
     await waitForOutput(session, /\$|%|#/)
     await expect(adapter.getSessionOption(NAME, 'status')).resolves.toBe('off')
+    session.detach()
+  })
+})
+
+/**
+ * `remain-on-exit` and the `pane-died` hook go on together or not at all: the
+ * option with no hook to reap turns every ordinary `exit` into a session
+ * nothing removes, the stray this project has already shipped once.
+ *
+ * Half of that rule is decided here, in the arguments `start()` builds —
+ * before tmux has been asked anything, and before `SessionManager` can install
+ * or refuse a hook. So the arguments are what has to be read: a session whose
+ * hook was refused for an unsafe reporter starts perfectly normally, and asking
+ * tmux afterwards cannot tell "never set" from "set and then unset by
+ * `wireDeathHook`". The other half — a hook refused by tmux itself, once the
+ * option is already on — is `pane-death.test.ts`'s.
+ */
+describe('PtySession remain-on-exit', () => {
+  let recorderDir: string | undefined
+
+  afterAll(async () => {
+    if (recorderDir) await rm(recorderDir, { recursive: true, force: true })
+  })
+
+  /** A stand-in for the tmux binary that writes the argv it was handed. */
+  async function recordingTmux(): Promise<{ adapter: TmuxAdapter; argv: () => Promise<string[]> }> {
+    recorderDir ??= await mkdtemp(join(tmpdir(), 'prcli-argv-'))
+    const bin = join(recorderDir, `tmux-${Math.random().toString(16).slice(2)}`)
+    const log = `${bin}.argv`
+    await writeFile(bin, `#!/bin/sh\nprintf '%s\\n' "$@" > ${JSON.stringify(log)}\n`, 'utf8')
+    await chmod(bin, 0o755)
+    return {
+      // A socket even here: the stub ignores its arguments, but a socket-less
+      // adapter is the one mistake that can reach the user's real tmux server,
+      // so nothing in this repo gets to be the exception.
+      adapter: new TmuxAdapter({ bin, socket: SOCKET }),
+      argv: async () => (await readFile(log, 'utf8')).split('\n').filter(Boolean),
+    }
+  }
+
+  function startWith(adapter: TmuxAdapter, deathReporter: string): PtySession {
+    const session = new PtySession(adapter, {
+      tmuxSession: NAME,
+      cwd: tmpdir(),
+      cols: 80,
+      rows: 24,
+      command: 'sleep 30',
+      deathReporter,
+      tabId: 'a1b2c3d4e5f60718',
+    })
+    session.start()
+    return session
+  }
+
+  it('chains the option on when a hook can be built for the reporter', async () => {
+    const { adapter: recorder, argv } = await recordingTmux()
+    const session = startWith(recorder, '/Users/paolo/.prcli/prcli-hook')
+
+    await expect.poll(argv, { timeout: 8000 }).toContain('remain-on-exit')
+    session.detach()
+  })
+
+  // The paired case, and the one that matters. A single quote ends the quoting
+  // the hook command uses to hold a path with a space in it together, so
+  // `canBuildDeathHook` refuses — and the option must not go on without it.
+  // Without that guard this is a session preserved on every exit with nothing
+  // that will ever reap it.
+  it('leaves the option off when the reporter path makes a hook unsafe', async () => {
+    const { adapter: recorder, argv } = await recordingTmux()
+    const session = startWith(recorder, "/Users/o'brien/.prcli/prcli-hook")
+
+    // Wait for the spawn to have happened at all, so this cannot pass by
+    // reading an empty log — `status` is chained unconditionally.
+    await expect.poll(argv, { timeout: 8000 }).toContain('status')
+    expect(await argv()).not.toContain('remain-on-exit')
+    session.detach()
+  })
+
+  it('leaves the option off when the tab id is not one this app generated', async () => {
+    const { adapter: recorder, argv } = await recordingTmux()
+    const session = new PtySession(recorder, {
+      tmuxSession: NAME,
+      cwd: tmpdir(),
+      cols: 80,
+      rows: 24,
+      command: 'sleep 30',
+      deathReporter: '/Users/paolo/.prcli/prcli-hook',
+      tabId: "abc'; rm -rf /",
+    })
+    session.start()
+
+    await expect.poll(argv, { timeout: 8000 }).toContain('status')
+    expect(await argv()).not.toContain('remain-on-exit')
     session.detach()
   })
 })

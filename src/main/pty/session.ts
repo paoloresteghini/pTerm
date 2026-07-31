@@ -134,8 +134,16 @@ export class PtySession {
     // The two still go on together or not at all — `remain-on-exit` with no
     // hook to reap turns every ordinary `exit` into a session that never goes
     // away, the stray this project has already had once. `canBuildDeathHook`
-    // asks exactly what `deathHookCommand` will, minus the window id, which
-    // tmux supplies and which is never the reason it refuses.
+    // asks exactly what `deathHookCommand` will, minus the window id.
+    //
+    // But this guard alone cannot hold that rule, and does not claim to. It
+    // runs before tmux has made the window, so it cannot know whether the hook
+    // will actually install — the window id may never come back, or `set-hook`
+    // may be refused. Holding the rule for those cases is
+    // `SessionManager.wireDeathHook`'s job: it takes this option back off
+    // whenever it ends without a hook and can still name the window. What is
+    // decided here is only the case it can decide, which is a reporter path or
+    // a tab id that could change the command's meaning.
     if (
       !this.options.windowId &&
       this.options.deathReporter &&

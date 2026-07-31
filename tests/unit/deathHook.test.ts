@@ -1,8 +1,80 @@
 import { describe, it, expect } from 'vitest'
-import { deathHookCommand } from '../../src/main/pty/deathHook'
+import { canBuildDeathHook, deathHookCommand } from '../../src/main/pty/deathHook'
 
 const ID = '0123456789abcdef'
 const SESSION = `prcli-alpha-${ID}`
+
+/**
+ * `PtySession.start()` has to decide whether to chain `remain-on-exit` into the
+ * very command that creates a session, and it has to decide before tmux has
+ * made the window the hook will name. It asks this rather than guessing — so
+ * this function is the load-bearing half of the together-or-not-at-all rule at
+ * spawn time, and it went the whole milestone with no test of its own.
+ */
+describe('canBuildDeathHook', () => {
+  const safe = { reporter: '/Users/paolo/.prcli/prcli-hook', tabId: ID, tmuxSession: SESSION }
+
+  it('accepts the values this app actually generates', () => {
+    expect(canBuildDeathHook(safe)).toBe(true)
+  })
+
+  it.each([
+    ["a single quote", "/Users/o'brien/.prcli/prcli-hook"],
+    ['a double quote', '/Users/paolo/"x"/prcli-hook'],
+    ['a dollar sign', '/Users/paolo/$HOME/prcli-hook'],
+    ['a backtick', '/Users/paolo/`id`/prcli-hook'],
+    ['a backslash', '/Users/paolo/x\\y/prcli-hook'],
+    ['a newline', '/Users/paolo/x\ny/prcli-hook'],
+    ['a hash', '/Users/paolo/#{x}/prcli-hook'],
+  ])('refuses a reporter path containing %s', (_label, reporter) => {
+    expect(canBuildDeathHook({ ...safe, reporter })).toBe(false)
+  })
+
+  it('refuses a tab id that is not sixteen hex characters', () => {
+    for (const tabId of ["abc'; rm -rf /", '', 'A1B2C3D4E5F60718', 'a1b2c3d4e5f6071', 'a1b2c3d4e5f607180']) {
+      expect(canBuildDeathHook({ ...safe, tabId })).toBe(false)
+    }
+  })
+
+  // The session name is checked against the same charset as the reporter,
+  // because it is interpolated into the same command. It is not, however, the
+  // reason this guard exists: `encodeSessionName` already refuses anything but
+  // `[a-z0-9_]` and 16 hex, so nothing here is reachable from the app.
+  it.each([
+    ['a single quote', "prcli-alpha-'x'" ],
+    ['a hash', 'prcli-alpha-#{x}'],
+    ['a dollar sign', 'prcli-alpha-$x'],
+  ])('refuses a session name containing %s', (_label, tmuxSession) => {
+    expect(canBuildDeathHook({ ...safe, tmuxSession })).toBe(false)
+  })
+
+  // The two must agree exactly, minus the window id, or the spawn-time
+  // decision and the install-time one can disagree — `remain-on-exit` chained
+  // on for a hook that is then refused, which is the stray this project has
+  // already shipped once.
+  it('answers what deathHookCommand will, for every input either of them judges', () => {
+    const reporters = [
+      '/Users/paolo/.prcli/prcli-hook',
+      '/Users/paolo/Application Support/prcli-hook',
+      "/Users/o'brien/.prcli/prcli-hook",
+      '/Users/paolo/#{x}/prcli-hook',
+      '/Users/paolo/$HOME/prcli-hook',
+    ]
+    const tabIds = [ID, 'a1b2c3d4e5f60718', "abc'; rm -rf /", '']
+    const sessions = [SESSION, 'prcli-alpha-x ; kill-server']
+    for (const reporter of reporters) {
+      for (const tabId of tabIds) {
+        for (const tmuxSession of sessions) {
+          const input = { reporter, tabId, tmuxSession }
+          expect({ ...input, ok: canBuildDeathHook(input) }).toEqual({
+            ...input,
+            ok: deathHookCommand({ ...input, windowId: '@7' }) !== null,
+          })
+        }
+      }
+    }
+  })
+})
 
 describe('deathHookCommand', () => {
   it('reports the dead pane\'s status and then kills the session', () => {

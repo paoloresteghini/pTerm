@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, beforeAll } from 'vitest'
+import { describe, it, expect, afterEach, beforeAll, vi } from 'vitest'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { mkdtemp, rm, writeFile, chmod } from 'node:fs/promises'
@@ -45,6 +45,26 @@ async function windowIdOf(name: string): Promise<string> {
   return stdout.trim()
 }
 
+/** The window-scoped `remain-on-exit`, or `''` when the window has gone. */
+async function remainOnExit(windowId: string): Promise<string> {
+  try {
+    const { stdout } = await run('tmux', [
+      '-L', SOCKET, 'show-options', '-w', '-t', windowId, '-v', 'remain-on-exit',
+    ])
+    return stdout.trim()
+  } catch {
+    return ''
+  }
+}
+
+/** The pid of the process running in a session's pane. */
+async function panePid(name: string): Promise<string> {
+  const { stdout } = await run('tmux', [
+    '-L', SOCKET, 'display-message', '-p', '-t', `=${name}:`, '#{pane_pid}',
+  ])
+  return stdout.trim()
+}
+
 async function paneIsDead(windowId: string): Promise<boolean> {
   const { stdout } = await run('tmux', [
     '-L', SOCKET, 'display-message', '-p', '-t', windowId, '#{pane_dead}',
@@ -62,7 +82,11 @@ let manager: SessionManager | null = null
  * The socket lives in a short temp path on purpose: `HookServer` refuses a
  * path over 104 bytes, which a nested temp directory would exceed.
  */
-async function harness(): Promise<{ manager: SessionManager; received: HookLine[] }> {
+async function harness(): Promise<{
+  manager: SessionManager
+  adapter: TmuxAdapter
+  received: HookLine[]
+}> {
   dir = await mkdtemp(join(tmpdir(), 'prcli-death-'))
   const paths = {
     script: join(dir, 'prcli-hook'),
@@ -77,15 +101,15 @@ async function harness(): Promise<{ manager: SessionManager; received: HookLine[
   const received: HookLine[] = []
   hookServer.onEvent((message) => received.push(message))
 
-  manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }), {
-    deathReporter: paths.script,
-  })
-  return { manager, received }
+  const adapter = new TmuxAdapter({ socket: SOCKET })
+  manager = new SessionManager(adapter, { deathReporter: paths.script })
+  return { manager, adapter, received }
 }
 
 beforeAll(killServer)
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   await killServer()
   await hookServer?.stop()
   hookServer = null
@@ -253,6 +277,47 @@ describe('a pane that dies', () => {
     expect(await paneIsDead(survivorWindow)).toBe(false)
     sessions.detachAll()
   })
+
+  // `remain-on-exit` and the `pane-died` hook go on together or not at all.
+  //
+  // On the `open()` path the option cannot wait for the hook: it is chained
+  // into the spawn because a command like `exit 3` is gone before a second
+  // tmux call can land. So by the time the hook is refused the option is
+  // already on, and leaving it there turns every ordinary `exit` into a dead
+  // pane, a window and a session that nothing removes — the stray this
+  // project has already shipped once, which the next restore then adopts as a
+  // live tab.
+  //
+  // The kill below is what proves it rather than merely reading the option
+  // back: with no hook installed, tmux's own reaping is the only thing that
+  // can remove this session, and `remain-on-exit on` is exactly what stops it.
+  it('takes remain-on-exit back off when the hook cannot be installed', async () => {
+    const { manager: sessions, adapter, received } = await harness()
+    vi.spyOn(adapter, 'setDeathHook').mockRejectedValue(new Error('tmux refused the hook'))
+
+    const record = sessions.open({
+      projectSlug: 'alpha',
+      cwd: dir,
+      command: 'sh -c "sleep 30"',
+      type: 'preset',
+    })
+    await expect.poll(() => sessionExists(record.tmuxSession), { timeout: 10_000 }).toBe(true)
+    const window = await windowIdOf(record.tmuxSession)
+
+    await expect.poll(() => remainOnExit(window), { timeout: 10_000 }).not.toBe('on')
+
+    await run('kill', ['-9', await panePid(record.tmuxSession)])
+    await expect.poll(() => sessionExists(record.tmuxSession), { timeout: 10_000 }).toBe(false)
+    // And nothing was reported, because nothing was hooked. The red dot is the
+    // price of this path; the stray session is not.
+    expect(received).toEqual([])
+  })
+
+  // The other way a hook can be refused — an unsafe reporter path — is
+  // decided before the spawn and is covered where that decision is made:
+  // `session.test.ts`'s "PtySession remain-on-exit". Asserting it again from
+  // here would produce a test no single mutation can fail, because the option
+  // is then held off by two independent mechanisms.
 
   // `remain-on-exit` is what makes the status readable at all, and it also
   // stops tmux reaping the session on its own. If the hook did not kill it,

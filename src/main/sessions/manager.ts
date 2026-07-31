@@ -191,8 +191,11 @@ export class SessionManager {
     if (!windowId) {
       // Swallowed deliberately. Everything expected is already tolerated
       // inside the adapter, so what reaches here is a tmux this app cannot
-      // talk to at all — and the cost of that is a tab whose death shows grey
-      // instead of red, which is not worth taking the main process down for.
+      // talk to at all, and that is not worth taking the main process down
+      // for. The cost is a tab whose death shows grey instead of red —
+      // `wireDeathHook` has already taken `remain-on-exit` back off by the
+      // time anything reaches here, on every path where it can name the
+      // window, so it is not also a stray session.
       void this.wireDeathHook(record, null).catch(() => {})
     }
     return record
@@ -209,15 +212,35 @@ export class SessionManager {
    * `open()`'s is chained into `new-session` because a fast command would
    * otherwise be reaped before a second tmux call could land, while a split's
    * window is empty until this has finished with it.
+   *
+   * That asymmetry is what makes every early return below load-bearing. On the
+   * split path a hook that does not go on leaves the window as tmux made it,
+   * and nothing is owed. On the `open()` path the option is ALREADY ON before
+   * this function runs, so the same early return would leave the together-or-
+   * not-at-all rule broken — every ordinary `exit` preserved as a dead pane in
+   * a window and a session nothing reaps, which the next restore then adopts
+   * as a live tab. So each one takes the option back off first.
    */
   private async wireDeathHook(record: PaneRecord, windowId: string | null): Promise<void> {
     const reporter = this.options.deathReporter
     if (!reporter) return
 
     const window = windowId ?? (await this.awaitWindowId(record.tmuxSession))
-    // Nothing to hook and nothing to leak: a session tmux will not name has
-    // gone, taking its window with it.
-    if (!window) return
+    if (!window) {
+      // This is NOT proof the session has gone. `windowIdOf` swallows every
+      // failure and answers '' for all of them, so a session tmux has never
+      // heard of and a tmux that would not answer are indistinguishable here.
+      //
+      // It is also the one path this function cannot repair, because taking a
+      // window option off requires naming a window and tmux has just declined
+      // to name one. If the session really has gone there is nothing to leak;
+      // if it has not, the pane is left preserved on exit with nothing to reap
+      // it, and only the next restore's reconcile will notice. Recorded rather
+      // than asserted away — the alternative would be a second target form for
+      // the same option, guessing at the window through the session, which is
+      // the mistake `window-size` already made once on this branch.
+      return
+    }
 
     const command = deathHookCommand({
       reporter,
@@ -225,18 +248,48 @@ export class SessionManager {
       tmuxSession: record.tmuxSession,
       windowId: window,
     })
-    // The two go on together or not at all: `remain-on-exit` with no hook to
-    // reap turns every ordinary `exit` into a window nothing removes. So the
-    // command is built BEFORE the option is set, and a refused one leaves the
-    // window exactly as tmux made it — the cost is a red dot, never a stray.
-    if (!command) return
+    if (!command) {
+      // Refused, so no hook is coming. Unreachable while `windowIdOf` answers
+      // tmux's own `@<n>` — `PtySession` asks `canBuildDeathHook`, which tests
+      // everything this does bar the window id — but the rule is held here
+      // rather than inferred from that.
+      await this.disableRemainOnExit(window)
+      return
+    }
 
     // Split path only. `open()`'s window already carries this, chained into
     // the command that created it. Window-scoped either way, so a sibling
     // pane's window is untouched — measured: it reads the option unset.
     if (windowId) await this.adapter.setWindowOption(windowId, 'remain-on-exit', 'on')
 
-    await this.adapter.setDeathHook(window, command)
+    try {
+      await this.adapter.setDeathHook(window, command)
+    } catch (error) {
+      // The same rule reached from the other side: the option is on — set at
+      // spawn on the `open()` path, one line above on the split path — and the
+      // hook is not. Everything tmux is expected to say here is already
+      // tolerated inside `setDeathHook`, so what lands in this catch is a real
+      // failure worth propagating; the option still has to come off first.
+      await this.disableRemainOnExit(window)
+      throw error
+    }
+  }
+
+  /**
+   * Take `remain-on-exit` off a window whose `pane-died` hook did not go on.
+   *
+   * Best effort, and swallowed on purpose. Every caller is already on a path
+   * where tmux has refused something, so this may be refused too — and it
+   * cannot make matters worse: afterwards the option is either off, or it was
+   * never reachable to begin with. The caller's own error is the one worth
+   * raising.
+   */
+  private async disableRemainOnExit(windowId: string): Promise<void> {
+    try {
+      await this.adapter.setWindowOption(windowId, 'remain-on-exit', 'off')
+    } catch {
+      // Nothing further to try. See above.
+    }
   }
 
   /**
