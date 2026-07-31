@@ -17,7 +17,8 @@ import { StatusRegistry } from '../status/registry'
 import { describeProjects, restoreWorkspace, withUnsorted } from './restore'
 import { isDirectory } from '../fsutil'
 import { scanCandidates } from '../projects/discovery'
-import { installHooks, readHooksState, uninstallHooks } from '../hooks/install'
+import { hookPaths, installHooks, readHooksState, uninstallHooks } from '../hooks/install'
+import { drainSpool } from '../hooks/spool'
 import {
   addProject,
   projectForSlug,
@@ -195,6 +196,19 @@ export function registerIpc(
     for (const tab of result.tabs) {
       if (registry.get(tab.id) === null) registry.applyOpen(tab.id, tab.type)
     }
+
+    // Whatever the hook script spooled while nothing was listening — a
+    // socket write that failed because the app was down. Run only now,
+    // after the reconcile above has decided which tabs actually survived:
+    // an event for a tab tmux no longer has must not resurrect a dot for a
+    // session that is gone. A second `restore` in one run (⌘R) costs
+    // nothing extra — the spool file drainSpool already took is gone.
+    const live = new Set(result.tabs.map((tab) => tab.id))
+    const spooled = await drainSpool(hookPaths().spool, Date.now())
+    for (const message of spooled) {
+      if (live.has(message.tabId)) registry.applyHook(message)
+    }
+
     return result
   })
 

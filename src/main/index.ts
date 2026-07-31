@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, Menu, Notification } from 'electron'
 import type { MenuItemConstructorOptions } from 'electron'
 import { execFile } from 'node:child_process'
+import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
 import { TmuxAdapter, TmuxNotInstalledError } from './tmux/adapter'
 import { resolveTmuxBin } from './tmux/resolve'
@@ -9,6 +10,8 @@ import { registerIpc } from './ipc/register'
 import { StatusRegistry } from './status/registry'
 import { mergeTab, NotificationRouter } from './notify/router'
 import { ConfigStore } from './state/store'
+import { HookServer } from './hooks/server'
+import { hookPaths } from './hooks/install'
 import { CHANNELS } from '../shared/ipc'
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string
@@ -27,6 +30,18 @@ const adapter = new TmuxAdapter({
 const manager = new SessionManager(adapter)
 const registry = new StatusRegistry()
 const store = new ConfigStore(ConfigStore.defaultPath())
+
+/**
+ * Where hook events actually arrive from Claude Code, one JSON line per event.
+ *
+ * Constructed here, alongside the registry it feeds, rather than inside
+ * `registerIpc`: it must already be listening before the renderer's first
+ * `restore` call, or an event that fires in the gap between launch and that
+ * call would have nowhere to land but the spool. `hookPaths()` reads
+ * `PRCLI_CONFIG_DIR` at call time, same as `ConfigStore.defaultPath()` above.
+ */
+const hookServer = new HookServer(hookPaths().socket)
+hookServer.onEvent((message) => registry.applyHook(message))
 
 /** The tab the renderer last said was selected — half of "attended". */
 let attendedTabId: string | null = null
@@ -222,6 +237,17 @@ app.whenReady().then(async () => {
     throw error
   }
 
+  // A hook script or a hand-crafted test client can connect the moment this
+  // resolves. A failure here (an unwritable config dir, a path too long for a
+  // unix socket) must not stop the app from opening a terminal — the cost is
+  // every dot staying hollow until it is fixed, not a broken app.
+  try {
+    await mkdir(hookPaths().dir, { recursive: true })
+    await hookServer.start()
+  } catch (error) {
+    console.error('PRCLI: failed to start the hook server', error)
+  }
+
   installMenu()
 
   registerIpc(manager, () => mainWindow, registry, store, setAttendedTab)
@@ -233,7 +259,10 @@ app.whenReady().then(async () => {
 })
 
 // Detach every client on quit. tmux sessions keep running by design.
-app.on('before-quit', () => manager.detachAll())
+app.on('before-quit', () => {
+  manager.detachAll()
+  void hookServer.stop()
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
