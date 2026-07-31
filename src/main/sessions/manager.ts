@@ -290,6 +290,8 @@ export class SessionManager {
     const group = await this.groupNameOf(input.paneId)
     const id = newSessionId()
     const cwd = input.cwd ?? sibling.record.cwd
+    const cols = input.cols ?? DEFAULT_COLS
+    const rows = input.rows ?? DEFAULT_ROWS
     const tmuxSession = encodeSessionName({
       projectSlug: sibling.record.projectSlug,
       id,
@@ -299,10 +301,15 @@ export class SessionManager {
     // a window's size when a client BEGINS viewing it and did not re-size on a
     // later select-window.
     //
-    // Set on each member by name, never once on the group: two probes disagreed
-    // about whether this option propagates between members, and a setting that
-    // happens to propagate is not a setting that was made. The group name is
-    // also not a valid option target once the founder has gone.
+    // Set with `-w` against a WINDOW ID, never through a session target.
+    // `window-size` is a window option, not a session one — measured:
+    // `show-options -g` has no `window-size` in it and `show-options -gw` does.
+    // `set-option -t '=<name>:'` on a window option therefore resolves to
+    // whatever window that session is *currently showing*, which is a real
+    // target and a wrong one: a freshly joined group member's current window is
+    // a SIBLING's (measured, `@0` every time), so the option lands on the
+    // founder's window and the pane it was meant for stays on `latest`.
+    // The window id is unambiguous and needs no ordering to be correct.
     //
     // `window-size manual` does not merely stop tracking the client — it
     // reverts the window to the size recorded at window CREATION, discarding
@@ -324,8 +331,8 @@ export class SessionManager {
     // size, right after. This resize is load-bearing — removing it silently
     // reintroduces a founder pane wrapped one row short of its real size.
     const founderWindow = await this.adapter.windowIdOf(sibling.record.tmuxSession)
-    await this.adapter.setSessionOption(sibling.record.tmuxSession, 'window-size', 'manual')
     if (founderWindow) {
+      await this.adapter.setWindowOption(founderWindow, 'window-size', 'manual')
       await this.adapter.resizeWindow(founderWindow, sibling.cols, sibling.rows)
     }
 
@@ -342,8 +349,14 @@ export class SessionManager {
     // on the new member reports nothing. `-e` on `new-session -t <group>`
     // does reach that table, which is where a reattach and any `show-environment`
     // caller both go looking, so both calls carry it.
+    // The new pane's own window gets the same treatment, by window id, and
+    // before any client has attached to it — so there is no ordering here that
+    // has to hold for the geometry rule to be in force. Without the explicit
+    // resize, `manual` would revert this window to the size tmux recorded when
+    // `newWindow` made it, which is the founder's, not this pane's.
+    await this.adapter.setWindowOption(window.id, 'window-size', 'manual')
+    await this.adapter.resizeWindow(window.id, cols, rows)
     await this.adapter.newGroupMember(group, tmuxSession, { PRCLI_TAB_ID: id })
-    await this.adapter.setSessionOption(tmuxSession, 'window-size', 'manual')
     // By index, with the member named. See the adapter method's comment.
     await this.adapter.selectWindow(tmuxSession, window.index)
 
@@ -377,11 +390,7 @@ export class SessionManager {
       })
     }
 
-    return this.attach(record, {
-      cols: input.cols ?? DEFAULT_COLS,
-      rows: input.rows ?? DEFAULT_ROWS,
-      windowId: window.id,
-    })
+    return this.attach(record, { cols, rows, windowId: window.id })
   }
 
   get(id: string): PaneRecord | undefined {

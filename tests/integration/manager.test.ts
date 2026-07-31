@@ -55,6 +55,22 @@ async function reattachedSize(name: string, stalePid: string): Promise<string[]>
     .map((client) => client.split(' ')[1])
 }
 
+/** A window-scoped option as tmux reads it back, by window id. */
+async function windowOption(windowId: string, option: string): Promise<string> {
+  const { stdout } = await run('tmux', [
+    '-L', SOCKET, 'show-options', '-w', '-t', windowId, '-v', option,
+  ])
+  return stdout.trim()
+}
+
+/** The window a session is currently showing. */
+async function windowIdOf(name: string): Promise<string> {
+  const { stdout } = await run('tmux', [
+    '-L', SOCKET, 'display-message', '-p', '-t', `=${name}:`, '#{window_id}',
+  ])
+  return stdout.trim()
+}
+
 /** Whether a tmux session by this name currently exists. */
 async function sessionExists(name: string): Promise<boolean> {
   try {
@@ -304,6 +320,13 @@ describe('SessionManager.splitTab', () => {
   // measured @0 every time — so attaching first gives the new client a
   // SIBLING's window and, under any non-manual sizing, resizes it. This is the
   // 80x24 geometry defect class in a new disguise.
+  //
+  // The sizes below are necessary but NOT sufficient, and the difference is
+  // the whole point of the option assertion further down. Under
+  // `window-size latest` each window is sized by the client that begins
+  // viewing it, so both of them read back exactly right while nothing has
+  // actually been set — which is how the split pane spent this milestone on
+  // `latest` with a `set-option` that exited 0 and did nothing.
   it('binds the new member to its own window, at its own size', async () => {
     const adapter = new TmuxAdapter({ socket: SOCKET })
     const manager = new SessionManager(adapter)
@@ -316,6 +339,31 @@ describe('SessionManager.splitTab', () => {
     await expect.poll(() => windowSize(first.tmuxSession), { timeout: 8000 }).toBe('100x30')
     await expect.poll(() => windowSize(second.tmuxSession), { timeout: 8000 }).toBe('200x50')
     manager.detachAll()
+  })
+
+  // What the sizes above cannot see. `window-size` is a WINDOW option, so it
+  // has to be read back off the window — and set there: a `set-option -t
+  // '=<member>:'` resolves to whichever window that member is currently
+  // showing, which for a freshly joined one is the FOUNDER's. That call
+  // succeeds, sets the founder's window a second time, and leaves the new
+  // pane's window on tmux's default.
+  //
+  // It matters because plan 2's restore attaches a client to this window, and
+  // a `latest` window follows whatever size that client arrives at.
+  it('puts window-size manual on the new pane\'s own window, not the founder\'s', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const manager = new SessionManager(adapter)
+    const first = manager.open({ projectSlug: 'lumio', cwd: tmpdir(), cols: 100, rows: 30 })
+    await waitFor(manager, first.id, /\$|%|#/)
+    const founderWindow = await windowIdOf(first.tmuxSession)
+
+    const second = await manager.splitTab({ paneId: first.id, cols: 200, rows: 50 })
+    await waitFor(manager, second.id, /\$|%|#/)
+
+    const splitWindow = await windowIdOf(second.tmuxSession)
+    expect(splitWindow).not.toBe(founderWindow)
+    expect(await windowOption(splitWindow, 'window-size')).toBe('manual')
+    expect(await windowOption(founderWindow, 'window-size')).toBe('manual')
   })
 })
 

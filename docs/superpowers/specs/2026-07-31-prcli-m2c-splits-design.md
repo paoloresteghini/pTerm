@@ -31,7 +31,7 @@ false on tmux 3.7b.
 | grouped members, one client each | **Independent current window per member.** |
 | window sizes, `window-size latest` | Each window holds its own size, fixed when a client begins viewing it. |
 | window sizes, `window-size manual` + `resize-window` | Exact, independent, identical as read from every member. |
-| `window-size` set on one member | **Contradicted.** One probe read it back as shared across the group; a later probe set it on the founder and read the member back as unset. Nothing may rely on propagation — set every option explicitly on the member it must apply to. |
+| `window-size` set on one member | **`window-size` is a WINDOW option, not a session one.** `show-options -g` does not list it; `show-options -gw` does. Recorded here as a contradiction between two probes, wrongly: both were right. `set-option -t '=<name>:'` on a window option resolves to *that session's current window*, so the first probe read the option back through a member still showing the founder's window (the same window it had just been set on) and the second read it through a member showing its own. Nothing propagates and nothing is shared — set it with `-w` against a **window id**, which is the only target that says which window is meant. |
 | `select-window -t @<id>` alone, or with a doubled `-t` | **Binds nothing, exits 0.** Binding a member needs `-t '=<member>:<index>'`. |
 | `set-option -t '=<group>:'` after the founder dies | **`no such window`.** A group name is valid for `new-session -t` only; option and window targets must name a live member. |
 | `set-option -w -t <windowId> remain-on-exit on` | Per window; the sibling window reads it unset. |
@@ -137,11 +137,12 @@ it means.
 
 ## Geometry
 
-`window-size` is set to `manual` on the group, and each pane's window is sized
-explicitly:
+`window-size` is set to `manual` on each pane's **window**, and each pane's
+window is sized explicitly:
 
 ```
-resize-window -t '=<member>:<index>' -x <cols> -y <rows>
+set-option -w -t <windowId> window-size manual
+resize-window -t <windowId> -x <cols> -y <rows>
 ```
 
 on attach and on every renderer resize.
@@ -153,12 +154,22 @@ pinned to one window and attaches once — and it is exactly the kind of
 "works because of an incidental ordering" that has already shipped as an 80×24
 defect twice. Manual sizing is deterministic and states the intent.
 
-`window-size` is set explicitly on **every member session**, not once on the
-group. An early probe read the option back as shared between members and a later
-one did not, so propagation is not a property this design may lean on — and a
-group name stops being a valid option target the moment its founding session
-dies. `remain-on-exit` is narrower still and goes on the *window*
-(`set-option -w`), which measured as leaving a sibling pane's window untouched.
+`window-size` is set with `-w` against a **window id**, not through a session
+target and not once on the group. It is a window option (measurement table
+above), and `set-option -t '=<name>:'` on a window option resolves to whatever
+window that session is *currently showing* — which is a real target and, for a
+freshly joined group member, the wrong one: its current window is a sibling's
+until `select-window` binds it. The call then succeeds, sets a window that was
+already set, and leaves the intended one on tmux's default. There is nothing
+being propagated or shared to reason about; there is only a target that does not
+name a window. A window id does, and needs no ordering to be right.
+
+(The group name is not an option target at all once the founding session dies —
+measured, `no such window` — which is a second, independent reason not to route
+these through a name.)
+
+`remain-on-exit` goes on the *window* the same way (`set-option -w`), which
+measured as leaving a sibling pane's window untouched.
 
 ## Death, and the blocker this discharges
 
