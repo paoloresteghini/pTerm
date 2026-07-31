@@ -29,17 +29,24 @@ if (!isPrimaryInstance) {
   app.quit()
 }
 
-// The renderer owns ⌘W: it closes the active tab. A menu accelerator fires
-// whatever the renderer does with the event, so the default File menu's
-// "Close Window" would win and take every session's client down with it.
-// Same menu as Electron's default, with that one item's accelerator shown
-// but not registered.
+// The renderer owns ⌘T, ⌘W and ⇧⌘\: they act on tabs and on the presets
+// panel. A menu accelerator fires instead of whatever the renderer does with
+// the event, so the default File menu's "Close Window" would win and take
+// every session's client down with it.
+// Same menu as Electron's default, with those items' accelerators shown but
+// not registered.
 function installMenu(): void {
   const template: MenuItemConstructorOptions[] = [
     { role: 'appMenu' },
     {
       label: 'File',
       submenu: [
+        {
+          label: 'New Tab',
+          accelerator: 'CmdOrCtrl+T',
+          registerAccelerator: false,
+          click: () => undefined,
+        },
         {
           label: 'Close Tab',
           accelerator: 'CmdOrCtrl+W',
@@ -51,7 +58,29 @@ function installMenu(): void {
       ],
     },
     { role: 'editMenu' },
-    { role: 'viewMenu' },
+    {
+      label: 'View',
+      submenu: [
+        {
+          label: 'Toggle Presets',
+          accelerator: 'Shift+CmdOrCtrl+\\',
+          registerAccelerator: false,
+          click: () => undefined,
+        },
+        { type: 'separator' },
+        // `reload` stays: restore reattaches everything, so a reload is how a
+        // wedged window recovers its workspace.
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
     { role: 'windowMenu' },
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
