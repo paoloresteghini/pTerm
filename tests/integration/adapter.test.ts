@@ -45,6 +45,14 @@ async function killServer(): Promise<void> {
   }
 }
 
+/** The window ids a session's window list holds. */
+async function windowsOf(name: string): Promise<string[]> {
+  const { stdout } = await run('tmux', [
+    '-L', SOCKET, 'list-windows', '-t', `=${name}:`, '-F', '#{window_id}',
+  ])
+  return stdout.split('\n').map((line) => line.trim()).filter(Boolean)
+}
+
 /** What tmux says a window measures, by window id. */
 async function windowSizeOf(windowId: string): Promise<string> {
   const { stdout } = await run('tmux', [
@@ -277,16 +285,30 @@ describe('TmuxAdapter groups and windows', () => {
     expect(await windowSizeOf(second)).toBe('200x50')
   })
 
+  // A window id (`@7`) is the one target form in this file that takes neither
+  // `=` nor a trailing colon, so it is the one most likely to be written in
+  // some other method's shape. Every wrong form here — `=@7`, `@7:`, a dropped
+  // `-t` — is the signature failure of this project: tmux exits 0 and kills
+  // nothing. So the window itself has to be observed. Neither the surviving
+  // session nor the second call resolving `undefined` can see that: stub the
+  // body of `killWindow` to `return` and both still hold.
   it('kills a window without killing the session that also holds another', async () => {
     const adapter = new TmuxAdapter({ socket: SOCKET })
     await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-s', 'f', 'sleep', '600'])
     await run('tmux', ['-L', SOCKET, 'new-window', '-t', '=f:', 'sleep', '600'])
     const doomed = await adapter.windowIdOf('f')
+    const survivor = (await windowsOf('f')).filter((id) => id !== doomed)
+    expect(survivor).toHaveLength(1)
 
     await adapter.killWindow(doomed)
 
+    // The window is gone, and only that window.
+    expect(await windowsOf('f')).toEqual(survivor)
     expect(await adapter.hasSession('f')).toBe(true)
+    // Killing one that has already gone is success — the death hook may have
+    // reaped it a moment earlier.
     await expect(adapter.killWindow(doomed)).resolves.toBeUndefined()
+    expect(await windowsOf('f')).toEqual(survivor)
   })
 
   // Group members can each be looking at a different window in the shared
