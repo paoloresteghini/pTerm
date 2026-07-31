@@ -1,4 +1,4 @@
-import type { TmuxAdapter } from '../tmux/adapter'
+import type { TmuxAdapter, WindowLookup } from '../tmux/adapter'
 import { PtySession } from '../pty/session'
 import { deathHookCommand } from '../pty/deathHook'
 import { decodeSessionName, encodeSessionName, newSessionId, tabIdFromGroupName } from '../tmux/names'
@@ -69,9 +69,9 @@ const DEFAULT_ROWS = 24
  *
  * The ceiling matches what the death tests already treat as the outside time
  * for a session to appear. It is a wait for an object to be created, not a
- * retry of something that failed: `windowIdOf` answers '' for a session tmux
- * has never heard of, and `PtySession.start()` returns before the client it
- * spawned has created one.
+ * retry of something that failed: `lookupWindow` answers `gone` for a session
+ * tmux has never heard of, and `PtySession.start()` returns before the client
+ * it spawned has created one.
  */
 const WINDOW_ID_TIMEOUT_MS = 10_000
 const WINDOW_ID_POLL_MS = 20
@@ -225,22 +225,34 @@ export class SessionManager {
     const reporter = this.options.deathReporter
     if (!reporter) return
 
-    const window = windowId ?? (await this.awaitWindowId(record.tmuxSession))
-    if (!window) {
-      // This is NOT proof the session has gone. `windowIdOf` swallows every
-      // failure and answers '' for all of them, so a session tmux has never
-      // heard of and a tmux that would not answer are indistinguishable here.
-      //
-      // It is also the one path this function cannot repair, because taking a
-      // window option off requires naming a window and tmux has just declined
-      // to name one. If the session really has gone there is nothing to leak;
-      // if it has not, the pane is left preserved on exit with nothing to reap
-      // it, and only the next restore's reconcile will notice. Recorded rather
-      // than asserted away — the alternative would be a second target form for
-      // the same option, guessing at the window through the session, which is
-      // the mistake `window-size` already made once on this branch.
+    const lookup: WindowLookup = windowId
+      ? { kind: 'found', id: windowId }
+      : await this.awaitWindowId(record.tmuxSession)
+
+    if (lookup.kind === 'gone') {
+      // A session tmux has never heard of. Nothing to hook and nothing to
+      // leak: this only reaches `gone` on the `open()` path (`splitTab`
+      // always hands in a known id), where nothing has set `remain-on-exit`
+      // yet either, so there is no option this pane is owed having taken back
+      // off.
       return
     }
+
+    if (lookup.kind === 'unreachable') {
+      // Honest degradation, not a repair: naming a window is exactly what
+      // tmux has just declined to do, so there is no window to take
+      // `remain-on-exit` back off of either. If the session is actually fine
+      // its pane is left preserved on exit with nothing to reap it, and only
+      // the next restore's reconcile will notice — logged here because
+      // nothing else will report it.
+      console.error(
+        `PRCLI: tmux was unreachable while wiring the death hook for ${record.tmuxSession}; ` +
+          'this pane will show grey instead of red when it exits',
+      )
+      return
+    }
+
+    const window = lookup.id
 
     const command = deathHookCommand({
       reporter,
@@ -249,10 +261,10 @@ export class SessionManager {
       windowId: window,
     })
     if (!command) {
-      // Refused, so no hook is coming. Unreachable while `windowIdOf` answers
-      // tmux's own `@<n>` — `PtySession` asks `canBuildDeathHook`, which tests
-      // everything this does bar the window id — but the rule is held here
-      // rather than inferred from that.
+      // Refused, so no hook is coming. Cannot happen while `lookupWindow`
+      // reports `found` with tmux's own `@<n>` — `PtySession` asks
+      // `canBuildDeathHook`, which tests everything this does bar the window
+      // id — but the rule is held here rather than inferred from that.
       await this.disableRemainOnExit(window)
       return
     }
@@ -297,15 +309,21 @@ export class SessionManager {
    *
    * `PtySession.start()` spawns a tmux client and returns; the session that
    * client creates does not exist for some milliseconds after that, and
-   * `windowIdOf` answers '' for a session tmux has never heard of. Asking once
-   * would leave most tabs with no hook at all.
+   * `lookupWindow` answers `gone` for a session tmux has never heard of, not
+   * only for one that will never exist. Asking once would leave most tabs
+   * with no hook at all.
+   *
+   * Polls only while the answer is `gone` **and** the deadline has not
+   * passed. `found` and `unreachable` both return immediately: the first
+   * because there is nothing left to wait for, the second because polling
+   * would not turn a tmux this app cannot talk to into one it can.
    */
-  private async awaitWindowId(tmuxSession: string): Promise<string> {
+  private async awaitWindowId(tmuxSession: string): Promise<WindowLookup> {
     const deadline = Date.now() + WINDOW_ID_TIMEOUT_MS
     for (;;) {
-      const windowId = await this.adapter.windowIdOf(tmuxSession)
-      if (windowId) return windowId
-      if (Date.now() >= deadline) return ''
+      const lookup = await this.adapter.lookupWindow(tmuxSession)
+      if (lookup.kind !== 'gone') return lookup
+      if (Date.now() >= deadline) return lookup
       await new Promise((resolve) => setTimeout(resolve, WINDOW_ID_POLL_MS))
     }
   }

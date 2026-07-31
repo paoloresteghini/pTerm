@@ -251,6 +251,39 @@ describe('TmuxAdapter.killSession, exact targeting', () => {
   })
 })
 
+describe('TmuxAdapter.lookupWindow', () => {
+  it('reports a session tmux has never heard of as gone, not as unreachable', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-s', 'real', 'sleep', '600'])
+    expect(await adapter.lookupWindow('nosuchsession')).toEqual({ kind: 'gone' })
+  })
+
+  it('reports a window it can name as found', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-s', 'real', 'sleep', '600'])
+    expect(await adapter.lookupWindow('real')).toMatchObject({ kind: 'found' })
+  })
+
+  // The distinction the whole task exists for. A tmux that cannot be run at all
+  // is not a session that has gone, and must not be reported as one.
+  it('reports a tmux it cannot run as unreachable, not as gone', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET, bin: '/nonexistent/tmux' })
+    await expect(adapter.lookupWindow('anything')).rejects.toThrow(TmuxNotInstalledError)
+  })
+
+  // The case above only proves an absent binary is a hard error, never a
+  // `WindowLookup` at all — `exec` throws before `lookupWindow`'s own mapping
+  // ever runs. This is the test that actually exercises that mapping's
+  // `unreachable` branch: a tmux that runs and fails for a reason that is
+  // neither "no such session" nor "no server". Real tmux on this machine has
+  // no on-demand way to produce that failure shape, so this reuses the
+  // `fakeTmuxFailingWith` stub already established above for the same reason.
+  it('reports a tmux that fails without saying the session is absent as unreachable', async () => {
+    const wedged = await fakeTmuxFailingWith('error connecting to /tmp/x (Permission denied)')
+    await expect(wedged.lookupWindow('anything')).resolves.toEqual({ kind: 'unreachable' })
+  })
+})
+
 describe('TmuxAdapter groups and windows', () => {
   it('reports an empty group for an ungrouped session and the group name for members', async () => {
     const adapter = new TmuxAdapter({ socket: SOCKET })

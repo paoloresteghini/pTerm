@@ -17,6 +17,15 @@ export interface TmuxAdapterOptions {
   socket?: string
 }
 
+/**
+ * The three answers `lookupWindow` can give, where `windowIdOf` used to
+ * collapse all of them into `''`: a window it can name (`found`), a session
+ * it can positively say tmux has never heard of (`gone`), and a tmux that
+ * failed for some other reason and cannot be trusted either way
+ * (`unreachable`).
+ */
+export type WindowLookup = { kind: 'found'; id: string } | { kind: 'gone' } | { kind: 'unreachable' }
+
 function isEnoent(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT'
 }
@@ -205,6 +214,13 @@ export class TmuxAdapter {
    *
    * Trailing colon: without it this is an exact-match window target and tmux
    * answers "can't find pane".
+   *
+   * Kept only for the callers that have nothing better to do with a missing
+   * answer than treat it as absent either way — a founder's own window,
+   * looked up so it can be resized back to what the app already tracked for
+   * it, and a cached window id refreshed lazily on resize. Anywhere the
+   * difference between "gone" and "tmux would not answer" matters, use
+   * `lookupWindow` instead.
    */
   async windowIdOf(name: string): Promise<string> {
     try {
@@ -214,6 +230,39 @@ export class TmuxAdapter {
     } catch {
       return ''
     }
+  }
+
+  /**
+   * The window a session is currently showing, distinguishing the three cases
+   * `windowIdOf` collapses into `''`. See `WindowLookup`.
+   *
+   * **Measured on tmux 3.7b:** `display-message` naming a session that does
+   * not exist SUCCEEDS, with one blank line of stdout —
+   * `$ tmux -L probe display-message -p -t '=nosuchsession:' '#{window_id}'`
+   * exits 0 with empty output. It never reaches `isNoSuchSession`, which only
+   * ever sees a *failure*. So empty-on-success has to be read as `gone` here,
+   * directly — not inferred from an error that will not occur. This is also
+   * what a session `open()` has just asked tmux to create looks like in the
+   * instant before tmux has finished making it, which is the ordinary case
+   * `awaitWindowId` polls through.
+   *
+   * `isNoSuchSession` (which folds in `isNoServer`) still covers the failure
+   * shape a session on a socket that was never created produces. Anything
+   * else that fails is `unreachable`: this app cannot tell what tmux meant,
+   * and reading it as `gone` would be the exact conflation this method exists
+   * to remove.
+   */
+  async lookupWindow(name: string): Promise<WindowLookup> {
+    let stdout: string
+    try {
+      stdout = await this.exec(['display-message', '-p', '-t', `=${name}:`, '#{window_id}'])
+    } catch (error) {
+      if (error instanceof TmuxNotInstalledError) throw error
+      if (isNoSuchSession(error)) return { kind: 'gone' }
+      return { kind: 'unreachable' }
+    }
+    const id = stdout.trim()
+    return id ? { kind: 'found', id } : { kind: 'gone' }
   }
 
   /**
