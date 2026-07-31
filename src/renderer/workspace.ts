@@ -137,13 +137,24 @@ export function workspaceReducer(
       )
     }
 
-    case 'movedTab':
+    case 'movedTab': {
+      const stillThere = action.projects.some((project) => project.id === state.activeProjectId)
       return {
         ...state,
         projects: action.projects,
         // Replaced in place: the tab keeps its position, and only its slug —
         // and therefore which project owns it — has changed.
         tabs: state.tabs.map((tab) => (tab.id === action.tab.id ? action.tab : tab)),
+        // Filing the last stray leaves nothing for Unsorted to hold, so the
+        // reply drops it and the selection would dangle — the same hazard the
+        // `projects` case guards. Follow the tab, so the window ends up showing
+        // where it went rather than nothing at all.
+        activeProjectId: stillThere
+          ? state.activeProjectId
+          : (action.projects.find((project) => project.slug === action.tab.projectSlug)?.id ??
+            action.projects[0]?.id ??
+            null),
       }
+    }
   }
 }

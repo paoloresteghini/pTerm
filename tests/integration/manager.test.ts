@@ -16,6 +16,42 @@ async function killServer(): Promise<void> {
   }
 }
 
+/** What tmux itself thinks the session's window measures. */
+async function windowSize(name: string): Promise<string> {
+  const { stdout } = await run('tmux', [
+    '-L', SOCKET, 'display-message', '-p', '-t', `=${name}:`, '#{window_width}x#{window_height}',
+  ])
+  return stdout.trim()
+}
+
+/**
+ * Every client attached to a session, as `"<pid> <cols>x<rows>"`.
+ *
+ * The window size is what reflows the pane, but it lags: tmux still reports the
+ * old one for a moment after a differently-sized client has attached, so a
+ * check made straight after a reattach reads the size that is about to be
+ * replaced. The client's own size is settled the instant it appears.
+ */
+async function clients(name: string): Promise<string[]> {
+  try {
+    const { stdout } = await run('tmux', [
+      '-L', SOCKET, 'list-clients', '-t', `=${name}`, '-F',
+      '#{client_pid} #{client_width}x#{client_height}',
+    ])
+    return stdout.split('\n').map((line) => line.trim()).filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+/** The size of the one client that is not `stalePid` — the reattached one. */
+async function reattachedSize(name: string, stalePid: string): Promise<string[]> {
+  const attached = await clients(name)
+  return attached
+    .filter((client) => !client.startsWith(`${stalePid} `))
+    .map((client) => client.split(' ')[1])
+}
+
 function waitFor(
   manager: SessionManager,
   id: string,
@@ -164,6 +200,54 @@ describe('SessionManager.kill', () => {
   it('throws rather than resolving when there is nothing to kill', async () => {
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
     await expect(manager.kill('000000000000000f')).rejects.toThrow(/no tmux session found/i)
+  })
+})
+
+describe('SessionManager.moveToProject', () => {
+  /**
+   * The reattached client is the session's only one, so tmux resizes the window
+   * to match it. Attaching at the 80×24 default therefore re-wraps the user's
+   * scrollback — and nothing in the renderer changes size across a move, so no
+   * refit follows to put it back.
+   */
+  it('reattaches at the size the client had, not the default', async () => {
+    const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
+    const tab = manager.open({ projectSlug: 'stray', cwd: tmpdir(), cols: 132, rows: 43 })
+    await waitFor(manager, tab.id, /\$|%|#/)
+    const [stale] = await clients(tab.tmuxSession)
+    expect(stale).toMatch(/ 132x43$/)
+    expect(await windowSize(tab.tmuxSession)).toBe('132x43')
+
+    const moved = await manager.moveToProject(tab.id, 'lumio')
+
+    expect(moved.tmuxSession).toBe(`prcli-lumio-${tab.id}`)
+    const stalePid = stale.split(' ')[0]
+    await expect
+      .poll(() => reattachedSize(moved.tmuxSession, stalePid), { timeout: 8000 })
+      .toEqual(['132x43'])
+    // And so the window the pane lives in never shrinks.
+    await expect.poll(() => windowSize(moved.tmuxSession), { timeout: 8000 }).toBe('132x43')
+    manager.detachAll()
+  })
+
+  // The size a tab was opened at is not the size it has: the renderer measures
+  // its container and resizes, so the move has to carry the latest one.
+  it('carries a later resize through the move', async () => {
+    const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
+    const tab = manager.open({ projectSlug: 'stray', cwd: tmpdir(), cols: 132, rows: 43 })
+    await waitFor(manager, tab.id, /\$|%|#/)
+    manager.resize(tab.id, 101, 37)
+    await expect.poll(() => windowSize(tab.tmuxSession), { timeout: 8000 }).toBe('101x37')
+    const [stale] = await clients(tab.tmuxSession)
+
+    const moved = await manager.moveToProject(tab.id, 'lumio')
+
+    const stalePid = stale.split(' ')[0]
+    await expect
+      .poll(() => reattachedSize(moved.tmuxSession, stalePid), { timeout: 8000 })
+      .toEqual(['101x37'])
+    await expect.poll(() => windowSize(moved.tmuxSession), { timeout: 8000 }).toBe('101x37')
+    manager.detachAll()
   })
 })
 

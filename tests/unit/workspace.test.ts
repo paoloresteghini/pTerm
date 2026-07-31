@@ -203,6 +203,38 @@ describe('workspaceReducer', () => {
     expect(next.tabs.map((t) => t.projectSlug)).toEqual(['lumio', 'scratch'])
   })
 
+  // Filing the last stray empties Unsorted, so the reply omits it — and the
+  // selection pointing at it would leave a blank pane, an empty tab bar and no
+  // empty-state to explain it.
+  it('follows the tab when the move empties the project it was selected in', () => {
+    const state: WorkspaceState = {
+      projects: [project('p1', 'lumio'), project(UNSORTED_ID, UNSORTED_ID, 'aaa')],
+      tabs: [tab('aaa', 'scratch')],
+      activeProjectId: UNSORTED_ID,
+    }
+    const next = workspaceReducer(state, {
+      type: 'movedTab',
+      tab: tab('aaa', 'lumio'),
+      projects: [project('p1', 'lumio')],
+    })
+    expect(next.activeProjectId).toBe('p1')
+    expect(tabsOfProject(next, 'p1').map((t) => t.id)).toEqual(['aaa'])
+  })
+
+  it('keeps the selection when the selected project is still in the reply', () => {
+    const state: WorkspaceState = {
+      projects: [project('p1', 'lumio'), project('p2', 'gco'), project(UNSORTED_ID, UNSORTED_ID)],
+      tabs: [tab('aaa', 'scratch'), tab('bbb', 'scratch')],
+      activeProjectId: 'p2',
+    }
+    const next = workspaceReducer(state, {
+      type: 'movedTab',
+      tab: tab('aaa', 'lumio'),
+      projects: state.projects,
+    })
+    expect(next.activeProjectId).toBe('p2')
+  })
+
   it('never mutates the state it is given', () => {
     const before = JSON.stringify(three)
     workspaceReducer(three, { type: 'removed', id: 'bbb' })

@@ -37,6 +37,15 @@ interface Entry {
   record: TabRecord
   session: PtySession
   /**
+   * The client's live geometry, kept current by `resize`. A reattach has to
+   * spawn at this size: the reattached client is usually the session's only
+   * one, so tmux resizes the window to match it and SIGWINCHes whatever is
+   * running inside. Attaching at the 80×24 default therefore reflows the
+   * user's scrollback, permanently.
+   */
+  cols: number
+  rows: number
+  /**
    * Set before we deliberately tear a client down, so the PTY's exit callback
    * can tell a detach or a kill apart from the child genuinely exiting.
    */
@@ -78,15 +87,18 @@ export class SessionManager {
       tmuxSession,
     }
 
+    const cols = input.cols ?? DEFAULT_COLS
+    const rows = input.rows ?? DEFAULT_ROWS
+
     const session = new PtySession(this.adapter, {
       tmuxSession: record.tmuxSession,
       cwd: record.cwd,
-      cols: input.cols ?? DEFAULT_COLS,
-      rows: input.rows ?? DEFAULT_ROWS,
+      cols,
+      rows,
       command: record.command,
     })
 
-    const entry: Entry = { record, session }
+    const entry: Entry = { record, session, cols, rows }
 
     session.onData((data) => {
       for (const listener of this.dataListeners) listener(id, data)
@@ -121,7 +133,13 @@ export class SessionManager {
   }
 
   resize(id: string, cols: number, rows: number): void {
-    this.entries.get(id)?.session.resize(cols, rows)
+    const entry = this.entries.get(id)
+    // Same guard PtySession applies, hoisted so a rejected size is never
+    // recorded as the geometry a reattach should use.
+    if (!entry || cols < 1 || rows < 1) return
+    entry.cols = cols
+    entry.rows = rows
+    entry.session.resize(cols, rows)
   }
 
   /** Detach the client. The tmux session keeps running. */
@@ -179,6 +197,11 @@ export class SessionManager {
    * no command, so moving one without this would return $HOME as its directory
    * for the caller to save over the truth. Restore does the same fix-up when it
    * reattaches a saved row over an orphan.
+   *
+   * The reattach carries the client's geometry forward. Nothing in the renderer
+   * changes size across a move — the container's box is identical and the tab
+   * stays visible — so no refit follows to correct a default-sized attach, and
+   * the pane would simply stay wrapped at 80 columns.
    */
   async moveToProject(
     id: string,
@@ -196,9 +219,13 @@ export class SessionManager {
     // client down for.
     if (tmuxSession === current.tmuxSession) return { ...current, cwd, command }
 
+    // Read before the detach disposes the entry. A detached tab has none, and
+    // no client to take a size from either, so the default is all there is —
+    // no worse than today, and the renderer refits it when it is next shown.
+    const size = entry ? { cols: entry.cols, rows: entry.rows } : {}
     await this.adapter.renameSession(current.tmuxSession, tmuxSession)
     if (entry) this.detach(id)
-    return this.open({ id, projectSlug, cwd, command, tmuxSession })
+    return this.open({ id, projectSlug, cwd, command, tmuxSession, ...size })
   }
 
   /**

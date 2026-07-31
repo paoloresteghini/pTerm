@@ -243,6 +243,11 @@ test('an Unsorted tab can be filed into a project, keeping its session', async (
     .toBe(true)
   // Renamed, not recreated: exactly one session, and the old name is gone.
   expect(await sessionNames()).toEqual(['prcli-lumio-abcdef0123456789'])
+  // The point of filing a stray is to be able to see it afterwards. Unsorted is
+  // empty now, so the window has to follow the tab into Lumio rather than stay
+  // pointed at a row that no longer exists.
+  await expect(window.getByTestId('project-id-lumio')).toHaveAttribute('data-active', 'true')
+  await expect(window.getByTestId('tab-abcdef0123456789')).toBeVisible()
 
   await app.close()
 })
