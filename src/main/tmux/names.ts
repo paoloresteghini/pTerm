@@ -56,3 +56,19 @@ export function decodeSessionName(name: string): SessionNameParts | null {
 export function isPrcliSession(name: string): boolean {
   return decodeSessionName(name) !== null
 }
+
+/**
+ * The tab id inside a tmux group name.
+ *
+ * A group takes the name its founding session had **at the moment the group was
+ * created, and never follows a rename** — measured on tmux 3.7b. So after
+ * `moveToProject` renames every member to the new slug, the group name still
+ * contains the old one. `decodeSessionName(group).projectSlug` therefore returns
+ * a plausible, wrong answer, and nothing may ask it.
+ *
+ * The id half is safe: `moveToProject` preserves the id and changes only the
+ * slug, so this value is stable for the tab's whole life.
+ */
+export function tabIdFromGroupName(group: string): string | null {
+  return decodeSessionName(group)?.id ?? null
+}

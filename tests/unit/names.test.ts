@@ -5,6 +5,7 @@ import {
   encodeSessionName,
   decodeSessionName,
   isPrcliSession,
+  tabIdFromGroupName,
 } from '../../src/main/tmux/names'
 
 describe('slugify', () => {
@@ -77,5 +78,27 @@ describe('isPrcliSession', () => {
   it('distinguishes ours from foreign sessions', () => {
     expect(isPrcliSession('prcli-lumio-a1b2c3d4e5f60718')).toBe(true)
     expect(isPrcliSession('my-work-session')).toBe(false)
+  })
+})
+
+describe('tabIdFromGroupName', () => {
+  it('returns the id half', () => {
+    expect(tabIdFromGroupName('prcli-lumio-a1b2c3d4e5f60718')).toBe('a1b2c3d4e5f60718')
+  })
+
+  // The whole reason this function exists rather than callers reaching for
+  // decodeSessionName: a group name keeps the slug it was founded with, so
+  // after a move to `gco` the group still says `lumio`. The id is the only
+  // field that stays true, and it is the only one anything may read.
+  it('returns the same id after the tab has moved project', () => {
+    const founded = 'prcli-lumio-a1b2c3d4e5f60718'
+    expect(tabIdFromGroupName(founded)).toBe('a1b2c3d4e5f60718')
+    expect(decodeSessionName(founded)?.projectSlug).toBe('lumio')
+  })
+
+  it('returns null for anything that is not an encoded prcli name', () => {
+    for (const value of ['', 'lumio', 'prcli-lumio', 'prcli-lumio-nothex', 'other-lumio-a1b2c3d4e5f60718']) {
+      expect(tabIdFromGroupName(value)).toBeNull()
+    }
   })
 })
