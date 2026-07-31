@@ -4,7 +4,13 @@ import { promisify } from 'node:util'
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { Candidate, ProjectDescriptor, RestoreResult, TabDescriptor } from '../../src/shared/ipc'
+import type {
+  Candidate,
+  ProjectDescriptor,
+  RestoreResult,
+  TabDescriptor,
+  TabState,
+} from '../../src/shared/ipc'
 
 // registerIpc reaches for electron's ipcMain, which does not exist outside the
 // main process. Capturing the handlers lets the real persistence path run.
@@ -31,9 +37,11 @@ const { TmuxAdapter } = await import('../../src/main/tmux/adapter')
 const { SessionManager } = await import('../../src/main/sessions/manager')
 const { ConfigStore } = await import('../../src/main/state/store')
 const { registerIpc } = await import('../../src/main/ipc/register')
+const { StatusRegistry } = await import('../../src/main/status/registry')
 
 type Manager = InstanceType<typeof SessionManager>
 type Store = InstanceType<typeof ConfigStore>
+type Registry = InstanceType<typeof StatusRegistry>
 
 const run = promisify(execFile)
 const SOCKET = 'prcli-test'
@@ -171,6 +179,7 @@ async function tmuxRefusingKills(): Promise<string> {
 let configDir: string
 let store: Store
 let manager: Manager
+let registry: Registry
 
 /** Every payload registerIpc has sent to the renderer, in order. */
 let sentEvents: Array<{ channel: string; payload: unknown }>
@@ -181,6 +190,7 @@ function useManager(bin?: string): void {
   ipc.listeners.clear()
   sentEvents = []
   manager = new SessionManager(new TmuxAdapter({ socket: SOCKET, bin }))
+  registry = new StatusRegistry()
   // A minimal stand-in for BrowserWindow: registerIpc only ever calls
   // isDestroyed() and webContents.send(), so that is all this needs to supply.
   const fakeWindow = {
@@ -191,7 +201,7 @@ function useManager(bin?: string): void {
       },
     },
   }
-  registerIpc(manager, () => fakeWindow as never, store)
+  registerIpc(manager, () => fakeWindow as never, registry, store)
 }
 
 /** Wait for the exit event a given tab sends to the renderer. */
@@ -580,5 +590,84 @@ describe('project channels', () => {
         cwd: join(tmpdir(), 'definitely-not-here-9f3a'),
       }),
     ).rejects.toThrow(/not a directory/i)
+  })
+})
+
+describe('status registry', () => {
+  function status(): Promise<Record<string, TabState>> {
+    return invoke<Record<string, TabState>>(CHANNELS.status)
+  }
+
+  // The brief wires `registry.applyExit` into the exit handler on any
+  // `!sessionAlive`, with no exception for `killed`. That races the
+  // CHANNELS.kill handler's own `registry.forget` — both are `.then`
+  // reactions on the exact same `manager.kill()` promise, with no ordering
+  // guarantee between them. A kill the user asked for must never leave a
+  // tombstone: nothing else will ever call `forget` for this id again, since
+  // the row is already gone from config and the tab from the tab bar.
+  it('never leaves a tombstone behind for a tab killed on purpose', async () => {
+    const tab = await invoke<TabDescriptor>(CHANNELS.open, {
+      projectSlug: 'lumio',
+      cwd: tmpdir(),
+      type: 'preset',
+      command: 'true',
+    })
+    expect((await status())[tab.id]).toBe('running')
+
+    await killTab(tab.id)
+    await settle(300)
+
+    expect((await status())[tab.id]).toBeUndefined()
+  })
+
+  // restoreWorkspace reattaches every tab through `manager.open` directly,
+  // never through the CHANNELS.open handler — so on the brief's version
+  // nothing ever gives a relaunch-restored tab an initial state. A restored
+  // `claude` tab would draw no dot at all, indistinguishable from a shell
+  // nobody has typed into, rather than the hollow `unknown` a tab that should
+  // have a state and does not deserves.
+  it('gives a relaunch-restored claude tab a state, not silence', async () => {
+    const tab = await invoke<TabDescriptor>(CHANNELS.open, {
+      projectSlug: 'lumio',
+      cwd: tmpdir(),
+      type: 'claude',
+    })
+    await waitForPrompt(tab.id)
+    detachTab(tab.id)
+    await settle(500)
+
+    // A fresh process: a new manager and a new, empty registry, with the
+    // tmux session still alive underneath — exactly what a relaunch is.
+    useManager()
+    const restored = await restoreTabs()
+    expect(restored.tabs.map((entry) => entry.id)).toEqual([tab.id])
+
+    expect((await status())[tab.id]).toBe('unknown')
+  })
+
+  // Restore is also how the renderer re-fetches the workspace on its own
+  // reload (⌘R), and by then the registry already knows real states from
+  // hook events main never stopped receiving. Populating every restored
+  // tab unconditionally — the naive reading of "give restored tabs a state"
+  // — would stamp a tab already `waiting` back to `unknown` on every ⌘R,
+  // which is precisely the "a ⌘R must not blank the board" defect this task
+  // exists to avoid.
+  it('does not blank a tab restore already knows the real state of', async () => {
+    const tab = await invoke<TabDescriptor>(CHANNELS.open, {
+      projectSlug: 'lumio',
+      cwd: tmpdir(),
+      type: 'claude',
+    })
+    await waitForPrompt(tab.id)
+
+    // Stands in for a hook event landing on the registry — wiring the real
+    // hook socket into main is a later task, but the registry's own surface
+    // is exactly what a `Notification` hook drives.
+    registry.applyHook({ tabId: tab.id, event: 'Notification', at: Date.now() })
+    expect((await status())[tab.id]).toBe('waiting')
+
+    await restoreTabs()
+
+    expect((await status())[tab.id]).toBe('waiting')
   })
 })

@@ -21,6 +21,11 @@ export const CHANNELS = {
   moveTabToProject: 'prcli:moveTabToProject',
   data: 'prcli:data',
   exit: 'prcli:exit',
+  status: 'prcli:status',
+  statusChanged: 'prcli:statusChanged',
+  restartTab: 'prcli:restartTab',
+  dismissTab: 'prcli:dismissTab',
+  focusTab: 'prcli:focusTab',
 } as const
 
 /**
@@ -88,6 +93,18 @@ export interface ExitEvent {
    * exit as a death drops tabs whose work is still there.
    */
   sessionAlive: boolean
+}
+
+export interface StatusEvent {
+  tabId: string
+  state: TabState
+}
+
+/** What Restart needs: the dead tab's record, plus the size to attach at. */
+export interface RestartRequest {
+  tab: TabDescriptor
+  cols?: number
+  rows?: number
 }
 
 /**
@@ -184,4 +201,13 @@ export interface PrcliApi {
   kill(id: string): Promise<void>
   onData(listener: (event: DataEvent) => void): () => void
   onExit(listener: (event: ExitEvent) => void): () => void
+  /** Every tab's state, for a renderer that has just mounted or reloaded. */
+  status(): Promise<Record<string, TabState>>
+  onStatus(listener: (event: StatusEvent) => void): () => void
+  /** Recreate a dead tab's session under the same id, cwd, command and type. */
+  restartTab(request: RestartRequest): Promise<TabDescriptor>
+  /** Stop tracking a dead tab: the renderer has dropped its tombstone. */
+  dismissTab(id: string): void
+  /** A clicked toast asking the renderer to select a particular tab. */
+  onFocusTab(listener: (tabId: string) => void): () => void
 }

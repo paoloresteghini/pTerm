@@ -5,11 +5,14 @@ import {
   type OpenRequest,
   type Preset,
   type ProjectDescriptor,
+  type RestartRequest,
   type RestoreResult,
+  type StatusEvent,
   type TabDescriptor,
 } from '../../shared/ipc'
 import type { ExitReason, SessionManager, TabRecord } from '../sessions/manager'
 import { ConfigStore, type PrcliConfig } from '../state/store'
+import { StatusRegistry } from '../status/registry'
 import { describeProjects, restoreWorkspace, withUnsorted } from './restore'
 import { isDirectory } from '../fsutil'
 import { scanCandidates } from '../projects/discovery'
@@ -24,6 +27,7 @@ import {
 export function registerIpc(
   manager: SessionManager,
   getWindow: () => BrowserWindow | null,
+  registry: StatusRegistry,
   store: ConfigStore = new ConfigStore(ConfigStore.defaultPath()),
 ): void {
   // The saved tab list means "reattach these next launch", which is not the
@@ -70,6 +74,23 @@ export function registerIpc(
   // actually settles the question, instead of racing a second one against it.
   const pendingKills = new Map<string, Promise<void>>()
 
+  // The size each tab's client last reported.
+  //
+  // Restart is a new attach path, and every new attach path in this codebase
+  // has shipped with the same defect: attach at the 80×24 default and tmux,
+  // seeing its only client, resizes the window down and SIGWINCHes whatever is
+  // inside — permanently reflowing the user's scrollback. The manager keeps
+  // geometry on its `Entry`, but the entry is deleted when the session dies,
+  // which is precisely when Restart needs it. So it is remembered here too.
+  const lastGeometry = new Map<string, { cols: number; rows: number }>()
+
+  registry.onTransition(({ tabId, to }) => {
+    const payload: StatusEvent = { tabId, state: to }
+    send(CHANNELS.statusChanged, payload)
+  })
+
+  ipcMain.handle(CHANNELS.status, () => registry.snapshot())
+
   /**
    * Whether the tmux session outlived the client that just stopped.
    *
@@ -114,11 +135,23 @@ export function registerIpc(
     void (async () => {
       const sessionAlive = await sessionSurvived(record, reason)
       send(CHANNELS.exit, { id: record.id, code, sessionAlive })
-      // `killed` is never pruned here: the CHANNELS.kill handler below
-      // already owns that, and forgets the tab immediately after the same
-      // `manager.kill()` this resolved against has succeeded — pruning here
-      // too would only be a redundant second write of the same outcome.
-      if (reason === 'exited' && !sessionAlive) await forgetTab(record.id)
+      if (!sessionAlive) {
+        // `killed` is never pruned here: the CHANNELS.kill handler below
+        // already owns that, and forgets the tab immediately after the same
+        // `manager.kill()` this resolved against has succeeded — pruning here
+        // too would only be a redundant second write of the same outcome.
+        if (reason === 'exited') await forgetTab(record.id)
+        // A deliberate kill already owns the registry state too: the
+        // CHANNELS.kill handler below calls `registry.forget` once its own
+        // await on the very same promise settles. Recording a tombstone here
+        // as well races that forget with no ordering guarantee — whichever
+        // runs last wins, and a `forget` that loses would leak a
+        // `crashed`/`ended` entry for a tab already gone from config and the
+        // tab bar, with nothing left that would ever call `forget` again to
+        // clean it up. A kill the user asked for does not need a tombstone —
+        // they already know it is gone.
+        if (reason !== 'killed') registry.applyExit(record.id, code)
+      }
     })()
   })
 
@@ -131,6 +164,7 @@ export function registerIpc(
     }
     const record = manager.open(request)
     await rememberTab(record)
+    registry.applyOpen(record.id, record.type)
     return record
   })
 
@@ -138,10 +172,24 @@ export function registerIpc(
 
   // The reconcile reads and then writes, so it has to hold the queue for the
   // whole operation rather than racing an `open` or an exit between the two.
-  ipcMain.handle(
-    CHANNELS.restore,
-    (): Promise<RestoreResult> => restoreWorkspace(manager, store, serialise),
-  )
+  ipcMain.handle(CHANNELS.restore, async (): Promise<RestoreResult> => {
+    const result = await restoreWorkspace(manager, store, serialise)
+    // restoreWorkspace reattaches every tab through `manager.open` directly,
+    // never through the CHANNELS.open handler above — so nothing else ever
+    // gives a restored tab an initial state. Left alone, a relaunched
+    // `claude` tab would show no dot at all rather than the hollow `unknown`
+    // one deserves, indistinguishable from a shell nothing has run in.
+    //
+    // Restore is also how a mid-session renderer reload (⌘R) re-fetches the
+    // workspace, and by then the registry already knows real states from
+    // hook events main never stopped receiving. Only a tab the registry has
+    // never seen gets initialised here — that is what keeps ⌘R from
+    // stamping a live `waiting`/`thinking` tab back to `unknown`.
+    for (const tab of result.tabs) {
+      if (registry.get(tab.id) === null) registry.applyOpen(tab.id, tab.type)
+    }
+    return result
+  })
 
   /**
    * The project list a mutation answers with — Unsorted included.
@@ -266,9 +314,12 @@ export function registerIpc(
 
   ipcMain.on(CHANNELS.input, (_event, id: string, data: string) => manager.write(id, data))
 
-  ipcMain.on(CHANNELS.resize, (_event, id: string, cols: number, rows: number) =>
-    manager.resize(id, cols, rows),
-  )
+  ipcMain.on(CHANNELS.resize, (_event, id: string, cols: number, rows: number) => {
+    // Same guard the manager applies, so a rejected size is never remembered
+    // as the one a restart should attach at.
+    if (cols >= 1 && rows >= 1) lastGeometry.set(id, { cols, rows })
+    manager.resize(id, cols, rows)
+  })
 
   // No persistence here: detaching is how a session survives, so forgetting it
   // would be exactly the wrong thing to record.
@@ -283,8 +334,46 @@ export function registerIpc(
     try {
       await outcome
       await forgetTab(id)
+      registry.forget(id)
+      lastGeometry.delete(id)
     } finally {
       pendingKills.delete(id)
     }
+  })
+
+  ipcMain.handle(
+    CHANNELS.restartTab,
+    async (_event, request: RestartRequest): Promise<TabDescriptor> => {
+      const { tab } = request
+      // Same guard `open` applies: node-pty does not throw on a missing cwd,
+      // it yields a live process that produces nothing, so the tab comes back
+      // permanently blank while looking fine.
+      if (!(await isDirectory(tab.cwd))) {
+        throw new Error(`Cannot restart: ${tab.cwd} is not a directory`)
+      }
+      const remembered = lastGeometry.get(tab.id)
+      const record = manager.open({
+        id: tab.id,
+        projectSlug: tab.projectSlug,
+        cwd: tab.cwd,
+        command: tab.command,
+        type: tab.type,
+        // The renderer's live measurement first, the last one main saw
+        // second. Attaching at neither would let tmux shrink the recreated
+        // session to 80×24 — the defect this codebase has now shipped twice.
+        cols: request.cols ?? remembered?.cols,
+        rows: request.rows ?? remembered?.rows,
+      })
+      await rememberTab(record)
+      registry.applyOpen(record.id, record.type)
+      return record
+    },
+  )
+
+  ipcMain.on(CHANNELS.dismissTab, (_event, id: string) => {
+    // The row is already gone from config — the exit handler forgot it. This
+    // drops the state, so the dock badge stops counting a tab nobody can see.
+    registry.forget(id)
+    lastGeometry.delete(id)
   })
 }

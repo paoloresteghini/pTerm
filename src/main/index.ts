@@ -5,6 +5,7 @@ import { TmuxAdapter, TmuxNotInstalledError } from './tmux/adapter'
 import { resolveTmuxBin } from './tmux/resolve'
 import { SessionManager } from './sessions/manager'
 import { registerIpc } from './ipc/register'
+import { StatusRegistry } from './status/registry'
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string
 declare const MAIN_WINDOW_VITE_NAME: string
@@ -20,6 +21,7 @@ const adapter = new TmuxAdapter({
   socket: process.env.PRCLI_TMUX_SOCKET,
 })
 const manager = new SessionManager(adapter)
+const registry = new StatusRegistry()
 
 // Two instances would each open their own sessions and race on one config
 // file. Real usage hit exactly that: three stray sessions, none reachable
@@ -147,7 +149,7 @@ app.whenReady().then(async () => {
 
   installMenu()
 
-  registerIpc(manager, () => mainWindow)
+  registerIpc(manager, () => mainWindow, registry)
   createWindow()
 
   app.on('activate', () => {

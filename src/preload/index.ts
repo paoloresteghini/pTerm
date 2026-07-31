@@ -5,6 +5,7 @@ import {
   type ExitEvent,
   type OpenRequest,
   type PrcliApi,
+  type StatusEvent,
   type TabDescriptor,
 } from '../shared/ipc'
 
@@ -35,6 +36,19 @@ const api: PrcliApi = {
     const handler = (_event: IpcRendererEvent, payload: ExitEvent): void => listener(payload)
     ipcRenderer.on(CHANNELS.exit, handler)
     return () => ipcRenderer.removeListener(CHANNELS.exit, handler)
+  },
+  status: () => ipcRenderer.invoke(CHANNELS.status),
+  onStatus: (listener: (event: StatusEvent) => void) => {
+    const handler = (_event: IpcRendererEvent, payload: StatusEvent): void => listener(payload)
+    ipcRenderer.on(CHANNELS.statusChanged, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.statusChanged, handler)
+  },
+  restartTab: (request) => ipcRenderer.invoke(CHANNELS.restartTab, request),
+  dismissTab: (id) => ipcRenderer.send(CHANNELS.dismissTab, id),
+  onFocusTab: (listener: (tabId: string) => void) => {
+    const handler = (_event: IpcRendererEvent, tabId: string): void => listener(tabId)
+    ipcRenderer.on(CHANNELS.focusTab, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.focusTab, handler)
   },
 }
 
