@@ -167,11 +167,13 @@ export async function restoreWorkspace(
       // otherwise shift every project's active tab onto its neighbour, and
       // without `noUncheckedIndexedAccess` that would typecheck cleanly and
       // leave the suite green.
-      projects: saved.projects.map((project) => ({
-        ...project,
-        activeTabId:
-          real.find((described) => described.id === project.id)?.activeTabId ?? project.activeTabId,
-      })),
+      projects: saved.projects.map((project) => {
+        const described = real.find((candidate) => candidate.id === project.id)
+        // Branching on the lookup rather than `?? project.activeTabId`: a
+        // project with no live tab resolves to null *by design*, and coalescing
+        // would read that as "not found" and keep the dead id on disk instead.
+        return described ? { ...project, activeTabId: described.activeTabId } : project
+      }),
       activeProjectId,
       tabs,
     })

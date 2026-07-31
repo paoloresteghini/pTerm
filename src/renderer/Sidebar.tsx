@@ -30,8 +30,9 @@ export function Sidebar({
 }) {
   const [menuFor, setMenuFor] = useState<string | null>(null)
   // Renaming happens in the row itself. `window.prompt` is not implemented in
-  // Electron — it returns null, so the rename it used to guard never fired at
-  // all — and an inline edit suits a keyboard-driven app better than a modal.
+  // Electron — it *throws* ("prompt() is not supported."), so the rename it
+  // used to guard never fired at all — and an inline edit suits a
+  // keyboard-driven app better than a modal.
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   // Which edit is still open, readable synchronously so that whichever of the

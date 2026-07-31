@@ -355,6 +355,23 @@ describe('restoreWorkspace projects', () => {
     manager.detachAll()
   })
 
+  // A project whose saved active tab died and which has no live tab at all
+  // resolves to null, and that null has to reach disk. Coalescing the lookup
+  // would read it as "no descriptor found" and leave the dead id on the row,
+  // so config would keep pointing at a session that no longer exists.
+  it('clears a project\'s active tab when nothing of it is left alive', async () => {
+    const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
+    const store = await configWith({
+      projects: [project('Lumio', 'lumio', tmpdir(), '00000000000000ff')],
+      activeProjectId: 'id-lumio',
+      tabs: [tab('00000000000000ff')],
+    })
+
+    await restoreWorkspace(manager, store, immediate)
+
+    await expect(store.read().then((c) => c.projects[0].activeTabId)).resolves.toBeNull()
+  })
+
   // Two projects with different answers, so a row written against the wrong
   // project is visible. One project cannot show that: every mapping, right or
   // wrong, produces the same file.
