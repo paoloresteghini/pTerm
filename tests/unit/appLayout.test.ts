@@ -161,21 +161,13 @@ function elements(source: string, tag: string): string[] {
       // character", which is the over-capture this bounding exists to prevent,
       // reintroduced in the one case it was written for.
       //
-      // Three ingredients make that silent rather than loud, and all three are
-      // needed — each configuration below was constructed and run:
-      //
-      //   1. the element is the LAST `tag` in the source. `split` bounds every
-      //      other chunk at the next opening tag, so only the final one can
-      //      reach the end at all.
-      //   2. it has no closing tag, so `indexOf` answers -1.
-      //   3. text AFTER it carries the string the caller is looking for.
-      //
-      // With 1 and 2 but not 3 the loop below fails loudly; with 2 and 3 but
-      // not 1 it fails loudly too. With all three, a `<button ... />` that had
-      // lost its `pointer-events-auto` passed — and the text it borrowed need
-      // not be another element: a helper function below the component, merely
-      // mentioning the string, does it just as well. An element this cannot
-      // bound is one it must not describe.
+      // Sometimes that is quiet rather than loud: measured, a `<button ... />`
+      // with no closing tag passed the `pointer-events-auto` loop below after
+      // losing that very class, by over-capturing text that still carried it.
+      // Which arrangements are quiet and which are loud is not written down
+      // here on purpose — two attempts at that enumeration were wrong, and the
+      // throw needs a reason, not a proof. An element this cannot bound is one
+      // it must not describe; the test below pins that, where it cannot rot.
       if (end === -1) throw new Error(`No ${close} for an opening ${tag}`)
       return rest.slice(0, end)
     })
