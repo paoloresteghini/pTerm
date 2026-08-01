@@ -14,6 +14,7 @@ import {
   needsYou,
   paneGroups,
   paneInDirection,
+  panesOfTab,
   projectIdForTab,
   stateOfProject,
   tabOfPane,
@@ -131,12 +132,24 @@ export function App() {
       // new pane's Terminal fits itself to its own box the moment it mounts
       // and sends the size it really got.
       const half = (cells: number): number => Math.max(1, Math.floor(cells / 2))
+      // A tab keeps the axis of the split that created it, and main applies that
+      // ruling by counting the kids on its own row. Its count and the user's
+      // disagree over a tombstone: main forgot that pane at its death, so a tab
+      // drawn as two boxes — one live, one dead — reads as one pane there and
+      // ⇧⌘D would silently re-orient a tab the user is looking at as split.
+      // Asking here instead, where the boxes actually are, and sending the axis
+      // already on screen so both sides reach the same answer whichever way main
+      // counts. Still only ever honoured by a split that CREATES a split tab;
+      // see `SplitRequest.dir`.
+      const row = tabOfPane(state, activePaneId)
+      const drawn = row ? panesOfTab(state, row.id) : []
+      const axis = row && drawn.length > 1 ? row.layout.dir : dir
       window.prcli
         .splitPane({
           paneId: activePaneId,
-          dir,
-          cols: dir === 'row' ? half(grid.cols) : grid.cols,
-          rows: dir === 'col' ? half(grid.rows) : grid.rows,
+          dir: axis,
+          cols: axis === 'row' ? half(grid.cols) : grid.cols,
+          rows: axis === 'col' ? half(grid.rows) : grid.rows,
         })
         .then((shape) => {
           dispatch({ type: 'split', shape })
@@ -147,7 +160,7 @@ export function App() {
         })
         .catch(fail)
     },
-    [activePaneId, fail],
+    [state, activePaneId, fail],
   )
 
   /** Make `paneId` the pane the keyboard talks to, and record it on its tab. */

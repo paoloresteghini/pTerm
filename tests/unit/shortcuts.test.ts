@@ -166,6 +166,31 @@ describe('App.tsx keydown handler', () => {
     expect(app).toMatch(/splitActive\( ?event\.shiftKey \? 'col' : 'row'/)
   })
 
+  it('sends the axis the tab is drawn along, not the one the key asked for', () => {
+    // The ruling is main's — a tab keeps the axis of the split that created it
+    // — but main applies it by counting the kids on its own row, and its count
+    // and the user's disagree over a tombstone: main forgot that pane when it
+    // died. A tab drawn as two boxes, one live and one dead, reads as one pane
+    // on disk, so ⇧⌘D would re-orient a tab the user is looking at as split —
+    // reflowing panes they did not act on, which is the harm the ruling exists
+    // to prevent, reached from the side main cannot see.
+    //
+    // So the renderer decides it, where the boxes are, and sends an axis both
+    // sides agree on whichever way main counts.
+    expect(app).toMatch(/drawn\.length > 1 \? row\.layout\.dir : dir/)
+    expect(app).toMatch(/dir: axis/)
+    // And the measurement has to follow the SAME axis it sends. Halving along
+    // one axis while splitting along the other hands the new window a size
+    // nobody drew — the geometry class this codebase has shipped three times.
+    expect(app).toMatch(/axis === 'row' \? half\(grid\.cols\)/)
+    expect(app).toMatch(/axis === 'col' \? half\(grid\.rows\)/)
+    // Measured rather than assumed: reverting either half of this — sending
+    // `dir` again, or measuring against `dir` while sending `axis` — fails
+    // here. Renaming `axis`, `drawn` or `row` fails it too without anything
+    // being wrong; re-point the assertion rather than loosening it, because
+    // naming both ends is the whole of what it says.
+  })
+
   it('keeps the ⌥ chords out of the bindings that are not ⌥ chords', () => {
     // ⌥ held makes it a different chord — ⌥⌘digit picks a tab, ⌘⌥arrow moves
     // a pane — so none of the letter bindings may fire while it is down.
