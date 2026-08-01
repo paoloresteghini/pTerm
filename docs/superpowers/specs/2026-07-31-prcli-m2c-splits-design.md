@@ -418,3 +418,83 @@ every test that could reach the real ones — the last is read by roughly twelve
 live Claude sessions. Never run `npm install`/`npm ci` casually: it breaks
 node-pty's spawn-helper permissions and fails all integration tests with
 `posix_spawnp failed`.
+
+## Plan 2b rulings (2026-08-01, after plan 2a merged)
+
+Plan 2a shipped the model headless: a split tab survives a relaunch with its
+axis, ratios and selected pane. **Nothing can create a split from the UI** —
+`splitTab` has no IPC, no keybinding and no menu item, and its only callers are
+tests. Plan 2b's job is to make a split visible and usable.
+
+### Scope
+
+**2b:** split/closePane IPC; `RestoreResult` carrying tab rows; the renderer
+pane tree; focus; ⌘W; per-pane death; worst-state aggregation.
+**2c:** drag-resize, the `⊞n` badge, E2E.
+
+**Worst-state aggregation moved from 2c into 2b.** With splits visible and no
+aggregation, a split tab's tab-bar dot shows its founder pane's state, so a
+crashed second pane leaves the tab looking green. That is not missing polish, it
+is a dot that lies — on a tool whose purpose is saying which of a dozen sessions
+needs attention. The severity order already exists in `shared/status.ts` and M3's
+registry already tracks per-pane state, so this is a fold over a tab's panes and
+the same fold over a project's tabs.
+
+### Focus
+
+**Click, plus ⌘⌥←/→/↑/↓ to move directionally.** The parent design specifies
+⌘D / ⇧⌘D to split and ⌘W to kill a pane but never says how a pane is *selected*,
+and with two panes on screen something must decide which receives keystrokes.
+
+Directional rather than cycling because one axis per tab makes direction
+unambiguous — the property the one-axis ruling was made for. ⌘-chords rather
+than ⌥ or ctrl because every keystroke this app does not intercept goes into a
+terminal where Claude and the shell already claim most of the keyboard; on macOS
+terminals do not consume ⌘.
+
+The selected pane is `TabRow.activePaneId`, which config already carries.
+
+### A pane that dies stays until it is dealt with
+
+**A dead pane keeps its place in the layout, red, until restarted or dismissed.**
+It does not collapse and let its siblings take the space.
+
+The reason is scrollback: when a pane dies the thing you need is what it printed
+just before, and collapsing it discards exactly that at the moment it matters. It
+also keeps one mental model — a dead pane behaves like today's dead tab.
+
+This diverges from restore, where `normaliseLayout` prunes a pane whose session
+is gone and redistributes its ratio. That is correct and not a contradiction: a
+pane dead *in this session* still has a window, a preserved dead pane and
+scrollback to read, while a pane missing at restore has nothing left to show.
+
+**This makes carried finding I4 live, so it must be fixed in 2b.** `restartTab`
+recreates a pane with a bare `new-session -A` and no `-t <group>`, so restarting
+a pane inside a split resurrects it *outside* its tab's group and silently
+un-splits the tab. It is inert today only because nothing can split from the UI.
+
+### Renderer state: flat panes plus a parallel tab index
+
+`state.panes: TabDescriptor[]` and `state.tabs: TabRow[]` — the same shape config
+v5 uses, rather than nesting panes inside tabs.
+
+One shape end to end (config, IPC payload, renderer state) means no translation
+layer and no second place for the tab-versus-pane distinction to drift. That
+distinction has already produced a `forgetTab` that pruned the wrong array while
+type-checking cleanly, and a tab row named after a pane id instead of the group's
+frozen id. Flat pane lookups also leave the existing reducer actions —
+`activatedTab`, `died`, `statusChanged`, `removed`, `movedTab` — working with a
+rename rather than a nested search, and they are the actions with coverage today.
+
+The cost is two arrays to keep consistent. **Main's payload is authoritative and
+the renderer never invents membership**: `normaliseLayout` already drops kids
+naming panes that do not exist and `tabRows` already dedupes cross-row claims.
+
+### What must not regress
+
+`App.tsx` keeps every terminal mounted across every project — unmounting
+disposes the xterm and loses scrollback — and toggles `visibility`, not
+`display`, so a hidden pane stays laid out and can measure itself. A hidden pane
+measuring 0×0 would resize its real tmux session to nothing. **Both properties
+survive splits:** every pane of every tab stays mounted, and only the current
+tab's panes are visible and arranged along the axis.
