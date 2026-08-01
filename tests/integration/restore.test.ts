@@ -578,8 +578,20 @@ describe('restoreWorkspace panes and tabs', () => {
     // must not drive a window it knows nothing about down to 80x24, which is
     // the geometry defect this project has already shipped twice. The spec's
     // Done-when is explicit: "no pane wrapped at 80 columns".
-    await expect.poll(() => windowSize(founder.tmuxSession), { timeout: 10_000 }).toBe('120x40')
-    await expect.poll(() => windowSize(second.tmuxSession), { timeout: 10_000 }).toBe('100x30')
+    //
+    // Settled first, then asserted plainly — NOT polled. This asserts the
+    // ABSENCE of a change, and `expect.poll` returns on its first match, so it
+    // would read the window before the attach-time resize it is guarding
+    // against could have landed and pass on a value that was about to be
+    // wrong. Measured: with the `sized` gate removed the polled form passed in
+    // 283ms; with this settle it fails with `expected '80x24' to be '120x40'`.
+    // `sizeWindowOnAttach` is a void-ed async call that resolves ~25ms after
+    // the attach, so 1.5s is nearly two orders of magnitude of headroom. Same
+    // idiom, and the same reason, as `does not resize the sibling's window
+    // when it reattaches` in `manager.test.ts`.
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    expect(await windowSize(founder.tmuxSession)).toBe('120x40')
+    expect(await windowSize(second.tmuxSession)).toBe('100x30')
 
     // No two live members of this tab may report the same window: one window
     // rendered by two xterms is the failure a fallen-back member causes.

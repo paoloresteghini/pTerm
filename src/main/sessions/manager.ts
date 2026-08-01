@@ -55,6 +55,21 @@ interface Entry {
    */
   windowId?: string
   /**
+   * Set once `ownsWindow` has said this pane may NOT write to the window tmux
+   * reports for it — the fallen-back state, where its own window has died and
+   * the id it reports is a sibling's.
+   *
+   * The negative has to be cached as well as the positive, and for the same
+   * reason: `windowId` is only ever filled in with a window this pane is
+   * entitled to, so without this a denied pane re-asks on every call and a
+   * drag puts a `list-sessions` plus one `windowIdOf` per sibling between
+   * every frame — the subprocess storm M3 exists to remove, in the one case
+   * where nothing will ever come of it. Permanent for the entry's lifetime,
+   * which is correct: the window this pane owned is gone and does not come
+   * back, and a detach or a move disposes the entry.
+   */
+  windowDenied?: boolean
+  /**
    * Set before we deliberately tear a client down, so the PTY's exit callback
    * can tell a detach or a kill apart from the child genuinely exiting.
    */
@@ -240,12 +255,24 @@ export class SessionManager {
     // attach with no size of its own spawns its client at 80x24 because a
     // client needs some size; driving the WINDOW there as well takes a pane
     // that was 120x40 and re-wraps a `claude` session's scrollback
-    // permanently. Restore is that caller and is the only one: nothing
-    // persists a per-pane `cols`/`rows` (neither `PaneRecord` nor `TabRow`
-    // has them), so it reattaches every pane at the default and the renderer
-    // fits it afterwards. Measured on this branch before the gate went in: a
-    // tab opened 120x40 and split at 100x30 came back from a v5 file as
-    // 80x24 and 80x24. Leaving such a window alone is what it inherited
+    // permanently.
+    //
+    // Three callers arrive unsized, not one. Restore is the one the gate was
+    // written for: nothing persists a per-pane `cols`/`rows` (neither
+    // `PaneRecord` nor `TabRow` has them), so it reattaches every pane at the
+    // default and the renderer fits it afterwards. The renderer's own
+    // `CHANNELS.open` is a second — `App.tsx` sends `projectSlug`, `cwd`,
+    // `command` and `type` and no geometry — and `moveTabToProject`'s
+    // detached branch is a third. The behaviour is right for all three: a
+    // window `new-session` has just made is on `window-size latest` and
+    // follows its client until the renderer's first `resize()`, so nothing is
+    // owed at attach time; only restore is attaching to a window that already
+    // existed at a size it must not disturb.
+    //
+    // Measured on this branch before the gate went in: a tab opened 120x40 and
+    // split at 100x30 came back from a v5 file as 80x24 and 80x24, and the
+    // restore test that guards it is RED on exactly that pair once it settles
+    // before asserting. Leaving such a window alone is what it inherited
     // before Task 5 and is what the spec's "no pane wrapped at 80 columns"
     // requires; persisting the real size is 2b's, and would let this gate go.
     //
@@ -302,6 +329,9 @@ export class SessionManager {
     // Not asked on the split path: that window was made for this pane, by
     // this manager, moments ago — there is nobody it could belong to instead.
     if (!own && !(await this.ownsWindow(entry.record.tmuxSession, lookup.id))) {
+      // Remembered, so the renderer's first `resize()` does not ask the same
+      // question again — and every frame of the drag after it. See `Entry`.
+      entry.windowDenied = true
       return
     }
     entry.windowId = lookup.id
@@ -328,10 +358,20 @@ export class SessionManager {
    * That asymmetry is what makes every early return below load-bearing. On the
    * split path a hook that does not go on leaves the window as tmux made it,
    * and nothing is owed. On the `open()` path the option is ALREADY ON before
-   * this function runs, so the same early return would leave the together-or-
-   * not-at-all rule broken — every ordinary `exit` preserved as a dead pane in
-   * a window and a session nothing reaps, which the next restore then adopts
-   * as a live tab. So each one takes the option back off first.
+   * this function runs, so an early return that simply leaves it there breaks
+   * the together-or-not-at-all rule — every ordinary `exit` preserved as a
+   * dead pane in a window and a session nothing reaps, which the next restore
+   * then adopts as a live tab.
+   *
+   * So each early return below has to account for the option, and each one
+   * does — but not all of them by turning it off, and the differences are the
+   * point. `gone` and `unreachable` have no window to turn it off ON. The
+   * `!command` return and the `setDeathHook` catch do call
+   * `disableRemainOnExit`. The fallen-back return does NOT, deliberately and
+   * uniquely: the option on that window is the SIBLING's, paired with the
+   * sibling's hook, and taking it off would cost the sibling the very reaping
+   * the rule exists to guarantee. Read that return's own comment before
+   * changing it; it is the exception, not an oversight.
    */
   private async wireDeathHook(
     record: PaneRecord,
@@ -472,8 +512,50 @@ export class SessionManager {
    * One `list-sessions` for a tab that has never been split, which is the
    * ordinary case: an ungrouped session has no sibling that could shadow it and
    * returns before asking tmux anything else.
+   *
+   * **Fails open.** `listSessionsWithGroups` returns `[]` only for "no server"
+   * and rethrows everything else — a failed `spawn` under load, most
+   * realistically, which this branch already measured happening at 111 tmux
+   * spawns in three seconds from one abandoned poll. A throw escaping here
+   * would not be an unanswered question, it would be a broken caller: in
+   * `wireDeathHook` it escapes PAST `disableRemainOnExit` and leaves
+   * `remain-on-exit` on with no hook, and in `kill()` it runs before
+   * `killSession` and leaves a live session still listed as a tab. So the
+   * question is answered rather than propagated, and it is answered `true`.
+   *
+   * `true` rather than `false` for two reasons, and they point the same way.
+   * The likelihood: a pane that has fallen back onto a sibling's window is
+   * rare (it needs its own window to have died without its hook running),
+   * while a tmux hiccup is uncorrelated with that and can land on any attach,
+   * so "yes, this pane owns its window" is simply the far likelier answer.
+   * And the cost: `true` degrades to exactly the pre-branch behaviour for one
+   * call — this pane writes to the window tmux named, which is its own unless
+   * it is that rare fallen-back member — whereas `false` re-creates the
+   * stray-session class on the ordinary path, leaving the option on with no
+   * hook and skipping a window kill for a pane that almost certainly did own
+   * its window. The failure `true` accepts is the narrow one: if the throw and
+   * the fallback coincide, this pane resizes, re-hooks or kills a sibling's
+   * window, which is the harm the check exists to stop. `false` would accept
+   * the broad one.
    */
   private async ownsWindow(tmuxSession: string, windowId: string): Promise<boolean> {
+    try {
+      return await this.claimsWindow(tmuxSession, windowId)
+    } catch (error) {
+      // Logged rather than swallowed silently: nothing else reports it, and a
+      // fail-open answer is a guess this app should be able to see it made.
+      // Not a log storm — every caller caches the answer on the entry, so this
+      // is once per entry, not once per drag frame.
+      console.error(
+        `PRCLI: tmux would not say who owns window ${windowId} for ${tmuxSession} ` +
+          `(${String(error)}); assuming it is this pane's own`,
+      )
+      return true
+    }
+  }
+
+  /** `ownsWindow`'s question, before it is made unable to fail. See there. */
+  private async claimsWindow(tmuxSession: string, windowId: string): Promise<boolean> {
     const rows = await this.adapter.listSessionsWithGroups()
     const group = rows.find((row) => row.name === tmuxSession)?.group
     if (!group) return true
@@ -660,10 +742,13 @@ export class SessionManager {
       await this.adapter.newGroupMember(group, tmuxSession, { PRCLI_TAB_ID: id })
       // By index, with the member named. See the adapter method's comment.
       await this.adapter.selectWindow(tmuxSession, window.index)
-      // `sized: true` regardless of what the caller passed: this window was
-      // just resized explicitly, two lines up, to exactly these numbers —
-      // defaulted or not, they are already the window's size, so the attach
-      // that follows is confirming a size rather than inventing one.
+      // `finishSplit` ends in an attach with `sized: true` regardless of what
+      // the caller passed, and this is where that is earned: the
+      // `resizeWindow(window.id, cols, rows)` above put the window at exactly
+      // these numbers. Defaulted or not, they are already the window's size,
+      // so the attach at the end of `finishSplit` is confirming a size rather
+      // than inventing one — which is the one thing the I1 gate exists to
+      // stop.
       return await this.finishSplit(record, window, cols, rows)
     } catch (error) {
       await this.rollbackSplit(record, window.id)
@@ -809,13 +894,20 @@ export class SessionManager {
   private async resizeWindow(entry: Entry, cols: number, rows: number): Promise<void> {
     let windowId = entry.windowId
     if (!windowId) {
+      // Already asked, and already told no. A drag would otherwise put a
+      // `list-sessions` plus one `windowIdOf` per sibling between every frame,
+      // for a pane whose answer cannot change.
+      if (entry.windowDenied) return
       const found = await this.adapter.windowIdOf(entry.record.tmuxSession)
       // Not cached, and not resized, when a sibling owns it: see `ownsWindow`.
-      // Asked once per entry rather than per resize — a drag would otherwise
-      // put a `list-sessions` between every frame — because this branch only
-      // runs while the entry has no window id, and it either gets one here or
-      // stays out of the window's way for good.
-      if (!found || !(await this.ownsWindow(entry.record.tmuxSession, found))) return
+      // Asked at most once per entry rather than once per resize — a "yes" is
+      // cached as `windowId`, which takes this whole branch out of the way for
+      // good, and a "no" as `windowDenied`, which does the same.
+      if (!found) return
+      if (!(await this.ownsWindow(entry.record.tmuxSession, found))) {
+        entry.windowDenied = true
+        return
+      }
       entry.windowId = found
       windowId = found
     }
@@ -863,15 +955,36 @@ export class SessionManager {
    * reports would destroy the other pane's window and the process inside it —
    * the user closes one pane and the other one's shell dies. Its session is
    * still killed either way; that is the only object it still has.
+   *
+   * That question is only put to tmux when the window had to be LOOKED UP. A
+   * window id already on the entry is this pane's own by construction —
+   * `splitTab` made that window for this pane, and the only other writers of
+   * the field set it after `ownsWindow` has already said yes — and asking
+   * again is not a second opinion but a worse one. `ownsWindow` can only see
+   * what tmux reports now, and in the mirror-image fallback (the FOUNDER's
+   * window dies and the founder falls back onto THIS pane's) the founder-first
+   * tie-break hands this pane's own window to the founder and vetoes the kill,
+   * leaving a live window and the shell inside it behind — measured. The
+   * tie-break itself is unchanged, and has to be: which member truly owns a
+   * shared window is not recoverable from tmux. This narrows it to the case
+   * where tmux's report is the only evidence there is, which is the same
+   * `ours`/looked-up distinction `wireDeathHook` and `sizeWindowOnAttach`
+   * already make. A pane whose entry was reopened after its own window died
+   * still has no cached id, so the case the check exists for is untouched.
    */
   async kill(id: string): Promise<void> {
     const entry = this.entries.get(id)
     if (entry) {
-      const windowId = entry.windowId ?? (await this.adapter.windowIdOf(entry.record.tmuxSession))
+      const cached = entry.windowId
+      const windowId = cached ?? (await this.adapter.windowIdOf(entry.record.tmuxSession))
       // Asked before the session is killed, and it has to be: the check reads
       // this session's group out of `list-sessions`, and there is no row left
       // to read once it has gone.
-      const own = windowId !== '' && (await this.ownsWindow(entry.record.tmuxSession, windowId))
+      const own =
+        cached !== undefined ||
+        (!entry.windowDenied &&
+          windowId !== '' &&
+          (await this.ownsWindow(entry.record.tmuxSession, windowId)))
       entry.intent = 'killed'
       entry.abandoned = true
       this.entries.delete(id)

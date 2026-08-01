@@ -85,6 +85,25 @@ async function windowsIn(name: string): Promise<string[]> {
   return stdout.split('\n').map((line) => line.trim()).filter(Boolean)
 }
 
+/**
+ * Every window on the whole server, whatever session it is linked into.
+ *
+ * `windowsIn` asks a session, which is no use for proving a window was
+ * reaped: the session that leaked it may be gone while the window it left
+ * behind is still linked into a sibling's list.
+ */
+async function allWindows(): Promise<string[]> {
+  try {
+    const { stdout } = await run('tmux', ['-L', SOCKET, 'list-windows', '-a', '-F', '#{window_id}'])
+    return stdout.split('\n').map((line) => line.trim()).filter(Boolean)
+  } catch {
+    // No server left at all, which is the strongest form of "that window is
+    // gone". Callers assert this list CONTAINS the window first, so an empty
+    // answer can never be the reason a later `not.toContain` passes.
+    return []
+  }
+}
+
 /** Whether a tmux session by this name currently exists. */
 async function sessionExists(name: string): Promise<boolean> {
   try {
@@ -1089,6 +1108,147 @@ describe('SessionManager and a member that has fallen back onto a sibling window
     expect(hooks).toContain(`=prcli-gco-${founder.id}`)
     expect(hooks).not.toContain(second.id)
     manager.detachAll()
+  })
+
+  // The denial has to be cached as well as a grant. `windowId` is only ever
+  // filled in with a window this pane may write to, so a denied pane had
+  // nothing to remember and re-ran the whole check — `list-sessions` plus one
+  // `windowIdOf` per sibling — on every `resize()`, which during a drag means
+  // every frame. Same subprocess-storm shape the branch's memoised window
+  // lookup exists to remove.
+  it('asks who owns a window once per pane, not once per resize', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const owners = vi.spyOn(adapter, 'listSessionsWithGroups')
+    const manager = new SessionManager(adapter)
+    const { second } = await fallenBack(manager)
+
+    manager.open({
+      id: second.id, projectSlug: 'lumio', cwd: tmpdir(),
+      tmuxSession: second.tmuxSession, cols: 60, rows: 20,
+    })
+    await expect.poll(() => clients(second.tmuxSession), { timeout: 8000 }).toHaveLength(1)
+    // The attach's own check is asynchronous; wait for it to land, then take
+    // the baseline. `toBeGreaterThan(0)` is what stops everything below from
+    // passing on a check that never ran at all.
+    await expect.poll(() => owners.mock.calls.length, { timeout: 8000 }).toBeGreaterThan(0)
+    const afterAttach = owners.mock.calls.length
+
+    // A drag, at one frame per size.
+    for (let width = 61; width <= 65; width += 1) manager.resize(second.id, width, 20)
+    await new Promise((resolve) => setTimeout(resolve, 500))
+
+    // Five frames, and tmux was asked nothing more. Without the cached denial
+    // this is `afterAttach + 5`.
+    expect(owners.mock.calls.length).toBe(afterAttach)
+    manager.detachAll()
+  })
+
+  /**
+   * The mirror image, which the founder-first tie-break gets wrong on its own:
+   * the FOUNDER's window dies and the founder falls back onto the second
+   * pane's. `ownsWindow(second, @second)` then finds the founder among the
+   * claimants, the founder wins by being the tab's own id, and the pane that
+   * genuinely owns the window is vetoed off it.
+   *
+   * Which member truly owns a shared window is not recoverable from tmux, so
+   * the tie-break itself cannot be fixed and is not being fixed here. What is
+   * fixed is that `kill()` was putting the question to tmux at all for a
+   * window it already had a cached, self-made id for. `splitTab` made this
+   * window for this pane and handed the id to `attach`; tmux's report is not a
+   * better source than that, and here it is a worse one.
+   */
+  it("kills its own window when the FOUNDER is the pane that has fallen back", async () => {
+    const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
+    const founder = manager.open({ projectSlug: 'lumio', cwd: tmpdir(), cols: 120, rows: 40 })
+    await waitFor(manager, founder.id, /\$|%|#/)
+    const second = await manager.splitTab({ paneId: founder.id, cols: 100, rows: 30 })
+    const founderWindow = await windowIdOf(founder.tmuxSession)
+    const secondWindow = await windowIdOf(second.tmuxSession)
+    expect(founderWindow).toMatch(/^@\d+$/)
+    expect(secondWindow).not.toBe(founderWindow)
+
+    // The founder is the one that loses its window this time.
+    manager.detach(founder.id)
+    await run('tmux', ['-L', SOCKET, 'kill-window', '-t', founderWindow])
+    // Asserted rather than assumed: without the fallback this is an ordinary
+    // one-pane kill and would pass on anything.
+    await expect.poll(() => windowIdOf(founder.tmuxSession), { timeout: 8000 }).toBe(secondWindow)
+    expect(await sessionExists(founder.tmuxSession)).toBe(true)
+
+    // Read before the kill: this is the process the leak leaves running.
+    const pid = await panePid(second.tmuxSession)
+    expect(pid).toMatch(/^\d+$/)
+    // And the window is there to be reaped, so the `not.toContain` below is
+    // asserting a removal rather than a list that never held it.
+    expect(await allWindows()).toContain(secondWindow)
+
+    await manager.kill(second.id)
+
+    expect(await sessionExists(second.tmuxSession)).toBe(false)
+    // The window and the shell inside it, not just the session. Killing only
+    // the session leaves `@n` linked into the surviving group with a live
+    // `zsh` in it, reachable afterwards only through `list-windows` — the
+    // spec's "a crashed or closed pane leaves no window and no member session
+    // behind", failed. Polled because the kernel reaps the shell a moment
+    // after tmux takes the window.
+    await expect.poll(() => isRunning(pid), { timeout: 8000 }).toBe(false)
+    const left = await allWindows()
+    expect(left).not.toContain(secondWindow)
+    manager.detachAll()
+  })
+})
+
+/**
+ * `ownsWindow` reads `list-sessions`, which returns `[]` only for "no server"
+ * and rethrows everything else — a failed `spawn` under load, most
+ * realistically. It is consulted on paths that had no throwing tmux call in
+ * them before this branch, and a throw escaping it is not an unanswered
+ * question but a broken caller. Both tests below make that call reject and
+ * assert the caller finished its job anyway.
+ */
+describe('SessionManager when tmux will not say who owns a window', () => {
+  /** `list-sessions` refusing to answer, on a manager that is otherwise real. */
+  function withBrokenOwnership(options: { deathReporter?: string } = {}): SessionManager {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    vi.spyOn(adapter, 'listSessionsWithGroups').mockRejectedValue(
+      new Error('tmux said something odd'),
+    )
+    return new SessionManager(adapter, options)
+  }
+
+  it('still pairs the death hook with remain-on-exit on an ordinary attach', async () => {
+    const manager = withBrokenOwnership({
+      deathReporter: join(tmpdir(), 'prcli-hook-test-reporter'),
+    })
+    const tab = manager.open({ projectSlug: 'lumio', cwd: tmpdir(), cols: 100, rows: 30 })
+    await waitFor(manager, tab.id, /\$|%|#/)
+    const window = await windowIdOf(tab.tmuxSession)
+    expect(window).toMatch(/^@\d+$/)
+
+    // The option goes on chained into `new-session`, so it is on before
+    // `ownsWindow` is ever reached. If the throw escapes, it escapes PAST
+    // `disableRemainOnExit` too and this window is left preserving its pane on
+    // exit with nothing to reap it — option on, no hook, the stray-session
+    // class this project has shipped once.
+    await expect.poll(() => hooksOf(window), { timeout: 10_000 }).toContain('pane-died')
+    expect(await windowOption(window, 'remain-on-exit')).toBe('on')
+    manager.detachAll()
+  })
+
+  it('still kills the session and its window', async () => {
+    const manager = withBrokenOwnership()
+    const tab = manager.open({ projectSlug: 'lumio', cwd: tmpdir(), cols: 100, rows: 30 })
+    await waitFor(manager, tab.id, /\$|%|#/)
+    const window = await windowIdOf(tab.tmuxSession)
+    expect(await allWindows()).toContain(window)
+
+    // The check runs BEFORE `killSession`, so a throw here leaves the session
+    // alive, the entry still registered, and `CHANNELS.kill`'s handler
+    // rejecting before it can forget the tab.
+    await manager.kill(tab.id)
+
+    expect(await sessionExists(tab.tmuxSession)).toBe(false)
+    expect(await allWindows()).not.toContain(window)
   })
 })
 
