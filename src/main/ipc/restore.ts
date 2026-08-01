@@ -103,7 +103,10 @@ export type WorkspaceReconcile = Omit<RestoreResult, 'status'>
  * this app could bind a member to is the one that member already reports,
  * which is either already right (a no-op) or the sibling's (cementing the
  * fault). Detecting it is what is left, so the shadowing pane is dropped from
- * the tab exactly as a pane whose session has gone is.
+ * the tab — and its session killed, which is not the same as dropping it. A
+ * pane whose session has gone needs nothing further; this one's session is
+ * alive, and a pane dropped from the tab without being killed is a running
+ * `prcli-*` session with no row on disk and no way back into the UI.
  *
  * Which of the two members truly owns the surviving window is not recoverable
  * from tmux: killing either side's window leaves both members reporting the
@@ -141,7 +144,16 @@ async function withoutSharedWindows(
     // sibling" — two panes tmux declined to describe are not evidence of
     // anything, and pruning a live session on that would lose a pane rather
     // than deduplicate one.
-    if (window && claimed.has(window)) continue
+    if (window && claimed.has(window)) {
+      // Dropped from the tab AND killed. Dropping alone is what leaves a live
+      // `prcli-*` session with no config row, no tab-bar entry and nothing in
+      // the app able to reach it — pruned again on every future restore, for
+      // as long as it runs. Its session is all there is to kill: it has no
+      // window of its own (that is what made it shadow one), and the window
+      // it reports belongs to the pane being kept.
+      await manager.killShadowMember(pane.tmuxSession)
+      continue
+    }
     if (window) claimed.add(window)
     kept.push(pane)
   }

@@ -1126,6 +1126,39 @@ export class SessionManager {
     return this.adapter.windowIdOf(tmuxSession)
   }
 
+  /**
+   * Destroy a member session and NOTHING else — no window, no group.
+   *
+   * The one caller is restore, dropping a member that has fallen back onto a
+   * sibling's window. Dropping it from the tab is not enough on its own: the
+   * session stays alive with no config row and no tab-bar entry, so nothing
+   * in the app can ever see it or kill it again and every future restore
+   * prunes it afresh. It is exactly the "live session the app has lost track
+   * of" this milestone's architecture note is written against.
+   *
+   * Deliberately not `kill()`. That resolves a window id and kills it too,
+   * and the only window this pane reports is its SIBLING's — killing it would
+   * take the sibling's process with it. Here there is no window to leak:
+   * this member has none of its own, which is the very condition that
+   * identified it.
+   *
+   * Best effort. A refused kill leaves exactly the strays that existed
+   * before, and failing the whole restore over one of them would cost the
+   * user every other pane; it is logged instead, because silence is what made
+   * the pruned member permanent.
+   */
+  async killShadowMember(tmuxSession: string): Promise<void> {
+    try {
+      await this.adapter.killSession(tmuxSession)
+    } catch (error) {
+      console.error(
+        `PRCLI: could not kill the shadowing member session ${tmuxSession}; ` +
+          'it is running with no window of its own and no entry in the UI',
+        error,
+      )
+    }
+  }
+
   onExit(listener: (record: PaneRecord, code: number, reason: ExitReason) => void): void {
     this.exitListeners.add(listener)
   }

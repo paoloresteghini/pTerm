@@ -755,7 +755,9 @@ describe('restoreWorkspace panes and tabs', () => {
     const orphanedWindow = await windowIdOf(second.tmuxSession)
     await run('tmux', ['-L', SOCKET, 'kill-window', '-t', orphanedWindow])
     expect(await sessionExists(second.tmuxSession)).toBe(true)
-    expect(await windowIdOf(second.tmuxSession)).toBe(await windowIdOf(founder.tmuxSession))
+    const founderWindow = await windowIdOf(founder.tmuxSession)
+    expect(founderWindow).toMatch(/^@\d+$/)
+    expect(await windowIdOf(second.tmuxSession)).toBe(founderWindow)
 
     const { store, file } = await v5ConfigWith({
       projects: [project('Lumio', 'lumio', tmpdir(), founder.id)],
@@ -775,12 +777,27 @@ describe('restoreWorkspace panes and tabs', () => {
 
     expect(result.tabs).toHaveLength(1)
     expect(result.tabs[0].id).toBe(founder.id)
-    // Stated as the invariant rather than as a count, because it is the
-    // invariant that matters: whatever came back, no two of this tab's panes
-    // may be looking at one window.
-    expect(result.tabs.length).toBeGreaterThan(0)
-    const windows = await Promise.all(result.tabs.map((pane) => windowIdOf(pane.tmuxSession)))
-    expect(new Set(windows).size).toBe(windows.length)
+    // The surviving pane is still looking at the window it always was: the
+    // prune must cost the tab a duplicate, not the founder's own process.
+    //
+    // The duplicate-window invariant this used to assert here is not asserted
+    // here any more. With one pane left `new Set(windows).size ===
+    // windows.length` is true by construction, and a regression that let the
+    // second pane back in would be caught by the `toHaveLength(1)` above
+    // before it could reach it — the count was doing all of the work and the
+    // invariant none. It is asserted where it can fail, in the two-pane test
+    // at the top of this describe.
+    expect(await windowIdOf(founder.tmuxSession)).toBe(founderWindow)
+
+    // The pruned member is not merely dropped from the tab — it is killed.
+    // Dropping alone leaves a live prcli session with no config row and no
+    // tab-bar entry, which every future restore prunes again and nothing can
+    // ever reach: the spec's "a crashed or closed pane leaves no window and
+    // no member session behind", failed permanently. Killing its SESSION is
+    // safe precisely because it has no window of its own; its window is the
+    // founder's, asserted intact above.
+    await expect.poll(() => sessionExists(second.tmuxSession), { timeout: 10_000 }).toBe(false)
+    expect(await sessionExists(founder.tmuxSession)).toBe(true)
 
     const saved = await written(file)
     expect(saved.tabs).toHaveLength(1)
