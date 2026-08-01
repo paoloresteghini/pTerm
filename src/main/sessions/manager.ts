@@ -198,7 +198,56 @@ export class SessionManager {
       // window, so it is not also a stray session.
       void this.wireDeathHook(record, null).catch(() => {})
     }
+    // Every attach sizes the window its client is about to see — not only a
+    // founder's, and not gated on `options.deathReporter` the way the hook
+    // above is (a manager built without one still owes its client the right
+    // size). `resize-window` flips a window straight to `window-size manual`
+    // the moment it is first called — measured on tmux 3.7b: a window whose
+    // `window-size` was unset reads back `manual` immediately after one
+    // `resize-window -x 140 -y 45` — so `latest` cannot be trusted to carry a
+    // reattaching client's geometry onto the window past that point. This is
+    // the third disguise of a geometry defect that has already shipped twice
+    // (a bare 80x24 `new-session -A`, then `window-size manual` reverting to
+    // the size recorded at window creation); without an explicit resize on
+    // every attach, the first caller to attach to a window it did not itself
+    // just size — restore, primarily — inherits whatever size that window
+    // last happened to have.
+    //
+    // Routed through the private `resizeWindow`, not `adapter.resizeWindow`
+    // directly: this lookup cannot land synchronously with `attach`, so by
+    // the time it resolves a renderer `resize()` may already have moved the
+    // window on to a newer size. `resizeWindow` re-checks the entry's current
+    // `cols`/`rows` against what was requested here before its own call
+    // lands, which is what stops that late resize from being the one that
+    // wins.
+    void this.sizeWindowOnAttach(entry, windowId ?? null, cols, rows).catch(() => {})
     return record
+  }
+
+  /**
+   * Resolve the window a freshly attached client's pane lives in, and size it
+   * to that client. See the comment at the call site in `attach` for why this
+   * exists at all.
+   *
+   * `windowId` is already known for `splitTab`, which made the window itself
+   * before any client attached to it. For `open()` it is not: the window does
+   * not exist until tmux has created it, so it is polled for the same way
+   * `wireDeathHook` polls for its own — and a `gone` or `unreachable` answer
+   * is skipped rather than guessed at, for the same reason `wireDeathHook`
+   * skips them.
+   */
+  private async sizeWindowOnAttach(
+    entry: Entry,
+    windowId: string | null,
+    cols: number,
+    rows: number,
+  ): Promise<void> {
+    const lookup: WindowLookup = windowId
+      ? { kind: 'found', id: windowId }
+      : await this.awaitWindowId(entry.record.tmuxSession)
+    if (lookup.kind !== 'found') return
+    entry.windowId = lookup.id
+    await this.resizeWindow(entry, cols, rows)
   }
 
   /**

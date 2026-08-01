@@ -199,6 +199,31 @@ describe('SessionManager.open', () => {
       .toThrow(/already open/i)
     manager.detachAll()
   })
+
+  // The window must end up at the size the CLIENT was given, whatever size the
+  // window happened to be beforehand. Under `manual` it will not follow on its
+  // own, and `latest` is no longer reliable once anything has called resize-window.
+  it('sizes the window to the client on every attach, not only the first', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const manager = new SessionManager(adapter)
+    const tab = manager.open({ projectSlug: 'lumio', cwd: tmpdir(), cols: 100, rows: 30 })
+    await waitFor(manager, tab.id, /\$|%|#/)
+    // Force the window to `manual` at a different size, exactly as a renderer
+    // resize would, then drop the client.
+    manager.resize(tab.id, 140, 45)
+    await expect.poll(() => windowSize(tab.tmuxSession), { timeout: 8000 }).toBe('140x45')
+    manager.detach(tab.id)
+
+    // Reattach at a third size. Nothing else will correct this.
+    const again = manager.open({
+      id: tab.id, projectSlug: 'lumio', cwd: tmpdir(),
+      tmuxSession: tab.tmuxSession, type: tab.type, cols: 120, rows: 40,
+    })
+    await waitFor(manager, again.id, /\$|%|#/)
+
+    await expect.poll(() => windowSize(tab.tmuxSession), { timeout: 8000 }).toBe('120x40')
+    manager.detachAll()
+  })
 })
 
 describe('SessionManager.write', () => {
