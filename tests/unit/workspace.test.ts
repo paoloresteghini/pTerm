@@ -298,6 +298,41 @@ describe('paneGroups', () => {
     expect(group?.panes.map((box) => box.style.flexBasis)).toEqual(['50%', '50%'])
   })
 
+  it('boxes a pane two rows both name exactly once', () => {
+    // Not a state main hands over — `tabRows` dedupes kids across rows — but
+    // a second box would mean a second xterm on one tmux pane.
+    const state: WorkspaceState = {
+      ...three,
+      tabs: [tabRow('aaa', ['aaa', 'bbb']), tabRow('ccc', ['ccc', 'bbb'])],
+    }
+    const groups = paneGroups(state)
+    expect(groups).not.toHaveLength(0)
+    const boxed = groups.flatMap((group) => group.panes.map((box) => box.pane.id))
+    expect(boxed.filter((id) => id === 'bbb')).toHaveLength(1)
+    // The first row to name it keeps it, and the second renormalises around
+    // what is left rather than rendering a gap.
+    expect(groups.map((group) => group.panes.map((box) => box.pane.id))).toEqual([
+      ['aaa', 'bbb'],
+      ['ccc'],
+    ])
+    expect(groups[1]?.panes.map((box) => box.style.flexBasis)).toEqual(['100%'])
+  })
+
+  it('drops a group left with nothing rather than rendering an empty tab', () => {
+    // 'bbb' is claimed by the row built first, which leaves the row keyed by
+    // 'bbb' — the one `tabOfPane` hands back for it — with no panes at all.
+    const state: WorkspaceState = {
+      ...three,
+      panes: [tab('aaa'), tab('bbb')],
+      tabs: [tabRow('bbb', ['bbb']), tabRow('aaa', ['aaa', 'bbb'])],
+    }
+    const groups = paneGroups(state)
+    expect(groups).not.toHaveLength(0)
+    expect(groups.every((group) => group.panes.length > 0)).toBe(true)
+    expect(groups.map((group) => group.id)).toEqual(['aaa'])
+    expect(groups[0]?.panes.map((box) => box.pane.id)).toEqual(['aaa', 'bbb'])
+  })
+
   it('is empty against a fully empty WorkspaceState', () => {
     expect(paneGroups(INITIAL_WORKSPACE_STATE)).toEqual([])
   })

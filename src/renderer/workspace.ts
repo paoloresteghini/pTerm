@@ -217,11 +217,22 @@ function percent(share: number): string {
  * kids' shares are then dropped and what is left renormalised, so the panes
  * that are here fill the tab instead of leaving a hole where the missing one
  * would have gone.
+ *
+ * A kid already in `claimed` — boxed by an earlier group — is dropped the same
+ * way. Two rows naming one pane is not a state main hands over today, since
+ * `tabRows` in store.ts dedupes kids across rows before they reach here, but
+ * it is a state a *transient* row rewrite could produce, and the consequence
+ * is severe out of all proportion to this filter: the pane would be boxed in
+ * both groups, mounting two xterms against one tmux pane, each fitting the
+ * session to its own container. One pane, one box, whatever arrives.
  */
-function boxesOfRow(state: WorkspaceState, row: TabRow): PaneBox[] {
+function boxesOfRow(state: WorkspaceState, row: TabRow, claimed: Set<string>): PaneBox[] {
   const byId = new Map(state.panes.map((pane) => [pane.id, pane]))
   const kept = row.layout.kids
-    .map((id, index) => ({ pane: byId.get(id), share: row.layout.ratio[index] ?? 0 }))
+    .map((id, index) => ({
+      pane: claimed.has(id) ? undefined : byId.get(id),
+      share: row.layout.ratio[index] ?? 0,
+    }))
     .filter((entry): entry is { pane: TabDescriptor; share: number } => entry.pane !== undefined)
   const total = kept.reduce((sum, entry) => sum + entry.share, 0)
   // A row carrying no usable ratios still has to divide the tab somehow, and
@@ -249,9 +260,11 @@ function visibleGroupId(state: WorkspaceState): string | null {
 }
 
 /**
- * Every pane, arranged: exactly one group per tab, in the order the tabs'
- * first panes appear in `state.panes`, and every pane in `state.panes` in
- * exactly one of them.
+ * Every pane, arranged: one group per tab, in the order the tabs' first panes
+ * appear in `state.panes`, and every pane in `state.panes` in exactly one of
+ * them — at most once because `claimed` says so, at least once because a pane
+ * that finds its group already built was put there by the row that built it,
+ * or claimed by an earlier one.
  *
  * Driven by `state.panes` rather than by `state.tabs` for two reasons. Every
  * pane gets a group whether or not a row names it — nothing here can drop a
@@ -262,11 +275,21 @@ export function paneGroups(state: WorkspaceState): PaneGroup[] {
   const visibleId = visibleGroupId(state)
   const groups: PaneGroup[] = []
   const seen = new Set<string>()
+  const claimed = new Set<string>()
   for (const pane of state.panes) {
     const row = tabOfPane(state, pane.id)
     const id = row?.id ?? pane.id
     if (seen.has(id)) continue
     seen.add(id)
+    // A stray pane is in no row's `kids`, and `claimed` only ever holds panes
+    // taken from one, so this branch cannot be handed a claimed pane.
+    const panes = row ? boxesOfRow(state, row, claimed) : [{ pane, style: { flexBasis: '100%' } }]
+    // Only reachable from the same double-naming this guards: a row whose
+    // kids were all boxed by rows processed before it has nothing left to
+    // show, and an empty container is not a tab, it is a blank screen where
+    // the panes are already visible elsewhere.
+    if (panes.length === 0) continue
+    for (const box of panes) claimed.add(box.pane.id)
     groups.push({
       id,
       visible: id === visibleId,
@@ -274,7 +297,7 @@ export function paneGroups(state: WorkspaceState): PaneGroup[] {
       // created the tab it came from. That is an axis with nothing to divide,
       // not a claim that this tab is split.
       style: { flexDirection: row?.layout.dir === 'col' ? 'column' : 'row' },
-      panes: row ? boxesOfRow(state, row) : [{ pane, style: { flexBasis: '100%' } }],
+      panes,
     })
   }
   return groups
