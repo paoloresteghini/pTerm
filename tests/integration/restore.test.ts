@@ -149,7 +149,7 @@ describe('restoreWorkspace', () => {
 
     const result = await restoreWorkspace(manager, store, immediate)
 
-    expect(result.tabs.map((t) => t.id)).toEqual(['a1b2c3d4e5f60718'])
+    expect(result.panes.map((t) => t.id)).toEqual(['a1b2c3d4e5f60718'])
     manager.detachAll()
   })
 
@@ -168,7 +168,7 @@ describe('restoreWorkspace', () => {
 
     const result = await restoreWorkspace(manager, store, immediate)
 
-    expect(result.tabs).toEqual([])
+    expect(result.panes).toEqual([])
     expect(result.projects[0].activeTabId).toBeNull()
     await expect(store.read().then((c) => c.panes)).resolves.toEqual([])
   })
@@ -187,7 +187,7 @@ describe('restoreWorkspace', () => {
 
     const result = await restoreWorkspace(manager, store, immediate)
 
-    expect(result.tabs.map((t) => t.id)).toEqual([
+    expect(result.panes.map((t) => t.id)).toEqual([
       '3333333333333333',
       '1111111111111111',
       '2222222222222222',
@@ -244,6 +244,7 @@ describe('restoreWorkspace', () => {
     const store = await configWith({ projects: [], activeProjectId: null, tabs: [] })
     await expect(restoreWorkspace(manager, store, immediate)).resolves.toEqual({
       projects: [],
+      panes: [],
       tabs: [],
       activeProjectId: null,
     })
@@ -284,7 +285,7 @@ describe('restoreWorkspace', () => {
 
     const result = await restoreWorkspace(manager, store, immediate)
 
-    expect(result.tabs[0]?.type).toBe('claude')
+    expect(result.panes[0]?.type).toBe('claude')
     manager.detachAll()
   })
 })
@@ -558,8 +559,8 @@ describe('restoreWorkspace panes and tabs', () => {
     const result = await restoreWorkspace(manager, store, immediate)
 
     // Both panes, and one tab holding both of them.
-    expect(result.tabs).toHaveLength(2)
-    expect(result.tabs.map((pane) => pane.id).sort()).toEqual([founder.id, second.id].sort())
+    expect(result.panes).toHaveLength(2)
+    expect(result.panes.map((pane) => pane.id).sort()).toEqual([founder.id, second.id].sort())
     const saved = await written(file)
     expect(saved.panes.map((pane) => pane.id).sort()).toEqual([founder.id, second.id].sort())
     expect(saved.tabs).toHaveLength(1)
@@ -571,6 +572,19 @@ describe('restoreWorkspace panes and tabs', () => {
     expect(row.layout.ratio).toHaveLength(2)
     expect(row.layout.ratio[0]).toBeCloseTo(0.25)
     expect(row.layout.ratio[1]).toBeCloseTo(0.75)
+
+    // The reconcile hands the tab rows themselves back too, not only the
+    // panes — I5: `restoreWorkspace` already built these for the write above
+    // and used to drop them on the reply, leaving nothing downstream able to
+    // lay out a split without a second read of config. Same ids and kids as
+    // what just landed on disk; the ratio check sums the row's own shares
+    // rather than only counting them, since two panes at 0.9/0.9 would pass
+    // a length check while describing a tab wider than the window it is in.
+    expect(result.tabs).toHaveLength(1)
+    expect(result.tabs.map((tabRow) => tabRow.id)).toEqual(saved.tabs.map((tabRow) => tabRow.id))
+    expect(result.tabs[0].layout.kids).toEqual(row.layout.kids)
+    expect(result.tabs[0].layout.dir).toBe(row.layout.dir)
+    expect(result.tabs[0].layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
 
     // Each pane's own window keeps the geometry it had before the relaunch —
     // 120x40 and 100x30. Restore knows no size for a pane (nothing persists
@@ -595,8 +609,8 @@ describe('restoreWorkspace panes and tabs', () => {
 
     // No two live members of this tab may report the same window: one window
     // rendered by two xterms is the failure a fallen-back member causes.
-    expect(result.tabs.length).toBeGreaterThan(1)
-    const windows = await Promise.all(result.tabs.map((pane) => windowIdOf(pane.tmuxSession)))
+    expect(result.panes.length).toBeGreaterThan(1)
+    const windows = await Promise.all(result.panes.map((pane) => windowIdOf(pane.tmuxSession)))
     expect(new Set(windows).size).toBe(windows.length)
     manager.detachAll()
   })
@@ -630,10 +644,10 @@ describe('restoreWorkspace panes and tabs', () => {
     })
 
     const manager = new SessionManager(adapter)
-    expect((await restoreWorkspace(manager, store, immediate)).tabs).toHaveLength(2)
+    expect((await restoreWorkspace(manager, store, immediate)).panes).toHaveLength(2)
     const result = await restoreWorkspace(manager, store, immediate)
 
-    expect(result.tabs.map((pane) => pane.id).sort()).toEqual([founder.id, second.id].sort())
+    expect(result.panes.map((pane) => pane.id).sort()).toEqual([founder.id, second.id].sort())
     const saved = await written(file)
     expect(saved.tabs).toHaveLength(1)
     expect(saved.tabs[0].layout.kids).toEqual([founder.id, second.id])
@@ -675,7 +689,7 @@ describe('restoreWorkspace panes and tabs', () => {
     const manager = new SessionManager(adapter)
     const result = await restoreWorkspace(manager, store, immediate)
 
-    expect(result.tabs.map((pane) => pane.id).sort()).toEqual([founder.id, last.id].sort())
+    expect(result.panes.map((pane) => pane.id).sort()).toEqual([founder.id, last.id].sort())
     const saved = await written(file)
     expect(saved.tabs).toHaveLength(1)
     const layout = saved.tabs[0].layout
@@ -722,7 +736,7 @@ describe('restoreWorkspace panes and tabs', () => {
 
     const result = await restoreWorkspace(manager, store, immediate)
 
-    expect(result.tabs.map((pane) => pane.id)).toEqual(['1111111111111111'])
+    expect(result.panes.map((pane) => pane.id)).toEqual(['1111111111111111'])
     const saved = await written(file)
     expect(saved.panes.map((pane) => pane.id)).toEqual(['1111111111111111'])
     expect(saved.tabs.map((row) => row.id)).toEqual(['1111111111111111'])
@@ -787,8 +801,8 @@ describe('restoreWorkspace panes and tabs', () => {
     const manager = new SessionManager(adapter)
     const result = await restoreWorkspace(manager, store, immediate)
 
-    expect(result.tabs).toHaveLength(1)
-    expect(result.tabs[0].id).toBe(founder.id)
+    expect(result.panes).toHaveLength(1)
+    expect(result.panes[0].id).toBe(founder.id)
     // The surviving pane is still looking at the window it always was: the
     // prune must cost the tab a duplicate, not the founder's own process.
     //

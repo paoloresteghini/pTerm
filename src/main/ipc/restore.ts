@@ -290,10 +290,10 @@ export async function restoreWorkspace(
     // Then anything tmux has that config did not know about.
     ordered.push(...byId.values())
 
-    const tabs: TabDescriptor[] = []
+    const panes: TabDescriptor[] = []
     for (const record of ordered) {
       try {
-        tabs.push(
+        panes.push(
           manager.open({
             id: record.id,
             projectSlug: record.projectSlug,
@@ -316,7 +316,7 @@ export async function restoreWorkspace(
     // to, in the order those panes are listed above — so a tab's position
     // follows saved pane order for the same reason the panes themselves do.
     const held = new Map<string, PaneRecord[]>()
-    for (const pane of tabs) {
+    for (const pane of panes) {
       // Every pane here came out of a group above, so the fallback only makes
       // this total: a pane that is its own tab is exactly what an ungrouped
       // session already is.
@@ -325,19 +325,19 @@ export async function restoreWorkspace(
       if (already) already.push(pane)
       else held.set(tabId, [pane])
     }
-    const tabRows = [...held].map(([tabId, panes]) =>
+    const tabRows = [...held].map(([tabId, groupPanes]) =>
       tabRowFor(
         tabId,
-        panes,
+        groupPanes,
         saved.tabs.find((row) => row.id === tabId),
       ),
     )
 
     // One descriptor per saved project, in saved order — so the write below can
     // take each resolved active tab from here rather than resolving twice.
-    const real = await describeProjects(saved.projects, tabs)
+    const real = await describeProjects(saved.projects, panes)
 
-    const projects = withUnsorted(real, tabs)
+    const projects = withUnsorted(real, panes)
 
     // Resolved after the append, so Unsorted can be the selected project: with
     // no real projects yet it is the only place a stray can be reached from.
@@ -362,7 +362,7 @@ export async function restoreWorkspace(
         return described ? { ...project, activeTabId: described.activeTabId } : project
       }),
       activeProjectId,
-      panes: tabs,
+      panes,
       // One row per tab live tmux still has, holding the saved axis and ratios
       // wherever a saved row still describes panes that came back. A tab whose
       // panes have all gone has no row here at all — dropped by having no
@@ -371,6 +371,10 @@ export async function restoreWorkspace(
       notifications: saved.notifications,
     })
 
-    return { projects, tabs, activeProjectId }
+    // `tabs` rides along with `panes` rather than being dropped here as it
+    // used to be (finding I5): `store.write` above just took the same
+    // `tabRows`, and a caller laying out a split needs exactly what was
+    // written, not a second `store.read()` to get it back.
+    return { projects, panes, tabs: tabRows, activeProjectId }
   })
 }

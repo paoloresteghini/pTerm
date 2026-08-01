@@ -78,7 +78,7 @@ export function App() {
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      // `status` comes back inside the same response as `projects`/`tabs`
+      // `status` comes back inside the same response as `projects`/`panes`
       // rather than from its own, separate `status()` call: that call used
       // to race `restore()`'s own multi-second reconcile (detach-all,
       // `findOrphans`, one `tmux new-session -A` per tab) with no ordering
@@ -86,12 +86,16 @@ export function App() {
       // `status` to `{}` — so the direction that lost blanked the board at
       // every launch with real sessions running. One response has nothing
       // left to race against.
-      const [{ projects, tabs, activeProjectId, status }, notificationConfig] = await Promise.all([
+      //
+      // `panes` only, for now: the reply also carries `tabs` — layout, one
+      // row per group — but nothing downstream reads it until a later
+      // milestone task turns it into a real split.
+      const [{ projects, panes, activeProjectId, status }, notificationConfig] = await Promise.all([
         window.prcli.restore(),
         window.prcli.notifications(),
       ])
       if (cancelled) return
-      dispatch({ type: 'restored', projects, tabs, activeProjectId, status })
+      dispatch({ type: 'restored', projects, tabs: panes, activeProjectId, status })
       setNotifications(notificationConfig)
       setReady(true)
     })().catch((reason: unknown) => {

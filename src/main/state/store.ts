@@ -5,9 +5,9 @@ import type { PaneRecord } from '../sessions/manager'
 // Declared with the other wire types: the renderer edits presets and sends them
 // back, and a second structurally identical declaration here would only invite
 // drift. Re-exported so existing importers keep working.
-import type { NotificationConfig, Preset, TabType } from '../../shared/ipc'
+import type { NotificationConfig, Preset, TabLayout, TabRow, TabType } from '../../shared/ipc'
 
-export type { Preset }
+export type { Preset, TabLayout, TabRow }
 
 export interface ProjectRecord {
   id: string
@@ -29,21 +29,6 @@ export interface ProjectRecord {
    * recorded here rather than settled as a side effect of this migration.
    */
   activeTabId: string | null
-}
-
-export interface TabLayout {
-  /** One axis per tab — never a tree. Ruled 2026-07-31; see the spec. */
-  dir: 'row' | 'col'
-  /** One entry per pane id in `kids`, summing to 1. */
-  ratio: number[]
-  kids: string[]
-}
-
-export interface TabRow {
-  /** The founder pane's id. Stable across a move; the group name is not stored. */
-  id: string
-  activePaneId: string | null
-  layout: TabLayout
 }
 
 export interface PrcliConfig {

@@ -99,6 +99,29 @@ export interface TabDescriptor {
   type: TabType
 }
 
+export interface TabLayout {
+  /** One axis per tab — never a tree. Ruled 2026-07-31; see the spec. */
+  dir: 'row' | 'col'
+  /** One entry per pane id in `kids`, summing to 1. */
+  ratio: number[]
+  kids: string[]
+}
+
+/**
+ * A tab's layout, without any of the pane data it arranges.
+ *
+ * Declared here rather than only in `src/main/state/store.ts`, which now
+ * imports it and re-exports it for its existing callers, because the
+ * renderer needs to lay out a split and cannot import from `src/main` to get
+ * the shape it lays out — the same reason `NotificationConfig` lives here.
+ */
+export interface TabRow {
+  /** The founder pane's id. Stable across a move; the group name is not stored. */
+  id: string
+  activePaneId: string | null
+  layout: TabLayout
+}
+
 export interface OpenRequest {
   projectSlug: string
   cwd: string
@@ -218,7 +241,15 @@ export interface Candidate {
 export interface RestoreResult {
   /** Sidebar order. Unsorted, when present, is always last. */
   projects: ProjectDescriptor[]
-  tabs: TabDescriptor[]
+  /** Every pane, flat. Which tab holds one is `tabs[].layout.kids`. */
+  panes: TabDescriptor[]
+  /**
+   * Order, selection and layout — never existence. `restoreWorkspace` builds
+   * this alongside `panes` and always has; this is only where the reply
+   * stopped dropping it — see finding I5. Nothing downstream can lay out a
+   * split without it.
+   */
+  tabs: TabRow[]
   activeProjectId: string | null
   /**
    * Every tab's state at the moment restore finished — including whatever a

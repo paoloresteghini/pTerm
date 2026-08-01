@@ -230,8 +230,13 @@ export function registerIpc(
     // hook events main never stopped receiving. Only a tab the registry has
     // never seen gets initialised here — that is what keeps ⌘R from
     // stamping a live `waiting`/`thinking` tab back to `unknown`.
-    for (const tab of result.tabs) {
-      if (registry.get(tab.id) === null) registry.applyOpen(tab.id, tab.type)
+    //
+    // Per pane, not per tab row: status is tracked by tab id, which since v5
+    // is a pane's own id (a group's founder id for a split tab, but every
+    // pane still has one), and `result.tabs` holds layout — axis and ratios —
+    // not the ids this loop needs.
+    for (const pane of result.panes) {
+      if (registry.get(pane.id) === null) registry.applyOpen(pane.id, pane.type)
     }
 
     // Whatever the hook script spooled while nothing was listening — a
@@ -247,7 +252,10 @@ export function registerIpc(
     // opens. `refreshBadge` below still catches the badge up in one shot
     // once the final state is in, rather than leaving it stale until some
     // unrelated tab's next live transition happens to correct it.
-    const live = new Set(result.tabs.map((tab) => tab.id))
+    //
+    // Per pane again: a spooled hook message names the pane's own
+    // `PRCLI_TAB_ID`, never a tab row's group id.
+    const live = new Set(result.panes.map((pane) => pane.id))
     const spooled = await drainSpool(hookPaths().spool, Date.now())
     for (const message of spooled) {
       if (!live.has(message.tabId)) continue
