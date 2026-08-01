@@ -86,12 +86,14 @@ export function App() {
    * what is on screen to drift from what is on disk.
    *
    * Only ever a LIVE pane, which is why nothing here clears the pane's `dead`
-   * tombstone: `TabBar` gives a dead tab Restart and Dismiss instead of ×, and
-   * ⌘W on one rejects inside `manager.kill` — no entry to kill and no orphan
-   * to find, since the session is gone — so it surfaces through `fail` and no
-   * `closedPane` is ever dispatched for it. Unchanged from `kill`, which
-   * rejected identically, but `closePane` is now the only close there is and
-   * the next person will ask why the error toast appears.
+   * tombstone. `TabBar` gives a dead tab's × to Dismiss rather than to Close:
+   * the same glyph, beside a ↻, wired somewhere else. And ⌘W on a dead pane
+   * rejects inside `manager.kill` — no entry to kill, and no orphan to find
+   * either, since the session is gone — so it surfaces through `fail` and no
+   * `closedPane` is dispatched for it at all. That is unchanged from `kill`,
+   * which rejected identically; it is written down because this is now the
+   * only close there is, and the next person will ask where that error came
+   * from.
    */
   const closePane = useCallback(
     (paneId: string) => {

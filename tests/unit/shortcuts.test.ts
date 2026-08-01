@@ -33,6 +33,11 @@ import { describe, it, expect } from 'vitest'
  *   answer that keeps this honest.
  * - renaming `splitActive` — 1, the axis assertion, which reads the call as
  *   well as the branch. `activePaneId` and `focusPane` are not read by name.
+ * - reordering the operands of a modifier gate, `!event.altKey &&
+ *   event.code === 'KeyD'` — 1, the gate assertion. Deliberately not loosened:
+ *   matching the two operands independently would stop the assertion saying
+ *   that this binding is gated on that modifier, which is the whole of what it
+ *   says. Reordering a `&&` is a deliberate edit; re-point the assertion.
  * - moving any of these files, or moving the keydown handler out of `App.tsx`
  *   into a module of its own. This test reads files by path; it follows the
  *   code nowhere.
@@ -151,7 +156,11 @@ describe('App.tsx keydown handler', () => {
     // other way would leave the whole column half of the layout unreachable
     // and would still pass every other assertion in this suite — it fails
     // visibly on the first press, but only if someone presses it.
-    expect(app).toMatch(/splitActive\(event\.shiftKey \? 'col' : 'row'\)/)
+    // Loosened where loosening costs nothing: an optional space after the
+    // paren, and no closing paren at all, so wrapping the call across lines —
+    // which a reformat does by adding a trailing comma — reads the same. What
+    // is left is the whole of what this asserts.
+    expect(app).toMatch(/splitActive\( ?event\.shiftKey \? 'col' : 'row'/)
   })
 
   it('keeps the ⌥ chords out of the bindings that are not ⌥ chords', () => {
