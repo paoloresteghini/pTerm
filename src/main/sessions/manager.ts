@@ -114,8 +114,15 @@ export class SessionManager {
 
     const cols = input.cols ?? DEFAULT_COLS
     const rows = input.rows ?? DEFAULT_ROWS
+    // Whether the caller actually knows this pane's geometry, or whether the
+    // two lines above invented it. The client has to be spawned at some size
+    // either way, and 80x24 is what a tmux client defaults to — but a WINDOW
+    // must never be driven to a size nobody measured. Both, not either: a
+    // caller supplying one and not the other is supplying a default for the
+    // other half, and half a measurement is not one.
+    const sized = input.cols !== undefined && input.rows !== undefined
 
-    return this.attach(record, { cols, rows })
+    return this.attach(record, { cols, rows, sized })
   }
 
   /**
@@ -131,7 +138,12 @@ export class SessionManager {
    */
   private attach(
     record: PaneRecord,
-    { cols, rows, windowId }: { cols: number; rows: number; windowId?: string },
+    {
+      cols,
+      rows,
+      windowId,
+      sized,
+    }: { cols: number; rows: number; windowId?: string; sized: boolean },
   ): PaneRecord {
     const id = record.id
 
@@ -198,10 +210,25 @@ export class SessionManager {
       // window, so it is not also a stray session.
       void this.wireDeathHook(record, null).catch(() => {})
     }
-    // Every attach sizes the window its client is about to see — not only a
-    // founder's, and not gated on `options.deathReporter` the way the hook
-    // above is (a manager built without one still owes its client the right
-    // size). `resize-window` flips a window straight to `window-size manual`
+    // Every attach that was GIVEN a size sizes the window its client is about
+    // to see — not only a founder's, and not gated on `options.deathReporter`
+    // the way the hook above is (a manager built without one still owes its
+    // client the right size).
+    //
+    // Gated on `sized`, though, and that gate is the whole of finding I1. An
+    // attach with no size of its own spawns its client at 80x24 because a
+    // client needs some size; driving the WINDOW there as well takes a pane
+    // that was 120x40 and re-wraps a `claude` session's scrollback
+    // permanently. Restore is that caller and is the only one: nothing
+    // persists a per-pane `cols`/`rows` (neither `PaneRecord` nor `TabRow`
+    // has them), so it reattaches every pane at the default and the renderer
+    // fits it afterwards. Measured on this branch before the gate went in: a
+    // tab opened 120x40 and split at 100x30 came back from a v5 file as
+    // 80x24 and 80x24. Leaving such a window alone is what it inherited
+    // before Task 5 and is what the spec's "no pane wrapped at 80 columns"
+    // requires; persisting the real size is 2b's, and would let this gate go.
+    //
+    // `resize-window` flips a window straight to `window-size manual`
     // the moment it is first called — measured on tmux 3.7b: a window whose
     // `window-size` was unset reads back `manual` immediately after one
     // `resize-window -x 140 -y 45` — so `latest` cannot be trusted to carry a
@@ -220,7 +247,7 @@ export class SessionManager {
     // `cols`/`rows` against what was requested here before its own call
     // lands, which is what stops that late resize from being the one that
     // wins.
-    void this.sizeWindowOnAttach(entry, windowId ?? null, cols, rows).catch(() => {})
+    if (sized) void this.sizeWindowOnAttach(entry, windowId ?? null, cols, rows).catch(() => {})
     return record
   }
 
@@ -510,6 +537,10 @@ export class SessionManager {
       await this.adapter.newGroupMember(group, tmuxSession, { PRCLI_TAB_ID: id })
       // By index, with the member named. See the adapter method's comment.
       await this.adapter.selectWindow(tmuxSession, window.index)
+      // `sized: true` regardless of what the caller passed: this window was
+      // just resized explicitly, two lines up, to exactly these numbers —
+      // defaulted or not, they are already the window's size, so the attach
+      // that follows is confirming a size rather than inventing one.
       return await this.finishSplit(record, window, cols, rows)
     } catch (error) {
       await this.rollbackSplit(record, window.id)
@@ -548,7 +579,7 @@ export class SessionManager {
       })
     }
 
-    return this.attach(record, { cols, rows, windowId: window.id })
+    return this.attach(record, { cols, rows, windowId: window.id, sized: true })
   }
 
   /**
@@ -888,9 +919,14 @@ export class SessionManager {
       }
 
       // Read before the detach disposes the entry. A detached pane has none,
-      // and no client to take a size from either, so the default is all
-      // there is — no worse than today, and the renderer refits it when it
-      // is next shown.
+      // and no client to take a size from either, so no size is passed at
+      // all — deliberately, not merely for want of one: `open()` reads an
+      // absent size as "leave this pane's window alone" (see `sized` there),
+      // so the window keeps the geometry it already had and only the new
+      // client starts at the default. Passing `DEFAULT_COLS`/`DEFAULT_ROWS`
+      // here explicitly would instead drive a split pane's `manual` window
+      // down to 80x24, which is finding I1 reached through the move path.
+      // The renderer refits the pane when it is next shown.
       const entry = this.entries.get(pane.id)
       const size = entry ? { cols: entry.cols, rows: entry.rows } : {}
       if (entry) this.detach(pane.id)

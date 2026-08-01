@@ -572,11 +572,14 @@ describe('restoreWorkspace panes and tabs', () => {
     expect(row.layout.ratio[0]).toBeCloseTo(0.25)
     expect(row.layout.ratio[1]).toBeCloseTo(0.75)
 
-    // Each pane's own window, sized to the client restore attached to it —
-    // 120x40 and 100x30 before the relaunch, so a window nothing re-sized
-    // reads back its old geometry rather than the reattached client's.
-    await expect.poll(() => windowSize(founder.tmuxSession), { timeout: 10_000 }).toBe('80x24')
-    await expect.poll(() => windowSize(second.tmuxSession), { timeout: 10_000 }).toBe('80x24')
+    // Each pane's own window keeps the geometry it had before the relaunch —
+    // 120x40 and 100x30. Restore knows no size for a pane (nothing persists
+    // one), so it attaches at the manager's default; a default-sized attach
+    // must not drive a window it knows nothing about down to 80x24, which is
+    // the geometry defect this project has already shipped twice. The spec's
+    // Done-when is explicit: "no pane wrapped at 80 columns".
+    await expect.poll(() => windowSize(founder.tmuxSession), { timeout: 10_000 }).toBe('120x40')
+    await expect.poll(() => windowSize(second.tmuxSession), { timeout: 10_000 }).toBe('100x30')
 
     // No two live members of this tab may report the same window: one window
     // rendered by two xterms is the failure a fallen-back member causes.
