@@ -11,6 +11,7 @@ import {
   activeProject,
   activeTabId,
   needsYou,
+  paneGroups,
   projectIdForTab,
   stateOfProject,
   tabsOfProject,
@@ -375,26 +376,46 @@ export function App() {
               No projects yet. Add one to open a terminal.
             </p>
           ) : null}
-          {/* Every terminal stays mounted, across every project. Unmounting
-              would dispose its xterm and lose scrollback on each switch. */}
-          {state.panes.map((tab) => {
-            const visible = tab.id === currentTabId
-            return (
-              <div
-                key={tab.id}
-                data-testid={visible ? 'terminal-active' : `terminal-${tab.id}`}
-                className={cn(
-                  // `visibility`, not `display`: a hidden tab must stay laid
-                  // out so it can measure itself, or it attaches at 80×24 and
-                  // tmux shrinks the real session to match.
-                  'absolute inset-0 p-2',
-                  visible ? 'visible z-10' : 'invisible z-0 pointer-events-none',
-                )}
-              >
-                <Terminal tabId={tab.id} visible={visible} />
-              </div>
-            )
-          })}
+          {/* Every terminal stays mounted, across every project and every tab:
+              both maps below are unconditional, and neither list is filtered
+              down to what is on screen. Unmounting would dispose an xterm and
+              lose its scrollback on each switch. `paneGroups` decides the
+              arrangement; see its tests for the arithmetic. */}
+          {paneGroups(state).map((group) => (
+            <div
+              key={group.id}
+              data-testid={group.visible ? 'terminal-active' : `terminal-${group.id}`}
+              className={cn(
+                // `visibility`, not `display`: a hidden tab must stay laid
+                // out so it can measure itself, or it attaches at 80×24 and
+                // tmux shrinks the real session to match.
+                // The hairline `gap` between panes is the only thing the axis
+                // spends on itself. It overflows the bases, which sum to the
+                // whole container, by one pixel; flex shrinking is weighted by
+                // base size, so that pixel comes off the panes in the same
+                // proportion as the ratios and leaves them intact.
+                'absolute inset-0 flex gap-px p-2',
+                group.visible ? 'visible z-10' : 'invisible z-0 pointer-events-none',
+              )}
+              style={group.style}
+            >
+              {group.panes.map((box) => (
+                <div
+                  key={box.pane.id}
+                  data-testid={`pane-${box.pane.id}`}
+                  // `min-w-0 min-h-0`: a flex item's automatic minimum size is
+                  // its content's, not zero, so an xterm canvas still sized for
+                  // the whole tab could hold this box open past its share — and
+                  // the fit that would resize that canvas measures this box, so
+                  // it would have nothing to correct itself to.
+                  className="min-h-0 min-w-0"
+                  style={box.style}
+                >
+                  <Terminal tabId={box.pane.id} visible={group.visible} />
+                </div>
+              ))}
+            </div>
+          ))}
         </div>
       </div>
 

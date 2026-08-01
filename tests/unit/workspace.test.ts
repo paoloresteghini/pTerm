@@ -10,6 +10,7 @@ import {
   stateOfTab,
   stateOfProject,
   needsYou,
+  paneGroups,
   panesOfTab,
   tabOfPane,
   type WorkspaceState,
@@ -167,6 +168,138 @@ describe('tabOfPane', () => {
 
   it('is undefined against a fully empty WorkspaceState', () => {
     expect(tabOfPane(INITIAL_WORKSPACE_STATE, 'aaa')).toBeUndefined()
+  })
+})
+
+describe('paneGroups', () => {
+  /** A row with explicit ratios, for the cases `tabRow`'s even split cannot show. */
+  function ratioRow(id: string, kids: string[], ratio: number[], dir: 'row' | 'col' = 'row'): TabRow {
+    return { id, activePaneId: kids[0] ?? null, layout: { dir, ratio, kids } }
+  }
+
+  it('lays a tab\'s panes along its axis, in kids order, sized by ratio', () => {
+    const state: WorkspaceState = {
+      ...three,
+      tabs: [ratioRow('bbb', ['bbb', 'ccc'], [0.6, 0.4])],
+    }
+    const group = paneGroups(state).find((candidate) => candidate.id === 'bbb')
+    expect(group).toBeDefined()
+    expect(group?.style).toEqual({ flexDirection: 'row' })
+    expect(group?.panes.map((box) => box.pane.id)).toEqual(['bbb', 'ccc'])
+    expect(group?.panes.map((box) => box.style)).toEqual([
+      { flexBasis: '60%' },
+      { flexBasis: '40%' },
+    ])
+  })
+
+  it('lays a col tab down the column axis', () => {
+    const state: WorkspaceState = {
+      ...three,
+      tabs: [ratioRow('bbb', ['bbb', 'ccc'], [0.25, 0.75], 'col')],
+    }
+    const group = paneGroups(state).find((candidate) => candidate.id === 'bbb')
+    expect(group?.style).toEqual({ flexDirection: 'column' })
+    expect(group?.panes.map((box) => box.style.flexBasis)).toEqual(['25%', '75%'])
+  })
+
+  it('divides three panes into thirds that between them claim the whole tab', () => {
+    const state: WorkspaceState = {
+      ...three,
+      tabs: [tabRow('aaa', ['aaa', 'bbb', 'ccc'])],
+    }
+    const group = paneGroups(state).find((candidate) => candidate.id === 'aaa')
+    expect(group?.panes).toHaveLength(3)
+    const bases = group?.panes.map((box) => Number.parseFloat(box.style.flexBasis)) ?? []
+    expect(bases).toEqual([33.3333, 33.3333, 33.3333])
+    expect(bases.reduce((sum, basis) => sum + basis, 0)).toBeGreaterThan(99.999)
+  })
+
+  it('gives every pane a box, including the panes of tabs that are not on screen', () => {
+    const state: WorkspaceState = {
+      ...three,
+      tabs: [ratioRow('aaa', ['aaa'], [1]), ratioRow('bbb', ['bbb', 'ccc'], [0.5, 0.5])],
+    }
+    const groups = paneGroups(state)
+    expect(groups).not.toHaveLength(0)
+    const boxed = groups.flatMap((group) => group.panes.map((box) => box.pane.id))
+    expect(boxed.sort()).toEqual(['aaa', 'bbb', 'ccc'])
+    // The tab that is not on screen is in there, panes and all — the whole
+    // point being that its terminals stay mounted.
+    expect(groups.find((group) => group.id === 'aaa')?.visible).toBe(false)
+    expect(groups.find((group) => group.id === 'aaa')?.panes).toHaveLength(1)
+  })
+
+  it('shows exactly one group: the active tab\'s', () => {
+    const state: WorkspaceState = {
+      ...three,
+      tabs: [ratioRow('aaa', ['aaa'], [1]), ratioRow('bbb', ['bbb', 'ccc'], [0.5, 0.5])],
+    }
+    const groups = paneGroups(state)
+    expect(groups).not.toHaveLength(0)
+    expect(groups.filter((group) => group.visible).map((group) => group.id)).toEqual(['bbb'])
+  })
+
+  it('shows a tab when the selection names one of its panes rather than the tab', () => {
+    // 'ccc' is the second pane of tab 'bbb', so no group is keyed by it.
+    const state: WorkspaceState = {
+      ...three,
+      projects: [project('p1', 'lumio', 'ccc')],
+      tabs: [ratioRow('bbb', ['bbb', 'ccc'], [0.5, 0.5])],
+    }
+    expect(paneGroups(state).filter((group) => group.visible).map((group) => group.id)).toEqual([
+      'bbb',
+    ])
+  })
+
+  it('shows nothing when no tab is selected', () => {
+    const state: WorkspaceState = { ...three, projects: [project('p1', 'lumio', null)] }
+    const groups = paneGroups(state)
+    expect(groups).not.toHaveLength(0)
+    expect(groups.some((group) => group.visible)).toBe(false)
+  })
+
+  it('gives a pane no row names a whole group of its own, keyed by its own id', () => {
+    // `three` has no rows at all: this is every freshly opened tab.
+    const groups = paneGroups(three)
+    expect(groups.map((group) => group.id)).toEqual(['aaa', 'bbb', 'ccc'])
+    expect(groups.map((group) => group.panes.map((box) => box.style.flexBasis))).toEqual([
+      ['100%'],
+      ['100%'],
+      ['100%'],
+    ])
+  })
+
+  it('keeps a pane\'s group in place when a row arrives for it', () => {
+    // A row id is its founder pane's id, so the container the terminal lives
+    // in is the same one before and after — nothing remounts.
+    const before = paneGroups(three)
+    const after = paneGroups({ ...three, tabs: [tabRow('bbb', ['bbb', 'ccc'])] })
+    expect(before.map((group) => group.id)).toEqual(['aaa', 'bbb', 'ccc'])
+    expect(after.map((group) => group.id)).toEqual(['aaa', 'bbb'])
+    expect(after[1]?.panes.map((box) => box.pane.id)).toEqual(['bbb', 'ccc'])
+  })
+
+  it('renormalises the panes that are here when a kid\'s pane is missing', () => {
+    const state: WorkspaceState = {
+      ...three,
+      tabs: [ratioRow('bbb', ['bbb', 'ghost', 'ccc'], [0.5, 0.25, 0.25])],
+    }
+    const group = paneGroups(state).find((candidate) => candidate.id === 'bbb')
+    // The share is read at the kid's own index, so 'ccc' keeps 0.25 rather
+    // than sliding onto the ghost's; the two are then scaled up to fill.
+    expect(group?.panes.map((box) => box.pane.id)).toEqual(['bbb', 'ccc'])
+    expect(group?.panes.map((box) => box.style.flexBasis)).toEqual(['66.6667%', '33.3333%'])
+  })
+
+  it('splits evenly when a row carries no usable ratios', () => {
+    const state: WorkspaceState = { ...three, tabs: [ratioRow('bbb', ['bbb', 'ccc'], [])] }
+    const group = paneGroups(state).find((candidate) => candidate.id === 'bbb')
+    // Never a 0%-wide box: that fits to tmux's floor of 2x1.
+    expect(group?.panes.map((box) => box.style.flexBasis)).toEqual(['50%', '50%'])
+  })
+
+  it('is empty against a fully empty WorkspaceState', () => {
+    expect(paneGroups(INITIAL_WORKSPACE_STATE)).toEqual([])
   })
 })
 

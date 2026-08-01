@@ -36,6 +36,15 @@ export function Terminal({ tabId, visible }: { tabId: string; visible: boolean }
       // A hidden container measures 0×0; fitting to that would resize the
       // real tmux session down to nothing.
       if (container.offsetParent === null) return
+      // `offsetParent` is null for `display: none` and for a detached node,
+      // but not for an element that simply has no box to speak of — a flex
+      // item handed a zero share, or a window with nothing on screen yet.
+      // FitAddon floors its proposal at 2 cols by 1 row rather than declining
+      // to answer (`Math.max(2, …)`, `Math.max(1, …)`), so measuring one of
+      // those would drive the real session to 2×1 with the guard above
+      // waving it through. The ResizeObserver below re-fits the moment the
+      // box is real, so skipping here costs nothing.
+      if (container.clientWidth === 0 || container.clientHeight === 0) return
       fit.fit()
       window.prcli.resize(tabId, term.cols, term.rows)
     }

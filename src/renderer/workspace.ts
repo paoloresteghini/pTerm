@@ -166,6 +166,120 @@ export function tabOfPane(state: WorkspaceState, paneId: string): TabRow | undef
   return state.tabs.find((row) => row.layout.kids.includes(paneId))
 }
 
+/** A pane and the share of its tab's axis it takes. */
+export interface PaneBox {
+  pane: TabDescriptor
+  /**
+   * `flexBasis` only, so a pane states its share without knowing which axis
+   * its tab flexes along — that is the container's `flexDirection`, and the
+   * basis follows whichever one it is.
+   */
+  style: { flexBasis: string }
+}
+
+/**
+ * One container's worth of render: a tab's panes along its axis, or a single
+ * pane no row has claimed.
+ *
+ * A pane in `state.panes` that no row's `kids` names is not an error and not
+ * something to drop — main is authoritative over membership and files it on
+ * its own schedule, and `opened` (a new tab, or a restart) adds a pane here
+ * with no row at all. Such a pane becomes a group of its own, keyed by its own
+ * id. That key is what makes the arrangement safe: a row id is its founder
+ * pane's id, so when a row does arrive for that pane — only a split of it can
+ * produce one — the group's id does not change, React reconciles it as the
+ * same container, and the terminal inside is never unmounted.
+ */
+export interface PaneGroup {
+  /** The row's id, or the pane's own when no row names it. */
+  id: string
+  visible: boolean
+  style: { flexDirection: 'row' | 'column' }
+  /** In `kids` order, and never empty. */
+  panes: PaneBox[]
+}
+
+/**
+ * Four places, so `1/3` lands on a stable string rather than
+ * `33.33333333333333%`. What that rounding gives away is at most 0.0001% of
+ * the tab — a thousandth of a pixel on any window this app can be opened at.
+ */
+function percent(share: number): string {
+  return `${Number((share * 100).toFixed(4))}%`
+}
+
+/**
+ * The panes of `row`, in `kids` order, each with its share of the axis.
+ *
+ * The share is read from `ratio` at the *kid's* index rather than at the
+ * pane's position among the panes that exist, so a kid whose pane has not
+ * arrived cannot slide every later pane onto the wrong share. Those absent
+ * kids' shares are then dropped and what is left renormalised, so the panes
+ * that are here fill the tab instead of leaving a hole where the missing one
+ * would have gone.
+ */
+function boxesOfRow(state: WorkspaceState, row: TabRow): PaneBox[] {
+  const byId = new Map(state.panes.map((pane) => [pane.id, pane]))
+  const kept = row.layout.kids
+    .map((id, index) => ({ pane: byId.get(id), share: row.layout.ratio[index] ?? 0 }))
+    .filter((entry): entry is { pane: TabDescriptor; share: number } => entry.pane !== undefined)
+  const total = kept.reduce((sum, entry) => sum + entry.share, 0)
+  // A row carrying no usable ratios still has to divide the tab somehow, and
+  // an even split is the only division that needs no data. Zero shares would
+  // otherwise hand a pane a 0%-wide box, which fits to tmux's floor of 2×1 —
+  // the geometry defect wearing different numbers.
+  return kept.map((entry) => ({
+    pane: entry.pane,
+    style: { flexBasis: percent(total > 0 ? entry.share / total : 1 / kept.length) },
+  }))
+}
+
+/**
+ * Which group is on screen.
+ *
+ * The active id is resolved through `tabOfPane` because it may name a pane
+ * rather than a tab: the tab bar still lists panes, so selecting the second
+ * pane of a split sets an id no row is keyed by. Showing that pane's tab is
+ * what the user asked for; matching group ids alone would show nothing.
+ */
+function visibleGroupId(state: WorkspaceState): string | null {
+  const id = activeTabId(state)
+  if (id === null) return null
+  return tabOfPane(state, id)?.id ?? id
+}
+
+/**
+ * Every pane, arranged: exactly one group per tab, in the order the tabs'
+ * first panes appear in `state.panes`, and every pane in `state.panes` in
+ * exactly one of them.
+ *
+ * Driven by `state.panes` rather than by `state.tabs` for two reasons. Every
+ * pane gets a group whether or not a row names it — nothing here can drop a
+ * terminal — and a pane's position among the groups does not move when a row
+ * arrives for it, so nothing is reordered in the DOM either.
+ */
+export function paneGroups(state: WorkspaceState): PaneGroup[] {
+  const visibleId = visibleGroupId(state)
+  const groups: PaneGroup[] = []
+  const seen = new Set<string>()
+  for (const pane of state.panes) {
+    const row = tabOfPane(state, pane.id)
+    const id = row?.id ?? pane.id
+    if (seen.has(id)) continue
+    seen.add(id)
+    groups.push({
+      id,
+      visible: id === visibleId,
+      // A one-pane tab has a row and therefore a `dir`, set by whichever split
+      // created the tab it came from. That is an axis with nothing to divide,
+      // not a claim that this tab is split.
+      style: { flexDirection: row?.layout.dir === 'col' ? 'column' : 'row' },
+      panes: row ? boxesOfRow(state, row) : [{ pane, style: { flexBasis: '100%' } }],
+    })
+  }
+  return groups
+}
+
 /**
  * Folds a `TabShape` reply into state: every pane it names is upserted into
  * `state.panes` in place, with any pane not already present appended, and its
