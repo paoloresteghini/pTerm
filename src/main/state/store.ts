@@ -18,16 +18,47 @@ export interface ProjectRecord {
   cwd: string
   /** User-defined only. Repo presets merge in above this at read time. */
   presets: Preset[]
-  /** Per-project, so returning to a project lands where you left it. */
+  /**
+   * Per-project, so returning to a project lands where you left it.
+   *
+   * Ambiguous under v5 and deliberately left that way: it is written by
+   * `setActive` from a pane id and resolved by `describeProjects` against pane
+   * rows, both of which predate tabs and panes being different things. Which of
+   * the two it names is a renderer-visible decision — a project could land on a
+   * tab and let the tab's own `activePaneId` pick the pane inside it — so it is
+   * recorded here rather than settled as a side effect of this migration.
+   */
   activeTabId: string | null
 }
 
+export interface TabLayout {
+  /** One axis per tab — never a tree. Ruled 2026-07-31; see the spec. */
+  dir: 'row' | 'col'
+  /** One entry per pane id in `kids`, summing to 1. */
+  ratio: number[]
+  kids: string[]
+}
+
+export interface TabRow {
+  /** The founder pane's id. Stable across a move; the group name is not stored. */
+  id: string
+  activePaneId: string | null
+  layout: TabLayout
+}
+
 export interface PrcliConfig {
-  version: 4
+  version: 5
   /** Array order is sidebar order, and the order ⌘1–9 follows. */
   projects: ProjectRecord[]
   activeProjectId: string | null
-  tabs: PaneRecord[]
+  /** Every pane, flat. Which tab holds one is `tabs[].layout.kids`. */
+  panes: PaneRecord[]
+  /**
+   * Order, selection and layout — never existence. Live tmux decides what
+   * exists; orientation and drag ratios are the two things it cannot report,
+   * which is the whole reason these rows are on disk.
+   */
+  tabs: TabRow[]
   notifications: NotificationConfig
 }
 
@@ -50,17 +81,23 @@ export const DEFAULT_NOTIFICATIONS: NotificationConfig = {
 }
 
 const EMPTY: PrcliConfig = {
-  version: 4,
+  version: 5,
   projects: [],
   activeProjectId: null,
+  panes: [],
   tabs: [],
   notifications: DEFAULT_NOTIFICATIONS,
 }
 
-function hasTabs(value: unknown): value is { version: number; tabs: unknown[] } {
+/**
+ * The one field every version has had, and the only one worth demanding: each
+ * branch below already tolerates every array it reads being missing or the
+ * wrong type, so refusing the whole file for a bad `tabs` would throw away
+ * projects and rules that were perfectly readable.
+ */
+function hasVersion(value: unknown): value is { version: number } {
   if (typeof value !== 'object' || value === null) return false
-  const candidate = value as { version?: unknown; tabs?: unknown }
-  return typeof candidate.version === 'number' && Array.isArray(candidate.tabs)
+  return typeof (value as { version?: unknown }).version === 'number'
 }
 
 function isProject(value: unknown): value is ProjectRecord {
@@ -75,7 +112,7 @@ function isProject(value: unknown): value is ProjectRecord {
 }
 
 /**
- * A tab row that restore can actually use.
+ * A pane row that restore can actually use.
  *
  * Validated for the same reason project rows are: `read()` promises never to
  * throw, and handing `restore.ts` a `null` it dereferences is that promise
@@ -83,7 +120,7 @@ function isProject(value: unknown): value is ProjectRecord {
  * `type` is normalised, not dropped — a live session is worth more than a
  * correct type field.
  */
-function isTab(value: unknown): value is PaneRecord {
+function isPane(value: unknown): value is PaneRecord {
   if (typeof value !== 'object' || value === null) return false
   const t = value as Partial<PaneRecord>
   return (
@@ -96,11 +133,102 @@ function isTab(value: unknown): value is PaneRecord {
 
 const TAB_TYPES: readonly TabType[] = ['claude', 'preset', 'shell']
 
-function normaliseTab(tab: PaneRecord): PaneRecord {
-  if (TAB_TYPES.includes(tab.type)) return tab
+function normalisePane(pane: PaneRecord): PaneRecord {
+  if (TAB_TYPES.includes(pane.type)) return pane
   // A v3 row cannot say whether it was running Claude, and does not need to —
   // hooks decide that. Only the launch command is knowable from the record.
-  return { ...tab, type: tab.command === undefined ? 'shell' : 'preset' }
+  return { ...pane, type: pane.command === undefined ? 'shell' : 'preset' }
+}
+
+/** Every readable pane row, in file order. Anything else on the way out. */
+function paneRows(value: unknown): PaneRecord[] {
+  return Array.isArray(value) ? value.filter(isPane).map(normalisePane) : []
+}
+
+/**
+ * One axis of panes that all still exist, with shares that add to 1.
+ *
+ * Null when nothing usable is left, which the caller reads as "drop this tab".
+ * Config supplies layout, never existence: a kid naming a pane no longer in
+ * `panes[]` goes, and a tab with no kids left goes with it. That is also how a
+ * forgotten pane's tab row clears itself, since `forgetTab` removes the pane
+ * row and leaves the layout entry pointing at nothing.
+ */
+function normaliseLayout(value: unknown, known: Set<string>): TabLayout | null {
+  if (typeof value !== 'object' || value === null) return null
+  const candidate = value as { dir?: unknown; ratio?: unknown; kids?: unknown }
+  const ratio: unknown[] = Array.isArray(candidate.ratio) ? candidate.ratio : []
+
+  const kids: string[] = []
+  const shares: unknown[] = []
+  if (Array.isArray(candidate.kids)) {
+    candidate.kids.forEach((kid: unknown, index: number) => {
+      if (typeof kid !== 'string' || !known.has(kid) || kids.includes(kid)) return
+      kids.push(kid)
+      shares.push(ratio[index])
+    })
+  }
+  if (kids.length === 0) return null
+
+  // All or nothing, and never `[].every` — `kids` is non-empty by the guard
+  // above, so this really does look at something. One unusable share is enough
+  // to distrust the array: honouring a zero would render a pane the user can
+  // neither see nor drag back, which is worse than ignoring a hand-edited file.
+  const usable = shares.every(
+    (share): share is number => typeof share === 'number' && Number.isFinite(share) && share > 0,
+  )
+  const total = usable ? shares.reduce<number>((sum, share) => sum + (share as number), 0) : 0
+  return {
+    // Anything unreadable is a row: a tab that draws wrong is recoverable by
+    // dragging, a tab dropped for a bad string is not.
+    dir: candidate.dir === 'col' ? 'col' : 'row',
+    // Rescaled rather than trusted, because dropping a kid above leaves the
+    // survivors summing to less than 1.
+    ratio: usable
+      ? (shares as number[]).map((share) => share / total)
+      : kids.map(() => 1 / kids.length),
+    kids,
+  }
+}
+
+/** Tab rows whose layout still describes panes that are on disk. */
+function tabRows(value: unknown, panes: PaneRecord[]): TabRow[] {
+  if (!Array.isArray(value)) return []
+  const known = new Set(panes.map((pane) => pane.id))
+  const rows: TabRow[] = []
+  for (const row of value as unknown[]) {
+    if (typeof row !== 'object' || row === null) continue
+    const candidate = row as { id?: unknown; activePaneId?: unknown; layout?: unknown }
+    if (typeof candidate.id !== 'string') continue
+    const layout = normaliseLayout(candidate.layout, known)
+    if (!layout) continue
+    rows.push({
+      id: candidate.id,
+      // Selection has to name a pane this tab actually holds; null is "the
+      // first one", which is a pane that exists.
+      activePaneId:
+        typeof candidate.activePaneId === 'string' && layout.kids.includes(candidate.activePaneId)
+          ? candidate.activePaneId
+          : null,
+      layout,
+    })
+  }
+  return rows
+}
+
+/**
+ * One tab per pane, in pane order — the shape every version before v5 had,
+ * where a tab *was* one pane.
+ *
+ * Exported because `restoreWorkspace` writes a workspace of one-pane tabs too;
+ * a second copy of this there would be one place for the two to drift.
+ */
+export function oneTabPerPane(panes: readonly PaneRecord[]): TabRow[] {
+  return panes.map((pane) => ({
+    id: pane.id,
+    activePaneId: pane.id,
+    layout: { dir: 'row', ratio: [1], kids: [pane.id] },
+  }))
 }
 
 /** Tolerate a project row missing its optional arrays rather than dropping it. */
@@ -139,49 +267,55 @@ function normaliseNotifications(value: unknown): NotificationConfig {
  * v1 had no active tab. v2 had one, globally — a notion v3 replaced with one
  * per project, so it is dropped rather than guessed at. v4 adds a tab type and
  * notification rules; neither is derivable from an older file, so both take
- * defaults.
+ * defaults. v5 splits `tabs` into flat `panes` plus tab rows carrying layout.
+ *
+ * v1 through v4 share one branch. All four store one row per tab because a tab
+ * *was* one pane, so all four migrate by the same step — and a v1 or v2 file
+ * carries no `projects` or `notifications` key at all, which makes reading for
+ * them the same as not reading for them. Four copies of one migration is four
+ * places for it to drift.
  *
  * Neither v1 nor v2 had projects, and their tabs all carry the slug of the
  * single hardcoded project that no longer exists. Synthesising a project from
  * that slug is the auto-create-from-slug behaviour M2b rejected, so migrated
- * tabs belong to nothing and restore lists them under Unsorted.
+ * panes belong to nothing and restore lists them under Unsorted.
  */
 function migrate(value: unknown): PrcliConfig {
-  if (!hasTabs(value)) return { ...EMPTY }
+  if (!hasVersion(value)) return { ...EMPTY }
+  const candidate = value as {
+    projects?: unknown
+    activeProjectId?: unknown
+    panes?: unknown
+    tabs?: unknown
+    notifications?: unknown
+  }
+  const rows: unknown[] = Array.isArray(candidate.projects) ? candidate.projects : []
+  const projects = rows.filter(isProject).map(normaliseProject)
+  const activeProjectId =
+    typeof candidate.activeProjectId === 'string' ? candidate.activeProjectId : null
 
-  // Every version this function accepts validates its tabs the same way, so
-  // the filter is shared rather than repeated per branch.
-  const tabs = value.tabs.filter(isTab).map(normaliseTab)
-
-  if (value.version === 4) {
-    const v4 = value as Partial<PrcliConfig>
-    const projects = Array.isArray(v4.projects) ? v4.projects.filter(isProject) : []
+  if (value.version === 5) {
+    const panes = paneRows(candidate.panes)
     return {
-      version: 4,
-      projects: projects.map(normaliseProject),
-      activeProjectId: typeof v4.activeProjectId === 'string' ? v4.activeProjectId : null,
-      tabs,
-      notifications: normaliseNotifications(v4.notifications),
+      version: 5,
+      projects,
+      activeProjectId,
+      panes,
+      tabs: tabRows(candidate.tabs, panes),
+      notifications: normaliseNotifications(candidate.notifications),
     }
   }
-  if (value.version === 3) {
-    const v3 = value as { projects?: unknown; activeProjectId?: unknown }
-    const projects = Array.isArray(v3.projects) ? v3.projects.filter(isProject) : []
+  if ([1, 2, 3, 4].includes(value.version)) {
+    // Lossless: a v4 tab genuinely is a one-pane tab, so its row becomes a pane
+    // and a tab holding just that pane, full width and necessarily selected.
+    const panes = paneRows(candidate.tabs)
     return {
-      version: 4,
-      projects: projects.map(normaliseProject),
-      activeProjectId: typeof v3.activeProjectId === 'string' ? v3.activeProjectId : null,
-      tabs,
-      notifications: DEFAULT_NOTIFICATIONS,
-    }
-  }
-  if (value.version === 1 || value.version === 2) {
-    return {
-      version: 4,
-      projects: [],
-      activeProjectId: null,
-      tabs,
-      notifications: DEFAULT_NOTIFICATIONS,
+      version: 5,
+      projects,
+      activeProjectId,
+      panes,
+      tabs: oneTabPerPane(panes),
+      notifications: normaliseNotifications(candidate.notifications),
     }
   }
   // A version from the future: refuse to guess at its shape.

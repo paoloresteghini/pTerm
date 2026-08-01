@@ -45,11 +45,17 @@ export function registerIpc(
   // stale until some unrelated tab's next transition happens to refresh it.
   refreshBadge: () => void = () => undefined,
 ): void {
-  // The saved tab list means "reattach these next launch", which is not the
-  // same set as "clients attached right now" — a detached tab must stay in it.
+  // The saved pane list means "reattach these next launch", which is not the
+  // same set as "clients attached right now" — a detached pane must stay in it.
   // So every mutation reads, edits and rewrites rather than dumping the
   // manager's registry. The file is tiny; serialising the edits is enough to
   // keep concurrent read-modify-writes from losing one another.
+  //
+  // Every handler below works in `config.panes`, never `config.tabs`: since v5
+  // a tab row is layout — an axis and its ratios — and holds none of the
+  // fields a session is reattached from. `config.tabs` type-checks against an
+  // `id` filter just as well as `config.panes` does, which is why that is
+  // written down here rather than left to be noticed.
   let tail: Promise<unknown> = Promise.resolve()
   const serialise = <T>(operation: () => Promise<T>): Promise<T> => {
     const result = tail.then(operation, operation)
@@ -60,17 +66,21 @@ export function registerIpc(
   const rememberTab = (tab: TabDescriptor): Promise<void> =>
     serialise(async () => {
       const config = await store.read()
-      const tabs = config.tabs.filter((saved) => saved.id !== tab.id)
-      tabs.push(tab)
-      await store.write({ ...config, tabs })
+      const panes = config.panes.filter((saved) => saved.id !== tab.id)
+      panes.push(tab)
+      await store.write({ ...config, panes })
     })
 
   const forgetTab = (id: string): Promise<void> =>
     serialise(async () => {
       const config = await store.read()
-      const tabs = config.tabs.filter((saved) => saved.id !== id)
-      if (tabs.length === config.tabs.length) return
-      await store.write({ ...config, tabs })
+      // The pane row, not the tab row. Removing the tab row instead would
+      // leave the pane on disk for good — and would type-check, because a
+      // `TabRow` has an `id` too. Any layout entry left pointing at this pane
+      // is collected by the next `read()`; see `normaliseLayout`.
+      const panes = config.panes.filter((saved) => saved.id !== id)
+      if (panes.length === config.panes.length) return
+      await store.write({ ...config, panes })
     })
 
   // Keyed to the three channels this file actually pushes unprompted, rather
@@ -273,15 +283,19 @@ export function registerIpc(
    * screen until the next launch, which is the opposite of leaving them alive
    * and reachable.
    *
-   * The tab set is config's, not the manager's. A detached tab stays in the tab
+   * The pane set is config's, not the manager's. A detached tab stays in the tab
    * bar — its session is running and only its client is gone — so describing
    * against live clients alone would drop the Unsorted row such a tab needs.
-   * Every caller below runs inside the write queue, where config's tab list is a
-   * superset of the manager's: an `open` records its tab through the same queue
+   * Every caller below runs inside the write queue, where config's pane list is a
+   * superset of the manager's: an `open` records its pane through the same queue
    * before anything else can read it.
+   *
+   * Panes, because `describeProjects` resolves each project's `activeTabId`
+   * against the rows it is given and has always been given pane rows — see the
+   * ambiguity recorded on `ProjectRecord.activeTabId`.
    */
   const described = async (config: PrcliConfig): Promise<ProjectDescriptor[]> =>
-    withUnsorted(await describeProjects(config.projects, config.tabs), config.tabs)
+    withUnsorted(await describeProjects(config.projects, config.panes), config.panes)
 
   ipcMain.on(CHANNELS.setActive, (_event, id: string | null) => {
     // Read directly, never through `serialise`: the queue has no reentrancy
@@ -292,7 +306,11 @@ export function registerIpc(
     void serialise(async () => {
       if (id === null) return
       const config = await store.read()
-      const tab = config.tabs.find((saved) => saved.id === id)
+      // A pane row: this writes the id back to `ProjectRecord.activeTabId`,
+      // which `describeProjects` resolves against pane rows. v5 leaves that
+      // pairing exactly as it was rather than moving one end of it — see the
+      // ambiguity recorded on `ProjectRecord.activeTabId`.
+      const tab = config.panes.find((saved) => saved.id === id)
       if (!tab) return
       const owner = projectForSlug(config, tab.projectSlug)
       // A tab under Unsorted has no row to record this on, by design.
@@ -372,7 +390,7 @@ export function registerIpc(
       // there is no half-applied outcome to unpick here. The saved row goes
       // along because a tab whose client has gone is found through
       // `findOrphans`, which has to synthesise a cwd; config holds the real one.
-      const saved = config.tabs.find((row) => row.id === tabId)
+      const saved = config.panes.find((row) => row.id === tabId)
       const tab = await manager.moveToProject(tabId, target.slug, saved)
       // Replace in place where config already lists the tab, so the tab bar
       // keeps its order; append where it does not. A plain `map` would quietly
@@ -381,10 +399,15 @@ export function registerIpc(
       // exercises, but it is an invariant, not a guarantee, and the cost of it
       // failing is a session running under a name nothing on disk knows. This
       // invents nothing: the rename above succeeded, so the session is there.
-      const tabs = saved
-        ? config.tabs.map((row) => (row.id === tabId ? tab : row))
-        : [...config.tabs, tab]
-      const updated: PrcliConfig = { ...config, tabs }
+      //
+      // Still one pane: `manager.moveToProject` is the singular call, so this
+      // moves the founder and writes back the founder's row. A tab with a
+      // second pane in it would have that pane left behind under the old slug
+      // — unreachable today, because no IPC exposes splitting yet.
+      const panes = saved
+        ? config.panes.map((row) => (row.id === tabId ? tab : row))
+        : [...config.panes, tab]
+      const updated: PrcliConfig = { ...config, panes }
       await store.write(updated)
       return { projects: await described(updated), tab }
     }),

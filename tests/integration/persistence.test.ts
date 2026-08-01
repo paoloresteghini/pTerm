@@ -82,7 +82,9 @@ function waitForPrompt(id: string, ms = 8000): Promise<void> {
 }
 
 async function savedIds(store: Store): Promise<string[]> {
-  return (await store.read()).tabs.map((tab) => tab.id)
+  // Pane rows, which are what `rememberTab`/`forgetTab` maintain. Config's tab
+  // rows carry layout and would answer this question with the wrong list.
+  return (await store.read()).panes.map((pane) => pane.id)
 }
 
 /** Poll the config until it matches, so an async write is not raced. */
@@ -558,7 +560,7 @@ describe('project channels', () => {
     await expect(adapter.hasSession(before)).resolves.toBe(false)
     // Nothing is stray any more, so there is nothing for Unsorted to hold.
     expect(moved.projects.map((p) => p.id)).toEqual([project.id])
-    await expect(store.read().then((c) => c.tabs.map((t) => t.tmuxSession))).resolves.toEqual([
+    await expect(store.read().then((c) => c.panes.map((p) => p.tmuxSession))).resolves.toEqual([
       moved.tab.tmuxSession,
     ])
   })
@@ -596,7 +598,7 @@ describe('project channels', () => {
     })
     const tab = await openTabIn('stray')
     await waitForPrompt(tab.id)
-    const before = (await store.read()).tabs.find((row) => row.id === tab.id)?.cwd
+    const before = (await store.read()).panes.find((row) => row.id === tab.id)?.cwd
     expect(before).toBe(tmpdir())
     detachTab(tab.id)
     await settle(500)
@@ -609,7 +611,7 @@ describe('project channels', () => {
 
     expect(moved.tab.tmuxSession).toBe(`prcli-lumio-${tab.id}`)
     expect(moved.tab.cwd).toBe(before)
-    await expect(store.read().then((c) => c.tabs.map((t) => t.cwd))).resolves.toEqual([before])
+    await expect(store.read().then((c) => c.panes.map((p) => p.cwd))).resolves.toEqual([before])
   })
 
   it('refuses to move a tab into a project that does not exist', async () => {
@@ -717,7 +719,7 @@ describe('status registry', () => {
     // The half that makes carrying the record necessary rather than tidy: by
     // now there is nothing left to look the tab up in. A listener handed only
     // an id would find nothing and drop the notification.
-    await expect(store.read().then((config) => config.tabs.map((row) => row.id))).resolves.not
+    await expect(store.read().then((config) => config.panes.map((row) => row.id))).resolves.not
       .toContain(tab.id)
   })
 

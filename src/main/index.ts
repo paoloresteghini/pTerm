@@ -54,7 +54,10 @@ const hookServer = new HookServer(hookPaths().socket)
 const inbox = createHookInbox({
   registry,
   isOpen: (tabId) => manager.get(tabId) !== undefined,
-  readTabs: async () => (await store.read()).tabs,
+  // Panes: a hook fires from inside one session, and it is a pane row that
+  // carries the session name and slug the inbox matches it against. Config's
+  // tab rows hold layout and nothing a hook can be resolved against.
+  readTabs: async () => (await store.read()).panes,
 })
 hookServer.onEvent((message) => void inbox.handle(message))
 
@@ -79,7 +82,7 @@ const router = new NotificationRouter({
     // removes, is what keeps that tab's transitions routed rather than
     // silently dropped exactly when the dock badge is the only signal left.
     const config = await store.read()
-    return mergeTab(manager.get(tabId) ?? null, config.tabs, tabId)
+    return mergeTab(manager.get(tabId) ?? null, config.panes, tabId)
   },
   projectOf: async (tab) => {
     const config = await store.read()

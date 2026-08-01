@@ -24,7 +24,7 @@ async function storeWith(raw: unknown): Promise<ConfigStore> {
 }
 
 const sampleConfig: PrcliConfig = {
-  version: 4,
+  version: 5,
   activeProjectId: 'p1',
   projects: [
     {
@@ -36,7 +36,7 @@ const sampleConfig: PrcliConfig = {
       activeTabId: 'a1b2c3d4e5f60718',
     },
   ],
-  tabs: [
+  panes: [
     {
       id: 'a1b2c3d4e5f60718',
       projectSlug: 'lumio',
@@ -45,40 +45,70 @@ const sampleConfig: PrcliConfig = {
       type: 'shell',
     },
   ],
+  tabs: [
+    {
+      id: 'a1b2c3d4e5f60718',
+      activePaneId: 'a1b2c3d4e5f60718',
+      layout: { dir: 'row', ratio: [1], kids: ['a1b2c3d4e5f60718'] },
+    },
+  ],
+  notifications: DEFAULT_NOTIFICATIONS,
+}
+
+/** Two panes side by side under one tab — the shape v4 could not express. */
+const splitConfig: PrcliConfig = {
+  version: 5,
+  activeProjectId: null,
+  projects: [],
+  panes: [
+    {
+      id: 'a'.repeat(16),
+      projectSlug: 'lumio',
+      cwd: '/tmp',
+      tmuxSession: `prcli-lumio-${'a'.repeat(16)}`,
+      type: 'shell',
+    },
+    {
+      id: 'b'.repeat(16),
+      projectSlug: 'lumio',
+      cwd: '/tmp',
+      tmuxSession: `prcli-lumio-${'b'.repeat(16)}`,
+      type: 'claude',
+    },
+  ],
+  tabs: [
+    {
+      id: 'a'.repeat(16),
+      activePaneId: 'b'.repeat(16),
+      layout: { dir: 'col', ratio: [0.25, 0.75], kids: ['a'.repeat(16), 'b'.repeat(16)] },
+    },
+  ],
+  notifications: DEFAULT_NOTIFICATIONS,
+}
+
+/** What `read()` answers with when it has nothing it can trust. */
+const EMPTY_CONFIG: PrcliConfig = {
+  version: 5,
+  activeProjectId: null,
+  projects: [],
+  panes: [],
+  tabs: [],
   notifications: DEFAULT_NOTIFICATIONS,
 }
 
 describe('ConfigStore.read', () => {
   it('returns an empty config when the file does not exist', async () => {
-    await expect(new ConfigStore(file).read()).resolves.toEqual({
-      version: 4,
-      activeProjectId: null,
-      projects: [],
-      tabs: [],
-      notifications: DEFAULT_NOTIFICATIONS,
-    })
+    await expect(new ConfigStore(file).read()).resolves.toEqual(EMPTY_CONFIG)
   })
 
   it('returns an empty config when the file is corrupt', async () => {
     await writeFile(file, '{not json', 'utf8')
-    await expect(new ConfigStore(file).read()).resolves.toEqual({
-      version: 4,
-      activeProjectId: null,
-      projects: [],
-      tabs: [],
-      notifications: DEFAULT_NOTIFICATIONS,
-    })
+    await expect(new ConfigStore(file).read()).resolves.toEqual(EMPTY_CONFIG)
   })
 
   it('returns an empty config when the shape is wrong', async () => {
     await writeFile(file, JSON.stringify({ version: 1, tabs: 'nope' }), 'utf8')
-    await expect(new ConfigStore(file).read()).resolves.toEqual({
-      version: 4,
-      activeProjectId: null,
-      projects: [],
-      tabs: [],
-      notifications: DEFAULT_NOTIFICATIONS,
-    })
+    await expect(new ConfigStore(file).read()).resolves.toEqual(EMPTY_CONFIG)
   })
 })
 
@@ -87,6 +117,15 @@ describe('ConfigStore.write', () => {
     const store = new ConfigStore(file)
     await store.write(sampleConfig)
     await expect(store.read()).resolves.toEqual(sampleConfig)
+  })
+
+  // The whole point of v5: orientation and drag ratios are the two things tmux
+  // cannot report, so a split that does not survive the round trip is a split
+  // the app cannot restore.
+  it('round-trips a two-pane tab with its axis and ratios intact', async () => {
+    const store = new ConfigStore(file)
+    await store.write(splitConfig)
+    await expect(store.read()).resolves.toEqual(splitConfig)
   })
 
   it('creates the parent directory', async () => {
@@ -105,6 +144,9 @@ describe('ConfigStore.write', () => {
   // restore then writes a full file over it — so running an older build once,
   // with a newer one's config on disk, destroys every project and rule in it.
   // Two builds have in fact been sharing that file all day.
+  //
+  // v5 raises the stakes rather than settling them: a v4 build reads a v5 file
+  // as "no config", and the full file it then writes back drops every split.
   it('refuses to overwrite a config written by a newer version', async () => {
     const future = { version: 99, projects: [], tabs: [], somethingNew: true }
     await writeFile(file, JSON.stringify(future), 'utf8')
@@ -146,7 +188,7 @@ describe('ConfigStore.write', () => {
   it('does not corrupt the existing file when given unserialisable input', async () => {
     const store = new ConfigStore(file)
     await store.write(sampleConfig)
-    const circular = { version: 4, tabs: [] } as unknown as PrcliConfig
+    const circular = { version: 5, panes: [], tabs: [] } as unknown as PrcliConfig
     ;(circular as unknown as { self: unknown }).self = circular
     await expect(store.write(circular)).rejects.toThrow()
     await expect(store.read()).resolves.toEqual(sampleConfig)
@@ -161,7 +203,7 @@ describe('ConfigStore.read, hostile shapes', () => {
   it('drops a null tab row instead of throwing through read()', async () => {
     const store = await storeWith({ version: 4, projects: [], tabs: [null], activeProjectId: null })
 
-    await expect(store.read()).resolves.toMatchObject({ tabs: [] })
+    await expect(store.read()).resolves.toMatchObject({ panes: [] })
   })
 
   it('drops tab rows of every wrong shape, keeping the good one', async () => {
@@ -179,7 +221,16 @@ describe('ConfigStore.read, hostile shapes', () => {
       tabs: [null, 'a string', 42, [], { id: 'no other fields' }, good],
     })
 
-    await expect(store.read()).resolves.toMatchObject({ tabs: [good] })
+    await expect(store.read()).resolves.toMatchObject({ panes: [good] })
+  })
+
+  it('drops a v5 tab row of every wrong shape without throwing', async () => {
+    const store = await storeWith({
+      ...splitConfig,
+      tabs: [null, 'a string', 42, [], { id: 'no layout' }, ...splitConfig.tabs],
+    })
+
+    await expect(store.read()).resolves.toMatchObject({ tabs: splitConfig.tabs })
   })
 })
 
@@ -218,8 +269,11 @@ describe('ConfigStore migration', () => {
   it('reads a v2 file as v4, keeping tab order', async () => {
     await writeFile(file, JSON.stringify(v2), 'utf8')
     const config = await new ConfigStore(file).read()
-    expect(config.version).toBe(4)
-    expect(config.tabs.map((tab) => tab.id)).toEqual(['a1b2c3d4e5f60718', '00000000000000ff'])
+    expect(config.version).toBe(5)
+    expect(config.panes.map((pane) => pane.id)).toEqual([
+      'a1b2c3d4e5f60718',
+      '00000000000000ff',
+    ])
   })
 
   // Synthesising a project from the slug is exactly the auto-create-from-slug
@@ -241,8 +295,8 @@ describe('ConfigStore migration', () => {
   it('still reads a v1 file, three versions back', async () => {
     await writeFile(file, JSON.stringify(v1), 'utf8')
     const config = await new ConfigStore(file).read()
-    expect(config.version).toBe(4)
-    expect(config.tabs.map((tab) => tab.id)).toEqual(['a1b2c3d4e5f60718'])
+    expect(config.version).toBe(5)
+    expect(config.panes.map((pane) => pane.id)).toEqual(['a1b2c3d4e5f60718'])
     expect(config.projects).toEqual([])
   })
 
@@ -312,16 +366,19 @@ describe('ConfigStore migration', () => {
 
   it('rejects an unknown future version rather than guessing', async () => {
     await writeFile(file, JSON.stringify({ version: 99, tabs: [] }), 'utf8')
-    await expect(new ConfigStore(file).read()).resolves.toEqual({
-      version: 4,
-      activeProjectId: null,
-      projects: [],
-      tabs: [],
-      notifications: DEFAULT_NOTIFICATIONS,
-    })
+    await expect(new ConfigStore(file).read()).resolves.toEqual(EMPTY_CONFIG)
   })
 
-  it('migrates a v3 config to v4, typing tabs by whether they carry a command', async () => {
+  // The next version up, not a distant one: v6 is the file a build one step
+  // ahead of this one leaves behind, and it is the version this build is most
+  // likely to actually meet. Reading its `panes` as if the shape had not moved
+  // is exactly the guess `write()`'s refusal exists to keep off disk.
+  it('refuses to guess at a v6 file, one version ahead', async () => {
+    await writeFile(file, JSON.stringify({ ...splitConfig, version: 6 }), 'utf8')
+    await expect(new ConfigStore(file).read()).resolves.toEqual(EMPTY_CONFIG)
+  })
+
+  it('migrates a v3 config to v5, typing tabs by whether they carry a command', async () => {
     const store = await storeWith({
       version: 3,
       projects: [],
@@ -340,11 +397,11 @@ describe('ConfigStore migration', () => {
 
     const config = await store.read()
 
-    expect(config.version).toBe(4)
+    expect(config.version).toBe(5)
     // A v3 tab cannot say whether it was running Claude, and it does not need
     // to: hooks decide. Only the launch command is knowable from the record.
-    expect(config.tabs[0]?.type).toBe('shell')
-    expect(config.tabs[1]?.type).toBe('preset')
+    expect(config.panes[0]?.type).toBe('shell')
+    expect(config.panes[1]?.type).toBe('preset')
   })
 
   it('gives a migrated config the default notification rules', async () => {
@@ -418,8 +475,8 @@ describe('ConfigStore migration', () => {
 
     const config = await store.read()
 
-    expect(config.tabs).toHaveLength(1)
-    expect(config.tabs[0]?.id).toBe('c'.repeat(16))
+    expect(config.panes).toHaveLength(1)
+    expect(config.panes[0]?.id).toBe('c'.repeat(16))
   })
 
   it('defaults a v4 tab missing its type rather than dropping the tab', async () => {
@@ -436,8 +493,226 @@ describe('ConfigStore migration', () => {
     const config = await store.read()
 
     // A live session is worth more than a correct type field.
+    expect(config.panes).toHaveLength(1)
+    expect(config.panes[0]?.type).toBe('shell')
+  })
+})
+
+describe('ConfigStore migration, v4 to v5', () => {
+  const claudePane = {
+    id: 'a'.repeat(16),
+    projectSlug: 'lumio',
+    cwd: '/Users/paolo/Code/Lumio',
+    tmuxSession: `prcli-lumio-${'a'.repeat(16)}`,
+    type: 'claude',
+  }
+  const devPane = {
+    id: 'b'.repeat(16),
+    projectSlug: 'lumio',
+    cwd: '/Users/paolo/Code/Lumio',
+    command: 'npm run dev',
+    tmuxSession: `prcli-lumio-${'b'.repeat(16)}`,
+    type: 'preset',
+  }
+  const v4 = {
+    version: 4,
+    activeProjectId: 'p1',
+    projects: [
+      {
+        id: 'p1',
+        name: 'Lumio',
+        slug: 'lumio',
+        cwd: '/Users/paolo/Code/Lumio',
+        presets: [],
+        activeTabId: 'a'.repeat(16),
+      },
+    ],
+    tabs: [claudePane, devPane],
+    notifications: DEFAULT_NOTIFICATIONS,
+  }
+
+  it('keeps every v4 tab row as a pane, in order and field for field', async () => {
+    const config = await (await storeWith(v4)).read()
+
+    expect(config.version).toBe(5)
+    expect(config.panes).toHaveLength(2)
+    // Pane by pane rather than by id alone: a migration that dropped `command`
+    // or `type` would keep both ids and still cost the user a preset tab.
+    expect(config.panes[0]).toEqual(claudePane)
+    expect(config.panes[1]).toEqual(devPane)
+  })
+
+  it('gives each migrated pane a tab of its own, active and full-width', async () => {
+    const config = await (await storeWith(v4)).read()
+
+    // Asserted before the loop, not after it: a migration that produced no tab
+    // rows at all would sail through `for (const … of [])` with every
+    // assertion below unrun. That shape has already produced ten tests on this
+    // project that could not fail.
+    expect(config.tabs).toHaveLength(2)
+    for (const [index, tab] of config.tabs.entries()) {
+      const pane = config.panes[index]
+      // A v4 tab genuinely was a one-pane tab, so the founder is the only pane
+      // there is, and it is necessarily the active one.
+      expect(tab.id).toBe(pane.id)
+      expect(tab.activePaneId).toBe(pane.id)
+      expect(tab.layout).toEqual({ dir: 'row', ratio: [1], kids: [pane.id] })
+    }
+  })
+
+  it('keeps projects and the selected one across the migration', async () => {
+    const config = await (await storeWith(v4)).read()
+
+    expect(config.projects.map((project) => project.slug)).toEqual(['lumio'])
+    expect(config.activeProjectId).toBe('p1')
+  })
+
+  it('gives a v1 file the same one-tab-per-pane treatment as a v4 one', async () => {
+    // Every version before v5 stored one row per tab because a tab *was* one
+    // pane, so they all migrate through the same step rather than each getting
+    // its own copy of it.
+    const config = await (
+      await storeWith({
+        version: 1,
+        tabs: [
+          {
+            id: 'e'.repeat(16),
+            projectSlug: 'scratch',
+            cwd: '/tmp',
+            tmuxSession: `prcli-scratch-${'e'.repeat(16)}`,
+          },
+        ],
+      })
+    ).read()
+
     expect(config.tabs).toHaveLength(1)
-    expect(config.tabs[0]?.type).toBe('shell')
+    expect(config.tabs[0]).toEqual({
+      id: 'e'.repeat(16),
+      activePaneId: 'e'.repeat(16),
+      layout: { dir: 'row', ratio: [1], kids: ['e'.repeat(16)] },
+    })
+  })
+})
+
+describe('ConfigStore.read, v5 layouts', () => {
+  const [paneA, paneB] = splitConfig.panes
+
+  /** A v5 file with `splitConfig`'s panes and whatever tab rows are given. */
+  function withTabs(tabs: unknown[]): Promise<ConfigStore> {
+    return storeWith({ ...splitConfig, tabs })
+  }
+
+  it('normalises a malformed layout away instead of throwing through read()', async () => {
+    const store = await withTabs([{ id: paneA.id, activePaneId: null, layout: 'nonsense' }])
+
+    // `read()` never throws, and a layout is the one part of config the app can
+    // rebuild from nothing: the panes are still there, and restore synthesises
+    // a one-pane tab for each pane no saved tab claims.
+    const config = await store.read()
+
+    expect(config.tabs).toEqual([])
+    expect(config.panes).toHaveLength(2)
+  })
+
+  it('drops a layout kid naming a pane that is not on disk', async () => {
+    const store = await withTabs([
+      {
+        id: paneA.id,
+        activePaneId: paneA.id,
+        layout: { dir: 'row', ratio: [0.5, 0.5], kids: [paneA.id, 'f'.repeat(16)] },
+      },
+    ])
+
+    const config = await store.read()
+
+    expect(config.tabs).toHaveLength(1)
+    expect(config.tabs[0].layout.kids).toEqual([paneA.id])
+    // Redistributed, not left at 0.5: a survivor keeping the share it had when
+    // it was one of two would render at half width with nothing beside it.
+    expect(config.tabs[0].layout.ratio).toEqual([1])
+  })
+
+  it('redistributes the ratios of the kids that survive', async () => {
+    const store = await withTabs([
+      {
+        id: paneA.id,
+        activePaneId: paneA.id,
+        layout: {
+          dir: 'col',
+          ratio: [0.2, 0.2, 0.6],
+          kids: [paneA.id, paneB.id, 'f'.repeat(16)],
+        },
+      },
+    ])
+
+    const config = await store.read()
+
+    const { ratio, kids } = config.tabs[0].layout
+    expect(kids).toEqual([paneA.id, paneB.id])
+    expect(ratio).toHaveLength(2)
+    expect(ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+    // The two survivors were equal before, so they stay equal after.
+    expect(ratio[0]).toBeCloseTo(0.5)
+  })
+
+  it('splits evenly when the ratios on disk are not usable', async () => {
+    const store = await withTabs([
+      {
+        id: paneA.id,
+        activePaneId: paneA.id,
+        layout: { dir: 'row', ratio: [0, 'half'], kids: [paneA.id, paneB.id] },
+      },
+    ])
+
+    const config = await store.read()
+
+    // A zero share would render a pane the user cannot see and cannot drag
+    // back, which is worse than ignoring a hand-edited ratio array entirely.
+    expect(config.tabs[0].layout.ratio).toEqual([0.5, 0.5])
+  })
+
+  it('drops a tab whose panes have all gone', async () => {
+    const store = await withTabs([
+      {
+        id: 'f'.repeat(16),
+        activePaneId: 'f'.repeat(16),
+        layout: { dir: 'row', ratio: [1], kids: ['f'.repeat(16)] },
+      },
+      ...splitConfig.tabs,
+    ])
+
+    const config = await store.read()
+
+    // This is also how a forgotten pane's tab row clears itself: `forgetTab`
+    // removes the pane row, and the next read collects the layout entry left
+    // pointing at it.
+    expect(config.tabs.map((tab) => tab.id)).toEqual([splitConfig.tabs[0].id])
+  })
+
+  it('forgets an active pane that is no longer part of the tab', async () => {
+    const store = await withTabs([
+      {
+        id: paneA.id,
+        activePaneId: paneB.id,
+        layout: { dir: 'row', ratio: [1], kids: [paneA.id] },
+      },
+    ])
+
+    const config = await store.read()
+
+    // Selection has to name something the tab actually holds; null means "the
+    // first one", which is a pane that exists.
+    expect(config.tabs[0].activePaneId).toBeNull()
+  })
+
+  it('defaults an unreadable axis to a row rather than dropping the tab', async () => {
+    const store = await withTabs([
+      { id: paneA.id, activePaneId: paneA.id, layout: { ratio: [1], kids: [paneA.id] } },
+    ])
+
+    const config = await store.read()
+
+    expect(config.tabs[0].layout.dir).toBe('row')
   })
 })
 

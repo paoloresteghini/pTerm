@@ -1,6 +1,6 @@
 import { homedir } from 'node:os'
 import type { SessionManager, PaneRecord } from '../sessions/manager'
-import type { ConfigStore, ProjectRecord } from '../state/store'
+import { oneTabPerPane, type ConfigStore, type ProjectRecord } from '../state/store'
 import { readManifest, mergePresets } from '../projects/manifest'
 import { isDirectory } from '../fsutil'
 // One definition, shared with the renderer — `TabDescriptor` and `PaneRecord`
@@ -122,7 +122,7 @@ export async function restoreWorkspace(
 
     // Saved order first, skipping rows whose session is gone.
     const ordered: PaneRecord[] = []
-    for (const row of saved.tabs) {
+    for (const row of saved.panes) {
       const orphan = byId.get(row.id)
       if (!orphan) continue
       byId.delete(row.id)
@@ -170,7 +170,7 @@ export async function restoreWorkspace(
       null
 
     await store.write({
-      version: 4,
+      version: 5,
       // Only real projects are persisted; the Unsorted row is synthetic.
       // Matched by id rather than by index: `describeProjects` returns one row
       // per project today, but adding a `filter` or a `continue` to it would
@@ -185,7 +185,13 @@ export async function restoreWorkspace(
         return described ? { ...project, activeTabId: described.activeTabId } : project
       }),
       activeProjectId,
-      tabs,
+      panes: tabs,
+      // One tab per pane, which is the shape v4 had. This reconcile reattaches
+      // one session per tab and has no notion of a pane group, so a multi-pane
+      // layout that was on disk does not survive it. That is this function's
+      // limit, not the format's: v5 can hold the layout, and grouping restored
+      // panes back into their tabs is a change to the reconcile itself.
+      tabs: oneTabPerPane(tabs),
       notifications: saved.notifications,
     })
 

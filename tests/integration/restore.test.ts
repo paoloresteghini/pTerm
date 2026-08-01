@@ -95,7 +95,7 @@ describe('restoreWorkspace', () => {
 
     expect(result.tabs).toEqual([])
     expect(result.projects[0].activeTabId).toBeNull()
-    await expect(store.read().then((c) => c.tabs)).resolves.toEqual([])
+    await expect(store.read().then((c) => c.panes)).resolves.toEqual([])
   })
 
   it('keeps config order and puts unknown strays after it', async () => {
@@ -160,7 +160,7 @@ describe('restoreWorkspace', () => {
     await restoreWorkspace(manager, store, immediate)
 
     const saved = await store.read()
-    expect(saved.tabs.map((t) => t.id)).toEqual(['1111111111111111'])
+    expect(saved.panes.map((p) => p.id)).toEqual(['1111111111111111'])
     manager.detachAll()
   })
 

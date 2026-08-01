@@ -11,9 +11,10 @@ import {
 import { DEFAULT_NOTIFICATIONS, type PrcliConfig } from '../../src/main/state/store'
 
 const EMPTY: PrcliConfig = {
-  version: 4,
+  version: 5,
   projects: [],
   activeProjectId: null,
+  panes: [],
   tabs: [],
   notifications: DEFAULT_NOTIFICATIONS,
 }
@@ -97,11 +98,11 @@ describe('removeProject', () => {
   })
 
   // The sessions keep running; restore lists them under Unsorted because
-  // their slug no longer matches anything. Nothing here should touch tabs.
-  it('leaves the tabs alone', () => {
+  // their slug no longer matches anything. Nothing here should touch panes.
+  it('leaves the panes alone', () => {
     const config: PrcliConfig = {
       ...withProjects('Lumio'),
-      tabs: [
+      panes: [
         {
           id: 'a1b2c3d4e5f60718',
           projectSlug: 'lumio',
@@ -112,7 +113,7 @@ describe('removeProject', () => {
       ],
     }
     const after = removeProject(config, config.projects[0].id)
-    expect(after.tabs).toEqual(config.tabs)
+    expect(after.panes).toEqual(config.panes)
   })
 
   it('moves focus to the neighbour when the active project goes', () => {
