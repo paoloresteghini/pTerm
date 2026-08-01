@@ -204,6 +204,25 @@ export class SessionManager {
   }
 
   /**
+   * The tab a LIVE pane is in, or undefined when this manager has no entry.
+   *
+   * `tabWasIn`'s counterpart for a pane that has not died yet: it reads
+   * `Entry.tabId`, the value whoever created the pane decided, rather than
+   * asking tmux. `register.ts` needs it twice — to name the row it writes for a
+   * pane it has just split, and to find the row of a pane it is about to kill,
+   * the latter necessarily BEFORE `kill()` disposes the entry.
+   *
+   * Deliberately not `tabIdFromGroupName(await groupNameOf(id))`. That is a
+   * second derivation of the same fact and the two can disagree: a group name
+   * goes out of date after a move (see `tabIdFromGroupName`), and it is what
+   * `splitTab` already reduced to this field. A caller writing a tab row under
+   * an id nothing else matches loses the tab's layout at the next restore.
+   */
+  tabIdOf(paneId: string): string | undefined {
+    return this.entries.get(paneId)?.tabId
+  }
+
+  /**
    * The record a pane is opened under, with the two inputs that make one
    * unusable refused before anything is created.
    *

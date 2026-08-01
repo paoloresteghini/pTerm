@@ -1,7 +1,7 @@
 import { describe, it, expect, afterAll, afterEach, beforeEach, beforeAll, vi } from 'vitest'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type {
@@ -12,6 +12,7 @@ import type {
   ProjectDescriptor,
   RestoreResult,
   TabDescriptor,
+  TabShape,
   TabState,
 } from '../../src/shared/ipc'
 
@@ -45,6 +46,7 @@ const { StatusRegistry } = await import('../../src/main/status/registry')
 type Manager = InstanceType<typeof SessionManager>
 type Store = InstanceType<typeof ConfigStore>
 type Registry = InstanceType<typeof StatusRegistry>
+type Config = Awaited<ReturnType<Store['read']>>
 
 const run = promisify(execFile)
 const SOCKET = 'prcli-test'
@@ -194,6 +196,37 @@ async function windowSizeOption(windowId: string): Promise<string> {
     '-L', SOCKET, 'show-options', '-w', '-t', windowId, 'window-size',
   ])
   return stdout.trim()
+}
+
+/**
+ * The config file exactly as a handler wrote it.
+ *
+ * Read raw rather than through `store.read()`, and every layout assertion in
+ * this file must use it: `normaliseLayout` rescales EVERY ratio array by its
+ * own total on the way in (`shares.map(share => share / total)`) and drops any
+ * row whose kids have all gone. So a handler that wrote shares summing to 0.5,
+ * or one that left a dead tab's row behind, reads back through `store.read()`
+ * looking perfect — the reader repairs both on the way past, and the assertion
+ * passes on the defect it was written for. Ported from restore.test.ts, which
+ * needs it for exactly this reason.
+ */
+async function written(): Promise<Config> {
+  return JSON.parse(await readFile(join(configDir, 'config.json'), 'utf8')) as Config
+}
+
+/**
+ * A session's own environment entry for `key`, as tmux prints it —
+ * `'PRCLI_TAB_ID=<id>'`, or `''` when there is none and when the session is not
+ * there at all. Every caller compares it against a non-empty expected string,
+ * so the two failures cannot pass as an answer.
+ */
+async function sessionEnv(name: string, key: string): Promise<string> {
+  try {
+    const { stdout } = await run('tmux', ['-L', SOCKET, 'show-environment', '-t', `=${name}`, key])
+    return stdout.trim()
+  } catch {
+    return ''
+  }
 }
 
 /** Resolves once the given tab's client has stopped, whatever the reason. */
@@ -740,6 +773,186 @@ describe('restartTab', () => {
     // below would pass on a restart that created nothing at all.
     await expect.poll(() => adapter.hasSession(restarted.tmuxSession), { timeout: 8000 }).toBe(true)
     expect(await sessionGroup(restarted.tmuxSession)).toBe('')
+  })
+})
+
+describe('splitPane and closePane', () => {
+  /** A tab of two panes, made the way the UI now makes one. */
+  async function splitOnce(
+    dir: 'row' | 'col' = 'row',
+  ): Promise<{ founder: TabDescriptor; second: TabDescriptor; shape: TabShape }> {
+    const founder = await invoke<TabDescriptor>(CHANNELS.open, {
+      projectSlug: 'lumio',
+      cwd: tmpdir(),
+    })
+    await waitForPrompt(founder.id)
+    const shape = await invoke<TabShape>(CHANNELS.splitPane, {
+      paneId: founder.id,
+      dir,
+      cols: 100,
+      rows: 30,
+    })
+    // Counted before anything indexes into it. `[].every` is true and `[][1]`
+    // is undefined, so a reply that made no pane at all would otherwise sail
+    // through every assertion below it.
+    expect(shape.panes).toHaveLength(2)
+    const second = shape.panes[1]
+    await waitForPrompt(second.id)
+    return { founder, second, shape }
+  }
+
+  it('splits a pane into its tab and writes the tab row that lays them out', async () => {
+    const { founder, second, shape } = await splitOnce('col')
+    expect(second.id).not.toBe(founder.id)
+    expect(shape.panes[0].id).toBe(founder.id)
+
+    // One group, read back from tmux for each pane and asserted non-empty
+    // first: `display-message` exits 0 with empty stdout for a session it does
+    // not have, so two failed lookups agree perfectly.
+    const group = await sessionGroup(founder.tmuxSession)
+    expect(group).not.toBe('')
+    expect(await sessionGroup(second.tmuxSession)).toBe(group)
+
+    // Each pane's OWN id in its own session's environment — the hook script
+    // reads this to say which pane an event came from, so two panes sharing one
+    // value is two panes' status collapsed onto one dot.
+    await expect
+      .poll(() => sessionEnv(founder.tmuxSession, 'PRCLI_TAB_ID'), { timeout: 10_000 })
+      .toBe(`PRCLI_TAB_ID=${founder.id}`)
+    await expect
+      .poll(() => sessionEnv(second.tmuxSession, 'PRCLI_TAB_ID'), { timeout: 10_000 })
+      .toBe(`PRCLI_TAB_ID=${second.id}`)
+
+    // A window each, bound before either client attached. A member that
+    // attaches onto a sibling's window leaves two xterms rendering one pane.
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const founderWindow = await adapter.windowIdOf(founder.tmuxSession)
+    const secondWindow = await adapter.windowIdOf(second.tmuxSession)
+    expect(founderWindow).toMatch(/^@\d+$/)
+    expect(secondWindow).toMatch(/^@\d+$/)
+    expect(secondWindow).not.toBe(founderWindow)
+    // The size the request carried, not the 80x24 `splitTab` would have
+    // defaulted to had `splitPane` let an unmeasured request through.
+    await expect.poll(() => windowSize(second.tmuxSession), { timeout: 8000 }).toBe('100x30')
+
+    // The file, raw. Nothing before this task wrote a multi-pane tab row from a
+    // user action at all, so every field here is new.
+    const config = await written()
+    expect(config.panes.map((pane) => pane.id)).toEqual([founder.id, second.id])
+    expect(config.tabs).toHaveLength(1)
+    const row = config.tabs[0]
+    // The GROUP's id, which for a tab still on its founder is the founder's.
+    expect(row.id).toBe(founder.id)
+    expect(row.activePaneId).toBe(second.id)
+    expect(row.layout.kids).toEqual([founder.id, second.id])
+    expect(row.layout.dir).toBe('col')
+    expect(row.layout.ratio).toHaveLength(2)
+    expect(row.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+    // And the reply is the row that was written, not a second opinion about it.
+    expect(shape.tabs).toEqual([row])
+  })
+
+  // The insertion point, which is the one thing about `kids` that a two-pane
+  // split cannot show: with one sibling, "after it" and "at the end" are the
+  // same position.
+  it('inserts a new pane after the sibling it was split from, not at the end', async () => {
+    const { founder, second } = await splitOnce()
+
+    const again = await invoke<TabShape>(CHANNELS.splitPane, {
+      paneId: founder.id,
+      dir: 'row',
+      cols: 100,
+      rows: 30,
+    })
+    expect(again.panes).toHaveLength(3)
+    const third = again.panes[1]
+    await waitForPrompt(third.id)
+    expect(third.id).not.toBe(founder.id)
+    expect(third.id).not.toBe(second.id)
+
+    const config = await written()
+    expect(config.tabs).toHaveLength(1)
+    expect(config.tabs[0].layout.kids).toEqual([founder.id, third.id, second.id])
+    expect(config.tabs[0].layout.ratio).toHaveLength(3)
+    expect(config.tabs[0].layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+  })
+
+  // The ruling this handler exists to enforce: `splitTab` defaults an absent
+  // size to 80x24 and then resizes the new window to it, so "do not pass a
+  // default" can only be honoured by refusing the call.
+  it('refuses to split a pane the renderer has not measured', async () => {
+    const founder = await invoke<TabDescriptor>(CHANNELS.open, {
+      projectSlug: 'lumio',
+      cwd: tmpdir(),
+    })
+    await waitForPrompt(founder.id)
+
+    await expect(
+      invoke(CHANNELS.splitPane, { paneId: founder.id, dir: 'row', cols: 0, rows: 0 }),
+    ).rejects.toThrow(/not measured/i)
+
+    // Refused before anything was created, not after. A tab that has never been
+    // split is a group of one, which tmux reports as no group at all.
+    expect(await sessionGroup(founder.tmuxSession)).toBe('')
+    const config = await written()
+    expect(config.panes.map((pane) => pane.id)).toEqual([founder.id])
+    expect(config.tabs).toEqual([])
+  })
+
+  it('closes one pane of two and leaves the sibling running in its own window', async () => {
+    const { founder, second } = await splitOnce()
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const founderWindow = await adapter.windowIdOf(founder.tmuxSession)
+    expect(founderWindow).toMatch(/^@\d+$/)
+
+    const shape = await invoke<TabShape>(CHANNELS.closePane, second.id)
+    expect(shape.panes.map((pane) => pane.id)).toEqual([founder.id])
+    expect(shape.tabs).toHaveLength(1)
+
+    await expect.poll(() => adapter.hasSession(second.tmuxSession), { timeout: 8000 }).toBe(false)
+    // The sibling's session AND the window its shell lives in. `manager.kill`
+    // reaps the closed pane's window too, and a pane that reports its
+    // sibling's would take the other shell down with it.
+    expect(await adapter.hasSession(founder.tmuxSession)).toBe(true)
+    expect(await adapter.windowIdOf(founder.tmuxSession)).toBe(founderWindow)
+
+    // Raw, because this is the assertion `store.read()` would repair: it
+    // rescales whatever ratio array it finds by that array's own total, so a
+    // `closePane` that dropped the kid and kept `[0.5]` reads back as `[1]`.
+    const config = await written()
+    expect(config.panes.map((pane) => pane.id)).toEqual([founder.id])
+    expect(config.tabs).toHaveLength(1)
+    const row = config.tabs[0]
+    expect(row.layout.kids).toEqual([founder.id])
+    expect(row.layout.ratio).toHaveLength(1)
+    expect(row.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+    // Selection followed the pane that went, rather than naming it still.
+    expect(row.activePaneId).toBe(founder.id)
+  })
+
+  it('closes the tab when its last pane is closed', async () => {
+    const { founder, second } = await splitOnce()
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+
+    await invoke<TabShape>(CHANNELS.closePane, second.id)
+    // Asserted before the last close, so the state that assertion is about is
+    // the one this test set up: a tab down to one pane, with a row still on
+    // disk. Without it, "no tab row afterwards" would also be satisfied by a
+    // `closePane` that had written no row in the first place.
+    const between = await written()
+    expect(between.tabs).toHaveLength(1)
+    expect(between.tabs[0].layout.kids).toEqual([founder.id])
+
+    const shape = await invoke<TabShape>(CHANNELS.closePane, founder.id)
+    expect(shape.panes).toEqual([])
+    expect(shape.tabs).toEqual([])
+
+    await expect.poll(() => adapter.hasSession(founder.tmuxSession), { timeout: 8000 }).toBe(false)
+    expect(await adapter.hasSession(second.tmuxSession)).toBe(false)
+
+    const config = await written()
+    expect(config.panes).toEqual([])
+    expect(config.tabs).toEqual([])
   })
 })
 

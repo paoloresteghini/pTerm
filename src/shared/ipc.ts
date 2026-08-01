@@ -25,6 +25,8 @@ export const CHANNELS = {
   statusChanged: 'prcli:statusChanged',
   restartTab: 'prcli:restartTab',
   dismissTab: 'prcli:dismissTab',
+  splitPane: 'prcli:splitPane',
+  closePane: 'prcli:closePane',
   focusTab: 'prcli:focusTab',
   notifications: 'prcli:notifications',
   updateNotifications: 'prcli:updateNotifications',
@@ -196,6 +198,48 @@ export interface RestartRequest {
 }
 
 /**
+ * What splitting a pane needs: which pane to split beside, which way, and how
+ * big the new pane will be drawn.
+ *
+ * `cols`/`rows` are REQUIRED, and that is the point of them. `SessionManager.
+ * splitTab` defaults them to 80×24 and then resizes the new window to whatever
+ * it ends up with, unconditionally — `open()`'s "no size given means do not
+ * size the window" guard does not reach it. So an omitted size here is not
+ * "leave it alone", it is "drive it to 80×24", which is the geometry defect
+ * this codebase has shipped twice. Making them non-optional turns a caller that
+ * has not measured into a compile error; `splitPane` refuses one at runtime too,
+ * because a renderer can still measure zero.
+ */
+export interface SplitRequest {
+  /** The pane the new one goes next to. Its tab is the tab they share. */
+  paneId: string
+  dir: 'row' | 'col'
+  cols: number
+  rows: number
+}
+
+/**
+ * One tab, whole: every pane in it and the row that lays them out.
+ *
+ * What `splitPane` and `closePane` both answer with, rather than the one pane
+ * that changed. The caller needs the new `kids` order and the redistributed
+ * ratios anyway, and a renderer patching its own arrays from a partial reply is
+ * a second place for tab membership to drift from what main just wrote.
+ *
+ * `tabs` holds at most one row — the tab that was split or closed into — and is
+ * empty exactly when that tab has no panes left, which is also when `panes` is.
+ * It is an array rather than a nullable row so that "the tab is gone" and "here
+ * is the tab" are the same shape to iterate.
+ *
+ * `panes` is in `tabs[0].layout.kids` order, and is this tab's panes only —
+ * never the whole workspace.
+ */
+export interface TabShape {
+  panes: TabDescriptor[]
+  tabs: TabRow[]
+}
+
+/**
  * The synthetic project collecting tabs whose slug matches no real one.
  * Lives here rather than in src/main because the renderer needs it too.
  */
@@ -321,6 +365,22 @@ export interface PrcliApi {
   restartTab(request: RestartRequest): Promise<TabDescriptor>
   /** Stop tracking a dead tab: the renderer has dropped its tombstone. */
   dismissTab(id: string): void
+  /**
+   * Add a pane to the tab that already holds `request.paneId`, beside it.
+   *
+   * Resolves to the whole tab — see `TabShape` — because the new pane's `kids`
+   * position and the tab's new ratios are as much of the answer as the pane
+   * itself. Rejects when no size was measured; see `SplitRequest`.
+   */
+  splitPane(request: SplitRequest): Promise<TabShape>
+  /**
+   * Kill one pane and take it out of its tab's layout.
+   *
+   * The session, its window and its saved row all go; the tab's remaining panes
+   * share out the closed one's ratio. Closing the last pane of a tab closes the
+   * tab, and resolves with both arrays empty.
+   */
+  closePane(paneId: string): Promise<TabShape>
   /** A clicked toast asking the renderer to select a particular tab. */
   onFocusTab(listener: (tabId: string) => void): () => void
   /** A menu item the user *clicked*, rather than reached by its accelerator. */

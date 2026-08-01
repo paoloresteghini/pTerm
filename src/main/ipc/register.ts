@@ -10,8 +10,11 @@ import {
   type ProjectDescriptor,
   type RestartRequest,
   type RestoreResult,
+  type SplitRequest,
   type StatusEvent,
   type TabDescriptor,
+  type TabRow,
+  type TabShape,
 } from '../../shared/ipc'
 import type { ExitReason, SessionManager, PaneRecord } from '../sessions/manager'
 import { ConfigStore, type PrcliConfig } from '../state/store'
@@ -51,11 +54,16 @@ export function registerIpc(
   // manager's registry. The file is tiny; serialising the edits is enough to
   // keep concurrent read-modify-writes from losing one another.
   //
-  // Every handler below works in `config.panes`, never `config.tabs`: since v5
-  // a tab row is layout — an axis and its ratios — and holds none of the
-  // fields a session is reattached from. `config.tabs` type-checks against an
-  // `id` filter just as well as `config.panes` does, which is why that is
-  // written down here rather than left to be noticed.
+  // Existence lives in `config.panes` and layout in `config.tabs`, and the two
+  // are not interchangeable: since v5 a tab row is an axis and its ratios and
+  // holds none of the fields a session is reattached from. A handler that
+  // reaches for the wrong one type-checks perfectly — a `TabRow` has an `id`
+  // too — which is why that is written down here rather than left to be
+  // noticed. Every handler that only opens or forgets a pane therefore works in
+  // `config.panes` alone. The two exceptions are `splitPane` and `closePane`
+  // below, which change what a tab HOLDS: they write both arrays, in one
+  // `store.write`, so no reader ever sees a pane no tab lists or a kid naming
+  // no pane.
   let tail: Promise<unknown> = Promise.resolve()
   const serialise = <T>(operation: () => Promise<T>): Promise<T> => {
     const result = tail.then(operation, operation)
@@ -82,6 +90,47 @@ export function registerIpc(
       if (panes.length === config.panes.length) return
       await store.write({ ...config, panes })
     })
+
+  /**
+   * `tabs` with the row for `tabId` replaced by `next`, or dropped when `next`
+   * is null.
+   *
+   * Both callers rewrite exactly one row and must leave every other one
+   * untouched, and a tab whose last pane has closed has to lose its row rather
+   * than keep an empty one — `store.read()` would drop such a row on the way
+   * back in anyway, but only after it had been written, which is precisely
+   * where an assertion could no longer see it.
+   *
+   * Replaced in place, never removed-and-appended: array order is the order the
+   * tab bar draws, so splitting a pane in the third tab must not move that tab
+   * to the end. A row that is not there yet is appended, which is the ordinary
+   * case for the first split of a tab opened this run — `CHANNELS.open` writes
+   * a pane row and no tab row.
+   *
+   * Free of `serialise`, `store` and the manager on purpose: the caller is
+   * already inside one pass holding one `config`, and this only rearranges what
+   * it holds. Task 2d's re-founding rewrites a row's `id` and can use it the
+   * same way.
+   */
+  const withTabRow = (tabs: TabRow[], tabId: string, next: TabRow | null): TabRow[] => {
+    const at = tabs.findIndex((row) => row.id === tabId)
+    if (at === -1) return next ? [...tabs, next] : tabs
+    if (!next) return tabs.filter((_, index) => index !== at)
+    return tabs.map((row, index) => (index === at ? next : row))
+  }
+
+  /** This tab's panes, in the order its row lays them out. */
+  const held = (panes: PaneRecord[], kids: string[]): PaneRecord[] => {
+    const byId = new Map(panes.map((pane) => [pane.id, pane]))
+    // Filtered rather than mapped: both callers build `kids` from ids that are
+    // in `panes` by construction, so nothing is dropped here today — but a
+    // `map` would answer a future mismatch with an `undefined` in the array
+    // that type-checks as a `PaneRecord` and reaches the renderer as one.
+    return kids.flatMap((kid) => {
+      const pane = byId.get(kid)
+      return pane ? [pane] : []
+    })
+  }
 
   // Keyed to the three channels this file actually pushes unprompted, rather
   // than left as `(channel: string, payload: unknown)`: `unknown` is exactly
@@ -518,6 +567,162 @@ export function registerIpc(
     // Dismissing the tombstone is what takes Restart off the screen, so the
     // tab id kept for it goes the same way its geometry does.
     manager.forgetPane(id)
+  })
+
+  ipcMain.handle(CHANNELS.splitPane, async (_event, request: SplitRequest): Promise<TabShape> => {
+    const { paneId, dir, cols, rows } = request
+    // Refused, not defaulted. `splitTab` falls back to 80×24 and then resizes
+    // the new window to whatever it settled on, unconditionally — `open()`'s
+    // "no size given means do not size the window" guard does not reach it — so
+    // an unmeasured split drives a window to the default rather than leaving it
+    // to follow its client. Same shape of test as `CHANNELS.resize`'s guard,
+    // and written as `>=` rather than `<` so a `NaN` from a renderer that
+    // measured a hidden element is refused too.
+    if (!(cols >= 1 && rows >= 1)) {
+      throw new Error(`Cannot split: pane ${paneId} was not measured (got ${cols}x${rows})`)
+    }
+
+    // Outside every `serialise` pass, like `CHANNELS.kill`'s `manager.kill`:
+    // the tmux work first, then one pass of our own. Doing it the other way
+    // round would be worse than slow — `serialise` is `tail.then(op, op)` with
+    // no reentrancy protection, so anything it reaches that calls back into it
+    // waits on its own caller for good.
+    const record = await manager.splitTab({ paneId, cols, rows })
+
+    // Read off the NEW pane, after the split, rather than derived a second time
+    // from the sibling: this is the id `splitTab` itself decided and recorded
+    // for the member it just made, so the row written below cannot be named
+    // something the manager disagrees with. The fallback covers only a pane
+    // that vanished between the split and this line, where the sibling's own id
+    // is the best evidence left.
+    const tabId = manager.tabIdOf(record.id) ?? paneId
+
+    // The same initialisation `CHANNELS.open` does, and needed for the same
+    // reason: nothing else gives a pane its first state, so a `claude` pane
+    // split off a tab would otherwise show no dot at all until its first hook.
+    registry.applyOpen(record.id, record.type)
+
+    return serialise(async () => {
+      const config = await store.read()
+      const panes = [...config.panes.filter((saved) => saved.id !== record.id), record]
+
+      // `store.read()` has already dropped every kid that named a pane not in
+      // `config.panes`, so the saved kids all still exist and none needs
+      // filtering here. No saved row at all means a tab that has never been
+      // split: `CHANNELS.open` writes none and restore writes one for every tab
+      // it brings back, so the sibling alone really is the whole of it.
+      const saved = config.tabs.find((row) => row.id === tabId)
+      const siblings = saved?.layout.kids ?? [paneId]
+      const at = siblings.indexOf(paneId)
+      const kids =
+        at === -1
+          ? [...siblings, record.id]
+          : [...siblings.slice(0, at + 1), record.id, ...siblings.slice(at + 1)]
+
+      const row: TabRow = {
+        // The GROUP's id, never the new pane's — a pane added to a tab is not
+        // its founder, and a row named after it would stop matching the tab at
+        // the next restore, which resolves rows by the group's id.
+        id: tabId,
+        // The pane the user just asked for is the one they are looking at.
+        activePaneId: record.id,
+        layout: {
+          dir,
+          // Even across the kids. A share carved out of the sibling's alone
+          // would preserve the other panes' widths, but it would also let a
+          // tab split repeatedly hand each new pane a sliver of a sliver;
+          // ratios are the one thing the user can drag straight back.
+          ratio: kids.map(() => 1 / kids.length),
+          kids,
+        },
+      }
+
+      // Both arrays in one write. `rememberTab` is deliberately not used: it is
+      // itself a `serialise` wrapper and would deadlock inside this pass, and
+      // it writes `config.panes` alone — a separate write for the tab row would
+      // leave a window in which the file holds a pane no tab lists.
+      const tabs = withTabRow(config.tabs, tabId, row)
+      await store.write({ ...config, panes, tabs })
+      return { panes: held(panes, kids), tabs: [row] }
+    })
+  })
+
+  ipcMain.handle(CHANNELS.closePane, async (_event, paneId: string): Promise<TabShape> => {
+    // Before the kill, and it has to be: `manager.kill()` deletes the entry
+    // this is held on, and a dead pane's tab is not recoverable afterwards —
+    // its membership lived in the tmux session the kill destroys. The fallback
+    // is a pane this process never held, which is a tab of one by definition.
+    const tabId = manager.tabIdOf(paneId) ?? paneId
+
+    // Recorded before the first await inside `manager.kill()` can run, for the
+    // reason `CHANNELS.kill` records it: the exit event this raises is settled
+    // by asking this map, and it fires while the kill is still in flight. See
+    // `pendingKills`.
+    const outcome = manager.kill(paneId)
+    pendingKills.set(paneId, outcome)
+    try {
+      await outcome
+    } finally {
+      pendingKills.delete(paneId)
+    }
+    // Everything `CHANNELS.kill` forgets, for its reasons: a killed pane is not
+    // restartable, so its state, the geometry a restart would have attached at
+    // and the tab a restart would have rejoined all go together.
+    registry.forget(paneId)
+    lastGeometry.delete(paneId)
+    manager.forgetPane(paneId)
+
+    return serialise(async () => {
+      const config = await store.read()
+      const panes = config.panes.filter((saved) => saved.id !== paneId)
+
+      // Kids and shares are index-aligned, and `store.read()` has already made
+      // the shares one per kid, positive and finite — so they are read together
+      // rather than re-derived. No saved row means nothing this tab held is
+      // known beyond the pane just closed, which is a tab of one: no survivors,
+      // no row.
+      const saved = config.tabs.find((row) => row.id === tabId)
+      const kept: { kid: string; share: number }[] = []
+      if (saved) {
+        saved.layout.kids.forEach((kid, index) => {
+          if (kid === paneId) return
+          kept.push({ kid, share: saved.layout.ratio[index] })
+        })
+      }
+
+      // What the survivors' shares add up to WITHOUT the closed pane's, which
+      // is less than 1 by exactly the share being given away.
+      const total = kept.reduce((sum, entry) => sum + entry.share, 0)
+
+      // A tab with no panes left loses its row outright. Leaving one behind
+      // would put an empty tab in the bar until the next `store.read()` swept
+      // it, and would leave `withTabRow`'s caller writing a row describing
+      // nothing.
+      const active = saved?.activePaneId
+      const row: TabRow | null =
+        kept.length === 0
+          ? null
+          : {
+              id: tabId,
+              // Selection has to name a pane the tab still holds; when the
+              // closed pane was the selected one the first survivor takes it.
+              activePaneId: active && active !== paneId ? active : kept[0].kid,
+              layout: {
+                dir: saved?.layout.dir ?? 'row',
+                // Rescaled by the survivors' own total, so the closed pane's
+                // share goes to its neighbours in proportion and the row still
+                // describes a whole tab. Without this the shares sum to less
+                // than 1 on disk — invisible through `store.read()`, which
+                // rescales them again on the way back in.
+                ratio: kept.map((entry) => entry.share / total),
+                kids: kept.map((entry) => entry.kid),
+              },
+            }
+
+      const tabs = withTabRow(config.tabs, tabId, row)
+      await store.write({ ...config, panes, tabs })
+      return { panes: row ? held(panes, row.layout.kids) : [], tabs: row ? [row] : [] }
+    })
   })
 
   ipcMain.handle(CHANNELS.notifications, async () => (await store.read()).notifications)
