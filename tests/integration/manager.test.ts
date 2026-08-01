@@ -895,6 +895,90 @@ describe('SessionManager.moveTabToProject', () => {
 })
 
 /**
+ * The window lookup an attach starts is a poll: `lookupWindow` answers `gone`
+ * for a session tmux has not finished creating, so asking once would leave most
+ * tabs with no hook. Before this branch it ran only for a manager with a death
+ * reporter; Task 5 gave it a second caller on every attach. Nothing ever ended
+ * one early, and a session that never appears costs ~370 `tmux` spawns.
+ */
+describe('SessionManager window lookup', () => {
+  const idle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  it('stops polling for a window once the pane it was opened for has gone', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    // The answer the poll keeps going on. A real dead-or-never-created session
+    // gives exactly this, and so does a tmux server that has been killed under
+    // a still-running test file.
+    let calls = 0
+    vi.spyOn(adapter, 'lookupWindow').mockImplementation(async () => {
+      calls += 1
+      return { kind: 'gone' }
+    })
+    const manager = new SessionManager(adapter, {
+      deathReporter: join(tmpdir(), 'prcli-hook-test-reporter'),
+    })
+    const tab = manager.open({ projectSlug: 'lumio', cwd: tmpdir(), cols: 100, rows: 30 })
+
+    await idle(250)
+    const whilePolling = calls
+    // It really was polling, so "it stopped" below cannot pass on a poll that
+    // never started. At 20ms this is a dozen or so calls.
+    expect(whilePolling).toBeGreaterThan(2)
+
+    manager.detach(tab.id)
+    await idle(250)
+    const settled = calls
+    await idle(250)
+
+    // Stopped dead, not merely slowed: the answer in flight when the pane was
+    // detached is allowed to land, nothing after it.
+    expect(calls).toBe(settled)
+    expect(settled).toBeLessThanOrEqual(whilePolling + 2)
+    manager.detachAll()
+  })
+
+  // Task 5's own deferred item: `wireDeathHook` and `sizeWindowOnAttach` each
+  // ran their own poll of the same session, so a manager with a reporter had
+  // two in flight per attach and twice the spawns for an attach that never
+  // resolves.
+  it('runs one lookup per attach, not one per thing that wants it', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const real = adapter.lookupWindow.bind(adapter)
+    // Concurrency, not a call count: a count has to be compared against a
+    // baseline that depends on how long tmux takes to make the session, while
+    // "two polls of one session" is visible directly as two lookups in flight
+    // at once. The delay is what makes that certain rather than likely — two
+    // independent polls start in the same tick.
+    let inFlight = 0
+    let peak = 0
+    vi.spyOn(adapter, 'lookupWindow').mockImplementation(async (name) => {
+      inFlight += 1
+      peak = Math.max(peak, inFlight)
+      try {
+        await idle(30)
+        return await real(name)
+      } finally {
+        inFlight -= 1
+      }
+    })
+    const manager = new SessionManager(adapter, {
+      deathReporter: join(tmpdir(), 'prcli-hook-test-reporter'),
+    })
+    // Both consumers want a window here: the hook (a reporter is set) and the
+    // attach-time resize (a size is given).
+    const tab = manager.open({ projectSlug: 'lumio', cwd: tmpdir(), cols: 100, rows: 30 })
+    await expect
+      .poll(async () => hooksOf(await windowIdOf(tab.tmuxSession)), { timeout: 10_000 })
+      .toContain('pane-died')
+    await expect.poll(() => windowSize(tab.tmuxSession), { timeout: 8000 }).toBe('100x30')
+
+    // Something was looked up at all, and never twice at once.
+    expect(peak).toBe(1)
+    manager.detachAll()
+  })
+})
+
+/**
  * A member whose OWN window has died silently falls back onto a sibling's —
  * measured on tmux 3.7b, in both directions — and its session survives.
  * `restoreWorkspace` is the only place in the app that knew about this state;

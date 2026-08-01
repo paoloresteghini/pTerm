@@ -59,6 +59,12 @@ interface Entry {
    * can tell a detach or a kill apart from the child genuinely exiting.
    */
   intent?: 'detached' | 'killed'
+  /**
+   * Set when this entry is disposed, so a window lookup still polling for it
+   * stops at its next answer instead of running out its ten-second deadline
+   * against a session nothing is waiting for any more. See `awaitWindowId`.
+   */
+  abandoned?: boolean
 }
 
 const DEFAULT_COLS = 80
@@ -200,6 +206,21 @@ export class SessionManager {
     // `splitTab` is not in this branch because it has already wired its own
     // window, before the command in it was started; there is nothing left to
     // race there.
+    //
+    // One lookup for both of the things that want it, and only if something
+    // does. Before this branch the poll ran only when a death reporter was
+    // set; Task 5 gave it a second, ungated caller, so an ordinary attach
+    // could have two independent polls of the same session in flight — and a
+    // poll whose session never appears costs ~370 `tmux display-message`
+    // spawns before it gives up. Memoised rather than started eagerly so a
+    // manager with no reporter and an unsized attach starts none at all.
+    let pending: Promise<WindowLookup> | undefined
+    const find = (): Promise<WindowLookup> =>
+      (pending ??= this.awaitWindowId(record.tmuxSession, entry))
+    const window: WindowLookup | (() => Promise<WindowLookup>) = windowId
+      ? { kind: 'found', id: windowId }
+      : find
+
     if (!windowId) {
       // Swallowed deliberately. Everything expected is already tolerated
       // inside the adapter, so what reaches here is a tmux this app cannot
@@ -208,7 +229,7 @@ export class SessionManager {
       // `wireDeathHook` has already taken `remain-on-exit` back off by the
       // time anything reaches here, on every path where it can name the
       // window, so it is not also a stray session.
-      void this.wireDeathHook(record, null).catch(() => {})
+      void this.wireDeathHook(record, window).catch(() => {})
     }
     // Every attach that was GIVEN a size sizes the window its client is about
     // to see — not only a founder's, and not gated on `options.deathReporter`
@@ -247,7 +268,7 @@ export class SessionManager {
     // `cols`/`rows` against what was requested here before its own call
     // lands, which is what stops that late resize from being the one that
     // wins.
-    if (sized) void this.sizeWindowOnAttach(entry, windowId ?? null, cols, rows).catch(() => {})
+    if (sized) void this.sizeWindowOnAttach(entry, window, cols, rows).catch(() => {})
     return record
   }
 
@@ -265,20 +286,22 @@ export class SessionManager {
    */
   private async sizeWindowOnAttach(
     entry: Entry,
-    windowId: string | null,
+    window: WindowLookup | (() => Promise<WindowLookup>),
     cols: number,
     rows: number,
   ): Promise<void> {
-    const lookup: WindowLookup = windowId
-      ? { kind: 'found', id: windowId }
-      : await this.awaitWindowId(entry.record.tmuxSession)
+    const own = typeof window !== 'function'
+    const lookup: WindowLookup = own ? window : await window()
     if (lookup.kind !== 'found') return
     // A window this member only appears to be in is not one to resize — and
     // not one to cache on the entry either, since `kill()` and every later
     // `resize()` would then take the cached id for this pane's own. A split
     // pane's window is `window-size manual`, so the sibling would simply stay
     // at whatever size this pane's client happens to be.
-    if (windowId === null && !(await this.ownsWindow(entry.record.tmuxSession, lookup.id))) {
+    //
+    // Not asked on the split path: that window was made for this pane, by
+    // this manager, moments ago — there is nobody it could belong to instead.
+    if (!own && !(await this.ownsWindow(entry.record.tmuxSession, lookup.id))) {
       return
     }
     entry.windowId = lookup.id
@@ -289,10 +312,15 @@ export class SessionManager {
    * Put the `pane-died` hook on the window a pane lives in, so its death reaps
    * that window and its own member session and nothing else.
    *
-   * `windowId` is null for `open()`, which has to wait for tmux to make the
-   * window before it can name it, and set for `splitTab()`, which made the
-   * window itself and knows it before anything is running in it. That
-   * difference is also why `remain-on-exit` is set in two different places:
+   * `window` is a lookup to *run* for `open()`, which has to wait for tmux to
+   * make the window before it can name it, and a window already *found* for
+   * `splitTab()`, which made the window itself and knows it before anything is
+   * running in it. A function rather than a promise so nothing is asked of
+   * tmux when there is no reporter and no hook to install; on the `open()`
+   * path it is the same memoised lookup `sizeWindowOnAttach` calls, so the two
+   * share one poll rather than racing two.
+   *
+   * That difference is also why `remain-on-exit` is set in two different places:
    * `open()`'s is chained into `new-session` because a fast command would
    * otherwise be reaped before a second tmux call could land, while a split's
    * window is empty until this has finished with it.
@@ -305,13 +333,18 @@ export class SessionManager {
    * a window and a session nothing reaps, which the next restore then adopts
    * as a live tab. So each one takes the option back off first.
    */
-  private async wireDeathHook(record: PaneRecord, windowId: string | null): Promise<void> {
+  private async wireDeathHook(
+    record: PaneRecord,
+    where: WindowLookup | (() => Promise<WindowLookup>),
+  ): Promise<void> {
     const reporter = this.options.deathReporter
     if (!reporter) return
 
-    const lookup: WindowLookup = windowId
-      ? { kind: 'found', id: windowId }
-      : await this.awaitWindowId(record.tmuxSession)
+    // A window handed in was made for this pane by `splitTab`; one that has to
+    // be looked up is whatever tmux currently says, which is not the same
+    // thing (see `ownsWindow`).
+    const ours = typeof where !== 'function'
+    const lookup: WindowLookup = ours ? where : await where()
 
     if (lookup.kind === 'gone') {
       // A session tmux has never heard of. `remain-on-exit` is a WINDOW
@@ -353,7 +386,7 @@ export class SessionManager {
     // break that pairing and cost the sibling the very reaping the rule
     // exists to guarantee. This member has no window of its own, so it has
     // nothing of its own left here to leak.
-    if (windowId === null && !(await this.ownsWindow(record.tmuxSession, window))) {
+    if (!ours && !(await this.ownsWindow(record.tmuxSession, window))) {
       console.error(
         `PRCLI: ${record.tmuxSession} reports window ${window}, which a sibling pane of the ` +
           'same tab already owns — its own window has died. Leaving that window alone; ' +
@@ -380,7 +413,7 @@ export class SessionManager {
     // Split path only. `open()`'s window already carries this, chained into
     // the command that created it. Window-scoped either way, so a sibling
     // pane's window is untouched — measured: it reads the option unset.
-    if (windowId) await this.adapter.setWindowOption(windowId, 'remain-on-exit', 'on')
+    if (ours) await this.adapter.setWindowOption(window, 'remain-on-exit', 'on')
 
     try {
       await this.adapter.setDeathHook(window, command)
@@ -473,12 +506,24 @@ export class SessionManager {
    * passed. `found` and `unreachable` both return immediately: the first
    * because there is nothing left to wait for, the second because polling
    * would not turn a tmux this app cannot talk to into one it can.
+   *
+   * `entry` is what cancels it. A poll for a session that never appears runs
+   * the full ten seconds at 20ms — measured on this branch at 111 `tmux
+   * display-message` spawns in three seconds, so ~370 for one abandoned
+   * attach — and nothing ended it early: not a detach, not a kill, not the
+   * test that started it. It stops at the next answer once the client it was
+   * started for has been torn down, because there is nothing left that wanted
+   * the answer. It takes whatever tmux says at that moment rather than
+   * returning a fourth kind: a session that does exist still gets its hook,
+   * which is what keeps `remain-on-exit` from being left on with nothing to
+   * reap it.
    */
-  private async awaitWindowId(tmuxSession: string): Promise<WindowLookup> {
+  private async awaitWindowId(tmuxSession: string, entry?: Entry): Promise<WindowLookup> {
     const deadline = Date.now() + WINDOW_ID_TIMEOUT_MS
     for (;;) {
       const lookup = await this.adapter.lookupWindow(tmuxSession)
       if (lookup.kind !== 'gone') return lookup
+      if (entry?.abandoned) return lookup
       if (Date.now() >= deadline) return lookup
       await new Promise((resolve) => setTimeout(resolve, WINDOW_ID_POLL_MS))
     }
@@ -648,7 +693,7 @@ export class SessionManager {
     // session by name. Wiring before `newGroupMember` would leave a hook that
     // fires against a session that does not exist yet, and the reap would take
     // the window while `selectWindow` was still trying to bind to it.
-    await this.wireDeathHook(record, window.id)
+    await this.wireDeathHook(record, { kind: 'found', id: window.id })
     if (record.command) {
       await this.adapter.respawnPane(window.id, {
         command: record.command,
@@ -688,6 +733,7 @@ export class SessionManager {
       // the client down, so the exit this raises is not reported as a crash of
       // a pane the caller has not been given yet.
       entry.intent = 'killed'
+      entry.abandoned = true
       this.entries.delete(record.id)
       entry.session.detach()
     }
@@ -783,6 +829,7 @@ export class SessionManager {
     const entry = this.entries.get(id)
     if (!entry) return
     entry.intent = 'detached'
+    entry.abandoned = true
     this.entries.delete(id)
     entry.session.detach()
   }
@@ -826,6 +873,7 @@ export class SessionManager {
       // to read once it has gone.
       const own = windowId !== '' && (await this.ownsWindow(entry.record.tmuxSession, windowId))
       entry.intent = 'killed'
+      entry.abandoned = true
       this.entries.delete(id)
       entry.session.detach()
       await this.adapter.killSession(entry.record.tmuxSession)
@@ -971,7 +1019,17 @@ export class SessionManager {
         if (to === pane.tmuxSession) continue
         await this.adapter.renameSession(pane.tmuxSession, to)
         renamed.push({ pane, from: pane.tmuxSession, to })
-        await this.wireDeathHook({ ...pane, tmuxSession: to }, null).catch(() => {})
+        // A single lookup, never the polling wrapper: the rename it follows
+        // has just succeeded, so the session provably exists and there is
+        // nothing to wait for. `awaitWindowId` would answer `gone` for a pane
+        // that died in the gap and keep asking for ten seconds — with this
+        // `await` inside the rename loop, and the IPC handler holding the
+        // config queue, that stalled a tab genuinely split across two
+        // projects for the whole of it.
+        await this.wireDeathHook(
+          { ...pane, tmuxSession: to },
+          () => this.adapter.lookupWindow(to),
+        ).catch(() => {})
       }
     } catch (error) {
       // Every undo is attempted, and one that is refused does not stop the
@@ -993,7 +1051,9 @@ export class SessionManager {
           // `panesOfTab` reported it, before any rename touched it — so
           // nothing needs overriding here the way the forward loop overrides
           // `to` above.
-          await this.wireDeathHook(pane, null).catch(() => {})
+          await this.wireDeathHook(pane, () => this.adapter.lookupWindow(pane.tmuxSession)).catch(
+            () => {},
+          )
         } catch (undoError) {
           undoFailures.push(undoError)
         }
