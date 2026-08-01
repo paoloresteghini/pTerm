@@ -78,11 +78,12 @@ export function App() {
   /**
    * Close one pane, and the tab with it when it was the last one.
    *
-   * `closePane`, never `kill`: it does everything the kill did — the pending
-   * kill, the forgotten status, geometry and pane, the config row — and also
-   * maintains the tab's layout row. Sending a user's close down the other
-   * path would leave a stale row behind the first time it was used on a split
-   * tab.
+   * The only close there is. It kills the pane's session and drops everything
+   * main held for it — its status, the geometry a restart would have used, its
+   * config row — and maintains the tab's layout row while doing it. The
+   * narrower `kill` channel did all of that except the row; two ways to close
+   * a pane, differing only in whether the layout survived, was a place for
+   * what is on screen to drift from what is on disk.
    */
   const closePane = useCallback(
     (paneId: string) => {
@@ -111,10 +112,13 @@ export function App() {
       // exists to refuse.
       if (!grid) return
       // Half the pane being split, along the axis being split — exact for the
-      // first split of a tab and an approximation for each one after it, since
-      // the other panes give up a share too. It only has to be a real grid
-      // rather than tmux's 80x24 default: the new pane's Terminal fits itself
-      // to its own box the moment it mounts and sends the true size.
+      // first split of a tab and an approximation after that, since the other
+      // panes give up a share too. What it must not be is unmeasured:
+      // `splitTab` sizes the new window to whatever it is handed, and 80x24 is
+      // the geometry defect this codebase has shipped twice, which is why
+      // `SplitRequest` demands these. The approximation costs nothing — the
+      // new pane's Terminal fits itself to its own box the moment it mounts
+      // and sends the size it really got.
       const half = (cells: number): number => Math.max(1, Math.floor(cells / 2))
       window.prcli
         .splitPane({
