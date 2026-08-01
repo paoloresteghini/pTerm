@@ -229,6 +229,57 @@ async function sessionEnv(name: string, key: string): Promise<string> {
   }
 }
 
+/** Type into a tab, through the same IPC listener a keystroke goes through. */
+function writeToTab(id: string, data: string): void {
+  const listener = ipc.listeners.get(CHANNELS.input)
+  if (!listener) throw new Error('input listener was not registered')
+  listener(null as never, id as never, data as never)
+}
+
+/**
+ * What `$PRCLI_TAB_ID` expands to inside the pane's own running PROCESS.
+ *
+ * Not `show-environment`, which reads the session's environment table — a
+ * different object, and not the one that matters. `addMember` sets the variable
+ * twice for exactly this reason: `-e` on `new-window` reaches the spawned
+ * pane's process and never the table, `-e` on `new-session -t <group>` reaches
+ * the table and not the process. The installed hook script reads
+ * `$PRCLI_TAB_ID` out of its own process environment (see `install.ts`), so a
+ * regression dropping `-e` from `newWindow` would take every status dot out
+ * while leaving a `show-environment` assertion perfectly green.
+ *
+ * Typed in rather than asked of tmux, because a process's environment is not
+ * something tmux will report. The marker is printed with `printf` so that the
+ * shell's echo of the command line — which comes straight back down the same
+ * stream — reads `TABID[%s]` and not the expanded value. The `%` in the
+ * character class is what excludes that echo, leaving the real output as the
+ * only thing this can match. An unset variable prints `TABID[]` and is matched
+ * as the empty string, so it fails on the comparison with a readable value
+ * rather than by running out the clock.
+ */
+function paneEnvTabId(id: string, ms = 10_000): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let buffer = ''
+    const timer = setTimeout(
+      () =>
+        reject(
+          new Error(`timed out reading PRCLI_TAB_ID from ${id}; saw ${JSON.stringify(buffer)}`),
+        ),
+      ms,
+    )
+    manager.onData((emittedId, data) => {
+      if (emittedId !== id) return
+      buffer += data
+      const found = /TABID\[([^\]%]*)\]/.exec(buffer)
+      if (!found) return
+      clearTimeout(timer)
+      resolve(found[1])
+    })
+    // Registered above before this runs, so nothing printed can be missed.
+    writeToTab(id, 'printf "TABID[%s]\\n" "$PRCLI_TAB_ID"\n')
+  })
+}
+
 /** Resolves once the given tab's client has stopped, whatever the reason. */
 function nextExit(id: string, ms = 8000): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -813,9 +864,17 @@ describe('splitPane and closePane', () => {
     expect(group).not.toBe('')
     expect(await sessionGroup(second.tmuxSession)).toBe(group)
 
-    // Each pane's OWN id in its own session's environment — the hook script
-    // reads this to say which pane an event came from, so two panes sharing one
-    // value is two panes' status collapsed onto one dot.
+    // Each pane's OWN id, read out of each pane's own running PROCESS — which
+    // is where the hook script reads it from, and a different object from the
+    // session environment table asserted below. Two panes sharing one value is
+    // two panes' status collapsed onto one dot.
+    expect(await paneEnvTabId(second.id)).toBe(second.id)
+    expect(await paneEnvTabId(founder.id)).toBe(founder.id)
+
+    // The table as well, because `addMember` sets the variable in both places
+    // deliberately and a reattach reads this one. Neither assertion stands in
+    // for the other: `-e` on `new-window` reaches only the process, `-e` on
+    // `new-session -t <group>` reaches only the table.
     await expect
       .poll(() => sessionEnv(founder.tmuxSession, 'PRCLI_TAB_ID'), { timeout: 10_000 })
       .toBe(`PRCLI_TAB_ID=${founder.id}`)
@@ -928,6 +987,155 @@ describe('splitPane and closePane', () => {
     expect(row.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
     // Selection followed the pane that went, rather than naming it still.
     expect(row.activePaneId).toBe(founder.id)
+  })
+
+  /**
+   * A split tab whose sibling has died and been restarted — so it is running,
+   * back in its tmux group and back in `config.panes`, and claimed by no tab
+   * row at all.
+   *
+   * That last part is the state both tests below are about, and it is not
+   * contrived: `forgetTab` drops a dead pane's row, the next `store.read()`
+   * drops it from the kids, and `restartTab` writes the pane back without
+   * putting it back in the layout. Nothing repairs it before the next restore.
+   */
+  async function splitThenRestartSibling(): Promise<{
+    founder: TabDescriptor
+    second: TabDescriptor
+  }> {
+    const { founder, second } = await splitOnce()
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const secondWindow = await adapter.windowIdOf(second.tmuxSession)
+    expect(secondWindow).toMatch(/^@\d+$/)
+
+    // The death hook's own two commands, in its order — see the restartTab
+    // tests above. This manager has no death reporter, so nothing else would.
+    const exitEvent = waitForExitEvent(second.id)
+    await run('tmux', [
+      '-L', SOCKET,
+      'kill-session', '-t', `=${second.tmuxSession}`, ';', 'kill-window', '-t', secondWindow,
+    ])
+    await exitEvent
+    await expect(adapter.hasSession(second.tmuxSession)).resolves.toBe(false)
+
+    const restarted = await invoke<TabDescriptor>(CHANNELS.restartTab, {
+      tab: second,
+      cols: 100,
+      rows: 30,
+    })
+    await expect.poll(() => adapter.hasSession(restarted.tmuxSession), { timeout: 8000 }).toBe(true)
+
+    // The precondition, asserted rather than assumed: the restarted pane is
+    // back on disk and NO row claims it. If this ever stopped holding, both
+    // tests below would be exercising the ordinary path instead of this one.
+    const before = await written()
+    expect(before.panes.map((pane) => pane.id).sort()).toEqual([founder.id, second.id].sort())
+    expect(before.tabs).toHaveLength(1)
+    expect(before.tabs[0].layout.kids).toEqual([founder.id])
+
+    return { founder, second }
+  }
+
+  // Building `kids` from the saved row alone drops a LIVE pane from both the
+  // file and the reply, which is the one thing `TabShape` promises not to do.
+  // Reachable the moment both affordances are wired: restart a dead pane in a
+  // split tab, then split again.
+  it('keeps a restarted pane in the tab when a sibling is split', async () => {
+    const { founder, second } = await splitThenRestartSibling()
+
+    const shape = await invoke<TabShape>(CHANNELS.splitPane, {
+      paneId: founder.id,
+      dir: 'row',
+      cols: 100,
+      rows: 30,
+    })
+    expect(shape.panes).toHaveLength(3)
+    const third = shape.panes[1]
+    await waitForPrompt(third.id)
+    expect(shape.panes.map((pane) => pane.id)).toEqual([founder.id, third.id, second.id])
+
+    const after = await written()
+    expect(after.tabs).toHaveLength(1)
+    expect(after.tabs[0].layout.kids).toEqual([founder.id, third.id, second.id])
+    expect(after.tabs[0].layout.ratio).toHaveLength(3)
+    expect(after.tabs[0].layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+  })
+
+  // The same union in `closePane`, and it needs its own stale row: a split
+  // repairs the row on its way past, so a close that follows one is no longer
+  // testing this. Closing the FOUNDER while the row still claims only the
+  // founder is the sharpest form of it — without the union the row's last kid
+  // goes, the tab is dropped as empty, and a running pane loses the tab it is
+  // drawn in.
+  it('keeps a restarted pane in the tab when the last claimed pane is closed', async () => {
+    const { founder, second } = await splitThenRestartSibling()
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+
+    const closed = await invoke<TabShape>(CHANNELS.closePane, founder.id)
+    expect(closed.panes.map((pane) => pane.id)).toEqual([second.id])
+    expect(closed.tabs).toHaveLength(1)
+    expect(closed.tabs[0].layout.kids).toEqual([second.id])
+
+    // The pane that had to survive really did, in tmux and not only in the
+    // reply. Polled for the founder's death, asserted plainly for the sibling.
+    await expect.poll(() => adapter.hasSession(founder.tmuxSession), { timeout: 8000 }).toBe(false)
+    expect(await adapter.hasSession(second.tmuxSession)).toBe(true)
+
+    const after = await written()
+    expect(after.panes.map((pane) => pane.id)).toEqual([second.id])
+    expect(after.tabs).toHaveLength(1)
+    // The row keeps the dead FOUNDER's id, and that is right: a tmux group
+    // keeps the name it was founded under, and restore resolves rows through
+    // `tabIdFromGroupName`, so a row renamed after the survivor would stop
+    // matching the tab. Re-founding is Task 2d's.
+    expect(after.tabs[0].id).toBe(founder.id)
+    expect(after.tabs[0].layout.kids).toEqual([second.id])
+    expect(after.tabs[0].layout.ratio).toHaveLength(1)
+    expect(after.tabs[0].layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+  })
+
+  // `withTabRow` replaces a row where it stands rather than removing and
+  // appending, because array order is the order the tab bar draws. Every other
+  // test here has one tab, so nothing else exercises it — and Task 2d reuses
+  // the same helper to rewrite a row's id.
+  it('leaves the other tabs where they are when one is split or closed', async () => {
+    const first = await invoke<TabDescriptor>(CHANNELS.open, {
+      projectSlug: 'lumio',
+      cwd: tmpdir(),
+    })
+    await waitForPrompt(first.id)
+    const other = await invoke<TabDescriptor>(CHANNELS.open, {
+      projectSlug: 'lumio',
+      cwd: tmpdir(),
+    })
+    await waitForPrompt(other.id)
+
+    const size = { dir: 'row', cols: 100, rows: 30 } as const
+    const firstSplit = await invoke<TabShape>(CHANNELS.splitPane, { paneId: first.id, ...size })
+    expect(firstSplit.panes).toHaveLength(2)
+    await waitForPrompt(firstSplit.panes[1].id)
+    const otherSplit = await invoke<TabShape>(CHANNELS.splitPane, { paneId: other.id, ...size })
+    expect(otherSplit.panes).toHaveLength(2)
+    await waitForPrompt(otherSplit.panes[1].id)
+
+    expect((await written()).tabs.map((row) => row.id)).toEqual([first.id, other.id])
+
+    // Splitting the FIRST tab again must not send it behind the second.
+    const again = await invoke<TabShape>(CHANNELS.splitPane, { paneId: first.id, ...size })
+    expect(again.panes).toHaveLength(3)
+    await waitForPrompt(again.panes[1].id)
+    const afterSplit = await written()
+    expect(afterSplit.tabs.map((row) => row.id)).toEqual([first.id, other.id])
+    expect(afterSplit.tabs[0].layout.kids).toHaveLength(3)
+    // And the neighbour's row is untouched by a split it had no part in.
+    expect(afterSplit.tabs[1].layout.kids).toEqual(otherSplit.tabs[0].layout.kids)
+
+    // Same both ways: closing a pane of the second tab leaves the first tab's
+    // row where it was and as it was.
+    await invoke<TabShape>(CHANNELS.closePane, otherSplit.panes[1].id)
+    const afterClose = await written()
+    expect(afterClose.tabs.map((row) => row.id)).toEqual([first.id, other.id])
+    expect(afterClose.tabs[0].layout.kids).toEqual(afterSplit.tabs[0].layout.kids)
   })
 
   it('closes the tab when its last pane is closed', async () => {

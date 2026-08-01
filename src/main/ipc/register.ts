@@ -60,10 +60,13 @@ export function registerIpc(
   // reaches for the wrong one type-checks perfectly — a `TabRow` has an `id`
   // too — which is why that is written down here rather than left to be
   // noticed. Every handler that only opens or forgets a pane therefore works in
-  // `config.panes` alone. The two exceptions are `splitPane` and `closePane`
-  // below, which change what a tab HOLDS: they write both arrays, in one
-  // `store.write`, so no reader ever sees a pane no tab lists or a kid naming
-  // no pane.
+  // `config.panes` alone. Two below do not: `splitPane` and `closePane` change
+  // what a tab HOLDS, and write both arrays in one `store.write` so no reader
+  // ever sees a pane no tab lists or a kid naming no pane. `CHANNELS.restore`
+  // is the third writer of `config.tabs` and the one that is easy to miss —
+  // it does not write the file itself, it hands `serialise` to
+  // `restoreWorkspace`, which rebuilds every row from live tmux and writes them
+  // with the panes inside this same queue.
   let tail: Promise<unknown> = Promise.resolve()
   const serialise = <T>(operation: () => Promise<T>): Promise<T> => {
     const result = tail.then(operation, operation)
@@ -592,10 +595,19 @@ export function registerIpc(
     // Read off the NEW pane, after the split, rather than derived a second time
     // from the sibling: this is the id `splitTab` itself decided and recorded
     // for the member it just made, so the row written below cannot be named
-    // something the manager disagrees with. The fallback covers only a pane
-    // that vanished between the split and this line, where the sibling's own id
-    // is the best evidence left.
-    const tabId = manager.tabIdOf(record.id) ?? paneId
+    // something the manager disagrees with.
+    //
+    // The sibling is asked second, and the sibling's own id only third. Nothing
+    // can actually reach past the first — `tabIdOf` is the next synchronous
+    // statement after the `await` above resolves, and the pty exit callback
+    // that disposes an entry is a macrotask, which cannot interleave inside a
+    // microtask continuation. But the last fallback is wrong wherever it is
+    // reached: `paneId` is the SIBLING's id, and that equals the tab id only
+    // when the sibling is the founder. Split from any other pane and it names a
+    // tab nothing matches, which loses the layout at the next restore — the
+    // failure `tabIdOf`'s own doc warns about. Asking the sibling's entry first
+    // costs nothing and is right in both directions.
+    const tabId = manager.tabIdOf(record.id) ?? manager.tabIdOf(paneId) ?? paneId
 
     // The same initialisation `CHANNELS.open` does, and needed for the same
     // reason: nothing else gives a pane its first state, so a `claude` pane
@@ -610,9 +622,33 @@ export function registerIpc(
       // `config.panes`, so the saved kids all still exist and none needs
       // filtering here. No saved row at all means a tab that has never been
       // split: `CHANNELS.open` writes none and restore writes one for every tab
-      // it brings back, so the sibling alone really is the whole of it.
+      // it brings back, so the sibling alone is the best starting point.
       const saved = config.tabs.find((row) => row.id === tabId)
-      const siblings = saved?.layout.kids ?? [paneId]
+      const savedKids = saved?.layout.kids ?? [paneId]
+      // Unioned with the tab's other live panes, because the row alone is not
+      // the whole tab: a pane that died and was restarted is running, back in
+      // this group, and back in `config.panes`, but no row claims it — its row
+      // entry went when it died and nothing puts it back until the next
+      // restore. Building `kids` from the row alone would drop a LIVE pane from
+      // both the file and the reply, which is the one thing `TabShape` promises
+      // not to do. Appending it is also exactly what `restore.ts`'s `tabRowFor`
+      // does with a pane its saved row never knew, so this writes the row the
+      // next restore would have produced rather than inventing a policy.
+      //
+      // `manager.panesOfTab` rather than the manager's own entries: it starts
+      // from live tmux, so it also sees a pane whose session survives with no
+      // client attached — detached, and still a member of this tab. Only the
+      // ids are read, so the cwd it synthesises for a pane it has no entry for
+      // never reaches anything.
+      //
+      // Filtered against `panes` because a kid has to name a pane row: an id
+      // that names none would be dropped by the next `store.read()` anyway, and
+      // `held` below would answer for it with nothing.
+      const listed = new Set(panes.map((pane) => pane.id))
+      const unclaimed = (await manager.panesOfTab(tabId))
+        .map((pane) => pane.id)
+        .filter((id) => id !== record.id && !savedKids.includes(id) && listed.has(id))
+      const siblings = [...savedKids, ...unclaimed]
       const at = siblings.indexOf(paneId)
       const kids =
         at === -1
@@ -676,48 +712,49 @@ export function registerIpc(
       const config = await store.read()
       const panes = config.panes.filter((saved) => saved.id !== paneId)
 
-      // Kids and shares are index-aligned, and `store.read()` has already made
-      // the shares one per kid, positive and finite — so they are read together
-      // rather than re-derived. No saved row means nothing this tab held is
-      // known beyond the pane just closed, which is a tab of one: no survivors,
-      // no row.
+      // The same union `splitPane` builds, and for the same reason: a pane that
+      // died and was restarted is live and in `config.panes` but in no row, and
+      // closing its sibling must not be the thing that drops it from the tab.
+      // The pane just closed cannot come back through it — `manager.kill()`
+      // destroyed its tmux session, which is what `panesOfTab` reads, and
+      // `listed` is the survivors on disk.
       const saved = config.tabs.find((row) => row.id === tabId)
-      const kept: { kid: string; share: number }[] = []
-      if (saved) {
-        saved.layout.kids.forEach((kid, index) => {
-          if (kid === paneId) return
-          kept.push({ kid, share: saved.layout.ratio[index] })
+      const savedKids = saved?.layout.kids ?? []
+      const listed = new Set(panes.map((pane) => pane.id))
+      const unclaimed = (await manager.panesOfTab(tabId))
+        .map((pane) => pane.id)
+        .filter((id) => !savedKids.includes(id) && listed.has(id))
+      const kids = [...savedKids.filter((kid) => kid !== paneId), ...unclaimed]
+
+      // `restore.ts`'s `tabRowFor` algorithm, on the same inputs and for the
+      // same reason: a kid the saved row knew keeps its own share, anything
+      // else takes an even one, and the lot is rescaled so the row describes a
+      // whole tab. Kids and shares are index-aligned and `store.read()` has
+      // already made the shares one per kid, positive and finite, so the saved
+      // ones can be read straight off. Without the rescale they sum to less
+      // than 1 on disk — invisible through `store.read()`, which rescales them
+      // again on the way back in.
+      //
+      // A tab with no panes left loses its row outright rather than keeping an
+      // empty one, which would put a tab nobody can see in the bar until the
+      // next read swept it.
+      let row: TabRow | null = null
+      if (kids.length > 0) {
+        const even = 1 / kids.length
+        const shares = kids.map((kid) => {
+          const at = savedKids.indexOf(kid)
+          return at === -1 || !saved ? even : saved.layout.ratio[at]
         })
+        const total = shares.reduce((sum, share) => sum + share, 0)
+        const active = saved?.activePaneId
+        row = {
+          id: tabId,
+          // Selection has to name a pane the tab still holds; when the closed
+          // pane was the selected one the first survivor takes it.
+          activePaneId: active && kids.includes(active) ? active : kids[0],
+          layout: { dir: saved?.layout.dir ?? 'row', ratio: shares.map((s) => s / total), kids },
+        }
       }
-
-      // What the survivors' shares add up to WITHOUT the closed pane's, which
-      // is less than 1 by exactly the share being given away.
-      const total = kept.reduce((sum, entry) => sum + entry.share, 0)
-
-      // A tab with no panes left loses its row outright. Leaving one behind
-      // would put an empty tab in the bar until the next `store.read()` swept
-      // it, and would leave `withTabRow`'s caller writing a row describing
-      // nothing.
-      const active = saved?.activePaneId
-      const row: TabRow | null =
-        kept.length === 0
-          ? null
-          : {
-              id: tabId,
-              // Selection has to name a pane the tab still holds; when the
-              // closed pane was the selected one the first survivor takes it.
-              activePaneId: active && active !== paneId ? active : kept[0].kid,
-              layout: {
-                dir: saved?.layout.dir ?? 'row',
-                // Rescaled by the survivors' own total, so the closed pane's
-                // share goes to its neighbours in proportion and the row still
-                // describes a whole tab. Without this the shares sum to less
-                // than 1 on disk — invisible through `store.read()`, which
-                // rescales them again on the way back in.
-                ratio: kept.map((entry) => entry.share / total),
-                kids: kept.map((entry) => entry.kid),
-              },
-            }
 
       const tabs = withTabRow(config.tabs, tabId, row)
       await store.write({ ...config, panes, tabs })
