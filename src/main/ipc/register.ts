@@ -675,7 +675,8 @@ export function registerIpc(
           // re-orientation is not cosmetic — every pane reflows and its real
           // tmux session is resized. Refusing the split outright was the third,
           // rejected as a dead key with no explanation. Ignoring is the only
-          // one where nothing the user did not act on moves.
+          // one that adds the pane the user asked for without moving panes
+          // they did not act on.
           //
           // Gated on the tab actually being split, not merely on a row
           // existing. Restore writes a row for every tab it brings back,
