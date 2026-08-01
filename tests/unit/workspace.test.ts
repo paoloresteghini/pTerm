@@ -1204,3 +1204,152 @@ describe('workspaceReducer', () => {
     })
   })
 })
+
+/**
+ * A tombstone across a split or a close of one of its siblings.
+ *
+ * The one transition the dead-pane ruling was never tested over, and the seam
+ * where two correct rules met and produced a defect. Main forgets a pane at its
+ * death, so a `TabShape` reply names only panes that are on disk; the renderer
+ * keeps the tombstone. Taking the reply's `kids` wholesale threw the tombstone
+ * out of its tab — and when the tombstone was the tab's FOUNDER, its id was the
+ * row's id too, so `paneGroups` skipped the group the second time it saw that id
+ * and every LIVE pane of the tab lost its box.
+ *
+ * Every fixture below puts the founder first in `state.panes`, which is the
+ * order restore and `applyTabShape` both produce, and is the order in which the
+ * live panes were the ones dropped. The reverse order dropped the tombstone
+ * instead; `both orderings` covers it explicitly rather than trusting that one
+ * implies the other.
+ */
+describe('a tombstone when its tab is split or closed', () => {
+  /** Tab `aaa` founded the tab and has died; `bbb` is live beside it. */
+  const deadFounder: WorkspaceState = {
+    projects: [project('p1', 'lumio', 'bbb')],
+    panes: [tab('aaa'), tab('bbb')],
+    tabs: [ratioRow('aaa', ['aaa', 'bbb'], [0.5, 0.5])],
+    activeProjectId: 'p1',
+    status: { aaa: 'crashed', bbb: 'idle' },
+    dead: { aaa: 0 },
+  }
+
+  /** What main sends back: the founder is not on disk, so it is not named. */
+  const splitReply = {
+    panes: [tab('bbb'), tab('ccc')],
+    tabs: [ratioRow('aaa', ['bbb', 'ccc'], [0.5, 0.5])],
+  }
+
+  it('keeps every live pane boxed when the dead pane is the founder', () => {
+    const next = workspaceReducer(deadFounder, { type: 'split', shape: splitReply })
+    const groups = paneGroups(next)
+    expect(groups).not.toHaveLength(0)
+    const boxed = groups.flatMap((group) => group.panes.map((box) => box.pane.id))
+    // The failure this exists for: `bbb` and `ccc` were skipped entirely,
+    // unmounting two live xterms and destroying their scrollback.
+    expect(boxed).toContain('bbb')
+    expect(boxed).toContain('ccc')
+    expect(boxed).toContain('aaa')
+    // And still exactly one box each — the merge must not double any of them.
+    expect(boxed).toHaveLength(3)
+  })
+
+  it('keeps the tombstone in its own tab rather than making it a group of its own', () => {
+    const next = workspaceReducer(deadFounder, { type: 'split', shape: splitReply })
+    const groups = paneGroups(next)
+    expect(groups).toHaveLength(1)
+    expect(groups[0].id).toBe('aaa')
+    expect(groups[0].panes.map((box) => box.pane.id)).toEqual(['aaa', 'bbb', 'ccc'])
+    // Its slot, not merely its presence: the dead pane was first and stays first.
+    expect(groups[0].panes[0].dead).toBe(true)
+  })
+
+  it('keeps the tombstone its share, and leaves the row summing to a whole tab', () => {
+    const next = workspaceReducer(deadFounder, { type: 'split', shape: splitReply })
+    const row = next.tabs.find((candidate) => candidate.id === 'aaa')
+    expect(row).toBeDefined()
+    expect(row?.layout.kids).toEqual(['aaa', 'bbb', 'ccc'])
+    const ratio = row?.layout.ratio ?? []
+    expect(ratio).toHaveLength(3)
+    expect(ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+    // The dead pane keeps the half it had EXACTLY; the two panes main sized
+    // divide the other half between them in the proportions it asked for.
+    // Renormalising all three alike instead gave the tombstone a third of the
+    // tab — the dead pane resizing, which is what the ruling forbids.
+    expect(ratio[0]).toBeCloseTo(0.5)
+    expect(ratio[1]).toBeCloseTo(0.25)
+    expect(ratio[2]).toBeCloseTo(0.25)
+  })
+
+  it('still reports the crashed pane in the tab and project dots', () => {
+    const next = workspaceReducer(deadFounder, { type: 'split', shape: splitReply })
+    const withStatus: WorkspaceState = {
+      ...next,
+      status: { ...next.status, ccc: 'idle' },
+    }
+    // Task 8's whole premise. Dropping the tombstone from the row took its
+    // `crashed` out of both folds, turning the tab and the sidebar's project row
+    // green while `TabBar` went on drawing that same pane's own dot red.
+    expect(stateOfTab(withStatus, 'aaa')).toBe('crashed')
+    expect(stateOfProject(withStatus, 'p1')).toBe('crashed')
+  })
+
+  it('drops neither side in either order of state.panes', () => {
+    for (const panes of [
+      [tab('aaa'), tab('bbb')],
+      [tab('bbb'), tab('aaa')],
+    ]) {
+      const next = workspaceReducer({ ...deadFounder, panes }, { type: 'split', shape: splitReply })
+      const boxed = paneGroups(next).flatMap((group) => group.panes.map((box) => box.pane.id))
+      expect(boxed).toHaveLength(3)
+      for (const id of ['aaa', 'bbb', 'ccc']) expect(boxed).toContain(id)
+    }
+  })
+
+  it('keeps the tombstone when a sibling is closed', () => {
+    const state: WorkspaceState = {
+      ...deadFounder,
+      panes: [tab('aaa'), tab('bbb'), tab('ccc')],
+      tabs: [ratioRow('aaa', ['aaa', 'bbb', 'ccc'], [0.5, 0.25, 0.25])],
+      status: { aaa: 'crashed', bbb: 'idle', ccc: 'idle' },
+    }
+    const next = workspaceReducer(state, {
+      type: 'closedPane',
+      paneId: 'ccc',
+      shape: { panes: [tab('bbb')], tabs: [ratioRow('aaa', ['bbb'], [1])] },
+    })
+    const row = next.tabs.find((candidate) => candidate.id === 'aaa')
+    expect(row?.layout.kids).toEqual(['aaa', 'bbb'])
+    expect(row?.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+    // The closed pane is gone and does not come back through the merge.
+    expect(next.panes.map((pane) => pane.id)).toEqual(['aaa', 'bbb'])
+    expect(stateOfTab(next, 'aaa')).toBe('crashed')
+  })
+
+  it('leaves the tombstone reachable when the last live pane closes', () => {
+    const next = workspaceReducer(deadFounder, {
+      type: 'closedPane',
+      paneId: 'bbb',
+      shape: { panes: [], tabs: [] },
+    })
+    // The tab is gone, so the row goes with it — and the tombstone's id is no
+    // longer shared with any row, which is what makes a group of its own safe.
+    expect(next.tabs).toHaveLength(0)
+    const groups = paneGroups(next)
+    expect(groups).toHaveLength(1)
+    expect(groups[0].panes.map((box) => box.pane.id)).toEqual(['aaa'])
+    expect(groups[0].panes[0].dead).toBe(true)
+  })
+
+  it('does not invent a kid for a pane that was never in the row', () => {
+    // A pane in `state.panes` that the prior row never named — an `opened` tab
+    // awaiting its first row — must not be swept into some other tab by the
+    // merge. Only a kid the prior row itself held comes back.
+    const state: WorkspaceState = { ...deadFounder, panes: [...deadFounder.panes, tab('zzz')] }
+    const next = workspaceReducer(state, { type: 'split', shape: splitReply })
+    expect(next.tabs.find((candidate) => candidate.id === 'aaa')?.layout.kids).toEqual([
+      'aaa',
+      'bbb',
+      'ccc',
+    ])
+  })
+})

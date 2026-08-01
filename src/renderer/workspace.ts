@@ -346,6 +346,18 @@ export interface PaneBox {
  * pane's id, so when a row does arrive for that pane — only a split of it can
  * produce one — the group's id does not change, React reconciles it as the
  * same container, and the terminal inside is never unmounted.
+ *
+ * **That reasoning only ever covered a row ARRIVING for a stray, and the
+ * opposite direction was a defect for as long as it went unwritten.** A row
+ * that LOSES its founder while the founder is still in `state.panes` — which is
+ * exactly a founder pane that has died and left a tombstone — makes a stray
+ * whose own id is that row's id. The two then collide in `seen` below, and
+ * whichever is walked second is skipped entirely: in `state.panes` order that
+ * is every LIVE pane of the tab, each one unmounted and its scrollback
+ * destroyed. What keeps a row from losing its founder is `withKeptPanes`, in
+ * the reducer, which puts a tombstoned kid back into the row main sent without
+ * it. The invariant this key relies on is therefore not free — it is
+ * maintained there, and a change that stops maintaining it lands here.
  */
 export interface PaneGroup {
   /** The row's id, or the pane's own when no row names it. */
@@ -431,8 +443,14 @@ function visibleGroupId(state: WorkspaceState): string | null {
  *
  * **At most one box per pane is enforced here**, by `claimed` across rows and
  * by `boxed` within one — no input can make this mount two xterms on one tmux
- * pane. **At least one box per pane is inherited from the two writers of
- * `tabs`**: `restore.ts` builds its rows from a Map keyed by tab id and
+ * pane. **At least one box per pane is NOT enforced here**, and saying so is
+ * the point: this function skips any group id it has already seen, so it is
+ * only ever as good as the ids it is given. It needs unique row ids *and* it
+ * needs no stray pane to carry an id a row is keyed by; the second was assumed
+ * rather than argued until a dead founder pane produced exactly that and cost
+ * a tab every live terminal in it. `withKeptPanes` is what supplies it now.
+ * The row-id half is inherited from the two writers of
+ * `tabs`: `restore.ts` builds its rows from a Map keyed by tab id and
  * replaces `tabs` wholesale, and `register.ts`'s `withTabRow` replaces the row
  * at a matching id or appends — neither can mint a second row with an id it
  * already has. Not from `store.ts`: its `tabRows` takes `candidate.id` as it
@@ -503,10 +521,97 @@ export function paneGroups(state: WorkspaceState): PaneGroup[] {
 }
 
 /**
+ * `next`, with any kid of the row it replaces that is still a pane here but
+ * that main did not name, put back at the index it held.
+ *
+ * This is the seam between two rules that are each right on their own. Main
+ * owns existence and forgets a pane the moment its session dies — `forgetTab`
+ * drops its row, and `normaliseLayout` then drops it from the tab's kids — so
+ * a `TabShape` reply names only panes that are on disk. The renderer owns
+ * tombstones: a pane that died while this window was up keeps its box, its
+ * share and its scrollback until the user restarts or dismisses it. Taking
+ * main's `kids` wholesale therefore threw every tombstone out of its tab on
+ * the next split or close, which is the one transition that rule was never
+ * tested over.
+ *
+ * Three things went wrong when it did, and the first is why this is not a
+ * cosmetic merge. A tab row's id IS its founder pane's id, so a tab whose
+ * FOUNDER is the tombstone produced a stray pane keyed by the very id its own
+ * row is keyed by — and `paneGroups` skips a group id it has already seen, so
+ * **every live pane of that tab lost its box**, unmounting its xterm and
+ * destroying the scrollback. Second, the tombstone's own state stopped
+ * reaching `stateOfTab`, so a crashed pane's tab and project both went green
+ * while the tab bar still drew that pane red. Third, its share was
+ * redistributed to its siblings, which is the collapse the dead-pane ruling
+ * exists to prevent.
+ *
+ * Only a kid that is still in `panes` comes back. The pane just closed is
+ * already out of that list by the time this runs, so a close cannot resurrect
+ * what it removed — and only a kid the PRIOR ROW itself held is considered, so
+ * a pane that never belonged to this tab cannot be swept into it.
+ *
+ * **A reinserted kid keeps its own share exactly, and the incoming row is
+ * scaled into the room that is left** — not renormalised alongside it. The
+ * difference is the ruling: renormalising treats every share alike, so a
+ * tombstone at half a tab came back at a third of one the moment its sibling
+ * was split, which is the dead pane resizing. Scaling instead means the panes
+ * main sized divide `1 - (what the tombstones hold)` between them in the
+ * proportions main asked for, the tombstone is untouched, and the row still
+ * sums to a whole tab.
+ *
+ * Falls back to an even split when the kept shares leave no room, or when the
+ * incoming row's own shares sum to nothing. Neither is reachable from a row
+ * `store.read()` has normalised, but a zero share is a 0%-wide box, which fits
+ * to tmux's 2x1 floor — the geometry defect wearing different numbers — so the
+ * arithmetic answers rather than trusting its inputs.
+ */
+function withKeptPanes(
+  prior: TabRow | undefined,
+  next: TabRow,
+  panes: TabDescriptor[],
+): TabRow {
+  if (!prior) return next
+  const present = new Set(panes.map((pane) => pane.id))
+  const named = new Set(next.layout.kids)
+  const missing = prior.layout.kids
+    .map((id, index) => ({ id, index, share: prior.layout.ratio[index] ?? 0 }))
+    .filter((entry) => present.has(entry.id) && !named.has(entry.id))
+  if (missing.length === 0) return next
+
+  const held = missing.reduce((sum, entry) => sum + entry.share, 0)
+  const incoming = next.layout.ratio.reduce((sum, share) => sum + share, 0)
+  const room = 1 - held
+  const usable = room > 0 && incoming > 0
+
+  const entries = next.layout.kids.map((id, index) => ({
+    id,
+    share: usable ? ((next.layout.ratio[index] ?? 0) / incoming) * room : 0,
+  }))
+  // In ascending prior index, which is the order `prior.layout.kids` is already
+  // in, so each splice lands before the ones after it are placed. Clamped to
+  // the current length because the row it is being put back into may be shorter
+  // than the one it left — a close removes a kid.
+  for (const entry of missing) {
+    entries.splice(Math.min(entry.index, entries.length), 0, { id: entry.id, share: entry.share })
+  }
+  return {
+    ...next,
+    layout: {
+      ...next.layout,
+      kids: entries.map((entry) => entry.id),
+      ratio: entries.map((entry) => (usable ? entry.share : 1 / entries.length)),
+    },
+  }
+}
+
+/**
  * Folds a `TabShape` reply into state: every pane it names is upserted into
  * `state.panes` in place, with any pane not already present appended, and its
  * one row — when it has one — replaces the matching entry in `state.tabs` or
  * is appended if this tab had none yet.
+ *
+ * The row that replaces keeps this tab's tombstones, which main cannot name;
+ * see `withKeptPanes`.
  *
  * Only `split` uses this. `closedPane` looked like a second caller at first —
  * it also gets a `TabShape` back — but it needs to *remove* a pane by an id
@@ -521,7 +626,14 @@ function applyTabShape(state: WorkspaceState, shape: TabShape): WorkspaceState {
     ...state.panes.map((pane) => shape.panes.find((incoming) => incoming.id === pane.id) ?? pane),
     ...shape.panes.filter((incoming) => !state.panes.some((pane) => pane.id === incoming.id)),
   ]
-  const row = shape.tabs[0]
+  const incoming = shape.tabs[0]
+  const row = incoming
+    ? withKeptPanes(
+        state.tabs.find((candidate) => candidate.id === incoming.id),
+        incoming,
+        panes,
+      )
+    : undefined
   const tabs = row
     ? state.tabs.some((candidate) => candidate.id === row.id)
       ? state.tabs.map((candidate) => (candidate.id === row.id ? row : candidate))
@@ -697,12 +809,22 @@ export function workspaceReducer(
       const closed = state.panes.find((pane) => pane.id === action.paneId)
       const panes = state.panes.filter((pane) => pane.id !== action.paneId)
       const nextRow = action.shape.tabs[0]
+      // Keeping this tab's tombstones, which main forgot at their panes' death
+      // and cannot name here — see `withKeptPanes`. Against `panes`, which has
+      // already had the closed pane filtered out of it, so the close cannot put
+      // back what it just removed.
+      const merged = nextRow ? withKeptPanes(priorRow, nextRow, panes) : undefined
       const tabs = priorRow
-        ? nextRow
+        ? merged
           ? // Row ids are frozen to the founder pane, so `nextRow.id` is always
             // `priorRow.id` here — never a rename to chase.
-            state.tabs.map((row) => (row.id === priorRow.id ? nextRow : row))
-          : state.tabs.filter((row) => row.id !== priorRow.id)
+            state.tabs.map((row) => (row.id === priorRow.id ? merged : row))
+          : // A tab whose last LIVE pane has gone loses its row, tombstones and
+            // all. Each becomes a group of its own, keyed by its own id — no
+            // longer a collision, because the row that shared that id has gone
+            // with it — so its scrollback stays mounted and stays reachable from
+            // its own tab-bar entry.
+            state.tabs.filter((row) => row.id !== priorRow.id)
         : state.tabs
       const next = { ...state, panes, tabs }
 
