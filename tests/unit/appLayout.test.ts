@@ -15,6 +15,27 @@ import { describe, it, expect } from 'vitest'
  * container before fitting to it* — the three properties whose loss drives a
  * real tmux session to a nonsense size. A grep is a poor test; it is better
  * than the nothing that is otherwise on offer here.
+ *
+ * **Edits that will fail this without anything being wrong.** Each was made
+ * against the real files and the result counted, so this list is measured
+ * rather than inferred:
+ *
+ * - renaming `group` in App.tsx — 3 of the 4 App assertions; renaming `box` —
+ *   1 (the computed styles).
+ * - switching the class strings to double quotes — 2 (the visibility ternary
+ *   and the class list). The two `.map(` assertions do not read quotes.
+ * - moving this JSX into its own component file — all 4. This test reads
+ *   `App.tsx` by path; it follows the code nowhere.
+ * - renaming `container` in Terminal.tsx — the guard assertion.
+ *
+ * If you are here because of one of those, the invariant is not broken and the
+ * fix is to re-point the assertion at the new name or the new file — but do
+ * re-point it, because nothing else in this suite is watching these
+ * properties. Everything else was measured too, in the other direction:
+ * reindenting, rewrapping, brace padding, reordering or adding classes,
+ * changing `data-testid`s, adding a `cn(` call earlier in the file, and
+ * editing any comment — including one that contains the words `display: none`
+ * — all leave it green.
  */
 
 /**

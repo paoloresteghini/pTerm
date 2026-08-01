@@ -318,6 +318,22 @@ describe('paneGroups', () => {
     expect(groups[1]?.panes.map((box) => box.style.flexBasis)).toEqual(['100%'])
   })
 
+  it('boxes a pane one row names twice exactly once', () => {
+    // `normaliseLayout` dedupes kids within a row, so this too is upstream's
+    // job today — but a second box is a second xterm on one tmux pane, and
+    // here it would also hand both boxes the same React key.
+    const state: WorkspaceState = {
+      ...three,
+      tabs: [ratioRow('bbb', ['bbb', 'bbb', 'ccc'], [0.5, 0.25, 0.25])],
+    }
+    const group = paneGroups(state).find((candidate) => candidate.id === 'bbb')
+    expect(group?.panes).toHaveLength(2)
+    expect(group?.panes.map((box) => box.pane.id)).toEqual(['bbb', 'ccc'])
+    // The first mention keeps its own share; the repeat's is dropped with it,
+    // exactly as an absent kid's is, and the survivors renormalise.
+    expect(group?.panes.map((box) => box.style.flexBasis)).toEqual(['66.6667%', '33.3333%'])
+  })
+
   it('drops a group left with nothing rather than rendering an empty tab', () => {
     // 'bbb' is claimed by the row built first, which leaves the row keyed by
     // 'bbb' — the one `tabOfPane` hands back for it — with no panes at all.

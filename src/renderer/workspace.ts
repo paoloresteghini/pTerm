@@ -218,21 +218,27 @@ function percent(share: number): string {
  * that are here fill the tab instead of leaving a hole where the missing one
  * would have gone.
  *
- * A kid already in `claimed` — boxed by an earlier group — is dropped the same
- * way. Two rows naming one pane is not a state main hands over today, since
- * `tabRows` in store.ts dedupes kids across rows before they reach here, but
- * it is a state a *transient* row rewrite could produce, and the consequence
- * is severe out of all proportion to this filter: the pane would be boxed in
- * both groups, mounting two xterms against one tmux pane, each fitting the
- * session to its own container. One pane, one box, whatever arrives.
+ * A kid already boxed is dropped the same way, whether it was boxed by an
+ * earlier group (`claimed`) or by an earlier position in this very row — hence
+ * `boxed`, which starts from `claimed` and grows as the row is walked, since
+ * `claimed` itself is not written until this returns. Neither duplicate is a
+ * state main hands over today: `tabRows` in store.ts dedupes kids across rows,
+ * and `normaliseLayout` dedupes them within one. Both are states a *transient*
+ * row rewrite could produce, and the consequence is severe out of all
+ * proportion to a set membership test — the pane would be boxed twice,
+ * mounting two xterms against one tmux pane, each fitting the session to its
+ * own container, and in the same-row case handing both boxes one React key.
+ * One pane, one box, however many times it is named.
  */
 function boxesOfRow(state: WorkspaceState, row: TabRow, claimed: Set<string>): PaneBox[] {
   const byId = new Map(state.panes.map((pane) => [pane.id, pane]))
+  const boxed = new Set(claimed)
   const kept = row.layout.kids
-    .map((id, index) => ({
-      pane: claimed.has(id) ? undefined : byId.get(id),
-      share: row.layout.ratio[index] ?? 0,
-    }))
+    .map((id, index) => {
+      const pane = boxed.has(id) ? undefined : byId.get(id)
+      if (pane) boxed.add(id)
+      return { pane, share: row.layout.ratio[index] ?? 0 }
+    })
     .filter((entry): entry is { pane: TabDescriptor; share: number } => entry.pane !== undefined)
   const total = kept.reduce((sum, entry) => sum + entry.share, 0)
   // A row carrying no usable ratios still has to divide the tab somehow, and
@@ -261,10 +267,19 @@ function visibleGroupId(state: WorkspaceState): string | null {
 
 /**
  * Every pane, arranged: one group per tab, in the order the tabs' first panes
- * appear in `state.panes`, and every pane in `state.panes` in exactly one of
- * them — at most once because `claimed` says so, at least once because a pane
- * that finds its group already built was put there by the row that built it,
- * or claimed by an earlier one.
+ * appear in `state.panes`.
+ *
+ * **At most one box per pane is enforced here**, by `claimed` across rows and
+ * by `boxed` within one — no input can make this mount two xterms on one tmux
+ * pane. **At least one box per pane is inherited from store.ts**, which keys a
+ * row by its founder pane and so never emits two rows with the same id. Given
+ * that, a pane whose group is already built was either boxed by the row that
+ * built it or claimed by an earlier one, so it is somewhere. Without it — two
+ * rows sharing an id — the second row is skipped by `seen` and its panes are
+ * dropped, which is a pane that never mounts. That case is not defended
+ * against because there is no non-arbitrary way to choose between two rows
+ * claiming to be the same tab; it is named so the next person does not have to
+ * rediscover which half of this is a guarantee.
  *
  * Driven by `state.panes` rather than by `state.tabs` for two reasons. Every
  * pane gets a group whether or not a row names it — nothing here can drop a
@@ -281,8 +296,12 @@ export function paneGroups(state: WorkspaceState): PaneGroup[] {
     const id = row?.id ?? pane.id
     if (seen.has(id)) continue
     seen.add(id)
-    // A stray pane is in no row's `kids`, and `claimed` only ever holds panes
-    // taken from one, so this branch cannot be handed a claimed pane.
+    // This branch cannot be handed a pane that is already boxed, though not
+    // because of what `claimed` holds — a stray's own id goes in there too,
+    // on the line below. It is the dichotomy: a pane that entered `claimed`
+    // from a row is in that row's `kids`, so `tabOfPane` would have found the
+    // row and sent it down the other branch; and a stray that has been here
+    // once has its own id in `seen`, which is what was just checked.
     const panes = row ? boxesOfRow(state, row, claimed) : [{ pane, style: { flexBasis: '100%' } }]
     // Only reachable from the same double-naming this guards: a row whose
     // kids were all boxed by rows processed before it has nothing left to
