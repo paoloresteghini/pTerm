@@ -99,6 +99,34 @@ async function sessionEnv(name: string, key: string): Promise<string> {
   }
 }
 
+/**
+ * The pid of the process a session's pane is running, per tmux.
+ *
+ * Trailing colon on the target: same requirement as `windowIdOf` above —
+ * without it this is an exact-match *window* target and tmux answers "can't
+ * find pane".
+ */
+async function panePid(name: string): Promise<string> {
+  const { stdout } = await run('tmux', [
+    '-L', SOCKET, 'display-message', '-p', '-t', `=${name}:`, '#{pane_pid}',
+  ])
+  return stdout.trim()
+}
+
+/**
+ * Whether a process with this pid still exists. Signal `0` sends nothing —
+ * it only asks the kernel whether the pid is live — so this cannot disturb
+ * the process it is checking.
+ */
+function isRunning(pid: string): boolean {
+  try {
+    process.kill(Number(pid), 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
 function waitFor(
   manager: SessionManager,
   id: string,
@@ -250,6 +278,34 @@ describe('SessionManager.kill', () => {
   it('throws rather than resolving when there is nothing to kill', async () => {
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
     await expect(manager.kill('000000000000000f')).rejects.toThrow(/no tmux session found/i)
+  })
+
+  it('kills one pane of a split without leaving its window or its process behind', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const manager = new SessionManager(adapter)
+    const founder = manager.open({ projectSlug: 'lumio', cwd: tmpdir() })
+    await waitFor(manager, founder.id, /\$|%|#/)
+    const second = await manager.splitTab({ paneId: founder.id, command: 'sleep 600' })
+    // Deliberately NO `waitFor` on `second`. Measured during pre-flight: a client
+    // attached to a pane running `sleep 600` emits 791 bytes of screen setup and
+    // not one `$`, `%` or `#`, so waiting for a prompt here times out at 8s and
+    // throws — the test could never pass. There is nothing left to wait for
+    // either: `splitTab` has already awaited every tmux call it makes.
+    const windows = await windowsIn(founder.tmuxSession)
+    expect(windows).toHaveLength(2)
+    // Read before the kill — afterwards there is no pane left to ask.
+    const pid = await panePid(second.tmuxSession)
+    expect(pid).toMatch(/^\d+$/)
+
+    await manager.kill(second.id)
+
+    expect(await sessionExists(second.tmuxSession)).toBe(false)
+    await expect.poll(() => windowsIn(founder.tmuxSession), { timeout: 10_000 }).toHaveLength(1)
+    // The window is gone, and so is what was running inside it. Asserted on the
+    // process rather than inferred from the window count, because "a running
+    // command with no session and no UI" is the actual harm this task prevents.
+    await expect.poll(() => isRunning(pid), { timeout: 10_000 }).toBe(false)
+    expect(await sessionExists(founder.tmuxSession)).toBe(true)
   })
 })
 

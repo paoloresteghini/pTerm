@@ -618,21 +618,41 @@ export class SessionManager {
   /**
    * Destroy the tmux session and everything running in it. Works whether or
    * not this app is attached — a tab detached earlier is still killable.
+   *
+   * `killSession` only ever destroys the MEMBER session. For a one-pane tab
+   * that has always been enough — the window dies with the last member in
+   * its group, and there is no group to leave it in. For a split it is not:
+   * the window and the process inside it belong to the group, not to any one
+   * member, so killing just the session leaks both, reachable afterwards
+   * only through `list-windows`. Resolved before the kill because there is no
+   * session left to ask the window of afterwards; killed session-then-window,
+   * the same order the death hook uses and for the same reason — a member
+   * whose window dies first falls back to a sibling's. `killWindow` already
+   * tolerates an already-gone window, which is what covers the one-pane case
+   * where the session's own death took the window with it.
+   *
+   * `windowIdOf`, not `lookupWindow`: this only ever needs a bare id to hand
+   * `killWindow`, and every way tmux can decline to give one — session gone,
+   * tmux unreachable — comes to the same thing here, nothing left to kill.
    */
   async kill(id: string): Promise<void> {
     const entry = this.entries.get(id)
     if (entry) {
+      const windowId = entry.windowId ?? (await this.adapter.windowIdOf(entry.record.tmuxSession))
       entry.intent = 'killed'
       this.entries.delete(id)
       entry.session.detach()
       await this.adapter.killSession(entry.record.tmuxSession)
+      if (windowId) await this.adapter.killWindow(windowId)
       return
     }
 
     const orphan = (await this.findOrphans()).find((record) => record.id === id)
     // Resolving here would report success without killing anything.
     if (!orphan) throw new Error(`kill: no tmux session found for tab ${id}`)
+    const windowId = await this.adapter.windowIdOf(orphan.tmuxSession)
     await this.adapter.killSession(orphan.tmuxSession)
+    if (windowId) await this.adapter.killWindow(windowId)
   }
 
   /**
