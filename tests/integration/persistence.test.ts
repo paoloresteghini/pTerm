@@ -385,7 +385,12 @@ describe('durable tab record', () => {
     await settle(500)
 
     const restored = await restoreTabs()
-    expect(restored.tabs.map((entry) => entry.id)).toEqual([tab.id])
+    // `restored.panes`, not `restored.tabs`: `tabs` is now `TabRow[]`, one
+    // row per group, and `restoreWorkspace` builds those rows by grouping
+    // panes into a Map keyed on tab id — so a bug that duplicated this pane's
+    // record would still produce exactly one row and this test would not
+    // catch the very regression it is named for.
+    expect(restored.panes.map((entry) => entry.id)).toEqual([tab.id])
     expect(await savedIds(store)).toEqual([tab.id])
   })
 })
@@ -837,7 +842,9 @@ describe('status registry', () => {
     // tmux session still alive underneath — exactly what a relaunch is.
     useManager()
     const restored = await restoreTabs()
-    expect(restored.tabs.map((entry) => entry.id)).toEqual([tab.id])
+    // `restored.panes`, same reason as above: `restored.tabs` is `TabRow[]`
+    // now, and this test wants the pane that came back, not its tab row.
+    expect(restored.panes.map((entry) => entry.id)).toEqual([tab.id])
 
     expect((await status())[tab.id]).toBe('unknown')
   })
