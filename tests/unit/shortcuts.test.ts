@@ -21,23 +21,32 @@ import { describe, it, expect } from 'vitest'
  * accelerator is invisible in every test that exists and shows up as Claude
  * missing a keystroke the user typed at it.
  *
- * **Edits that will fail this without anything being wrong.** Measured against
- * the real files, not inferred:
+ * **Edits that will fail this without anything being wrong.** Each was made
+ * against the real files and the result counted, so this list is measured
+ * rather than inferred:
  *
- * - reformatting the `MenuCommand` union onto one line per member with the
- *   `|` trailing rather than leading — the parse assertion. Both `= 'a' | 'b'`
- *   and `= | 'a' | 'b'` are read; a `|` at the end of a line is not.
- * - moving the keydown handler out of `App.tsx` into its own module — every
- *   assertion in the `App.tsx` block. This test reads files by path; it
- *   follows the code nowhere.
- * - putting a menu item's `accelerator` and its `registerAccelerator` in
- *   different objects, or nesting an object literal inside a menu item — the
- *   accelerator assertion reads one `{...}` at a time.
+ * - renaming the `MenuCommand` type — 2 of the 3 menu assertions. Both are
+ *   the same parse, which anchors on the name.
+ * - composing that union out of a second named type (`| PaneCommand |`) — 1.
+ *   The parse stops at the first member that is not a string literal, and the
+ *   members it can no longer see stop being checked at all, so failing is the
+ *   answer that keeps this honest.
+ * - moving any of these files, or moving the keydown handler out of `App.tsx`
+ *   into a module of its own. This test reads files by path; it follows the
+ *   code nowhere.
  *
  * Measured in the other direction too, and all still green: renaming
- * `activePaneId`, `splitActive` or `focusPane`; reordering the four arrows;
- * reordering or renaming any menu item id; adding a menu item without an
- * accelerator; and rewrapping or reindenting any of the three files.
+ * `activePaneId`; reordering the four arrows; renaming a menu item id; adding
+ * a menu item with no accelerator; putting a comment between two members of
+ * the union; and writing that union on one line, with the `|` leading or
+ * trailing — comments are stripped and whitespace flattened before anything
+ * is read, which is what makes those last three the same text.
+ *
+ * One tolerance is worth knowing about, because it was measured rather than
+ * assumed: wrapping a menu item's `click` in a braced body takes that item out
+ * of the per-object accelerator check, which reads one brace pair at a time.
+ * The count beside it still covers the item — with the count assertion removed,
+ * a braced item that registers its accelerator passes; with it, it fails.
  */
 
 /**
@@ -99,11 +108,13 @@ describe('menu accelerators', () => {
   })
 
   it('never claims an accelerator from the window', () => {
-    // Each menu item that names an accelerator, one `{...}` at a time — menu
-    // items hold no nested object literals, so a brace pair is an item.
+    // Two readings of the same rule, because each covers the other's blind
+    // spot. Every item that names an accelerator, one `{...}` at a time —
+    // which only sees items holding no nested braces, so an item whose
+    // `click` grew a braced body drops silently out of this set...
     const accelerated = main.match(/\{[^{}]*\baccelerator:[^{}]*\}/g) ?? []
-    // Ten of them at the time of writing. Zero would mean the regex had
-    // stopped matching menu items and every assertion below was vacuous.
+    // ...ten of them when this was written. Zero would mean the regex had
+    // stopped matching menu items and the loop below was vacuous.
     expect(accelerated).not.toHaveLength(0)
     for (const item of accelerated) {
       // The keystroke has to reach the renderer. An accelerator the menu
@@ -111,6 +122,13 @@ describe('menu accelerators', () => {
       // would take the key off whatever is running in the focused pane.
       expect(item).toContain('registerAccelerator: false')
     }
+    // ...and a straight count, which sees every item but not which opt-out
+    // belongs to which accelerator. `\b` keeps this off `registerAccelerator`,
+    // whose own capital A cannot match a lowercase one.
+    const declared = main.match(/\baccelerator: '/g) ?? []
+    const unregistered = main.match(/registerAccelerator: false/g) ?? []
+    expect(declared).not.toHaveLength(0)
+    expect(unregistered).toHaveLength(declared.length)
     expect(main).not.toMatch(/registerAccelerator: true/)
   })
 })
