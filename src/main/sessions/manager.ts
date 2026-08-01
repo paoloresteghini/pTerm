@@ -754,17 +754,20 @@ export class SessionManager {
    *      would not merely be redundant, it would fail: `new-session -t <group>
    *      -s <name>` with a name tmux already has is refused outright
    *      ("duplicate session", exit 1 — measured).
-   *   2. The session has gone and the tab still has live members: the pane has
-   *      to JOIN the group again. A bare `new-session -A` creates an UNGROUPED
-   *      session under the same name — a pane sitting beside its tab rather
-   *      than in it, which the next restore reads as a tab of its own, since
-   *      restore groups panes by their `session_group` and nothing else. That
-   *      is finding I4, and it is the only case here that is new.
-   *   3. The session has gone and tmux has nothing left of the tab: an
-   *      ordinary one-pane tab, or the last pane of a split. There is no group
-   *      to rejoin and `new-session -A` is right for it.
+   *   2. The session has gone and the tab still has a live member — in a
+   *      group, or reduced to one and so ungrouped, which `liveGroupOf` treats
+   *      alike: the pane has to JOIN it. A bare `new-session -A` would create
+   *      an UNGROUPED session under the same name — a pane sitting beside its
+   *      tab rather than in it, which the next restore reads as a tab of its
+   *      own, since restore groups panes by their `session_group` and nothing
+   *      else. That is finding I4, and it is the only case here that is new.
+   *   3. The session has gone and tmux has nothing left of the tab at all: an
+   *      ordinary one-pane tab, or the first pane back of a split that died
+   *      whole. There is nothing to join and `new-session -A` is right for it.
+   *      Case 2 then covers the panes that follow it back — see `liveGroupOf`,
+   *      which is what stops the tab un-splitting between the two restarts.
    *
-   * Case 2 is reachable only while `tabId` names a group tmux still has. A
+   * Case 2 is reachable only while `tabId` names something tmux still has. A
    * dead pane leaves no trace of its own membership — it lived in the member
    * session, and the death hook kills that session — so nothing here could
    * recover the tab from the pane alone. See `RestartRequest.tabId`.
@@ -794,19 +797,42 @@ export class SessionManager {
   }
 
   /**
-   * The tmux group a tab's surviving members share, and one of them to work
+   * What a pane of tab `tabId` must be joined to, and a live session to work
    * through — or undefined when tmux has nothing left of that tab.
    *
-   * Matched on the group NAME's id half and nothing else: the slug in it is
-   * frozen at group creation and is out of date after any move (see
-   * `tabIdFromGroupName`). An ungrouped session reports an empty group and
-   * `tabIdFromGroupName('')` is null, so a tab that has never been split never
-   * matches here — which is right, there is nothing to rejoin.
+   * Two ways a tab can be present, and both are needed. This is the same rule
+   * `groupNameOf` applies to a live pane (`row?.group || record.tmuxSession`),
+   * asked of a tab whose pane is dead:
    *
-   * The group outlives the pane that named it: measured on this socket, after
-   * a founder's session and window are killed its sibling still reports the
-   * same `session_group`, and `new-session -t <that name>` joins it even
-   * though no session bears that name any more.
+   *   - A live member's `session_group`, matched on the group NAME's id half
+   *     and nothing else: the slug in it is frozen at group creation and is
+   *     out of date after any move (see `tabIdFromGroupName`). The group
+   *     outlives the pane that named it — measured, after a founder's session
+   *     and window are killed its sibling still reports the same
+   *     `session_group`.
+   *   - Failing that, a live session whose OWN name carries this tab's id.
+   *     A tab reduced to one member is UNGROUPED — it reports an empty
+   *     `session_group`, and `tabIdFromGroupName('')` is null — so the match
+   *     above cannot see it. Without this second half, a split whose panes all
+   *     died and were then restarted one at a time comes back as two separate
+   *     tabs: the first pane back is ungrouped by definition (there was
+   *     nothing to rejoin), and every pane after it then finds nothing to
+   *     match. That is I4's harm again, reached with a perfectly good `tabId`.
+   *
+   * Joining by that name is what re-forms the tab under its own identity, not
+   * merely some group: `new-session -t <a session name>` creates a group named
+   * after that session — measured, and it is how this tab's group was named in
+   * the first place (`splitTab` hands `groupNameOf`'s fallback to
+   * `newGroupMember`). So the tab regains the group name it had, whose id half
+   * still decodes to `tabId`.
+   *
+   * The second match cannot pick up the pane being restarted: `reopenInTab`
+   * has already returned whenever a session by that pane's name is live, so by
+   * here there is none, and a tab of one is the only thing it can find. (A
+   * live session carrying this pane's id under a DIFFERENT project slug would
+   * match — but that is a caller holding a name tmux has renamed out from
+   * under it, which no path through `reopenInTab` can detect and none of them
+   * created.)
    *
    * Neither of the two existing tab lookups answers this. `panesOfTab` returns
    * `PaneRecord`s, which carry no group name at all — it can name a member but
@@ -822,8 +848,11 @@ export class SessionManager {
     tabId: string,
   ): Promise<{ group: string; member: string } | undefined> {
     const rows = await this.adapter.listSessionsWithGroups()
-    const row = rows.find((candidate) => tabIdFromGroupName(candidate.group) === tabId)
-    return row ? { group: row.group, member: row.name } : undefined
+    const grouped = rows.find((candidate) => tabIdFromGroupName(candidate.group) === tabId)
+    if (grouped) return { group: grouped.group, member: grouped.name }
+
+    const alone = rows.find((candidate) => decodeSessionName(candidate.name)?.id === tabId)
+    return alone ? { group: alone.name, member: alone.name } : undefined
   }
 
   /**

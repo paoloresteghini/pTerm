@@ -178,6 +178,24 @@ async function sessionGroup(name: string): Promise<string> {
   return stdout.trim()
 }
 
+/**
+ * A window's own `window-size` option, as tmux prints it — `'window-size
+ * manual'` when set, `''` when unset.
+ *
+ * The option, not the resulting size, and the difference is the whole point.
+ * A window left unset inherits the global `latest` and follows its client; a
+ * window forced to `manual` and resized to the same numbers the client happens
+ * to have MEASURES IDENTICALLY. So `windowSize()` cannot tell an unsized
+ * restart from one that drove the window to 80x24 — this can. Both readings
+ * measured on `-L prcli-test`, each exiting 0.
+ */
+async function windowSizeOption(windowId: string): Promise<string> {
+  const { stdout } = await run('tmux', [
+    '-L', SOCKET, 'show-options', '-w', '-t', windowId, 'window-size',
+  ])
+  return stdout.trim()
+}
+
 /** Resolves once the given tab's client has stopped, whatever the reason. */
 function nextExit(id: string, ms = 8000): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -500,8 +518,14 @@ describe('restartTab', () => {
     // that attaches first lands on a sibling's window, and two xterms then
     // render one pane.
     const restartedWindow = await adapter.windowIdOf(restarted.tmuxSession)
+    const siblingWindow = await adapter.windowIdOf(founder.tmuxSession)
+    // Both sides guarded before they are compared. `windowIdOf` answers `''`
+    // for any failure, so an unguarded right-hand side would let a tmux hiccup
+    // satisfy this — vacuously, on the assertion that guards the very bug it
+    // is here for.
     expect(restartedWindow).toMatch(/^@\d+$/)
-    expect(restartedWindow).not.toBe(await adapter.windowIdOf(founder.tmuxSession))
+    expect(siblingWindow).toMatch(/^@\d+$/)
+    expect(restartedWindow).not.toBe(siblingWindow)
     // The window this pane was given, not a size nobody asked for: the request
     // carried 100x30.
     await expect.poll(() => windowSize(restarted.tmuxSession), { timeout: 8000 }).toBe('100x30')
@@ -531,6 +555,9 @@ describe('restartTab', () => {
     await exitEvent
     await expect(adapter.hasSession(founder.tmuxSession)).resolves.toBe(false)
 
+    // No cols/rows anywhere: none were passed, and `lastGeometry` holds
+    // nothing for a tab nothing has resized. So this restart is unsized, which
+    // is what the window-size assertion below is here to hold.
     const restarted = await invoke<TabDescriptor>(CHANNELS.restartTab, { tab: founder })
 
     // Polled for the same reason as in the test above.
@@ -538,8 +565,85 @@ describe('restartTab', () => {
     expect(await sessionGroup(restarted.tmuxSession)).toBe(group)
     expect(await sessionGroup(second.tmuxSession)).toBe(group)
     const restartedWindow = await adapter.windowIdOf(restarted.tmuxSession)
+    const siblingWindow = await adapter.windowIdOf(second.tmuxSession)
     expect(restartedWindow).toMatch(/^@\d+$/)
-    expect(restartedWindow).not.toBe(await adapter.windowIdOf(second.tmuxSession))
+    expect(siblingWindow).toMatch(/^@\d+$/)
+    expect(restartedWindow).not.toBe(siblingWindow)
+    // Nobody measured this pane, so nothing may drive its window to a size.
+    // Asserted on the OPTION, which is the only reading that can fail: forcing
+    // `manual` and resizing to the default lands the window at exactly the
+    // 80x24 the client attaches at anyway, so `windowSize()` reads the same
+    // either way and could not catch it. Unset here means the window inherits
+    // the global `latest` and follows its own client.
+    expect(await windowSizeOption(restartedWindow)).toBe('')
+  })
+
+  // A tab that dies WHOLE — two `claude` sessions ending is ordinary, not
+  // exotic — and is then restarted one pane at a time. The first pane back has
+  // nothing to rejoin and is ungrouped by definition; an empty `session_group`
+  // is invisible to a group-name match, so without the second half of
+  // `liveGroupOf` the second pane finds nothing either and the tab comes back
+  // as two. That happens with a perfectly good `tabId`, so no amount of
+  // renderer plumbing rescues it.
+  it('restarts both panes of a tab that died whole back into one group', async () => {
+    const founder = await openTab()
+    await waitForPrompt(founder.id)
+    const second = await manager.splitTab({ paneId: founder.id })
+    await waitForPrompt(second.id)
+
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const founderWindow = await adapter.windowIdOf(founder.tmuxSession)
+    const secondWindow = await adapter.windowIdOf(second.tmuxSession)
+    expect(founderWindow).toMatch(/^@\d+$/)
+    expect(secondWindow).toMatch(/^@\d+$/)
+
+    const founderExit = waitForExitEvent(founder.id)
+    const secondExit = waitForExitEvent(second.id)
+    // The sibling first, session then window as the hook does it, while the
+    // founder is still alive to keep the server up.
+    await run('tmux', [
+      '-L', SOCKET,
+      'kill-session', '-t', `=${second.tmuxSession}`, ';', 'kill-window', '-t', secondWindow,
+    ])
+    // Then the founder, now the last session on this socket. No chained
+    // `kill-window` here: killing the last session takes the server with it,
+    // so the hook's second command would have nothing to talk to — measured,
+    // `kill-session … ; kill-window -t @0` on a lone session prints "no
+    // current target" and exits 1. There is nothing left to reap either; the
+    // window went with the server.
+    await run('tmux', ['-L', SOCKET, 'kill-session', '-t', `=${founder.tmuxSession}`])
+    await founderExit
+    await secondExit
+    await expect(adapter.hasSession(founder.tmuxSession)).resolves.toBe(false)
+    await expect(adapter.hasSession(second.tmuxSession)).resolves.toBe(false)
+
+    const backFirst = await invoke<TabDescriptor>(CHANNELS.restartTab, { tab: founder })
+    await expect.poll(() => adapter.hasSession(backFirst.tmuxSession), { timeout: 8000 }).toBe(true)
+    // Ungrouped, and correctly so: there was nothing left of the tab to join.
+    // Asserted rather than assumed, because it is the precondition the second
+    // restart has to cope with — if this ever came back grouped, the test
+    // below would be exercising the ordinary path instead of this one.
+    expect(await sessionGroup(backFirst.tmuxSession)).toBe('')
+
+    const backSecond = await invoke<TabDescriptor>(CHANNELS.restartTab, {
+      tab: second,
+      tabId: founder.id,
+    })
+    await expect.poll(() => adapter.hasSession(backSecond.tmuxSession), { timeout: 8000 }).toBe(true)
+
+    const group = await sessionGroup(backSecond.tmuxSession)
+    expect(group).not.toBe('')
+    expect(await sessionGroup(backFirst.tmuxSession)).toBe(group)
+    // And it is this TAB's group, not merely some group the two share: a group
+    // takes the name of the session it was created against, so re-forming it
+    // through the founder gives back a name whose id half is the tab id.
+    expect(group).toBe(founder.tmuxSession)
+
+    const firstWindow = await adapter.windowIdOf(backFirst.tmuxSession)
+    const secondBackWindow = await adapter.windowIdOf(backSecond.tmuxSession)
+    expect(firstWindow).toMatch(/^@\d+$/)
+    expect(secondBackWindow).toMatch(/^@\d+$/)
+    expect(secondBackWindow).not.toBe(firstWindow)
   })
 })
 
