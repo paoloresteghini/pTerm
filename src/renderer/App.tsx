@@ -178,6 +178,14 @@ export function App() {
       // `register.ts`'s `lastGeometry` — the size its last resize reported —
       // is what main attaches at, and the fit that follows the reattach
       // corrects anything stale. The renderer has nothing fresher to offer.
+      //
+      // No `tabId` either, and that is only correct while every tab here is
+      // one pane: main then reads this pane's own id as the tab id, which is
+      // right for a one-pane tab and for the founder of a split, and wrong for
+      // any other pane of one — it comes back outside its tab's group. The
+      // moment this app draws a split and offers Restart on a pane inside it,
+      // this call has to send the id of the tab that holds the pane. See
+      // `RestartRequest.tabId`.
       window.prcli
         .restartTab({ tab })
         .then((restarted) => dispatch({ type: 'opened', tab: restarted }))

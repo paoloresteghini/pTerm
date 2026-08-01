@@ -157,6 +157,27 @@ async function windowSize(name: string): Promise<string> {
   return stdout.trim()
 }
 
+/**
+ * The tmux group a session is in, or `''` when it is in none.
+ *
+ * `=${name}:` WITH the trailing colon. Measured on this socket: `-t '=name'`
+ * answers `#{session_group}` with an empty string and exits 0 for a session
+ * that is demonstrably in a group, where `-t '=name:'` answers with the group
+ * name. This helper was written the first way and passed a green suite for one
+ * run, agreeing that two grouped sessions were both in no group at all.
+ *
+ * `''` is also what a lookup against a session tmux does not have returns —
+ * `display-message` exits 0 with empty stdout for a missing target — so every
+ * caller asserts non-empty before comparing two of these. Two failed lookups
+ * agree perfectly.
+ */
+async function sessionGroup(name: string): Promise<string> {
+  const { stdout } = await run('tmux', [
+    '-L', SOCKET, 'display-message', '-p', '-t', `=${name}:`, '#{session_group}',
+  ])
+  return stdout.trim()
+}
+
 /** Resolves once the given tab's client has stopped, whatever the reason. */
 function nextExit(id: string, ms = 8000): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -422,6 +443,103 @@ describe('restartTab', () => {
     // `lastGeometry` — the attach-at-80x24-default defect this codebase has
     // now shipped twice, proven fixed a second, independent way.
     await expect.poll(() => windowSize(restarted.tmuxSession), { timeout: 8000 }).toBe('111x41')
+  })
+
+  // I4. Restart recreated a pane with a bare `new-session -A`, which makes an
+  // UNGROUPED session — so a pane of a split came back beside its tab instead
+  // of in it, and the next restore, which groups panes by `session_group` and
+  // nothing else, read it as a tab of its own. The split silently un-split.
+  //
+  // The sibling case, which is the one main cannot answer on its own: the dead
+  // pane is not the founder, so nothing left in tmux or on disk says which tab
+  // it was in and the request has to carry the tab id.
+  it('restarts a split pane back into its tab group, not beside it', async () => {
+    const founder = await openTab()
+    await waitForPrompt(founder.id)
+    const second = await manager.splitTab({ paneId: founder.id })
+    await waitForPrompt(second.id)
+
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const group = await sessionGroup(founder.tmuxSession)
+    expect(group).not.toBe('')
+    expect(await sessionGroup(second.tmuxSession)).toBe(group)
+    const secondWindow = await adapter.windowIdOf(second.tmuxSession)
+    expect(secondWindow).toMatch(/^@\d+$/)
+
+    // What the death hook does when a pane's process dies, in its order: the
+    // member session, then the window it was bound to — see `deathHookCommand`.
+    // This manager is built without a death reporter, so no hook is installed
+    // here and these two commands stand in for it.
+    const exitEvent = waitForExitEvent(second.id)
+    await run('tmux', [
+      '-L', SOCKET,
+      'kill-session', '-t', `=${second.tmuxSession}`, ';', 'kill-window', '-t', secondWindow,
+    ])
+    await exitEvent
+    await expect(adapter.hasSession(second.tmuxSession)).resolves.toBe(false)
+
+    const restarted = await invoke<TabDescriptor>(CHANNELS.restartTab, {
+      tab: second,
+      tabId: founder.id,
+      cols: 100,
+      rows: 30,
+    })
+
+    expect(restarted.tmuxSession).toBe(second.tmuxSession)
+    // Polled, not asserted straight off: the rejoin path creates this session
+    // before it returns, but the `new-session -A` one it must not take spawns
+    // a client and returns without waiting for tmux — so a plain assertion
+    // here would fail on that path for a reason that is not the group, and
+    // hide whether the group assertions below can catch anything at all.
+    await expect.poll(() => adapter.hasSession(restarted.tmuxSession), { timeout: 8000 }).toBe(true)
+    // The tab's own group — the one it had before, not a new one — with both
+    // panes in it. Read back from tmux for each, and non-empty above.
+    expect(await sessionGroup(restarted.tmuxSession)).toBe(group)
+    expect(await sessionGroup(founder.tmuxSession)).toBe(group)
+    // And bound to a window of its own before its client attached. A member
+    // that attaches first lands on a sibling's window, and two xterms then
+    // render one pane.
+    const restartedWindow = await adapter.windowIdOf(restarted.tmuxSession)
+    expect(restartedWindow).toMatch(/^@\d+$/)
+    expect(restartedWindow).not.toBe(await adapter.windowIdOf(founder.tmuxSession))
+    // The window this pane was given, not a size nobody asked for: the request
+    // carried 100x30.
+    await expect.poll(() => windowSize(restarted.tmuxSession), { timeout: 8000 }).toBe('100x30')
+  })
+
+  // The founder case, and the one main answers with no help from the renderer:
+  // a group keeps the name its founder had and outlives it, so the founder's
+  // own id still names the group once its session is gone. No `tabId` in this
+  // request — the fallback to the pane's own id is what is under test.
+  it("restarts a tab's founder back into the group named after it", async () => {
+    const founder = await openTab()
+    await waitForPrompt(founder.id)
+    const second = await manager.splitTab({ paneId: founder.id })
+    await waitForPrompt(second.id)
+
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const group = await sessionGroup(second.tmuxSession)
+    expect(group).not.toBe('')
+    const founderWindow = await adapter.windowIdOf(founder.tmuxSession)
+    expect(founderWindow).toMatch(/^@\d+$/)
+
+    const exitEvent = waitForExitEvent(founder.id)
+    await run('tmux', [
+      '-L', SOCKET,
+      'kill-session', '-t', `=${founder.tmuxSession}`, ';', 'kill-window', '-t', founderWindow,
+    ])
+    await exitEvent
+    await expect(adapter.hasSession(founder.tmuxSession)).resolves.toBe(false)
+
+    const restarted = await invoke<TabDescriptor>(CHANNELS.restartTab, { tab: founder })
+
+    // Polled for the same reason as in the test above.
+    await expect.poll(() => adapter.hasSession(restarted.tmuxSession), { timeout: 8000 }).toBe(true)
+    expect(await sessionGroup(restarted.tmuxSession)).toBe(group)
+    expect(await sessionGroup(second.tmuxSession)).toBe(group)
+    const restartedWindow = await adapter.windowIdOf(restarted.tmuxSession)
+    expect(restartedWindow).toMatch(/^@\d+$/)
+    expect(restartedWindow).not.toBe(await adapter.windowIdOf(second.tmuxSession))
   })
 })
 

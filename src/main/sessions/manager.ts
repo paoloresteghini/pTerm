@@ -110,6 +110,20 @@ export class SessionManager {
   ) {}
 
   open(input: OpenInput): PaneRecord {
+    return this.attach(this.recordFor(input), this.geometryOf(input))
+  }
+
+  /**
+   * The record a pane is opened under, with the two inputs that make one
+   * unusable refused before anything is created.
+   *
+   * Split out of `open()` so `reopenInTab()` can name the same session and
+   * apply the same guards while choosing a different way to create it, rather
+   * than keeping a second copy of them. Synchronous, and called before either
+   * caller's first `await`, so "already open" is still refused before anything
+   * can race it.
+   */
+  private recordFor(input: OpenInput): PaneRecord {
     const id = input.id ?? newSessionId()
     if (this.entries.has(id)) throw new Error(`session ${id} is already open`)
 
@@ -124,7 +138,7 @@ export class SessionManager {
       )
     }
 
-    const record: PaneRecord = {
+    return {
       id,
       projectSlug: input.projectSlug,
       cwd: input.cwd,
@@ -132,18 +146,24 @@ export class SessionManager {
       tmuxSession,
       type: input.type ?? 'shell',
     }
+  }
 
-    const cols = input.cols ?? DEFAULT_COLS
-    const rows = input.rows ?? DEFAULT_ROWS
-    // Whether the caller actually knows this pane's geometry, or whether the
-    // two lines above invented it. The client has to be spawned at some size
-    // either way, and 80x24 is what a tmux client defaults to — but a WINDOW
-    // must never be driven to a size nobody measured. Both, not either: a
-    // caller supplying one and not the other is supplying a default for the
-    // other half, and half a measurement is not one.
-    const sized = input.cols !== undefined && input.rows !== undefined
-
-    return this.attach(record, { cols, rows, sized })
+  /**
+   * The size to spawn a client at, and whether the caller actually knows it.
+   *
+   * `sized` is whether the caller supplied this pane's geometry, or whether
+   * this invented it. The client has to be spawned at some size either way,
+   * and 80x24 is what a tmux client defaults to — but a WINDOW must never be
+   * driven to a size nobody measured. Both, not either: a caller supplying one
+   * and not the other is supplying a default for the other half, and half a
+   * measurement is not one.
+   */
+  private geometryOf(input: OpenInput): { cols: number; rows: number; sized: boolean } {
+    return {
+      cols: input.cols ?? DEFAULT_COLS,
+      rows: input.rows ?? DEFAULT_ROWS,
+      sized: input.cols !== undefined && input.rows !== undefined,
+    }
   }
 
   /**
@@ -631,14 +651,10 @@ export class SessionManager {
   /**
    * Add a pane to the tab that already holds `paneId`.
    *
-   * Three tmux objects, in this order and no other:
-   *   1. `new-window -e PRCLI_TAB_ID=<new id>` in the group — holds the process.
-   *   2. `new-session -t <group> -s <new name>` — the view the xterm attaches to.
-   *   3. `select-window` binding 2 to 1, BEFORE any client attaches.
-   *
-   * Step 3 before the attach is not stylistic. A newly joined member's current
-   * window is arbitrary, so a client attaching first lands on a sibling's window
-   * and resizes it.
+   * What is decided here is the new pane's identity, the group to put it in,
+   * and both windows' sizes. The three tmux objects a member is made of, and
+   * the order they have to be made in, are `addMember`'s — shared with
+   * `reopenInTab`, which brings a dead pane back into the same tab.
    */
   async splitTab(input: {
     paneId: string
@@ -700,22 +716,6 @@ export class SessionManager {
       await this.adapter.resizeWindow(founderWindow, sibling.cols, sibling.rows)
     }
 
-    // The new window is created through a LIVE member, not the group name, and
-    // EMPTY — the command follows at the end, once the window can survive it.
-    //
-    // Everything from here on is guarded. The window is the first object this
-    // makes that the app cannot see and tmux can: it goes into the tab's
-    // SHARED window list holding a running shell, where only `list-windows`
-    // would ever find it again. The member session that follows is worse — it
-    // is a name `findOrphans` reports as a real pane, so the next restore
-    // resurrects a pane the user never created, attached to a window nothing
-    // has a record of. See `rollbackSplit`.
-    const window = await this.adapter.newWindow({
-      member: sibling.record.tmuxSession,
-      cwd,
-      env: { PRCLI_TAB_ID: id },
-    })
-
     const record: PaneRecord = {
       id,
       projectSlug: sibling.record.projectSlug,
@@ -725,31 +725,184 @@ export class SessionManager {
       type: input.type ?? 'shell',
     }
 
+    // `sized: true` regardless of what the caller passed, and this is where
+    // that is earned: `addMember` resizes the new window to exactly these
+    // numbers, before any client attaches to it. Defaulted or not, they are
+    // the window's own size by the time it is attached to, so that attach
+    // confirms a size rather than inventing one — which is the one thing the
+    // I1 gate exists to stop.
+    return this.addMember({
+      group,
+      through: sibling.record.tmuxSession,
+      record,
+      cols,
+      rows,
+      sized: true,
+    })
+  }
+
+  /**
+   * Bring a pane that has died back into the tab it belonged to.
+   *
+   * Three cases, and `tabId` — the tab the CALLER says this pane was in, which
+   * is the founder pane's id, not this pane's own, whenever the two differ —
+   * is what tells the middle one from the last:
+   *
+   *   1. The pane's own session is still running: a client died, not the
+   *      session. `new-session -A` reattaches to it and its group membership
+   *      was never lost, so `open()` is right — and joining anything here
+   *      would not merely be redundant, it would fail: `new-session -t <group>
+   *      -s <name>` with a name tmux already has is refused outright
+   *      ("duplicate session", exit 1 — measured).
+   *   2. The session has gone and the tab still has live members: the pane has
+   *      to JOIN the group again. A bare `new-session -A` creates an UNGROUPED
+   *      session under the same name — a pane sitting beside its tab rather
+   *      than in it, which the next restore reads as a tab of its own, since
+   *      restore groups panes by their `session_group` and nothing else. That
+   *      is finding I4, and it is the only case here that is new.
+   *   3. The session has gone and tmux has nothing left of the tab: an
+   *      ordinary one-pane tab, or the last pane of a split. There is no group
+   *      to rejoin and `new-session -A` is right for it.
+   *
+   * Case 2 is reachable only while `tabId` names a group tmux still has. A
+   * dead pane leaves no trace of its own membership — it lived in the member
+   * session, and the death hook kills that session — so nothing here could
+   * recover the tab from the pane alone. See `RestartRequest.tabId`.
+   */
+  async reopenInTab(input: OpenInput & { id: string; tabId: string }): Promise<PaneRecord> {
+    // Before either await, so "already open" is still refused before anything
+    // can race it — see `recordFor`.
+    const record = this.recordFor(input)
+    const geometry = this.geometryOf(input)
+
+    if (await this.adapter.hasSession(record.tmuxSession)) return this.attach(record, geometry)
+
+    const rejoin = await this.liveGroupOf(input.tabId)
+    if (!rejoin) return this.attach(record, geometry)
+
+    return this.addMember({
+      group: rejoin.group,
+      through: rejoin.member,
+      record,
+      cols: geometry.cols,
+      rows: geometry.rows,
+      // Whatever the caller knew, unchanged. A restart that was given no size
+      // must not drive this pane's new window to one, which is why `addMember`
+      // takes this rather than assuming a split's `true`.
+      sized: geometry.sized,
+    })
+  }
+
+  /**
+   * The tmux group a tab's surviving members share, and one of them to work
+   * through — or undefined when tmux has nothing left of that tab.
+   *
+   * Matched on the group NAME's id half and nothing else: the slug in it is
+   * frozen at group creation and is out of date after any move (see
+   * `tabIdFromGroupName`). An ungrouped session reports an empty group and
+   * `tabIdFromGroupName('')` is null, so a tab that has never been split never
+   * matches here — which is right, there is nothing to rejoin.
+   *
+   * The group outlives the pane that named it: measured on this socket, after
+   * a founder's session and window are killed its sibling still reports the
+   * same `session_group`, and `new-session -t <that name>` joins it even
+   * though no session bears that name any more.
+   *
+   * Neither of the two existing tab lookups answers this. `panesOfTab` returns
+   * `PaneRecord`s, which carry no group name at all — it can name a member but
+   * not the group to join one to. `findOrphanTabs` is built on `findOrphans`,
+   * which excludes every session this app holds a client for, and a live
+   * sibling is exactly that.
+   *
+   * Any member will do: members of a group share one window list, so
+   * `new-window` through any of them puts the window in the same place. The
+   * one picked is first in tmux's alphabetical order and means nothing.
+   */
+  private async liveGroupOf(
+    tabId: string,
+  ): Promise<{ group: string; member: string } | undefined> {
+    const rows = await this.adapter.listSessionsWithGroups()
+    const row = rows.find((candidate) => tabIdFromGroupName(candidate.group) === tabId)
+    return row ? { group: row.group, member: row.name } : undefined
+  }
+
+  /**
+   * Put a pane into a tab that already exists in tmux.
+   *
+   * Three tmux objects, in this order and no other:
+   *   1. `new-window -e PRCLI_TAB_ID=<id>` in the group — holds the process.
+   *   2. `new-session -t <group> -s <name>` — the view the xterm attaches to.
+   *   3. `select-window` binding 2 to 1, BEFORE any client attaches.
+   *
+   * Step 3 before the attach is not stylistic. A newly joined member's current
+   * window is arbitrary — measured, a sibling's `@0` every time — so a client
+   * attaching first lands on a sibling's window and resizes it, and two xterms
+   * then render one pane.
+   *
+   * The middle of both callers, kept as one copy. `splitTab` adds a pane the
+   * user has just asked for; `reopenInTab` puts a pane that died back where it
+   * was. What differs between them is decided before this runs — which id and
+   * record, which live member to work through, and whether anyone has measured
+   * the geometry — and none of it changes the three objects or their order.
+   *
+   * `through` is a LIVE member session, never the group name: `new-window`
+   * takes a window target, and a group name is not one.
+   *
+   * Everything here is guarded. The window is the first object this makes that
+   * the app cannot see and tmux can: it goes into the tab's SHARED window list
+   * holding a running shell, where only `list-windows` would ever find it
+   * again. The member session that follows is worse — it is a name
+   * `findOrphans` reports as a real pane, so the next restore resurrects a pane
+   * the user never created, attached to a window nothing has a record of. See
+   * `rollbackSplit`.
+   */
+  private async addMember(input: {
+    group: string
+    through: string
+    record: PaneRecord
+    cols: number
+    rows: number
+    sized: boolean
+  }): Promise<PaneRecord> {
+    const { group, record, cols, rows, sized } = input
+    // Created EMPTY — the command follows at the end, once the window can
+    // survive it.
+    const window = await this.adapter.newWindow({
+      member: input.through,
+      cwd: record.cwd,
+      env: { PRCLI_TAB_ID: record.id },
+    })
+
     try {
       // The new pane's own window is sized by window id, and before any client
       // has attached to it — so there is no ordering here that has to hold for
       // the geometry rule to be in force. Without the explicit resize,
       // `manual` would revert this window to the size tmux recorded when
       // `newWindow` made it, which is the founder's, not this pane's.
-      await this.adapter.setWindowOption(window.id, 'window-size', 'manual')
-      await this.adapter.resizeWindow(window.id, cols, rows)
+      //
+      // Skipped entirely when nobody has measured this pane, which is the I1
+      // gate again: a window is never driven to an invented size. Nothing is
+      // owed in that case, and nothing is at risk either — this window was
+      // created moments ago and has no scrollback to re-wrap, and it is left
+      // on the `window-size latest` it inherits (measured: a window
+      // `new-window` makes reads the option unset, and the global is `latest`),
+      // so it follows the client this pane is about to attach. That client is
+      // the only one that will ever have this window active: every other member
+      // of the group is bound to a window of its own.
+      if (sized) {
+        await this.adapter.setWindowOption(window.id, 'window-size', 'manual')
+        await this.adapter.resizeWindow(window.id, cols, rows)
+      }
       // The env goes here too, not only on `newWindow`: `-e` on `new-window`
       // reaches the spawned pane's own process (confirmed: a child inside it
       // sees it) but never the session's environment table — `show-environment`
       // on the new member reports nothing. `-e` on `new-session -t <group>`
       // does reach that table, which is where a reattach and any
       // `show-environment` caller both go looking, so both calls carry it.
-      await this.adapter.newGroupMember(group, tmuxSession, { PRCLI_TAB_ID: id })
+      await this.adapter.newGroupMember(group, record.tmuxSession, { PRCLI_TAB_ID: record.id })
       // By index, with the member named. See the adapter method's comment.
-      await this.adapter.selectWindow(tmuxSession, window.index)
-      // `finishSplit` ends in an attach with `sized: true` regardless of what
-      // the caller passed, and this is where that is earned: the
-      // `resizeWindow(window.id, cols, rows)` above put the window at exactly
-      // these numbers. Defaulted or not, they are already the window's size,
-      // so the attach at the end of `finishSplit` is confirming a size rather
-      // than inventing one — which is the one thing the I1 gate exists to
-      // stop.
-      return await this.finishSplit(record, window, cols, rows)
+      await this.adapter.selectWindow(record.tmuxSession, window.index)
+      return await this.finishSplit(record, window, cols, rows, sized)
     } catch (error) {
       await this.rollbackSplit(record, window.id)
       throw error
@@ -757,14 +910,15 @@ export class SessionManager {
   }
 
   /**
-   * The last three steps of a split, kept together so `splitTab`'s try block
-   * reads as one guarded sequence rather than a wall of awaits.
+   * The last three steps of adding a member, kept together so `addMember`'s
+   * try block reads as one guarded sequence rather than a wall of awaits.
    */
   private async finishSplit(
     record: PaneRecord,
     window: { id: string; index: string },
     cols: number,
     rows: number,
+    sized: boolean,
   ): Promise<PaneRecord> {
     // Wired before the command runs, and after the member session exists.
     //
@@ -787,7 +941,7 @@ export class SessionManager {
       })
     }
 
-    return this.attach(record, { cols, rows, windowId: window.id, sized: true })
+    return this.attach(record, { cols, rows, windowId: window.id, sized })
   }
 
   /**

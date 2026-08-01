@@ -479,8 +479,19 @@ export function registerIpc(
         throw new Error(`Cannot restart: ${tab.cwd} is not a directory`)
       }
       const remembered = lastGeometry.get(tab.id)
-      const record = manager.open({
+      // `reopenInTab`, not `open`: a pane of a split has to REJOIN its tab's
+      // group, and a bare `new-session -A` would bring it back beside the tab
+      // instead of in it (finding I4). The manager decides which of the three
+      // cases this is — see `reopenInTab`; only the "still has live siblings"
+      // one does anything `open` did not.
+      //
+      // `request.tabId` is the renderer's; falling back to the pane's own id
+      // is right for a one-pane tab and for the founder of a split, and is the
+      // best main can do on its own — the dead pane's membership is gone from
+      // both tmux and config by now. See `RestartRequest.tabId`.
+      const record = await manager.reopenInTab({
         id: tab.id,
+        tabId: request.tabId ?? tab.id,
         projectSlug: tab.projectSlug,
         cwd: tab.cwd,
         command: tab.command,

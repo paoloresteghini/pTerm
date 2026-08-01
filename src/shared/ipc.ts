@@ -180,6 +180,26 @@ export interface StatusEvent {
 /** What Restart needs: the dead tab's record, plus the size to attach at. */
 export interface RestartRequest {
   tab: TabDescriptor
+  /**
+   * The tab this pane belongs to — a `TabRow.id`, which is the FOUNDER pane's
+   * id and so differs from `tab.id` for every other pane of a split.
+   *
+   * Sent because main cannot work it out. A pane's tab membership lives in its
+   * tmux session's group, and by the time Restart is offered that session has
+   * been killed (the death hook kills it); its config row is deleted on exit
+   * too, and config's tab rows drop a kid naming a pane that is no longer on
+   * disk. The renderer still draws the dead pane inside its tab and is the
+   * only holder of that fact.
+   *
+   * Omit it and main reads the pane's own id as the tab id. That is right for
+   * a one-pane tab, and right for the FOUNDER of a split — a group keeps the
+   * name its founder had and outlives it, so the founder's id still names the
+   * group. It is wrong for any other pane of a split: that pane comes back
+   * outside its tab's group, as a tab of its own on the next restore, which is
+   * exactly finding I4. Any caller offering Restart on a pane inside a split
+   * must send this.
+   */
+  tabId?: string
   cols?: number
   rows?: number
 }
