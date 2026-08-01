@@ -25,6 +25,22 @@ export interface OpenInput {
   command?: string
   /** Supply to reattach an existing tab; omit to create a new one. */
   id?: string
+  /**
+   * The tab this pane belongs to — a group's founder id, which equals the
+   * pane's own id only for a one-pane tab and for the founder of a split.
+   *
+   * Omitted means "this pane founds its own tab", which is what the renderer's
+   * `CHANNELS.open` always is. Every other caller opens a pane into a tab that
+   * already exists and must say which: `restoreWorkspace` adopting a member of
+   * a live group, and `moveTabToProject` reopening a pane it detached. Getting
+   * it wrong is invisible until that pane dies and is restarted, at which
+   * point it comes back outside its tab (finding I4).
+   *
+   * Not read by tmux and not persisted: it is what the manager remembers for
+   * this pane, so a restart after its death can find the group again. See
+   * `Entry.tabId` and `tabWasIn`.
+   */
+  tabId?: string
   /** Saved tmux name, checked against the one this input encodes to. */
   tmuxSession?: string
   cols?: number
@@ -35,6 +51,17 @@ export interface OpenInput {
 interface Entry {
   record: PaneRecord
   session: PtySession
+  /**
+   * The tab this pane is in, decided by whoever created the pane and never
+   * asked of tmux afterwards.
+   *
+   * Held on the entry so it can outlive it: `session.onExit` copies it into
+   * `tabWasIn` on the way out, and a dead pane has no other source for it —
+   * its membership lived in its tmux session's group and the death hook kills
+   * that session; `register.ts`'s `forgetTab` deletes its config row; and
+   * `store.read()`'s `normaliseLayout` then drops it from the tab row's kids.
+   */
+  tabId: string
   /**
    * The client's live geometry, kept current by `resize`. A reattach has to
    * spawn at this size: the reattached client is usually the session's only
@@ -99,6 +126,26 @@ const WINDOW_ID_POLL_MS = 20
 
 export class SessionManager {
   private readonly entries = new Map<string, Entry>()
+  /**
+   * Which tab each pane that has DIED was in. `reopenInTab` is its only
+   * reader; `session.onExit` its only writer.
+   *
+   * This is main owning a fact rather than asking for it. The renderer is the
+   * only other holder — it still draws the dead pane inside its tab — but a
+   * request field for it cannot be made safe: the cheapest thing in scope at
+   * every call site is the pane's own id, which type-checks, is right for a
+   * one-pane tab and for a split's founder, and is wrong for every other pane
+   * of a split. Arriving here it is indistinguishable from a legitimate
+   * one-pane restart, so no check could catch it.
+   *
+   * A process-lifetime map covers exactly the interval in which a restart can
+   * be asked for: the affordance is a renderer-side tombstone, and a relaunch
+   * produces none — restore rebuilds from live tmux, which has nothing to say
+   * about a pane that is gone. That is the same lifetime contract
+   * `register.ts`'s `lastGeometry` has, down to being dropped by the same two
+   * handlers; see `forgetPane`.
+   */
+  private readonly tabWasIn = new Map<string, string>()
   private readonly dataListeners = new Set<(id: string, data: string) => void>()
   private readonly exitListeners = new Set<
     (record: PaneRecord, code: number, reason: ExitReason) => void
@@ -110,7 +157,30 @@ export class SessionManager {
   ) {}
 
   open(input: OpenInput): PaneRecord {
-    return this.attach(this.recordFor(input), this.geometryOf(input))
+    const record = this.recordFor(input)
+    return this.attach(record, {
+      ...this.geometryOf(input),
+      // The pane's own id when the caller says nothing, because that is what a
+      // new tab is: a group of one, whose founder's id IS the tab's. A caller
+      // putting a pane into a tab that already exists says so — see
+      // `OpenInput.tabId`.
+      tabId: input.tabId ?? record.id,
+    })
+  }
+
+  /**
+   * Drop what a restart of this pane would have used to find its tab again.
+   *
+   * Called from where `register.ts` drops `lastGeometry`, and for the same
+   * reason: a kill and a dismissal are the two ways a dead pane stops being
+   * restartable at all. Nothing is recorded for a pane killed while it was
+   * still open — `kill()` disposes the entry before the client goes, so the
+   * exit that follows records nothing (see `attach`) — so what this is for is
+   * the other order: a pane that died, was tombstoned, and is then dismissed
+   * or killed from the tab bar.
+   */
+  forgetPane(id: string): void {
+    this.tabWasIn.delete(id)
   }
 
   /**
@@ -176,6 +246,9 @@ export class SessionManager {
    * created and passes it through, so `PtySession` attaches to the existing
    * member instead. It is also what says whether the pane's death hook still
    * has to be installed, or was installed before its command started.
+   *
+   * `tabId` is decided by each caller too, and is the one thing here that is
+   * not recoverable later: see `Entry.tabId`.
    */
   private attach(
     record: PaneRecord,
@@ -184,7 +257,8 @@ export class SessionManager {
       rows,
       windowId,
       sized,
-    }: { cols: number; rows: number; windowId?: string; sized: boolean },
+      tabId,
+    }: { cols: number; rows: number; windowId?: string; sized: boolean; tabId: string },
   ): PaneRecord {
     const id = record.id
 
@@ -214,7 +288,7 @@ export class SessionManager {
       windowId,
     })
 
-    const entry: Entry = { record, session, cols, rows, windowId }
+    const entry: Entry = { record, session, cols, rows, windowId, tabId }
 
     session.onData((data) => {
       for (const listener of this.dataListeners) listener(id, data)
@@ -223,7 +297,18 @@ export class SessionManager {
       // Compare identity, not just the id: a detached tab can be reopened
       // before its old client's exit lands, and that late event must not
       // evict the new entry.
-      if (this.entries.get(id) === entry) this.entries.delete(id)
+      if (this.entries.get(id) === entry) {
+        this.entries.delete(id)
+        // Copied out before the entry is unreachable, and only from the entry
+        // that is still the live one — a late exit from a superseded entry
+        // must not overwrite what its replacement recorded.
+        //
+        // A deliberate `detach()`, `kill()` or `rollbackSplit()` never gets
+        // here: all three delete the entry BEFORE tearing the client down, so
+        // this branch is exactly the pane that died on its own, which is
+        // exactly the pane a restart can be asked for. See `tabWasIn`.
+        this.tabWasIn.set(id, entry.tabId)
+      }
       const reason: ExitReason = entry.intent ?? 'exited'
       // The record travels with the event: by the time a listener runs the
       // entry is gone, and a listener that has to check whether the tmux
@@ -738,15 +823,23 @@ export class SessionManager {
       cols,
       rows,
       sized: true,
+      // The group's id half — never this new pane's own id, which is the one
+      // thing it certainly is not: a pane added to a tab is not its founder.
+      // `groupNameOf` answers with the sibling's own session name while the
+      // tab is still a group of one, and that decodes to the same id, so both
+      // of its answers are handled by the same call. The fallback covers a
+      // group name this app did not create and cannot read; the sibling's own
+      // record is then the best evidence there is.
+      tabId: tabIdFromGroupName(group) ?? sibling.tabId,
     })
   }
 
   /**
    * Bring a pane that has died back into the tab it belonged to.
    *
-   * Three cases, and `tabId` — the tab the CALLER says this pane was in, which
-   * is the founder pane's id, not this pane's own, whenever the two differ —
-   * is what tells the middle one from the last:
+   * Three cases, and the tab this manager RECORDED for the pane — the founder
+   * pane's id, not this pane's own, whenever the two differ — is what tells
+   * the middle one from the last:
    *
    *   1. The pane's own session is still running: a client died, not the
    *      session. `new-session -A` reattaches to it and its group membership
@@ -767,21 +860,33 @@ export class SessionManager {
    *      Case 2 then covers the panes that follow it back — see `liveGroupOf`,
    *      which is what stops the tab un-splitting between the two restarts.
    *
-   * Case 2 is reachable only while `tabId` names something tmux still has. A
-   * dead pane leaves no trace of its own membership — it lived in the member
-   * session, and the death hook kills that session — so nothing here could
-   * recover the tab from the pane alone. See `RestartRequest.tabId`.
+   * Case 2 is reachable only while the recorded tab id names something tmux
+   * still has. A dead pane leaves no trace of its own membership — it lived in
+   * the member session, and the death hook kills that session — which is why
+   * the fact is remembered from when the pane was created rather than looked
+   * up here or taken from the caller. See `tabWasIn`.
+   *
+   * The input deliberately has no `tabId`: there is nothing a caller could put
+   * there that this does not already know better, and an omission would be
+   * indistinguishable from a one-pane tab.
    */
-  async reopenInTab(input: OpenInput & { id: string; tabId: string }): Promise<PaneRecord> {
+  async reopenInTab(input: Omit<OpenInput, 'tabId'> & { id: string }): Promise<PaneRecord> {
     // Before either await, so "already open" is still refused before anything
     // can race it — see `recordFor`.
     const record = this.recordFor(input)
     const geometry = this.geometryOf(input)
+    // The pane's own id when nothing was recorded for it, which is right for
+    // the two cases that produce no memory: a one-pane tab (its founder's id
+    // IS the tab's) and a pane this process never held — no restart is offered
+    // for one of those, since a tombstone does not survive a relaunch.
+    const tabId = this.tabWasIn.get(record.id) ?? record.id
 
-    if (await this.adapter.hasSession(record.tmuxSession)) return this.attach(record, geometry)
+    if (await this.adapter.hasSession(record.tmuxSession)) {
+      return this.attach(record, { ...geometry, tabId })
+    }
 
-    const rejoin = await this.liveGroupOf(input.tabId)
-    if (!rejoin) return this.attach(record, geometry)
+    const rejoin = await this.liveGroupOf(tabId)
+    if (!rejoin) return this.attach(record, { ...geometry, tabId })
 
     return this.addMember({
       group: rejoin.group,
@@ -793,6 +898,7 @@ export class SessionManager {
       // must not drive this pane's new window to one, which is why `addMember`
       // takes this rather than assuming a split's `true`.
       sized: geometry.sized,
+      tabId,
     })
   }
 
@@ -892,8 +998,10 @@ export class SessionManager {
     cols: number
     rows: number
     sized: boolean
+    /** The tab this member joins — see `Entry.tabId`. Both callers know it. */
+    tabId: string
   }): Promise<PaneRecord> {
-    const { group, record, cols, rows, sized } = input
+    const { group, record, cols, rows, sized, tabId } = input
     // Created EMPTY — the command follows at the end, once the window can
     // survive it.
     const window = await this.adapter.newWindow({
@@ -931,7 +1039,7 @@ export class SessionManager {
       await this.adapter.newGroupMember(group, record.tmuxSession, { PRCLI_TAB_ID: record.id })
       // By index, with the member named. See the adapter method's comment.
       await this.adapter.selectWindow(record.tmuxSession, window.index)
-      return await this.finishSplit(record, window, cols, rows, sized)
+      return await this.finishSplit(record, window, cols, rows, sized, tabId)
     } catch (error) {
       await this.rollbackSplit(record, window.id)
       throw error
@@ -948,6 +1056,7 @@ export class SessionManager {
     cols: number,
     rows: number,
     sized: boolean,
+    tabId: string,
   ): Promise<PaneRecord> {
     // Wired before the command runs, and after the member session exists.
     //
@@ -970,7 +1079,7 @@ export class SessionManager {
       })
     }
 
-    return this.attach(record, { cols, rows, windowId: window.id, sized })
+    return this.attach(record, { cols, rows, windowId: window.id, sized, tabId })
   }
 
   /**
@@ -1409,6 +1518,13 @@ export class SessionManager {
           command,
           tmuxSession: to,
           type,
+          // Carried across the detach and reopen. Without it `open()` reads
+          // every pane of a moved tab as the founder of a tab of its own, and
+          // a restart after a later death brings a sibling back outside the
+          // group — I4, reached through the move path. The entry's own answer
+          // first (recorded when the pane was created or adopted); for a
+          // DETACHED pane, which has no entry, the tab it was found in.
+          tabId: entry?.tabId ?? tabId,
           ...size,
         }),
       )

@@ -179,13 +179,10 @@ export function App() {
       // is what main attaches at, and the fit that follows the reattach
       // corrects anything stale. The renderer has nothing fresher to offer.
       //
-      // No `tabId` either, and that is only correct while every tab here is
-      // one pane: main then reads this pane's own id as the tab id, which is
-      // right for a one-pane tab and for the founder of a split, and wrong for
-      // any other pane of one — it comes back outside its tab's group. The
-      // moment this app draws a split and offers Restart on a pane inside it,
-      // this call has to send the id of the tab that holds the pane. See
-      // `RestartRequest.tabId`.
+      // The pane's record is the whole request, and there is nothing else to
+      // send: which tab holds the pane is main's own record, not this one's to
+      // supply, so offering Restart on a pane inside a split needs no change
+      // here. See `RestartRequest`.
       window.prcli
         .restartTab({ tab })
         .then((restarted) => dispatch({ type: 'opened', tab: restarted }))

@@ -301,6 +301,23 @@ export async function restoreWorkspace(
             command: record.command,
             tmuxSession: record.tmuxSession,
             type: record.type,
+            // The tab this pane is a member of, from the live group it was
+            // found in — the same map `held` below groups by, handed to the
+            // manager instead of being computed here and dropped.
+            //
+            // This line is the whole of adoption for `manager.open`'s `tabId`,
+            // and adopted panes are most panes in real use: every one the app
+            // did not itself create this run. A previous run's manager is gone
+            // with everything it recorded, and by the time a restart is asked
+            // for, the pane's own session — which held its membership — has
+            // been killed by the death hook. Drop it and a restarted sibling
+            // comes back OUTSIDE its tab's group, which the next restore reads
+            // as a tab of its own. That is finding I4, for the majority case.
+            //
+            // The fallback is total for the same reason `held`'s is: every
+            // record here came out of a group above, and a pane that is its own
+            // tab is what an ungrouped session already is.
+            tabId: tabOf.get(record.id) ?? record.id,
           }),
         )
       } catch {

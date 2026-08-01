@@ -468,9 +468,10 @@ describe('restartTab', () => {
   // of in it, and the next restore, which groups panes by `session_group` and
   // nothing else, read it as a tab of its own. The split silently un-split.
   //
-  // The sibling case, which is the one main cannot answer on its own: the dead
-  // pane is not the founder, so nothing left in tmux or on disk says which tab
-  // it was in and the request has to carry the tab id.
+  // The sibling case: the dead pane is not the founder, so nothing left in tmux
+  // or on disk says which tab it was in. Nothing in the request says either —
+  // main remembers it from when the pane was created, which is what makes a
+  // caller unable to omit it. See `SessionManager.tabWasIn`.
   it('restarts a split pane back into its tab group, not beside it', async () => {
     const founder = await openTab()
     await waitForPrompt(founder.id)
@@ -496,9 +497,12 @@ describe('restartTab', () => {
     await exitEvent
     await expect(adapter.hasSession(second.tmuxSession)).resolves.toBe(false)
 
+    // No tab id in the request, and there is nowhere left for one to come
+    // from: this pane's own id names no group, and the group is named after the
+    // founder. Main's own record of which tab it made this pane in is the only
+    // thing that can answer.
     const restarted = await invoke<TabDescriptor>(CHANNELS.restartTab, {
       tab: second,
-      tabId: founder.id,
       cols: 100,
       rows: 30,
     })
@@ -583,8 +587,8 @@ describe('restartTab', () => {
   // nothing to rejoin and is ungrouped by definition; an empty `session_group`
   // is invisible to a group-name match, so without the second half of
   // `liveGroupOf` the second pane finds nothing either and the tab comes back
-  // as two. That happens with a perfectly good `tabId`, so no amount of
-  // renderer plumbing rescues it.
+  // as two. That happens with a perfectly good tab id — knowing which tab the
+  // pane was in is necessary and not sufficient.
   it('restarts both panes of a tab that died whole back into one group', async () => {
     const founder = await openTab()
     await waitForPrompt(founder.id)
@@ -625,10 +629,7 @@ describe('restartTab', () => {
     // below would be exercising the ordinary path instead of this one.
     expect(await sessionGroup(backFirst.tmuxSession)).toBe('')
 
-    const backSecond = await invoke<TabDescriptor>(CHANNELS.restartTab, {
-      tab: second,
-      tabId: founder.id,
-    })
+    const backSecond = await invoke<TabDescriptor>(CHANNELS.restartTab, { tab: second })
     await expect.poll(() => adapter.hasSession(backSecond.tmuxSession), { timeout: 8000 }).toBe(true)
 
     const group = await sessionGroup(backSecond.tmuxSession)
@@ -644,6 +645,101 @@ describe('restartTab', () => {
     expect(firstWindow).toMatch(/^@\d+$/)
     expect(secondBackWindow).toMatch(/^@\d+$/)
     expect(secondBackWindow).not.toBe(firstWindow)
+  })
+
+  // The population main has no other source for, and in real use the largest
+  // one: a pane adopted from a PREVIOUS run. The manager below never created
+  // these panes and never split them — the only thing that can know which tab
+  // the adopted pane belongs to is the reconcile that grouped it, and only if
+  // it hands that on. A version of this change that records the fact at
+  // creation and skips the hand-off passes every other test in this file.
+  it('restarts a pane adopted from a previous run back into its tab group', async () => {
+    const founder = await openTab()
+    await waitForPrompt(founder.id)
+    const second = await manager.splitTab({ paneId: founder.id })
+    await waitForPrompt(second.id)
+
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const group = await sessionGroup(founder.tmuxSession)
+    expect(group).not.toBe('')
+    expect(await sessionGroup(second.tmuxSession)).toBe(group)
+
+    // Quit, then relaunch. Every client goes and both tmux sessions stay;
+    // `useManager` throws the manager that made these panes away along with
+    // everything it remembers and re-registers the handlers against a new one.
+    // That is what makes the panes below adopted rather than recalled.
+    manager.detachAll()
+    await settle(500)
+    useManager()
+
+    const restored = await restoreTabs()
+    expect(restored.panes.map((pane) => pane.id).sort()).toEqual([founder.id, second.id].sort())
+    const adopted = restored.panes.find((pane) => pane.id === second.id)
+    // Thrown rather than expected: everything below indexes into this, and
+    // `undefined` would fail them for the wrong reason.
+    if (!adopted) throw new Error(`restore did not bring back ${second.id}`)
+    // Waited for, and this is not belt and braces: `manager.open()` returns as
+    // soon as the client is SPAWNED, and that client's `new-session -A` may not
+    // have run yet. Killing the session in that window leaves the client to
+    // CREATE one under the same name — measured here: an ungrouped session,
+    // alive and attached, and no exit event at all, which is a green pane on a
+    // red assertion's behalf. The prompt is proof the attach has landed.
+    await waitForPrompt(adopted.id)
+    const adoptedWindow = await adapter.windowIdOf(adopted.tmuxSession)
+    expect(adoptedWindow).toMatch(/^@\d+$/)
+
+    // The death hook's own two commands, in its order — see the sibling test
+    // above.
+    const exitEvent = waitForExitEvent(adopted.id)
+    await run('tmux', [
+      '-L', SOCKET,
+      'kill-session', '-t', `=${adopted.tmuxSession}`, ';', 'kill-window', '-t', adoptedWindow,
+    ])
+    await exitEvent
+    await expect(adapter.hasSession(adopted.tmuxSession)).resolves.toBe(false)
+
+    const restarted = await invoke<TabDescriptor>(CHANNELS.restartTab, { tab: adopted })
+
+    await expect.poll(() => adapter.hasSession(restarted.tmuxSession), { timeout: 8000 }).toBe(true)
+    // The group this tab had before the relaunch, read back for both panes and
+    // asserted non-empty above — a group name survives a quit because the
+    // sessions in it do.
+    expect(await sessionGroup(restarted.tmuxSession)).toBe(group)
+    expect(await sessionGroup(founder.tmuxSession)).toBe(group)
+    const restartedWindow = await adapter.windowIdOf(restarted.tmuxSession)
+    const siblingWindow = await adapter.windowIdOf(founder.tmuxSession)
+    expect(restartedWindow).toMatch(/^@\d+$/)
+    expect(siblingWindow).toMatch(/^@\d+$/)
+    expect(restartedWindow).not.toBe(siblingWindow)
+  })
+
+  // The third case in `reopenInTab`, and the one every ordinary tab takes:
+  // nothing of this tab is left in tmux, so there is no group to join and
+  // `new-session -A` is right. Here to hold that a manager which now always has
+  // an answer for "which tab was this pane in" still creates an UNGROUPED
+  // session when that answer is the pane's own id.
+  it('restarts a one-pane tab with no group to rejoin', async () => {
+    const tab = await openTab()
+    await waitForPrompt(tab.id)
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    // A tab that has never been split is a group of one, which tmux reports as
+    // no group at all. Asserted so the reading after the restart means
+    // something: it is the state being preserved, not merely the expected one.
+    expect(await sessionGroup(tab.tmuxSession)).toBe('')
+
+    const exitEvent = waitForExitEvent(tab.id)
+    await run('tmux', ['-L', SOCKET, 'kill-session', '-t', `=${tab.tmuxSession}`])
+    await exitEvent
+    await expect(adapter.hasSession(tab.tmuxSession)).resolves.toBe(false)
+
+    const restarted = await invoke<TabDescriptor>(CHANNELS.restartTab, { tab })
+
+    expect(restarted.tmuxSession).toBe(tab.tmuxSession)
+    // Alive first. `sessionGroup` answers `''` for a session tmux does not
+    // have as readily as for one in no group, so without this the assertion
+    // below would pass on a restart that created nothing at all.
+    await expect.poll(() => adapter.hasSession(restarted.tmuxSession), { timeout: 8000 }).toBe(true)
+    expect(await sessionGroup(restarted.tmuxSession)).toBe('')
   })
 })
 

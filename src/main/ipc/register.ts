@@ -463,6 +463,10 @@ export function registerIpc(
       await forgetTab(id)
       registry.forget(id)
       lastGeometry.delete(id)
+      // The two things main holds for a pane only so a restart can use them,
+      // dropped together — a killed pane is not restartable. See
+      // `SessionManager.forgetPane`.
+      manager.forgetPane(id)
     } finally {
       pendingKills.delete(id)
     }
@@ -485,13 +489,11 @@ export function registerIpc(
       // cases this is — see `reopenInTab`; only the "still has live siblings"
       // one does anything `open` did not.
       //
-      // `request.tabId` is the renderer's; falling back to the pane's own id
-      // is right for a one-pane tab and for the founder of a split, and is the
-      // best main can do on its own — the dead pane's membership is gone from
-      // both tmux and config by now. See `RestartRequest.tabId`.
+      // Nothing here says which tab the pane was in, and nothing in the
+      // request could: the manager recorded that when the pane was created or
+      // adopted. See `SessionManager.tabWasIn` and `RestartRequest`.
       const record = await manager.reopenInTab({
         id: tab.id,
-        tabId: request.tabId ?? tab.id,
         projectSlug: tab.projectSlug,
         cwd: tab.cwd,
         command: tab.command,
@@ -513,6 +515,9 @@ export function registerIpc(
     // drops the state, so the dock badge stops counting a tab nobody can see.
     registry.forget(id)
     lastGeometry.delete(id)
+    // Dismissing the tombstone is what takes Restart off the screen, so the
+    // tab id kept for it goes the same way its geometry does.
+    manager.forgetPane(id)
   })
 
   ipcMain.handle(CHANNELS.notifications, async () => (await store.read()).notifications)
