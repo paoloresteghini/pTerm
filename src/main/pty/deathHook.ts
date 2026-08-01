@@ -1,12 +1,21 @@
+import { isPrcliSession } from '../tmux/names'
+
 /**
  * Anything that would change meaning on the way to the shell.
  *
- * The string this guards is interpolated into a tmux command, which re-parses
- * it when the hook fires, and then into a `/bin/sh` command inside that. So it
- * has to survive two parsers: `"` `$` `` ` `` `\` and a newline are the shell's,
- * `'` ends the quoting this uses to keep a path with a space in it whole, and
- * `#` opens a tmux format expansion — this command is deliberately full of
- * those, so a `#` arriving from a path would be expanded rather than printed.
+ * This guards the reporter path, which lands inside `run-shell "…"`. That
+ * string is interpolated into a tmux command, which re-parses it when the
+ * hook fires, and then into a `/bin/sh` command inside that. So it has to
+ * survive two parsers: `"` `$` `` ` `` `\` and a newline are the shell's, `'`
+ * ends the quoting this uses to keep a path with a space in it whole, and `#`
+ * opens a tmux format expansion — this command is deliberately full of those,
+ * so a `#` arriving from a path would be expanded rather than printed. A
+ * space is not in this set: the reporter legitimately contains one (see
+ * "keeps a path with a space in it as one word"), and `run-shell "…"` keeps
+ * it inert.
+ *
+ * The session name is a different string in a different context — see
+ * `canBuildDeathHook` — and is not checked against this charset.
  *
  * `install.ts` has a guard of its own (`UNSAFE_IN_PATH`) and it is not this
  * one: it covers the socket and spool paths rather than the script's, and its
@@ -42,7 +51,17 @@ export function canBuildDeathHook(input: {
 }): boolean {
   if (UNSAFE_IN_HOOK.test(input.reporter)) return false
   if (!TAB_ID_RE.test(input.tabId)) return false
-  if (UNSAFE_IN_HOOK.test(input.tmuxSession)) return false
+  // The session name lands bare in `kill-session -t =<name> ; kill-window
+  // -t @7`, not inside `run-shell "…"` like the reporter does — there, a `;`
+  // would end the command early rather than sit inert, and `UNSAFE_IN_HOOK`
+  // has no `;` in it because the reporter never needs one refused. Rather
+  // than widen that charset for a string it does not guard, this checks the
+  // session name against the narrower thing it actually has to be: a name
+  // `encodeSessionName` could have produced. Unreachable today — every
+  // `tmuxSession` this app hands in comes from `encodeSessionName`
+  // (`SessionManager.open`, `.moveTabToProject`) — so this makes an existing
+  // guarantee explicit rather than fixing a live bug.
+  if (!isPrcliSession(input.tmuxSession)) return false
   return true
 }
 

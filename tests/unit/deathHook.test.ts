@@ -36,16 +36,36 @@ describe('canBuildDeathHook', () => {
     }
   })
 
-  // The session name is checked against the same charset as the reporter,
-  // because it is interpolated into the same command. It is not, however, the
-  // reason this guard exists: `encodeSessionName` already refuses anything but
-  // `[a-z0-9_]` and 16 hex, so nothing here is reachable from the app.
+  // These are refused by `isPrcliSession` because the third dash-separated
+  // part isn't 16 hex characters, not because of any charset check — the
+  // session name is no longer checked against the reporter's charset at all
+  // (see `canBuildDeathHook`). It is not, however, the reason this guard
+  // exists: `encodeSessionName` already refuses anything but `[a-z0-9_]` and
+  // 16 hex, so nothing here is reachable from the app.
   it.each([
     ['a single quote', "prcli-alpha-'x'" ],
     ['a hash', 'prcli-alpha-#{x}'],
     ['a dollar sign', 'prcli-alpha-$x'],
   ])('refuses a session name containing %s', (_label, tmuxSession) => {
     expect(canBuildDeathHook({ ...safe, tmuxSession })).toBe(false)
+  })
+
+  it('refuses a session name that is not one this app could have generated', () => {
+    for (const tmuxSession of [
+      'prcli-alpha-a1b2c3d4e5f60718 ; kill-server',
+      'prcli-alpha-nothex',
+      'not-a-prcli-name',
+      '',
+    ]) {
+      expect(
+        deathHookCommand({
+          reporter: '/tmp/prcli/prcli-hook',
+          tabId: 'a1b2c3d4e5f60718',
+          tmuxSession,
+          windowId: '@7',
+        }),
+      ).toBeNull()
+    }
   })
 
   // The two must agree exactly, minus the window id, or the spawn-time
