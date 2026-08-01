@@ -31,6 +31,8 @@ import { describe, it, expect } from 'vitest'
  *   The parse stops at the first member that is not a string literal, and the
  *   members it can no longer see stop being checked at all, so failing is the
  *   answer that keeps this honest.
+ * - renaming `splitActive` — 1, the axis assertion, which reads the call as
+ *   well as the branch. `activePaneId` and `focusPane` are not read by name.
  * - moving any of these files, or moving the keydown handler out of `App.tsx`
  *   into a module of its own. This test reads files by path; it follows the
  *   code nowhere.
@@ -142,6 +144,25 @@ describe('App.tsx keydown handler', () => {
       expect(app).toContain(code)
     }
     expect(app).not.toMatch(/event\.key\b/)
+  })
+
+  it('picks the split axis with ⇧, in that direction', () => {
+    // ⇧⌘D is the only way a `col` tab is ever created. A branch that read the
+    // other way would leave the whole column half of the layout unreachable
+    // and would still pass every other assertion in this suite — it fails
+    // visibly on the first press, but only if someone presses it.
+    expect(app).toMatch(/splitActive\(event\.shiftKey \? 'col' : 'row'\)/)
+  })
+
+  it('keeps the ⌥ chords out of the bindings that are not ⌥ chords', () => {
+    // ⌥ held makes it a different chord — ⌥⌘digit picks a tab, ⌘⌥arrow moves
+    // a pane — so none of the letter bindings may fire while it is down.
+    for (const code of ['KeyT', 'KeyW', 'KeyD']) {
+      expect(app).toMatch(new RegExp(`event\\.code === '${code}' && !event\\.altKey`))
+    }
+    // And the arrows are the ⌥ chord itself, with ⇧ excluded so ⇧⌘⌥arrow is
+    // left for whatever claims it later.
+    expect(app).toMatch(/event\.altKey && !event\.shiftKey/)
   })
 
   it('moves the selection through paneInDirection', () => {

@@ -51,6 +51,16 @@ export type WorkspaceAction =
     }
   | { type: 'projects'; projects: ProjectDescriptor[] }
   | { type: 'opened'; tab: TabDescriptor }
+  /**
+   * **Nothing dispatches this.** ⌘W, the tab bar's × and the menu item all
+   * became `closedPane` when `CHANNELS.kill` was collapsed into
+   * `CHANNELS.closePane`. It drops a pane, its status and its tombstone but
+   * does NOT maintain the tab's layout row, so reaching for it on a split tab
+   * leaves exactly the stale row that collapse removed from the main process —
+   * the same drift, one level down. Use `closedPane`. Kept for now rather than
+   * deleted along with the tests that still describe it; collapsing the two is
+   * a ledger item, not an oversight.
+   */
   | { type: 'removed'; id: string }
   | { type: 'activatedTab'; id: string }
   | { type: 'activatedProject'; id: string }
