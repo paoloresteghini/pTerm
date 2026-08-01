@@ -1243,7 +1243,7 @@ describe('SessionManager when tmux will not say who owns a window', () => {
     expect(await allWindows()).toContain(window)
 
     // The check runs BEFORE `killSession`, so a throw here leaves the session
-    // alive, the entry still registered, and `CHANNELS.kill`'s handler
+    // alive, the entry still registered, and `CHANNELS.closePane`'s handler
     // rejecting before it can forget the tab.
     await manager.kill(tab.id)
 

@@ -234,19 +234,19 @@ export function registerIpc(
         // toast. Passing `record` sidesteps that race outright rather than
         // betting on read/write ordering across two independent config-file
         // operations. `killed` is exempted for the same reason it always
-        // was: the CHANNELS.kill handler below calls `registry.forget` once
-        // its own await on the very same `manager.kill()` promise settles,
-        // and recording a tombstone here too would race that forget with no
-        // ordering guarantee — whichever runs last wins, and a losing
+        // was: the CHANNELS.closePane handler below calls `registry.forget`
+        // once its own await on the very same `manager.kill()` promise
+        // settles, and recording a tombstone here too would race that forget
+        // with no ordering guarantee — whichever runs last wins, and a losing
         // `forget` would leak a `crashed`/`ended` entry nothing would ever
         // clean up. A kill the user asked for does not need a tombstone —
         // they already know it is gone.
         if (reason !== 'killed') registry.applyExit(record.id, code, record)
         // `killed` is never pruned here either, for the same reason: the
-        // CHANNELS.kill handler already owns that, and forgets the tab
-        // immediately after the same `manager.kill()` this resolved against
-        // has succeeded — pruning here too would only be a redundant second
-        // write of the same outcome.
+        // CHANNELS.closePane handler already owns that, and drops the pane's
+        // config row inside the same pass that rewrites its tab, once the
+        // `manager.kill()` this resolved against has succeeded — pruning here
+        // too would only be a redundant second write of the same outcome.
         if (reason === 'exited') await forgetTab(record.id)
       }
     })()
@@ -504,26 +504,6 @@ export function registerIpc(
   // would be exactly the wrong thing to record.
   ipcMain.on(CHANNELS.detach, (_event, id: string) => manager.detach(id))
 
-  ipcMain.handle(CHANNELS.kill, async (_event, id: string) => {
-    // Recorded before the first await inside `manager.kill()` can run, so it
-    // is always in place before the exit event it settles could possibly
-    // fire — see `pendingKills` above.
-    const outcome = manager.kill(id)
-    pendingKills.set(id, outcome)
-    try {
-      await outcome
-      await forgetTab(id)
-      registry.forget(id)
-      lastGeometry.delete(id)
-      // The two things main holds for a pane only so a restart can use them,
-      // dropped together — a killed pane is not restartable. See
-      // `SessionManager.forgetPane`.
-      manager.forgetPane(id)
-    } finally {
-      pendingKills.delete(id)
-    }
-  })
-
   ipcMain.handle(
     CHANNELS.restartTab,
     async (_event, request: RestartRequest): Promise<TabDescriptor> => {
@@ -585,7 +565,7 @@ export function registerIpc(
       throw new Error(`Cannot split: pane ${paneId} was not measured (got ${cols}x${rows})`)
     }
 
-    // Outside every `serialise` pass, like `CHANNELS.kill`'s `manager.kill`:
+    // Outside every `serialise` pass, like `CHANNELS.closePane`'s `manager.kill`:
     // the tmux work first, then one pass of our own. Doing it the other way
     // round would be worse than slow — `serialise` is `tail.then(op, op)` with
     // no reentrancy protection, so anything it reaches that calls back into it
@@ -704,6 +684,16 @@ export function registerIpc(
     })
   })
 
+  /**
+   * The one way a pane is closed.
+   *
+   * There used to be two: a `CHANNELS.kill` that destroyed the session and
+   * forgot the pane, and this, which does all of that AND maintains the tab
+   * row the pane was laid out in. Two channels differing only in whether the
+   * layout is kept is a place for drift — whichever one ⌘W did not use would
+   * leave a stale row the first time it met a split tab — so the narrower one
+   * is gone and every caller comes here.
+   */
   ipcMain.handle(CHANNELS.closePane, async (_event, paneId: string): Promise<TabShape> => {
     // Before the kill, and it has to be: `manager.kill()` deletes the entry
     // this is held on, and a dead pane's tab is not recoverable afterwards —
@@ -711,10 +701,10 @@ export function registerIpc(
     // is a pane this process never held, which is a tab of one by definition.
     const tabId = manager.tabIdOf(paneId) ?? paneId
 
-    // Recorded before the first await inside `manager.kill()` can run, for the
-    // reason `CHANNELS.kill` records it: the exit event this raises is settled
-    // by asking this map, and it fires while the kill is still in flight. See
-    // `pendingKills`.
+    // Recorded before the first await inside `manager.kill()` can run, so it
+    // is always in place before the exit event it settles could possibly fire:
+    // that event is answered by asking this map, and it fires while the kill
+    // is still in flight. See `pendingKills`.
     const outcome = manager.kill(paneId)
     pendingKills.set(paneId, outcome)
     try {
@@ -722,9 +712,9 @@ export function registerIpc(
     } finally {
       pendingKills.delete(paneId)
     }
-    // Everything `CHANNELS.kill` forgets, for its reasons: a killed pane is not
-    // restartable, so its state, the geometry a restart would have attached at
-    // and the tab a restart would have rejoined all go together.
+    // A killed pane is not restartable, so its state, the geometry a restart
+    // would have attached at and the tab a restart would have rejoined all go
+    // together. See `SessionManager.forgetPane`.
     registry.forget(paneId)
     lastGeometry.delete(paneId)
     manager.forgetPane(paneId)

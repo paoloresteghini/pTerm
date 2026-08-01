@@ -133,10 +133,19 @@ function detachTab(id: string): void {
   listener(null as never, id as never)
 }
 
-function killTab(id: string): Promise<void> {
-  const handler = ipc.handlers.get(CHANNELS.kill)
-  if (!handler) throw new Error('kill handler was not registered')
-  return handler(null as never, id as never) as Promise<void>
+/**
+ * Close a tab the way every gesture in the app now does.
+ *
+ * Through `CHANNELS.closePane`, which is the only channel that kills a pane:
+ * the narrower `CHANNELS.kill` did the same work without maintaining the
+ * closed pane's tab row, and two of those was one too many. Every tab these
+ * tests open holds a single pane, so what comes back is an empty `TabShape`
+ * and the kill is the whole of it.
+ */
+function killTab(id: string): Promise<TabShape> {
+  const handler = ipc.handlers.get(CHANNELS.closePane)
+  if (!handler) throw new Error('closePane handler was not registered')
+  return handler(null as never, id as never) as Promise<TabShape>
 }
 
 function restoreTabs(): Promise<RestoreResult> {
@@ -1562,7 +1571,7 @@ describe('status registry', () => {
 
   // The brief wires `registry.applyExit` into the exit handler on any
   // `!sessionAlive`, with no exception for `killed`. That races the
-  // CHANNELS.kill handler's own `registry.forget` — both are `.then`
+  // CHANNELS.closePane handler's own `registry.forget` — both are `.then`
   // reactions on the exact same `manager.kill()` promise, with no ordering
   // guarantee between them. A kill the user asked for must never leave a
   // tombstone: nothing else will ever call `forget` for this id again, since
@@ -1603,7 +1612,7 @@ describe('status registry', () => {
     })
 
     // Exactly what a crash outside the app leaves behind, with nothing
-    // routed through manager.kill() or CHANNELS.kill — the `exited` path,
+    // routed through manager.kill() or CHANNELS.closePane — the `exited` path,
     // where the config row is forgotten in this very same handler.
     const exitEvent = waitForExitEvent(tab.id)
     await run('tmux', ['-L', SOCKET, 'kill-session', '-t', `=${tab.tmuxSession}`])

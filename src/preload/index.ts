@@ -27,7 +27,6 @@ const api: PrcliApi = {
   input: (id, data) => ipcRenderer.send(CHANNELS.input, id, data),
   resize: (id, cols, rows) => ipcRenderer.send(CHANNELS.resize, id, cols, rows),
   detach: (id) => ipcRenderer.send(CHANNELS.detach, id),
-  kill: (id) => ipcRenderer.invoke(CHANNELS.kill, id),
   onData: (listener: (event: DataEvent) => void) => {
     const handler = (_event: IpcRendererEvent, payload: DataEvent): void => listener(payload)
     ipcRenderer.on(CHANNELS.data, handler)

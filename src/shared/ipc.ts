@@ -8,7 +8,6 @@ export const CHANNELS = {
   input: 'prcli:input',
   resize: 'prcli:resize',
   detach: 'prcli:detach',
-  kill: 'prcli:kill',
   restore: 'prcli:restore',
   setActive: 'prcli:setActive',
   addProject: 'prcli:addProject',
@@ -381,7 +380,6 @@ export interface PrcliApi {
   input(id: string, data: string): void
   resize(id: string, cols: number, rows: number): void
   detach(id: string): void
-  kill(id: string): Promise<void>
   onData(listener: (event: DataEvent) => void): () => void
   onExit(listener: (event: ExitEvent) => void): () => void
   /** Every tab's state, for a renderer that has just mounted or reloaded. */
@@ -405,6 +403,10 @@ export interface PrcliApi {
    * The session, its window and its saved row all go; the tab's remaining panes
    * share out the closed one's ratio. Closing the last pane of a tab closes the
    * tab, and resolves with both arrays empty.
+   *
+   * The only way to close anything: ⌘W, the tab bar's ×, and a clicked Close
+   * Pane all come here. A second channel that killed a pane without touching
+   * its tab row was where the layout drifted from what was on screen.
    */
   closePane(paneId: string): Promise<TabShape>
   /** A clicked toast asking the renderer to select a particular tab. */
