@@ -456,12 +456,30 @@ The selected pane is `TabRow.activePaneId`, which config already carries.
 
 ### A pane that dies stays until it is dealt with
 
-**A dead pane keeps its place in the layout, red, until restarted or dismissed.**
-It does not collapse and let its siblings take the space.
+**A dead pane keeps its place in the layout until restarted or dismissed.** It
+does not collapse and let its siblings take the space.
 
 The reason is scrollback: when a pane dies the thing you need is what it printed
 just before, and collapsing it discards exactly that at the moment it matters. It
 also keeps one mental model — a dead pane behaves like today's dead tab.
+
+**Its dot is whatever the status machine says, and only a crash is red.** An
+earlier wording of this line said "red" for every death; that was amended
+2026-08-01, and the code was not, because the code is the part that is right. A
+clean exit keeps `ended`'s faint dot — that is exactly the distinction
+`stateForExit` exists to draw, and a second red-for-every-death rule invented at
+the pane would flatten it.
+
+The temptation to draw red from the tombstone is worth naming, because the
+tombstone is the nearest thing to hand and it is the wrong source. What
+`state.dead` holds is the *attach client's* exit code, and for a pane death that
+is 0 however the pane went — see `StatusRegistry.applyDead`, whose comment says
+so outright. Reading it would answer a segfault with a clean 0. What actually
+killed a pane is read off tmux's own `pane_dead_status` and arrives through the
+status channel like every other state, so the pane's colour comes from
+`state.status` and its `StatusDot`, the one place a state becomes a colour. The
+tombstone's only job is to say *that* the pane died, which is what keeps its box
+and its ratio on screen.
 
 This diverges from restore, where `normaliseLayout` prunes a pane whose session
 is gone and redistributes its ratio. That is correct and not a contradiction: a
