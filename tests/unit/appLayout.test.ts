@@ -29,23 +29,34 @@ import { describe, it, expect } from 'vitest'
  * - moving this JSX into its own component file — all 4. This test reads
  *   `App.tsx` by path; it follows the code nowhere.
  * - renaming `container` in Terminal.tsx — the guard assertion.
- * - renaming `restartTab` in App.tsx, or renaming the `pane-restart-` testid —
- *   1 each, the wiring assertion. It reads both by name, because what it says
- *   is that *this* glyph reaches *that* handler, and there is no way to say
- *   that without naming both ends.
+ * - renaming `restartTab` in App.tsx, or renaming either the `pane-restart-` or
+ *   the `pane-dismiss-` testid — 1 each, the wiring assertion. It finds each
+ *   button by its own testid and names the handler each must reach, because
+ *   what it says is that *this* glyph reaches *that* handler, and there is no
+ *   way to say that without naming both ends.
  * - renaming `pane` in DeadPane.tsx — 2: the wiring assertion, and the overlay
  *   assertion, which anchors on `` data-testid={`dead-${pane.id}`} ``.
- * - renaming the `dead-` testid — 1, that same anchor. It is the only testid in
- *   DeadPane.tsx that is load-bearing here; the dot's and the dismiss's are not.
+ * - renaming the `dead-` testid — 1, that same anchor.
+ * - reordering the strip's own attributes so its `className` comes before its
+ *   `data-testid` — 1, that anchor again: it then walks forward to the FIRST
+ *   button's class list instead (measured: it captures
+ *   `pointer-events-auto cursor-default ...`). Loud, but worth knowing, since
+ *   "moving attributes onto one line" is tolerated below and a reader could
+ *   reasonably extend that to moving them past each other.
  * - moving DeadPane's strip classes into a `cn(` call — 1, the overlay
  *   assertion, which reads a `className="..."` literal.
+ *
+ * Which leaves one of DeadPane.tsx's three testids free: the dot's. The other
+ * two are named by an assertion and are not yours to rename quietly.
  *
  * If you are here because of one of those, the invariant is not broken and the
  * fix is to re-point the assertion at the new name or the new file — but do
  * re-point it, because nothing else in this suite is watching these
  * properties. Everything else was measured too, in the other direction:
  * reindenting, rewrapping, brace padding, reordering or adding classes,
- * changing `data-testid`s, adding a `cn(` call earlier in the file, and
+ * changing a `data-testid` **no assertion names** — which was all of them until
+ * the dead-pane block below, and is now all but the three named above —
+ * adding a `cn(` call earlier in the file, and
  * editing any comment — including one that contains the words `display: none`,
  * and one that quotes `state.dead[` or `box.dead` in prose — all leave it
  * green. So do the edits the dead-pane block was written not to care about:
@@ -148,10 +159,23 @@ function elements(source: string, tag: string): string[] {
       // element with no closing tag — a self-closing one, or an unclosed one —
       // and `slice(0, -1)` reads that as "everything to the end bar one
       // character", which is the over-capture this bounding exists to prevent,
-      // reintroduced in the one case it was written for. Measured silent: a
-      // last-position `<button ... />` that had lost its `pointer-events-auto`
-      // passed the loop below by borrowing a following sibling's. An element
-      // this cannot bound is one it must not describe.
+      // reintroduced in the one case it was written for.
+      //
+      // Three ingredients make that silent rather than loud, and all three are
+      // needed — each configuration below was constructed and run:
+      //
+      //   1. the element is the LAST `tag` in the source. `split` bounds every
+      //      other chunk at the next opening tag, so only the final one can
+      //      reach the end at all.
+      //   2. it has no closing tag, so `indexOf` answers -1.
+      //   3. text AFTER it carries the string the caller is looking for.
+      //
+      // With 1 and 2 but not 3 the loop below fails loudly; with 2 and 3 but
+      // not 1 it fails loudly too. With all three, a `<button ... />` that had
+      // lost its `pointer-events-auto` passed — and the text it borrowed need
+      // not be another element: a helper function below the component, merely
+      // mentioning the string, does it just as well. An element this cannot
+      // bound is one it must not describe.
       if (end === -1) throw new Error(`No ${close} for an opening ${tag}`)
       return rest.slice(0, end)
     })
