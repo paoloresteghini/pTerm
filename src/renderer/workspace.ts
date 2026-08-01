@@ -231,6 +231,26 @@ export interface PaneBox {
    * basis follows whichever one it is.
    */
   style: { flexBasis: string }
+  /**
+   * Whether this pane's tmux session has died — the one thing about a box that
+   * is not geometry, here because it is decided per box and nowhere else can
+   * decide it once: `paneGroups` builds boxes down two branches, and a caller
+   * re-reading `state.dead` beside the render would be a second rule to keep in
+   * step with this one.
+   *
+   * A boolean, not the exit code `state.dead` holds, and that is deliberate:
+   * the code there is the code the *attach client* stopped with, not the one
+   * the user's process reported — and for a pane death it is 0 whichever way
+   * the pane went, which is what `StatusRegistry.applyDead` means by "always 0
+   * regardless of what happened" and why the real verdict is read off tmux's
+   * own `pane_dead_status` and sent down the status channel instead. Carrying
+   * that number here would invite it onto the screen, where it would answer a
+   * segfault with a clean 0. What killed a pane belongs to `state.status`, and
+   * its colour to `StatusDot` — the only place a state becomes one.
+   *
+   * Required rather than optional so neither branch can quietly omit it.
+   */
+  dead: boolean
 }
 
 /**
@@ -301,9 +321,12 @@ function boxesOfRow(state: WorkspaceState, row: TabRow, claimed: Set<string>): P
   // an even split is the only division that needs no data. Zero shares would
   // otherwise hand a pane a 0%-wide box, which fits to tmux's floor of 2×1 —
   // the geometry defect wearing different numbers.
+  // A dead kid is kept, ratio and all, exactly like a live one — see `PaneBox.dead`
+  // and the note on `paneGroups` about why this is the opposite of restore's rule.
   return kept.map((entry) => ({
     pane: entry.pane,
     style: { flexBasis: percent(total > 0 ? entry.share / total : 1 / kept.length) },
+    dead: state.dead[entry.pane.id] !== undefined,
   }))
 }
 
@@ -346,6 +369,19 @@ function visibleGroupId(state: WorkspaceState): string | null {
  * pane gets a group whether or not a row names it — nothing here can drop a
  * terminal — and a pane's position among the groups does not move when a row
  * arrives for it, so nothing is reordered in the DOM either.
+ *
+ * **A dead pane is boxed like any other**, keeping its slot and its share, and
+ * carries `dead` so the renderer can offer Restart and Dismiss over it. That is
+ * the opposite of what `restoreWorkspace` does with a pane whose session is
+ * gone, and both are right for their own moment. Restore prunes: it skips every
+ * saved pane live tmux does not have (`byId.get(row.id)` misses, `continue`) and
+ * so never hands that pane to `tabRowFor`, because at launch such a pane has no
+ * window, no xterm and no scrollback — there is nothing to draw and nowhere to
+ * draw it, and reopening one would put a fresh shell outside the tab's group.
+ * A pane that died while this window was up still has all three, and its
+ * scrollback is the only record of why it died. Collapsing it would throw that
+ * away at the exact moment it is wanted — the same mistake that once made
+ * `crashed` a state nothing could render (see the `died` case below).
  */
 export function paneGroups(state: WorkspaceState): PaneGroup[] {
   const visibleId = visibleGroupId(state)
@@ -363,7 +399,9 @@ export function paneGroups(state: WorkspaceState): PaneGroup[] {
     // from a row is in that row's `kids`, so `tabOfPane` would have found the
     // row and sent it down the other branch; and a stray that has been here
     // once has its own id in `seen`, which is what was just checked.
-    const panes = row ? boxesOfRow(state, row, claimed) : [{ pane, style: { flexBasis: '100%' } }]
+    const panes = row
+      ? boxesOfRow(state, row, claimed)
+      : [{ pane, style: { flexBasis: '100%' }, dead: state.dead[pane.id] !== undefined }]
     // Only reachable from the same double-naming this guards: a row whose
     // kids were all boxed by rows processed before it has nothing left to
     // show, and an empty container is not a tab, it is a blank screen where

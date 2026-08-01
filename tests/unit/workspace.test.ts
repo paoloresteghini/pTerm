@@ -57,6 +57,11 @@ function tabRow(id: string, kids: string[], activePaneId: string | null = kids[0
   }
 }
 
+/** A row with explicit ratios, for the cases `tabRow`'s even split cannot show. */
+function ratioRow(id: string, kids: string[], ratio: number[], dir: 'row' | 'col' = 'row'): TabRow {
+  return { id, groupId: id, activePaneId: kids[0] ?? null, layout: { dir, ratio, kids } }
+}
+
 const three: WorkspaceState = {
   projects: [project('p1', 'lumio', 'bbb')],
   panes: [tab('aaa'), tab('bbb'), tab('ccc')],
@@ -244,11 +249,6 @@ describe('paneInDirection', () => {
 })
 
 describe('paneGroups', () => {
-  /** A row with explicit ratios, for the cases `tabRow`'s even split cannot show. */
-  function ratioRow(id: string, kids: string[], ratio: number[], dir: 'row' | 'col' = 'row'): TabRow {
-    return { id, groupId: id, activePaneId: kids[0] ?? null, layout: { dir, ratio, kids } }
-  }
-
   it('lays a tab\'s panes along its axis, in kids order, sized by ratio', () => {
     const state: WorkspaceState = {
       ...three,
@@ -423,6 +423,82 @@ describe('paneGroups', () => {
 
   it('is empty against a fully empty WorkspaceState', () => {
     expect(paneGroups(INITIAL_WORKSPACE_STATE)).toEqual([])
+  })
+})
+
+/**
+ * A pane whose session has died, as the layout presents it.
+ *
+ * The rule is the opposite of restore's, and both are right. `restoreWorkspace`
+ * prunes a pane tmux no longer has — `tabRowFor` is never given it — because a
+ * pane missing at launch has no window, no xterm and no scrollback: there is
+ * nothing to show and nowhere to show it. A pane that died *in this session*
+ * still has all three, and its scrollback is the only record of why it died, so
+ * it keeps its box and its share and is marked instead.
+ */
+describe('a dead pane', () => {
+  /** Panes 'aaa', 'bbb', 'ccc' in one uneven tab, with 'bbb' dead. */
+  const split: WorkspaceState = {
+    ...three,
+    // Uneven on purpose. Every ratio this app writes today is even —
+    // `splitPane` re-evens on every split and nothing else edits them until
+    // 2c's drag-resize — so an even fixture cannot tell "the survivors kept
+    // their shares" apart from "the survivors were re-evened". These can.
+    tabs: [ratioRow('aaa', ['aaa', 'bbb', 'ccc'], [0.5, 0.25, 0.25])],
+    projects: [project('p1', 'lumio', 'aaa')],
+    dead: { bbb: 0 },
+  }
+
+  it('keeps its box, in its slot, and leaves its siblings the shares they had', () => {
+    const group = paneGroups(split).find((candidate) => candidate.id === 'aaa')
+    expect(group?.panes.map((box) => box.pane.id)).toEqual(['aaa', 'bbb', 'ccc'])
+    // Not just "three boxes": the dead pane's own share is still its own, and
+    // neither neighbour has grown into it.
+    expect(group?.panes.map((box) => box.style.flexBasis)).toEqual(['50%', '25%', '25%'])
+  })
+
+  it('is the only box the layout marks dead', () => {
+    const group = paneGroups(split).find((candidate) => candidate.id === 'aaa')
+    expect(group?.panes).toHaveLength(3)
+    expect(group?.panes.map((box) => box.dead)).toEqual([false, true, false])
+  })
+
+  it('is marked when it is a tab of its own, which is every unsplit tab', () => {
+    // `three` has no rows at all, so every pane goes down the branch that
+    // boxes a pane no row names — the shape of every tab opened this run that
+    // has never been split, and the shape the tab bar's own ↻ answers for.
+    const groups = paneGroups({ ...three, dead: { bbb: 0 } })
+    expect(groups).not.toHaveLength(0)
+    expect(groups.map((group) => group.panes.map((box) => box.dead))).toEqual([
+      [false],
+      [true],
+      [false],
+    ])
+  })
+
+  it('comes back live, in the same slot with the same share, when it is restarted', () => {
+    // What `restartTab` dispatches: main hands back the pane's record and the
+    // renderer folds it in through `opened`. Membership and ratios live on the
+    // tab row, which a restart does not touch, so the pane returns where it was.
+    const after = workspaceReducer(split, { type: 'opened', tab: tab('bbb') })
+    const group = paneGroups(after).find((candidate) => candidate.id === 'aaa')
+    expect(group?.panes.map((box) => box.pane.id)).toEqual(['aaa', 'bbb', 'ccc'])
+    expect(group?.panes.map((box) => box.style.flexBasis)).toEqual(['50%', '25%', '25%'])
+    // And the mark goes with it: `opened` drops the tombstone, so the chrome
+    // that offered Restart is gone rather than left over a live pane.
+    expect(group?.panes.map((box) => box.dead)).toEqual([false, false, false])
+  })
+
+  it('gives its share back to its siblings when it is dismissed', () => {
+    const after = workspaceReducer(split, { type: 'dismissed', id: 'bbb' })
+    const group = paneGroups(after).find((candidate) => candidate.id === 'aaa')
+    // The row still names 'bbb' — nothing in the renderer rewrites `kids` on a
+    // dismiss, and main has already dropped the pane row on disk. `boxesOfRow`
+    // drops the kid whose pane has gone and renormalises what is left, which
+    // is where the 0.25 actually goes: 0.5 and 0.25 of 0.75.
+    expect(after.tabs[0]?.layout.kids).toEqual(['aaa', 'bbb', 'ccc'])
+    expect(group?.panes.map((box) => box.pane.id)).toEqual(['aaa', 'ccc'])
+    expect(group?.panes.map((box) => box.style.flexBasis)).toEqual(['66.6667%', '33.3333%'])
   })
 })
 

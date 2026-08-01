@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, it, expect } from 'vitest'
 
 /**
- * Three properties of the terminal area that no test in this suite can observe
+ * Four properties of the terminal area that no test in this suite can observe
  * at runtime, checked against the source text instead.
  *
  * `vitest.config.mts` runs in `environment: 'node'`: there is no DOM to render
@@ -11,22 +11,30 @@ import { describe, it, expect } from 'vitest'
  * would report nothing about the very thing at stake. The arithmetic that
  * decides the arrangement is unit-tested properly, in `paneGroups`
  * (workspace.test.ts). What is left over is *that App.tsx renders all of it*,
- * *that it hides a tab with `visibility`*, and *that Terminal.tsx checks its
- * container before fitting to it* — the three properties whose loss drives a
- * real tmux session to a nonsense size. A grep is a poor test; it is better
- * than the nothing that is otherwise on offer here.
+ * *that it hides a tab with `visibility`*, *that Terminal.tsx checks its
+ * container before fitting to it*, and *that a dead pane's chrome overlays its
+ * box rather than taking room in it* — the four properties whose loss drives a
+ * real tmux session, or a still-mounted xterm, to a nonsense size. A grep is a
+ * poor test; it is better than the nothing that is otherwise on offer here.
  *
  * **Edits that will fail this without anything being wrong.** Each was made
  * against the real files and the result counted, so this list is measured
  * rather than inferred:
  *
  * - renaming `group` in App.tsx — 3 of the 4 App assertions; renaming `box` —
- *   1 (the computed styles).
+ *   3 (the computed styles, and both assertions that read the pane box: the
+ *   dead gate and the box's own class list).
  * - switching the class strings to double quotes — 2 (the visibility ternary
  *   and the class list). The two `.map(` assertions do not read quotes.
  * - moving this JSX into its own component file — all 4. This test reads
  *   `App.tsx` by path; it follows the code nowhere.
  * - renaming `container` in Terminal.tsx — the guard assertion.
+ * - renaming `pane` in DeadPane.tsx, renaming `restartTab` in App.tsx, or
+ *   renaming the `pane-restart-` testid — 1 each, the wiring assertion. It
+ *   reads all three by name, because what it says is that *this* glyph reaches
+ *   *that* handler, and there is no way to say that without naming both ends.
+ * - moving DeadPane's strip classes into a `cn(` call — 1, the overlay
+ *   assertion, which reads a `className="..."` literal.
  *
  * If you are here because of one of those, the invariant is not broken and the
  * fix is to re-point the assertion at the new name or the new file — but do
@@ -34,8 +42,11 @@ import { describe, it, expect } from 'vitest'
  * properties. Everything else was measured too, in the other direction:
  * reindenting, rewrapping, brace padding, reordering or adding classes,
  * changing `data-testid`s, adding a `cn(` call earlier in the file, and
- * editing any comment — including one that contains the words `display: none`
- * — all leave it green.
+ * editing any comment — including one that contains the words `display: none`,
+ * and one that quotes `state.dead[` or `box.dead` in prose — all leave it
+ * green. So do the edits the dead-pane block was written not to care about:
+ * swapping which of ↻ and × is drawn first, changing either glyph, renaming
+ * the dot's testid, and wrapping the `<DeadPane>` render in a fragment.
  */
 
 /**
@@ -57,6 +68,7 @@ function readCode(path: string): string {
 
 const app = readCode('../../src/renderer/App.tsx')
 const terminal = readCode('../../src/renderer/Terminal.tsx')
+const deadPane = readCode('../../src/renderer/DeadPane.tsx')
 
 describe('App.tsx terminal area', () => {
   it('mounts every group and every pane in it, filtering neither', () => {
@@ -104,6 +116,93 @@ describe('App.tsx terminal area', () => {
     // something nothing renders.
     expect(app).toMatch(/style=\{ ?group\.style ?\}/)
     expect(app).toMatch(/style=\{ ?box\.style ?\}/)
+  })
+})
+
+/**
+ * Each `tag` element in `source`, from the tag to its own closing one.
+ *
+ * The closing tag is what bounds them: splitting on the opening tag alone would
+ * run the last element to the end of the file and let anything added after it
+ * answer for that element.
+ */
+function elements(source: string, tag: string): string[] {
+  const close = `</${tag.slice(1)}>`
+  return source
+    .split(tag)
+    .slice(1)
+    .map((rest) => rest.slice(0, rest.indexOf(close)))
+}
+
+describe('the chrome over a dead pane', () => {
+  /**
+   * What a dead pane offers, and where the offer comes from.
+   *
+   * Whether a pane is dead, whether it keeps its box and what share that box
+   * takes are all decided in `paneGroups` and tested there. What is left over
+   * is that App.tsx renders the offer at all, that the two glyphs are wired to
+   * different actions, and that the strip takes no room in the pane — the last
+   * being the one that would refit the still-mounted xterm and reflow the
+   * scrollback the whole affordance exists to keep readable.
+   */
+  it('renders it for a box the layout marked dead, and decides deadness nowhere else', () => {
+    expect(app).toMatch(/<DeadPane\b/)
+    expect(app).toMatch(/\{ ?box\.dead \?/)
+    // A second reading of `state.dead` beside the render is a second rule to
+    // keep in step with `paneGroups`, and only one of the two has a test.
+    expect(app).not.toMatch(/state\.dead\[/)
+  })
+
+  it('hands the restart the pane and the dismiss its id, and not the other way round', () => {
+    // The M3 hazard, one level down: a dead tab's × is Dismiss while a live
+    // one's is Close, and the ↻ beside it is a third wiring behind a fourth
+    // glyph. Swapping two of them type-checks — `onRestart(pane)` and
+    // `onDismiss(pane.id)` differ only in what they are handed — and shows up
+    // as a click that kills the session it was asked to bring back.
+    // One element at a time, found by its own testid rather than by position,
+    // so swapping which glyph is drawn first reads the same — that is a
+    // presentation choice, and pinning it here would cost a spurious failure
+    // for nothing.
+    const buttons = elements(deadPane, '<button')
+    expect(buttons).not.toHaveLength(0)
+    const restart = buttons.find((button) => button.includes('pane-restart-'))
+    const dismiss = buttons.find((button) => button.includes('pane-dismiss-'))
+    expect(restart).toBeDefined()
+    expect(dismiss).toBeDefined()
+    expect(restart).toMatch(/onRestart\(pane\)/)
+    expect(restart).not.toMatch(/onDismiss\(/)
+    expect(dismiss).toMatch(/onDismiss\(pane\.id\)/)
+    expect(dismiss).not.toMatch(/onRestart\(/)
+    // And that App gives those two props the handlers that reach main. The
+    // restart deliberately names no tab: main owns `paneId → tabId` and a tab
+    // id sent from here is one that can be wrong.
+    expect(app).toMatch(/onRestart=\{restartTab\}/)
+    expect(app).toMatch(/onDismiss=\{dismissTab\}/)
+  })
+
+  it('overlays the pane rather than taking room in it', () => {
+    // Anchored on the pane box's own `key`, so this reads that box's classes
+    // and not the group container's, which is asserted separately above.
+    const box = /key=\{ ?box\.pane\.id ?\}.*?className=\{cn\( ?'([^']*)'/.exec(app)
+    expect(box).not.toBeNull()
+    // Without a positioned box the strip resolves against whatever ancestor is
+    // positioned and lands over a pane that did not die.
+    expect((box?.[1] ?? '').split(' ')).toContain('relative')
+
+    const strip = /className="([^"]*)"/.exec(deadPane)
+    expect(strip).not.toBeNull()
+    const classes = (strip?.[1] ?? '').split(' ')
+    // A strip in the flow would shrink the box, `Terminal` would fit itself to
+    // the smaller container, and tmux is not what reflows the scrollback here —
+    // the xterm is, and it is still mounted over a dead session.
+    expect(classes).toContain('absolute')
+    expect(classes).toContain('pointer-events-none')
+
+    // Which leaves the buttons to opt back in one at a time, so the scrollback
+    // stays selectable everywhere the glyphs are not.
+    const buttons = elements(deadPane, '<button')
+    expect(buttons).not.toHaveLength(0)
+    for (const button of buttons) expect(button).toMatch(/pointer-events-auto/)
   })
 })
 

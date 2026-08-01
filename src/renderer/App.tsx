@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useState } from 'react'
 import { Terminal, paneGrid } from './Terminal'
 import { TabBar } from './TabBar'
+import { DeadPane } from './DeadPane'
 import { Sidebar } from './Sidebar'
 import { RightPanel } from './RightPanel'
 import { AddProjectDialog } from './AddProjectDialog'
@@ -556,6 +557,11 @@ export function App() {
                   // pane counts as choosing it too.
                   onMouseDown={() => selectPane(box.pane.id)}
                   className={cn(
+                    // `relative`: the dead-pane chrome below positions itself
+                    // against this box, and an overlay that escaped to the
+                    // group container would land on whichever pane happened to
+                    // be at that corner.
+                    'relative',
                     // `min-w-0 min-h-0`: a flex item's automatic minimum size
                     // is its content's, not zero, so an xterm canvas still
                     // sized for the whole tab could hold this box open past its
@@ -580,6 +586,23 @@ export function App() {
                     // would move typing to a terminal the user cannot see.
                     focused={group.visible && box.pane.id === activePaneId}
                   />
+                  {/* Only the pane's session has died — the box, the xterm and
+                      the scrollback in it are all still here, which is why this
+                      draws over the pane instead of collapsing it. See
+                      `paneGroups`, which says why that is the opposite of what
+                      restore does with a pane whose session is gone.
+
+                      Gated on `box.dead` rather than on `state.dead[...]` read
+                      again here: `paneGroups` decides it, once, down both of
+                      its branches, and that is where it is tested. */}
+                  {box.dead ? (
+                    <DeadPane
+                      pane={box.pane}
+                      state={state.status[box.pane.id] ?? null}
+                      onRestart={restartTab}
+                      onDismiss={dismissTab}
+                    />
+                  ) : null}
                 </div>
               ))}
             </div>
