@@ -48,6 +48,7 @@ const sampleConfig: PrcliConfig = {
   tabs: [
     {
       id: 'a1b2c3d4e5f60718',
+      groupId: 'a1b2c3d4e5f60718',
       activePaneId: 'a1b2c3d4e5f60718',
       layout: { dir: 'row', ratio: [1], kids: ['a1b2c3d4e5f60718'] },
     },
@@ -79,6 +80,7 @@ const splitConfig: PrcliConfig = {
   tabs: [
     {
       id: 'a'.repeat(16),
+      groupId: 'a'.repeat(16),
       activePaneId: 'b'.repeat(16),
       layout: { dir: 'col', ratio: [0.25, 0.75], kids: ['a'.repeat(16), 'b'.repeat(16)] },
     },
@@ -588,6 +590,10 @@ describe('ConfigStore migration, v4 to v5', () => {
     expect(config.tabs).toHaveLength(1)
     expect(config.tabs[0]).toEqual({
       id: 'e'.repeat(16),
+      // A tab that was one pane is its own founder and its own tmux group, so
+      // all three ids are that pane's. Every v5 file written before the two
+      // were split reads back the same way — see the row below.
+      groupId: 'e'.repeat(16),
       activePaneId: 'e'.repeat(16),
       layout: { dir: 'row', ratio: [1], kids: ['e'.repeat(16)] },
     })
@@ -612,6 +618,47 @@ describe('ConfigStore.read, v5 layouts', () => {
 
     expect(config.tabs).toEqual([])
     expect(config.panes).toHaveLength(2)
+  })
+
+  // The whole of why splitting a tab's permanent id from its tmux group id
+  // needed no version bump: every v5 row written before the split was named
+  // after the group it was in, so `id` IS the group id for all of them, and
+  // defaulting the new field to it says exactly that. A row that has since
+  // re-founded carries both and is read as it was written.
+  it('reads a v5 row with no group id as one whose group is its own', async () => {
+    const store = await withTabs([
+      {
+        id: paneA.id,
+        activePaneId: paneA.id,
+        layout: { dir: 'row', ratio: [0.5, 0.5], kids: [paneA.id, paneB.id] },
+      },
+    ])
+
+    const config = await store.read()
+
+    expect(config.tabs).toHaveLength(1)
+    expect(config.tabs[0].id).toBe(paneA.id)
+    expect(config.tabs[0].groupId).toBe(paneA.id)
+  })
+
+  it('keeps a group id that differs from the row id, for a tab that re-founded', async () => {
+    const store = await withTabs([
+      {
+        id: paneA.id,
+        groupId: paneB.id,
+        activePaneId: paneA.id,
+        layout: { dir: 'row', ratio: [0.5, 0.5], kids: [paneA.id, paneB.id] },
+      },
+    ])
+
+    const config = await store.read()
+
+    expect(config.tabs).toHaveLength(1)
+    // Defaulting this one to `id` too would silently point the tab at a group
+    // tmux no longer has, and restore would then read it as a tab it has never
+    // seen — losing the layout and, with it, the id the renderer keys on.
+    expect(config.tabs[0].id).toBe(paneA.id)
+    expect(config.tabs[0].groupId).toBe(paneB.id)
   })
 
   it('drops a layout kid naming a pane that is not on disk', async () => {

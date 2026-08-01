@@ -836,6 +836,313 @@ describe('restartTab', () => {
   })
 })
 
+/**
+ * Task 2d. A tab whose panes have ALL died has nothing left in tmux to rejoin,
+ * and no one-line way back: tmux cannot move a live session into a group after
+ * creation, and a group takes the name of the session `new-session -t` targets
+ * — so such a tab can only regain a group by naming it after whichever pane
+ * comes back first. The founder-first test above hides that, because the name
+ * it lands on is the one the tab already had.
+ *
+ * Sibling-first is the same tab re-forming under a NEW group name, and it is
+ * the case neither half of `liveGroupOf` could reach: the group-name match has
+ * no group to look at, and the founder's own session — the only name the second
+ * half matches — is exactly the one that is still dead. Before this the second
+ * pane back found nothing to join and came back ungrouped too: two ungrouped
+ * sessions where a split tab was, which the next restore reads as two tabs.
+ * That is finding I4's harm verbatim, on the path the I4 fix left open.
+ *
+ * So the tab's identity is split from its tmux group: `TabRow.id` is permanent
+ * and is what the renderer keys its container on, and `TabRow.groupId` carries
+ * whichever group the tab is in now.
+ */
+describe('a tab that re-founds', () => {
+  /**
+   * A split tab whose panes have both died, with nothing of it left in tmux
+   * and nothing of it left on disk.
+   *
+   * Split through `CHANNELS.splitPane` rather than `manager.splitTab` so a tab
+   * row is actually written — the point being that both deaths then take it
+   * away again. The founder is killed last because killing the last session on
+   * a socket takes the server with it, which would leave the chained
+   * `kill-window` nothing to talk to.
+   */
+  async function deadSplitTab(): Promise<{ founder: TabDescriptor; second: TabDescriptor }> {
+    const founder = await invoke<TabDescriptor>(CHANNELS.open, {
+      projectSlug: 'lumio',
+      cwd: tmpdir(),
+    })
+    await waitForPrompt(founder.id)
+    const shape = await invoke<TabShape>(CHANNELS.splitPane, {
+      paneId: founder.id,
+      dir: 'row',
+      cols: 100,
+      rows: 30,
+    })
+    // Counted before anything indexes into it: `[][1]` is undefined, and every
+    // assertion below would then fail for the wrong reason.
+    expect(shape.panes).toHaveLength(2)
+    const second = shape.panes[1]
+    await waitForPrompt(second.id)
+
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const secondWindow = await adapter.windowIdOf(second.tmuxSession)
+    expect(secondWindow).toMatch(/^@\d+$/)
+
+    // A session of tmux's own, so that killing both panes does not take the
+    // server down with them. The last kill on a socket ends the server, and
+    // the exit handler's "did the session survive?" question then cannot be
+    // answered at all — it defaults to "alive", which is the safe answer and
+    // the wrong one here, leaving a dead pane's row on disk. Measured on this
+    // socket: without this one of the two rows survives, and which one is a
+    // race. Its name decodes to nothing, so no lookup in main can see it.
+    await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-s', 'keeper'])
+
+    const founderExit = waitForExitEvent(founder.id)
+    const secondExit = waitForExitEvent(second.id)
+    // The death hook's own two commands, in its order — see the restartTab
+    // tests above. This manager has no death reporter, so nothing else would.
+    await run('tmux', [
+      '-L', SOCKET,
+      'kill-session', '-t', `=${second.tmuxSession}`, ';', 'kill-window', '-t', secondWindow,
+    ])
+    // No chained `kill-window` on this one: the sibling's window went with the
+    // command above, so the founder's is the last window its group's window
+    // list holds and tmux reaps it with the session — measured, `kill-window
+    // -t @0` right after reports "can't find window: @0" and exits 1.
+    await run('tmux', ['-L', SOCKET, 'kill-session', '-t', `=${founder.tmuxSession}`])
+    await founderExit
+    await secondExit
+    await expect(adapter.hasSession(founder.tmuxSession)).resolves.toBe(false)
+    await expect(adapter.hasSession(second.tmuxSession)).resolves.toBe(false)
+
+    // Waited for, not assumed: `forgetTab` runs off the exit event and takes
+    // its own turn in the config queue, so a later read of the file would
+    // otherwise race a write that is still coming.
+    await waitForSavedIds(store, [])
+    return { founder, second }
+  }
+
+  it('brings a wholly dead split back into one group when the SIBLING restarts first', async () => {
+    const { founder, second } = await deadSplitTab()
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+
+    const backFirst = await invoke<TabDescriptor>(CHANNELS.restartTab, { tab: second })
+    await expect.poll(() => adapter.hasSession(backFirst.tmuxSession), { timeout: 8000 }).toBe(true)
+    // Ungrouped, and correctly so — there was nothing left of the tab to join.
+    // Asserted rather than assumed, because it is the precondition the second
+    // restart has to cope with: if this ever came back grouped, the assertions
+    // below would be exercising the ordinary path instead of this one.
+    expect(await sessionGroup(backFirst.tmuxSession)).toBe('')
+
+    const backSecond = await invoke<TabDescriptor>(CHANNELS.restartTab, { tab: founder })
+    await expect.poll(() => adapter.hasSession(backSecond.tmuxSession), { timeout: 8000 }).toBe(true)
+
+    // Read back from tmux for each, with the trailing colon `sessionGroup`
+    // documents, and non-empty before the two are compared — `''` is also what
+    // a lookup against a session tmux does not have returns, and two failed
+    // lookups agree perfectly.
+    const group = await sessionGroup(backSecond.tmuxSession)
+    expect(group).not.toBe('')
+    expect(await sessionGroup(backFirst.tmuxSession)).toBe(group)
+    // Named after the pane that came back FIRST, which is the whole of what
+    // re-founding means: the founder's own session name is not a target tmux
+    // has any more, so the group cannot be given the name it used to have.
+    expect(group).toBe(second.tmuxSession)
+
+    // And each pane bound to a window of its own. A member that attaches
+    // before it is bound lands on a sibling's window, and two xterms then
+    // render one pane.
+    const firstWindow = await adapter.windowIdOf(backFirst.tmuxSession)
+    const secondWindow = await adapter.windowIdOf(backSecond.tmuxSession)
+    expect(firstWindow).toMatch(/^@\d+$/)
+    expect(secondWindow).toMatch(/^@\d+$/)
+    expect(secondWindow).not.toBe(firstWindow)
+  })
+
+  /** Both panes back, sibling first — so the tab is live again under a new group. */
+  async function refoundedTab(): Promise<{ founder: TabDescriptor; second: TabDescriptor }> {
+    const { founder, second } = await deadSplitTab()
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const backSibling = await invoke<TabDescriptor>(CHANNELS.restartTab, {
+      tab: second,
+      cols: 100,
+      rows: 30,
+    })
+    await expect
+      .poll(() => adapter.hasSession(backSibling.tmuxSession), { timeout: 8000 })
+      .toBe(true)
+    const backFounder = await invoke<TabDescriptor>(CHANNELS.restartTab, {
+      tab: founder,
+      cols: 100,
+      rows: 30,
+    })
+    await expect
+      .poll(() => adapter.hasSession(backFounder.tmuxSession), { timeout: 8000 })
+      .toBe(true)
+    // The group they share is the sibling's, asserted here so the identity
+    // assertions in each test below are about a tab that really has re-founded.
+    const group = await sessionGroup(backFounder.tmuxSession)
+    expect(group).toBe(second.tmuxSession)
+    await waitForPrompt(backFounder.id)
+    return { founder, second }
+  }
+
+  it('writes the tab row under its original id, and the new group beside it', async () => {
+    const { founder, second } = await refoundedTab()
+    // Disk remembers nothing of this tab by now — `forgetTab` dropped each
+    // pane row as it died, and `store.read()` drops a tab row whose kids have
+    // all gone. So what identity the tab comes back under is decided entirely
+    // by main's live memory of it, which is the thing under test.
+    expect((await written()).tabs).toHaveLength(0)
+
+    const shape = await invoke<TabShape>(CHANNELS.splitPane, {
+      paneId: founder.id,
+      dir: 'row',
+      cols: 100,
+      rows: 30,
+    })
+    expect(shape.panes).toHaveLength(3)
+    const third = shape.panes[1]
+    await waitForPrompt(third.id)
+
+    // What the renderer is handed. It keys each tab's container on this id and
+    // `Terminal.tsx` disposes the xterm on unmount, so a row arriving under the
+    // new group's id would unmount the tab and take every scrollback in it —
+    // including the two the user just restarted.
+    expect(shape.tabs).toHaveLength(1)
+    expect(shape.tabs[0].id).toBe(founder.id)
+    expect(shape.tabs[0].groupId).toBe(second.id)
+
+    // Raw, because these are the assertions `store.read()` would repair: it
+    // rescales every ratio array by its own total and defaults a missing
+    // `groupId` to the row's id, so a row written with shares summing to 0.5,
+    // or with no group id at all, reads back through it looking perfect.
+    const config = await written()
+    expect(config.tabs).toHaveLength(1)
+    const row = config.tabs[0]
+    expect(row.id).toBe(founder.id)
+    expect(row.groupId).toBe(second.id)
+    expect(row.layout.kids).toEqual([founder.id, third.id, second.id])
+    expect(row.layout.ratio).toHaveLength(3)
+    expect(row.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+  })
+
+  // The one way a tab row outlives the tab it describes, and so the one way a
+  // saved row can be sitting there pointing at a group that no longer exists:
+  // `forgetTab` runs off an exit event, and a pane whose client had already
+  // detached sends none when its session is killed from outside. Its row stays,
+  // the tab row keeps it as a kid, and both survive the visible pane's death.
+  //
+  // Without the correction below, that row would name the old group for good —
+  // and never match this tab again on any future restore, which is the layout
+  // lost permanently rather than for one run.
+  it('corrects a saved row that outlived its group when the tab re-founds', async () => {
+    const founder = await invoke<TabDescriptor>(CHANNELS.open, {
+      projectSlug: 'lumio',
+      cwd: tmpdir(),
+    })
+    await waitForPrompt(founder.id)
+    const shape = await invoke<TabShape>(CHANNELS.splitPane, {
+      paneId: founder.id,
+      dir: 'row',
+      cols: 100,
+      rows: 30,
+    })
+    expect(shape.panes).toHaveLength(2)
+    const second = shape.panes[1]
+    await waitForPrompt(second.id)
+
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const secondWindow = await adapter.windowIdOf(second.tmuxSession)
+    expect(secondWindow).toMatch(/^@\d+$/)
+    // Keeps the server up once both panes are gone; see `deadSplitTab`.
+    await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-s', 'keeper'])
+
+    // The founder's client goes first, deliberately — that is what makes its
+    // death invisible to main.
+    detachTab(founder.id)
+    await settle(500)
+    await run('tmux', ['-L', SOCKET, 'kill-session', '-t', `=${founder.tmuxSession}`])
+
+    // No chained `kill-window`: this is the last session of the tab's group,
+    // and tmux reaps a window list nothing holds any more — measured, the
+    // chained form reports "can't find window" and exits 1.
+    const exitEvent = waitForExitEvent(second.id)
+    await run('tmux', ['-L', SOCKET, 'kill-session', '-t', `=${second.tmuxSession}`])
+    await exitEvent
+    await expect(adapter.hasSession(founder.tmuxSession)).resolves.toBe(false)
+    await expect(adapter.hasSession(second.tmuxSession)).resolves.toBe(false)
+    await waitForSavedIds(store, [founder.id])
+
+    // The precondition, asserted rather than assumed: a row for a tab with no
+    // live pane at all, still naming the group the tab used to be in.
+    const before = await written()
+    expect(before.tabs).toHaveLength(1)
+    expect(before.tabs[0].id).toBe(founder.id)
+    expect(before.tabs[0].groupId).toBe(founder.id)
+
+    const back = await invoke<TabDescriptor>(CHANNELS.restartTab, { tab: second })
+    await expect.poll(() => adapter.hasSession(back.tmuxSession), { timeout: 8000 }).toBe(true)
+    // Ungrouped: there was nothing left to rejoin, so this pane is the tab's
+    // new founder and its own session is the group any sibling will join.
+    expect(await sessionGroup(back.tmuxSession)).toBe('')
+
+    const after = await written()
+    expect(after.tabs).toHaveLength(1)
+    // The tab is the same tab — the renderer is still drawing it, with the
+    // founder's tombstone in it — and it is now in a different group.
+    expect(after.tabs[0].id).toBe(founder.id)
+    expect(after.tabs[0].groupId).toBe(second.id)
+  })
+
+  it('finds the re-founded tab again on restore, still under its original id', async () => {
+    const { founder, second } = await refoundedTab()
+    const shape = await invoke<TabShape>(CHANNELS.splitPane, {
+      paneId: founder.id,
+      dir: 'col',
+      cols: 100,
+      rows: 30,
+    })
+    expect(shape.panes).toHaveLength(3)
+    const third = shape.panes[1]
+    await waitForPrompt(third.id)
+
+    // Quit and relaunch: every client goes, the three tmux sessions stay, and
+    // the manager that remembered this tab is thrown away with everything in
+    // it. From here the saved row is the only thing that can say what this
+    // tab's identity was — matched by the group it is in NOW, which is not the
+    // id that row is keyed by.
+    manager.detachAll()
+    await settle(500)
+    useManager()
+
+    const restored = await restoreTabs()
+    expect(restored.panes).toHaveLength(3)
+    expect(restored.tabs).toHaveLength(1)
+    expect(restored.tabs[0].id).toBe(founder.id)
+    expect(restored.tabs[0].groupId).toBe(second.id)
+    // The layout survived with it, in the order and on the axis the split set.
+    expect(restored.tabs[0].layout.kids).toEqual([founder.id, third.id, second.id])
+    expect(restored.tabs[0].layout.dir).toBe('col')
+
+    const config = await written()
+    expect(config.tabs).toHaveLength(1)
+    expect(config.tabs[0].id).toBe(founder.id)
+    expect(config.tabs[0].groupId).toBe(second.id)
+    expect(config.tabs[0].layout.ratio).toHaveLength(3)
+    expect(config.tabs[0].layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+
+    // And the new manager was told the STABLE id for each adopted pane, not
+    // the group's. It is what every row this run writes will be keyed by, so a
+    // pane adopted under the group id would hand the renderer a new tab the
+    // first time one of these panes was split or closed.
+    expect(manager.tabIdOf(founder.id)).toBe(founder.id)
+    expect(manager.tabIdOf(second.id)).toBe(founder.id)
+    expect(manager.tabIdOf(third.id)).toBe(founder.id)
+  })
+})
+
 describe('splitPane and closePane', () => {
   /** A tab of two panes, made the way the UI now makes one. */
   async function splitOnce(
@@ -909,8 +1216,10 @@ describe('splitPane and closePane', () => {
     expect(config.panes.map((pane) => pane.id)).toEqual([founder.id, second.id])
     expect(config.tabs).toHaveLength(1)
     const row = config.tabs[0]
-    // The GROUP's id, which for a tab still on its founder is the founder's.
+    // The TAB's id, which is the id of the pane that founded it.
     expect(row.id).toBe(founder.id)
+    // And its group, which is the same id until this tab ever re-founds.
+    expect(row.groupId).toBe(founder.id)
     expect(row.activePaneId).toBe(second.id)
     expect(row.layout.kids).toEqual([founder.id, second.id])
     // The FIRST split of this tab, which is the only one the requested axis
@@ -1153,10 +1462,13 @@ describe('splitPane and closePane', () => {
     const after = await written()
     expect(after.panes.map((pane) => pane.id)).toEqual([second.id])
     expect(after.tabs).toHaveLength(1)
-    // The row keeps the dead FOUNDER's id, and that is right: a tmux group
-    // keeps the name it was founded under, and restore resolves rows through
-    // `tabIdFromGroupName`, so a row renamed after the survivor would stop
-    // matching the tab. Re-founding is Task 2d's.
+    // The row keeps the dead FOUNDER's id, and that is right twice over: it is
+    // the tab's permanent identity, which the renderer keys its container on,
+    // and this tab is still in the group founded under that name — a group
+    // keeps the name it was founded under, and restore resolves rows by the
+    // group id. A row renamed after the survivor would stop matching the tab
+    // AND unmount it. The one case where the two ids come apart is a tab whose
+    // panes have ALL died and which re-founds; then only `groupId` moves.
     expect(after.tabs[0].id).toBe(founder.id)
     expect(after.tabs[0].layout.kids).toEqual([second.id])
     expect(after.tabs[0].layout.ratio).toHaveLength(1)
@@ -1165,8 +1477,8 @@ describe('splitPane and closePane', () => {
 
   // `withTabRow` replaces a row where it stands rather than removing and
   // appending, because array order is the order the tab bar draws. Every other
-  // test here has one tab, so nothing else exercises it — and Task 2d reuses
-  // the same helper to rewrite a row's id.
+  // test here has one tab, so nothing else exercises it — and a re-founding
+  // rewrites a row's `groupId` through the same helper.
   it('leaves the other tabs where they are when one is split or closed', async () => {
     const first = await invoke<TabDescriptor>(CHANNELS.open, {
       projectSlug: 'lumio',

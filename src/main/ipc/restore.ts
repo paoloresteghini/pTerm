@@ -161,20 +161,35 @@ async function withoutSharedWindows(
 }
 
 /**
- * The tab row for one live tmux group.
+ * The tab row for one tab, given the panes it holds and the row saved for it.
  *
- * Existence is settled before this runs — `panes` is what actually came back
- * from tmux and attached, and is never empty. All this adds is what tmux
- * cannot report: the axis, the ratios and which pane was selected, taken from
- * the saved row where it still describes panes that are here.
+ * Existence is settled before this runs — `ids` is what the tab actually
+ * holds, and is never empty. All this adds is what tmux cannot report: the axis,
+ * the ratios and which pane was selected, taken from the saved row where it
+ * still describes panes that are here.
  *
  * A pane the saved row never knew about is appended rather than ignored: a tab
  * split during the last run has no multi-pane row on disk at all (nothing
  * writes one yet), so on the first relaunch after a split every sibling
  * arrives this way.
+ *
+ * Exported for `register.ts`'s `closePane`, which had grown its own copy of
+ * this — the same union, the same saved-share-or-even, the same rescale and
+ * the same `activePaneId` fallback, line for line. Two copies of one algorithm
+ * is how the rescale that keeps a row summing to 1 goes dead in one of them
+ * without a test noticing, since `store.read()` rescales on the way back in.
+ *
+ * `tab` is passed whole rather than derived from `saved`, because the two
+ * callers know the tab's identity by different routes and only they can say:
+ * restore starts from a live tmux group and takes the stable id off whatever
+ * row matches it, while `closePane` starts from the manager's own record of
+ * the tab and asks tmux which group that tab is in now.
  */
-function tabRowFor(tabId: string, panes: PaneRecord[], saved: TabRow | undefined): TabRow {
-  const ids = panes.map((pane) => pane.id)
+export function tabRowFor(
+  tab: { id: string; groupId: string },
+  ids: string[],
+  saved: TabRow | undefined,
+): TabRow {
   const savedKids = saved?.layout.kids ?? []
   const kids = [
     ...savedKids.filter((kid) => ids.includes(kid)),
@@ -201,10 +216,12 @@ function tabRowFor(tabId: string, panes: PaneRecord[], saved: TabRow | undefined
   // so no reader has to know that.
   const active = saved?.activePaneId
   return {
-    // The group's own id, never a pane's: a group outlives its founder, and a
-    // row named after whichever sibling happened to survive would stop matching
-    // the tab on the next restore.
-    id: tabId,
+    // Never a surviving pane's id: a group outlives its founder, and a row
+    // renamed after whichever sibling happened to survive would stop matching
+    // the tab on the next restore — and, in the same instant, unmount the tab
+    // in the renderer, which keys its container on this.
+    id: tab.id,
+    groupId: tab.groupId,
     activePaneId: active && kids.includes(active) ? active : kids[0],
     layout: {
       dir: saved?.layout.dir ?? 'row',
@@ -251,21 +268,45 @@ export async function restoreWorkspace(
 
     // Grouped by live tmux, not by anything saved: `findOrphanTabs` reads each
     // pane's `session_group`, which is what a split tab actually is, and takes
-    // the tab's id from the group name's frozen id half. Its slug is never
-    // read — a pane's project comes from that pane's own session name.
+    // its id from the group name's frozen id half. Its slug is never read — a
+    // pane's project comes from that pane's own session name.
+    //
+    // What it hands back is the GROUP's id, which is the tab's own id for
+    // every tab that still has the group it was founded with, and a different
+    // pane's for one that has re-founded since. The saved rows are what turn
+    // one into the other, below.
     const liveTabs: { tabId: string; panes: PaneRecord[] }[] = []
     for (const tab of await manager.findOrphanTabs()) {
       liveTabs.push({ tabId: tab.tabId, panes: await withoutSharedWindows(manager, tab) })
     }
 
     const byId = new Map<string, PaneRecord>()
-    const tabOf = new Map<string, string>()
+    // Keyed by the live GROUP's id — the only id tmux can report — which is
+    // the tab's own for every tab that has not re-founded.
+    const groupOf = new Map<string, string>()
     for (const tab of liveTabs) {
       for (const pane of tab.panes) {
         byId.set(pane.id, pane)
-        tabOf.set(pane.id, tab.tabId)
+        groupOf.set(pane.id, tab.tabId)
       }
     }
+
+    // The saved row for a group, by the group id that row was last seen in.
+    //
+    // Matched on `groupId` and never on `id`, because the group is all live
+    // tmux knows: a tab that re-founded while the app was running is in a
+    // group named after a different pane than the one its row is keyed by, and
+    // matching on `id` would find nothing, lose the tab's layout and hand the
+    // renderer a tab it has never seen. First row wins, which is a formality —
+    // the writers keep one row per tab id (`withTabRow` replaces by id, and
+    // this function's own caller replaces `tabs` wholesale), and a tab's group
+    // is one tab's, so distinct groups resolve to distinct rows.
+    const savedByGroup = new Map<string, TabRow>()
+    for (const row of saved.tabs) {
+      if (!savedByGroup.has(row.groupId)) savedByGroup.set(row.groupId, row)
+    }
+    /** The tab id a group belongs to: its saved row's, or the group's own. */
+    const tabIdOfGroup = (groupId: string): string => savedByGroup.get(groupId)?.id ?? groupId
 
     // Saved order first, skipping rows whose session is gone.
     //
@@ -317,7 +358,13 @@ export async function restoreWorkspace(
             // The fallback is total for the same reason `held`'s is: every
             // record here came out of a group above, and a pane that is its own
             // tab is what an ungrouped session already is.
-            tabId: tabOf.get(record.id) ?? record.id,
+            //
+            // The TAB's id, not the group's, and that is the whole of adoption
+            // for a tab that has re-founded: the manager hands this back to
+            // every writer of a tab row for as long as this run lasts, so a
+            // pane adopted under its group's id would put the tab in the bar
+            // twice the first time one of its panes was split or closed.
+            tabId: tabIdOfGroup(groupOf.get(record.id) ?? record.id),
           }),
         )
       } catch {
@@ -337,16 +384,16 @@ export async function restoreWorkspace(
       // Every pane here came out of a group above, so the fallback only makes
       // this total: a pane that is its own tab is exactly what an ungrouped
       // session already is.
-      const tabId = tabOf.get(pane.id) ?? pane.id
-      const already = held.get(tabId)
+      const groupId = groupOf.get(pane.id) ?? pane.id
+      const already = held.get(groupId)
       if (already) already.push(pane)
-      else held.set(tabId, [pane])
+      else held.set(groupId, [pane])
     }
-    const tabRows = [...held].map(([tabId, groupPanes]) =>
+    const tabRows = [...held].map(([groupId, groupPanes]) =>
       tabRowFor(
-        tabId,
-        groupPanes,
-        saved.tabs.find((row) => row.id === tabId),
+        { id: tabIdOfGroup(groupId), groupId },
+        groupPanes.map((pane) => pane.id),
+        savedByGroup.get(groupId),
       ),
     )
 

@@ -196,7 +196,12 @@ function tabRows(value: unknown, panes: PaneRecord[]): TabRow[] {
   const rows: TabRow[] = []
   for (const row of value as unknown[]) {
     if (typeof row !== 'object' || row === null) continue
-    const candidate = row as { id?: unknown; activePaneId?: unknown; layout?: unknown }
+    const candidate = row as {
+      id?: unknown
+      groupId?: unknown
+      activePaneId?: unknown
+      layout?: unknown
+    }
     if (typeof candidate.id !== 'string') continue
     const layout = normaliseLayout(candidate.layout, known)
     if (!layout) continue
@@ -206,6 +211,11 @@ function tabRows(value: unknown, panes: PaneRecord[]): TabRow[] {
     for (const kid of layout.kids) known.delete(kid)
     rows.push({
       id: candidate.id,
+      // Defaulted to the row's own id, which is why splitting the two needed no
+      // version bump: every row any earlier build wrote was named after the
+      // group it was in, so `id` IS the group id for all of them, and for every
+      // tab that has never re-founded. A row that has re-founded carries both.
+      groupId: typeof candidate.groupId === 'string' ? candidate.groupId : candidate.id,
       // Selection has to name a pane this tab actually holds; null is "the
       // first one", which is a pane that exists.
       activePaneId:
@@ -224,15 +234,18 @@ function tabRows(value: unknown, panes: PaneRecord[]): TabRow[] {
  *
  * Migration's, and only migration's. `restoreWorkspace` deliberately does not
  * use it, and the reason is worth writing down so it is not re-derived: a tab
- * row must carry the GROUP's frozen id, and a group outlives its founder, so a
- * row named after whichever pane survived would stop matching the tab on the
- * next restore. For a one-pane tab the two are byte-identical, which is
- * exactly why sharing this would look right and be wrong for the case this
- * milestone exists for. Restore builds its rows in `tabRowFor` instead.
+ * row's `groupId` must carry the GROUP's frozen id, and a group outlives its
+ * founder, so a row whose group id followed whichever pane survived would stop
+ * matching the tab on the next restore. For a one-pane tab every id here is
+ * byte-identical, which is exactly why sharing this would look right and be
+ * wrong for the case this milestone exists for. Restore builds its rows in
+ * `tabRowFor` instead.
  */
 function oneTabPerPane(panes: readonly PaneRecord[]): TabRow[] {
   return panes.map((pane) => ({
     id: pane.id,
+    // A v1–v4 tab is one pane, so it is its own founder and its own group.
+    groupId: pane.id,
     activePaneId: pane.id,
     layout: { dir: 'row', ratio: [1], kids: [pane.id] },
   }))

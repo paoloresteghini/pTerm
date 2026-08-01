@@ -26,8 +26,12 @@ export interface OpenInput {
   /** Supply to reattach an existing tab; omit to create a new one. */
   id?: string
   /**
-   * The tab this pane belongs to — a group's founder id, which equals the
+   * The tab this pane belongs to — the tab's permanent id, which equals the
    * pane's own id only for a one-pane tab and for the founder of a split.
+   *
+   * Not the tmux group's id, and the difference only shows once a tab whose
+   * panes all died has re-founded under a new group: the tab keeps this id and
+   * the group has another. `groupIdOf` answers the other question.
    *
    * Omitted means "this pane founds its own tab", which is what the renderer's
    * `CHANNELS.open` always is. Every other caller opens a pane into a tab that
@@ -66,10 +70,12 @@ interface Entry {
    * sets it from the tab the pane is in **at the moment the entry is made**,
    * which is why the two cannot disagree, and each gets there differently:
    * `CHANNELS.open` founds a tab, so the pane's own id is the answer;
-   * `splitTab` reads the group it is about to join the new member to;
+   * `splitTab` copies the sibling's, which is the tab they will share;
    * `restoreWorkspace` reads live tmux (`restore.ts:261-267`) — usually a run
    * later than the pane joined that tab, so the entry is new and the
-   * membership is not; and `moveTabToProject` does not change tab membership
+   * membership is not — under the tab's own id, not the group's, which is what
+   * keeps a re-founded tab's panes agreeing about which tab they are in; and
+   * `moveTabToProject` does not change tab membership
    * at all — it carries the old entry's value onto the one it makes, or, for a
    * pane already under the target name, makes no new entry (`continue`) and
    * leaves the old one standing. **An operation that moves a pane between
@@ -862,14 +868,18 @@ export class SessionManager {
       cols,
       rows,
       sized: true,
-      // The group's id half — never this new pane's own id, which is the one
-      // thing it certainly is not: a pane added to a tab is not its founder.
-      // `groupNameOf` answers with the sibling's own session name while the
-      // tab is still a group of one, and that decodes to the same id, so both
-      // of its answers are handled by the same call. The fallback covers a
-      // group name this app did not create and cannot read; the sibling's own
-      // record is then the best evidence there is.
-      tabId: tabIdFromGroupName(group) ?? sibling.tabId,
+      // The sibling's own recorded tab — never this new pane's id, which is
+      // the one thing it certainly is not: a pane added to a tab is not its
+      // founder.
+      //
+      // Read off the entry rather than off `group`, and the two are not the
+      // same answer: a group's name is the founder's session name frozen at
+      // creation, so for a tab that has re-founded it decodes to the pane that
+      // came back first, not to the tab. Taking the tab id from there would
+      // hand this new pane a different tab from its own sibling's, and rows
+      // written under it would be a second tab in the bar. The entry is where
+      // the tab's permanent identity lives; see `Entry.tabId`.
+      tabId: sibling.tabId,
     })
   }
 
@@ -909,7 +919,9 @@ export class SessionManager {
    * there that this does not already know better, and an omission would be
    * indistinguishable from a one-pane tab.
    */
-  async reopenInTab(input: Omit<OpenInput, 'tabId'> & { id: string }): Promise<PaneRecord> {
+  async reopenInTab(
+    input: Omit<OpenInput, 'tabId'> & { id: string },
+  ): Promise<{ record: PaneRecord; groupId: string }> {
     // Before either await, so "already open" is still refused before anything
     // can race it — see `recordFor`.
     const record = this.recordFor(input)
@@ -921,13 +933,28 @@ export class SessionManager {
     const tabId = this.tabWasIn.get(record.id) ?? record.id
 
     if (await this.adapter.hasSession(record.tmuxSession)) {
-      return this.attach(record, { ...geometry, tabId })
+      const reattached = this.attach(record, { ...geometry, tabId })
+      // Its own session never left the group it was created in, so the tab's
+      // group is whatever it already was. Read off the now-live entry rather
+      // than assumed to be `tabId`: this is also the path a pane of a tab that
+      // re-founded some time ago takes, and that group is not named after the
+      // tab.
+      return { record: reattached, groupId: await this.currentGroupId(record.id, tabId) }
     }
 
     const rejoin = await this.liveGroupOf(tabId)
-    if (!rejoin) return this.attach(record, { ...geometry, tabId })
+    if (!rejoin) {
+      // Case 3, and the half of it this app can still be wrong about. There is
+      // nothing to join, so `new-session -A` makes an UNGROUPED session — and
+      // for a tab that had more than one pane, that session is what the next
+      // pane back will be joined to, which names the group after it. So the
+      // tab re-founds here, around this pane, and the group id it reports is
+      // this pane's own. Its `tabId` is untouched: `TabRow.id` is the tab's
+      // permanent identity and the renderer's key for it.
+      return { record: this.attach(record, { ...geometry, tabId }), groupId: record.id }
+    }
 
-    return this.addMember({
+    const joined = await this.addMember({
       group: rejoin.group,
       through: rejoin.member,
       record,
@@ -939,6 +966,23 @@ export class SessionManager {
       sized: geometry.sized,
       tabId,
     })
+    // The group actually joined, which for a tab that re-founded before this
+    // pane came back is named after whichever pane did come back first.
+    return { record: joined, groupId: tabIdFromGroupName(rejoin.group) ?? tabId }
+  }
+
+  /**
+   * The group id of a pane this manager holds an entry for, or `fallback` when
+   * its group name is one this app did not create and cannot read.
+   *
+   * Answered from the pane rather than from the tab, which is what makes it
+   * safe to ask immediately after an attach: `groupIdOf` looks for a live
+   * session of the tab, and a client spawned moments ago may not have run its
+   * `new-session` yet — a race that reads as "this tab has no group", which is
+   * a plausible, wrong answer.
+   */
+  private async currentGroupId(paneId: string, fallback: string): Promise<string> {
+    return tabIdFromGroupName(await this.groupNameOf(paneId)) ?? fallback
   }
 
   /**
@@ -963,13 +1007,28 @@ export class SessionManager {
    *     tabs: the first pane back is ungrouped by definition (there was
    *     nothing to rejoin), and every pane after it then finds nothing to
    *     match. That is I4's harm again, reached with a perfectly good `tabId`.
+   *   - Failing THAT, a live session belonging to any pane this manager places
+   *     in this tab. The second match only ever finds the founder — a session
+   *     whose own name decodes to the tab id is the founder's by definition —
+   *     so with every pane of the tab dead and the SIBLING restarted first,
+   *     neither match above can see anything: there is no group, and the only
+   *     name they look for is the founder's, which is the one still dead. The
+   *     tab then re-founds under the sibling, and this is what the panes that
+   *     follow it back find. Which panes are in the tab is main's own record
+   *     (`Entry.tabId` for a live one, `tabWasIn` for a dead one) — the same
+   *     fact `reopenInTab` starts from, read the other way round.
    *
-   * Joining by that name is what re-forms the tab under its own identity, not
-   * merely some group: `new-session -t <a session name>` creates a group named
-   * after that session — measured, and it is how this tab's group was named in
-   * the first place (`splitTab` hands `groupNameOf`'s fallback to
-   * `newGroupMember`). So the tab regains the group name it had, whose id half
-   * still decodes to `tabId`.
+   * Joining by that name is what re-forms the tab, not merely some group:
+   * `new-session -t <a session name>` creates a group named after that session
+   * — measured, and it is how this tab's group was named in the first place
+   * (`splitTab` hands `groupNameOf`'s fallback to `newGroupMember`). Through
+   * the first two matches the tab regains the group name it had, whose id half
+   * still decodes to `tabId`. Through the third it cannot: the session that
+   * named the group is gone, and tmux has no way to name a group after a
+   * session it does not have, so the group comes back named after the pane
+   * that came back first and the tab's group id changes. Its `TabRow.id` does
+   * not — see `TabRow.groupId` for the other half of that, and `groupIdOf`,
+   * which is how a caller holding a tab id learns the new one.
    *
    * The second match cannot pick up the pane being restarted: `reopenInTab`
    * has already returned whenever a session by that pane's name is live, so by
@@ -992,12 +1051,61 @@ export class SessionManager {
   private async liveGroupOf(
     tabId: string,
   ): Promise<{ group: string; member: string } | undefined> {
-    const rows = await this.adapter.listSessionsWithGroups()
-    const grouped = rows.find((candidate) => tabIdFromGroupName(candidate.group) === tabId)
-    if (grouped) return { group: grouped.group, member: grouped.name }
+    const member = this.memberOfTab(await this.adapter.listSessionsWithGroups(), tabId)
+    // `groupNameOf`'s rule, applied to a session found rather than named: a
+    // member reports the group it is in, and a session in no group IS the
+    // group any join would create — which is what makes a re-founding possible
+    // at all, and what names the new group after this member.
+    return member ? { group: member.group || member.name, member: member.name } : undefined
+  }
 
-    const alone = rows.find((candidate) => decodeSessionName(candidate.name)?.id === tabId)
-    return alone ? { group: alone.name, member: alone.name } : undefined
+  /**
+   * A live session of tab `tabId`, or undefined when tmux has nothing left of
+   * that tab. The three matches are `liveGroupOf`'s; see it for why each is
+   * needed and in this order.
+   *
+   * Split out because `panesOfTab` needs the same question answered against
+   * rows it has already fetched, and two resolutions of "which tmux group is
+   * this tab" is exactly how the two of them came to disagree about whether a
+   * tab exists at all — see `panesOfTab`'s own note on that.
+   */
+  private memberOfTab(
+    rows: readonly { name: string; group: string }[],
+    tabId: string,
+  ): { name: string; group: string } | undefined {
+    const grouped = rows.find((candidate) => tabIdFromGroupName(candidate.group) === tabId)
+    if (grouped) return grouped
+
+    const founder = rows.find((candidate) => decodeSessionName(candidate.name)?.id === tabId)
+    if (founder) return founder
+
+    // Only reachable for a tab that has re-founded: any pane of a tab still in
+    // its original group is found by one of the two matches above.
+    const members = new Set<string>()
+    for (const [id, entry] of this.entries) if (entry.tabId === tabId) members.add(id)
+    for (const [id, was] of this.tabWasIn) if (was === tabId) members.add(id)
+    return rows.find((candidate) => {
+      const id = decodeSessionName(candidate.name)?.id
+      return id !== undefined && members.has(id)
+    })
+  }
+
+  /**
+   * The id half of the tmux group tab `tabId` is in now.
+   *
+   * `tabId` itself for every tab that still has the group it was founded with,
+   * and for one tmux has nothing left of — a tab with no live members is about
+   * to re-found under whichever pane comes back first, and until one does
+   * there is nothing truer to say. After a re-founding it is that pane's id.
+   *
+   * This is the only way a caller holding a tab id can learn the group id to
+   * write on that tab's row, and it has to be asked of tmux rather than
+   * remembered: the group a tab re-founds into is decided by a restart, and
+   * the panes that follow it back join whatever they find.
+   */
+  async groupIdOf(tabId: string): Promise<string> {
+    const found = await this.liveGroupOf(tabId)
+    return (found && tabIdFromGroupName(found.group)) ?? tabId
   }
 
   /**
@@ -1694,11 +1802,21 @@ export class SessionManager {
       // tab" throw and left such a tab stuck in its project for as long as it
       // lived. The group name's SLUG is still never read; it is several
       // renames out of date by definition.
-      const group = rows.find((row) => tabIdFromGroupName(row.group) === tabId)?.group
-      if (!group) return []
+      //
+      // Resolved through `memberOfTab`, which is that same group-name match
+      // plus the one a re-founded tab needs: once every pane of a tab has died
+      // the group is named after whichever pane came back first, so a tab id
+      // matches no group name at all and reading only that would report a live
+      // split tab as having no panes.
+      const member = this.memberOfTab(rows, tabId)
+      if (!member) return []
       // Nothing to put first: the pane whose id names this tab has gone, so
       // the order is tmux's and no caller may read a founder out of it.
-      members = rows.filter((row) => row.group === group)
+      //
+      // An ungrouped member is the whole tab — a tab down to one pane reports
+      // no group, and filtering on `''` would collect every other lone session
+      // on the socket into this tab.
+      members = member.group ? rows.filter((row) => row.group === member.group) : [member]
     }
 
     const panes: PaneRecord[] = []

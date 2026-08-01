@@ -133,8 +133,31 @@ export interface TabLayout {
  * the shape it lays out — the same reason `NotificationConfig` lives here.
  */
 export interface TabRow {
-  /** The founder pane's id. Stable across a move; the group name is not stored. */
+  /**
+   * The tab's permanent identity — the id of the pane that founded it, and
+   * never rewritten afterwards.
+   *
+   * The renderer keys each tab's container on this (`App.tsx`), and
+   * `Terminal.tsx` disposes the xterm on unmount, so changing it takes every
+   * scrollback in the tab with it. That is why it is not the same field as
+   * `groupId`: a tab whose panes have all died can only regain a tmux group by
+   * naming it after whichever pane comes back first, and the one moment that
+   * happens is the one moment every pane in the tab is a tombstone the user is
+   * still reading.
+   */
   id: string
+  /**
+   * The id half of the tmux group this tab is in NOW — `id` until every pane
+   * of the tab has died at once and the tab re-founds, and then the id of the
+   * pane that came back first.
+   *
+   * What restore matches a saved row by, because it is the only one of the two
+   * live tmux can report: a tab is a `session_group`, and a group's name is
+   * frozen at creation from the session it was created against. Every writer
+   * inside one run works in `id` instead — that is what `SessionManager`
+   * records per pane and what `withTabRow` replaces a row by.
+   */
+  groupId: string
   activePaneId: string | null
   layout: TabLayout
 }

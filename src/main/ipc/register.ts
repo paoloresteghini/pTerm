@@ -19,7 +19,7 @@ import {
 import type { ExitReason, SessionManager, PaneRecord } from '../sessions/manager'
 import { ConfigStore, type PrcliConfig } from '../state/store'
 import { StatusRegistry } from '../status/registry'
-import { describeProjects, restoreWorkspace, withUnsorted } from './restore'
+import { describeProjects, restoreWorkspace, tabRowFor, withUnsorted } from './restore'
 import { isDirectory } from '../fsutil'
 import { scanCandidates } from '../projects/discovery'
 import { hookPaths, installHooks, readHooksState, uninstallHooks } from '../hooks/install'
@@ -98,6 +98,12 @@ export function registerIpc(
    * `tabs` with the row for `tabId` replaced by `next`, or dropped when `next`
    * is null.
    *
+   * Keyed by `TabRow.id` — the tab's permanent identity, and the id every
+   * caller here holds, since that is what `SessionManager` records per pane.
+   * Never by `groupId`: a re-founding changes which group a tab is in and
+   * changes nothing about which row is that tab's, and this is the helper the
+   * new group id is written through.
+   *
    * Both callers rewrite exactly one row and must leave every other one
    * untouched, and a tab whose last pane has closed has to lose its row rather
    * than keep an empty one — `store.read()` would drop such a row on the way
@@ -112,8 +118,7 @@ export function registerIpc(
    *
    * Free of `serialise`, `store` and the manager on purpose: the caller is
    * already inside one pass holding one `config`, and this only rearranges what
-   * it holds. Task 2d's re-founding rewrites a row's `id` and can use it the
-   * same way.
+   * it holds.
    */
   const withTabRow = (tabs: TabRow[], tabId: string, next: TabRow | null): TabRow[] => {
     const at = tabs.findIndex((row) => row.id === tabId)
@@ -524,7 +529,7 @@ export function registerIpc(
       // Nothing here says which tab the pane was in, and nothing in the
       // request could: the manager recorded that when the pane was created or
       // adopted. See `SessionManager.tabWasIn` and `RestartRequest`.
-      const record = await manager.reopenInTab({
+      const { record, groupId } = await manager.reopenInTab({
         id: tab.id,
         projectSlug: tab.projectSlug,
         cwd: tab.cwd,
@@ -536,7 +541,42 @@ export function registerIpc(
         cols: request.cols ?? remembered?.cols,
         rows: request.rows ?? remembered?.rows,
       })
-      await rememberTab(record)
+
+      // Which tab this pane came back into. It and `groupId` differ exactly
+      // when the tab had no live member left and has re-founded around this
+      // pane or an earlier one back: tmux cannot name a group after a session
+      // it no longer has, so the group takes the name of whichever pane
+      // returned first, while the tab keeps the id it has always had.
+      //
+      // The group comes back FROM the reopen rather than being asked of tmux
+      // after it, and that is not a shortcut: the reopen is what decided it,
+      // and on the re-founding path the session it just spawned may not have
+      // reached tmux yet — a `list-sessions` in this line reads that as "the
+      // tab has no group" and leaves the row pointing at a group that is gone.
+      const tabId = manager.tabIdOf(record.id) ?? record.id
+
+      // `rememberTab` would write the pane row and nothing else, and it is a
+      // `serialise` wrapper, so the row update could not join it — two passes,
+      // with a window in between where the file says this tab is in a group it
+      // is not. One pass writes both.
+      await serialise(async () => {
+        const config = await store.read()
+        const panes = [...config.panes.filter((saved) => saved.id !== record.id), record]
+        const saved = config.tabs.find((row) => row.id === tabId)
+        // Only when there is a row to correct. A tab that died WHOLE has none
+        // by now — `forgetTab` dropped each pane row as its pane died, and
+        // `store.read()` drops a tab row whose kids have all gone — so nothing
+        // is written for it here, and nothing should be: a row naming panes
+        // that do not exist is the one thing `normaliseLayout`'s "config
+        // supplies layout, never existence" rule forbids. The tab's identity
+        // is carried by the manager until the next split or close writes a row
+        // under it.
+        const tabs =
+          saved && saved.groupId !== groupId
+            ? withTabRow(config.tabs, tabId, { ...saved, groupId })
+            : config.tabs
+        await store.write({ ...config, panes, tabs })
+      })
       registry.applyOpen(record.id, record.type)
       return record
     },
@@ -588,6 +628,12 @@ export function registerIpc(
     // failure `tabIdOf`'s own doc warns about. Asking the sibling's entry first
     // costs nothing and is right in both directions.
     const tabId = manager.tabIdOf(record.id) ?? manager.tabIdOf(paneId) ?? paneId
+    // The group that tab is in now, which is its own id unless it has
+    // re-founded since its panes all died. Asked here rather than taken from
+    // the saved row: after a re-founding there IS no saved row, and the row
+    // this handler is about to write is the first thing to record the tab's
+    // new group. Outside the pass below, like every other tmux call here.
+    const groupId = await manager.groupIdOf(tabId)
 
     // The same initialisation `CHANNELS.open` does, and needed for the same
     // reason: nothing else gives a pane its first state, so a `claude` pane
@@ -636,10 +682,13 @@ export function registerIpc(
           : [...siblings.slice(0, at + 1), record.id, ...siblings.slice(at + 1)]
 
       const row: TabRow = {
-        // The GROUP's id, never the new pane's — a pane added to a tab is not
-        // its founder, and a row named after it would stop matching the tab at
-        // the next restore, which resolves rows by the group's id.
+        // The TAB's id, never the new pane's — a pane added to a tab is not
+        // its founder, and a row named after it would be a second tab in the
+        // bar with the first one's panes in it.
         id: tabId,
+        // And the group it is in now, which is what the next restore resolves
+        // this row by: that is all live tmux can report about a tab.
+        groupId,
         // The pane the user just asked for is the one they are looking at.
         activePaneId: record.id,
         layout: {
@@ -719,6 +768,11 @@ export function registerIpc(
     lastGeometry.delete(paneId)
     manager.forgetPane(paneId)
 
+    // After the kill, so it reads the group the tab is left in rather than the
+    // one it was in with this pane still alive — and outside the pass below,
+    // like the kill itself.
+    const groupId = await manager.groupIdOf(tabId)
+
     return serialise(async () => {
       const config = await store.read()
       const panes = config.panes.filter((saved) => saved.id !== paneId)
@@ -737,35 +791,20 @@ export function registerIpc(
         .filter((id) => !savedKids.includes(id) && listed.has(id))
       const kids = [...savedKids.filter((kid) => kid !== paneId), ...unclaimed]
 
-      // `restore.ts`'s `tabRowFor` algorithm, on the same inputs and for the
-      // same reason: a kid the saved row knew keeps its own share, anything
-      // else takes an even one, and the lot is rescaled so the row describes a
-      // whole tab. Kids and shares are index-aligned and `store.read()` has
-      // already made the shares one per kid, positive and finite, so the saved
-      // ones can be read straight off. Without the rescale they sum to less
-      // than 1 on disk — invisible through `store.read()`, which rescales them
-      // again on the way back in.
+      // `restore.ts`'s `tabRowFor`, on the same inputs and for the same reason:
+      // a kid the saved row knew keeps its own share, anything else takes an
+      // even one, and the lot is rescaled so the row describes a whole tab.
+      // This handler had its own copy of that, converged on it line for line —
+      // and the rescale is exactly the part that can rot unnoticed in one copy,
+      // since `store.read()` rescales again on the way back in and repairs the
+      // evidence.
       //
       // A tab with no panes left loses its row outright rather than keeping an
       // empty one, which would put a tab nobody can see in the bar until the
-      // next read swept it.
-      let row: TabRow | null = null
-      if (kids.length > 0) {
-        const even = 1 / kids.length
-        const shares = kids.map((kid) => {
-          const at = savedKids.indexOf(kid)
-          return at === -1 || !saved ? even : saved.layout.ratio[at]
-        })
-        const total = shares.reduce((sum, share) => sum + share, 0)
-        const active = saved?.activePaneId
-        row = {
-          id: tabId,
-          // Selection has to name a pane the tab still holds; when the closed
-          // pane was the selected one the first survivor takes it.
-          activePaneId: active && kids.includes(active) ? active : kids[0],
-          layout: { dir: saved?.layout.dir ?? 'row', ratio: shares.map((s) => s / total), kids },
-        }
-      }
+      // next read swept it. That is why the emptiness is tested here rather
+      // than inside `tabRowFor`, whose other caller can never be handed none.
+      const row: TabRow | null =
+        kids.length > 0 ? tabRowFor({ id: tabId, groupId }, kids, saved) : null
 
       const tabs = withTabRow(config.tabs, tabId, row)
       await store.write({ ...config, panes, tabs })

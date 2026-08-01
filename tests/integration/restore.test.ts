@@ -549,6 +549,7 @@ describe('restoreWorkspace panes and tabs', () => {
       tabs: [
         {
           id: founder.id,
+          groupId: founder.id,
           activePaneId: second.id,
           layout: { dir: 'col', ratio: [0.25, 0.75], kids: [founder.id, second.id] },
         },
@@ -637,6 +638,7 @@ describe('restoreWorkspace panes and tabs', () => {
       tabs: [
         {
           id: founder.id,
+          groupId: founder.id,
           activePaneId: second.id,
           layout: { dir: 'col', ratio: [0.4, 0.6], kids: [founder.id, second.id] },
         },
@@ -680,6 +682,7 @@ describe('restoreWorkspace panes and tabs', () => {
       tabs: [
         {
           id: founder.id,
+          groupId: founder.id,
           activePaneId: middle.id,
           layout: { dir: 'row', ratio: [0.2, 0.3, 0.5], kids: [founder.id, middle.id, last.id] },
         },
@@ -723,11 +726,13 @@ describe('restoreWorkspace panes and tabs', () => {
       tabs: [
         {
           id: gone[0].id,
+          groupId: gone[0].id,
           activePaneId: gone[0].id,
           layout: { dir: 'row', ratio: [0.5, 0.5], kids: [gone[0].id, gone[1].id] },
         },
         {
           id: '1111111111111111',
+          groupId: '1111111111111111',
           activePaneId: '1111111111111111',
           layout: { dir: 'row', ratio: [1], kids: ['1111111111111111'] },
         },
@@ -759,6 +764,9 @@ describe('restoreWorkspace panes and tabs', () => {
     expect(saved.tabs).toHaveLength(1)
     expect(saved.tabs[0]).toEqual({
       id: 'a1b2c3d4e5f60718',
+      // Its own group, because an ungrouped session IS a tab of one: nothing
+      // saved says otherwise, and this is the only id there is to write.
+      groupId: 'a1b2c3d4e5f60718',
       activePaneId: 'a1b2c3d4e5f60718',
       layout: { dir: 'row', ratio: [1], kids: ['a1b2c3d4e5f60718'] },
     })
@@ -792,6 +800,7 @@ describe('restoreWorkspace panes and tabs', () => {
       tabs: [
         {
           id: founder.id,
+          groupId: founder.id,
           activePaneId: founder.id,
           layout: { dir: 'row', ratio: [0.5, 0.5], kids: [founder.id, second.id] },
         },

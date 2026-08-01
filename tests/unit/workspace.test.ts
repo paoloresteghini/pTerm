@@ -49,6 +49,9 @@ function project(id: string, slug: string, activeTabId: string | null = null): P
 function tabRow(id: string, kids: string[], activePaneId: string | null = kids[0] ?? null): TabRow {
   return {
     id,
+    // The tab's own group until it re-founds, which nothing in the renderer
+    // does or can: it is main that decides a tab's group.
+    groupId: id,
     activePaneId,
     layout: { dir: 'row', ratio: kids.map(() => 1 / kids.length), kids },
   }
@@ -177,6 +180,7 @@ describe('paneInDirection', () => {
   function colRow(id: string, kids: string[]): TabRow {
     return {
       id,
+      groupId: id,
       activePaneId: kids[0] ?? null,
       layout: { dir: 'col', ratio: kids.map(() => 1 / kids.length), kids },
     }
@@ -242,7 +246,7 @@ describe('paneInDirection', () => {
 describe('paneGroups', () => {
   /** A row with explicit ratios, for the cases `tabRow`'s even split cannot show. */
   function ratioRow(id: string, kids: string[], ratio: number[], dir: 'row' | 'col' = 'row'): TabRow {
-    return { id, activePaneId: kids[0] ?? null, layout: { dir, ratio, kids } }
+    return { id, groupId: id, activePaneId: kids[0] ?? null, layout: { dir, ratio, kids } }
   }
 
   it('lays a tab\'s panes along its axis, in kids order, sized by ratio', () => {
