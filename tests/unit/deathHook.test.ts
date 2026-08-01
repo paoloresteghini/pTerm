@@ -30,10 +30,14 @@ describe('canBuildDeathHook', () => {
     expect(canBuildDeathHook({ ...safe, reporter })).toBe(false)
   })
 
-  it('refuses a tab id that is not sixteen hex characters', () => {
-    for (const tabId of ["abc'; rm -rf /", '', 'A1B2C3D4E5F60718', 'a1b2c3d4e5f6071', 'a1b2c3d4e5f607180']) {
-      expect(canBuildDeathHook({ ...safe, tabId })).toBe(false)
-    }
+  it.each([
+    ['a shell metacharacter', "abc'; rm -rf /"],
+    ['nothing at all', ''],
+    ['upper-case hex', 'A1B2C3D4E5F60718'],
+    ['fifteen characters', 'a1b2c3d4e5f6071'],
+    ['seventeen characters', 'a1b2c3d4e5f607180'],
+  ])('refuses a tab id that is %s rather than sixteen hex characters', (_label, tabId) => {
+    expect(canBuildDeathHook({ ...safe, tabId })).toBe(false)
   })
 
   // These are refused by `isPrcliSession` because the third dash-separated
@@ -50,22 +54,20 @@ describe('canBuildDeathHook', () => {
     expect(canBuildDeathHook({ ...safe, tmuxSession })).toBe(false)
   })
 
-  it('refuses a session name that is not one this app could have generated', () => {
-    for (const tmuxSession of [
-      'prcli-alpha-a1b2c3d4e5f60718 ; kill-server',
-      'prcli-alpha-nothex',
-      'not-a-prcli-name',
-      '',
-    ]) {
-      expect(
-        deathHookCommand({
-          reporter: '/tmp/prcli/prcli-hook',
-          tabId: 'a1b2c3d4e5f60718',
-          tmuxSession,
-          windowId: '@7',
-        }),
-      ).toBeNull()
-    }
+  it.each([
+    ['a chained tmux command', 'prcli-alpha-a1b2c3d4e5f60718 ; kill-server'],
+    ['an id half that is not hex', 'prcli-alpha-nothex'],
+    ['no prcli prefix at all', 'not-a-prcli-name'],
+    ['nothing at all', ''],
+  ])('refuses a session name with %s, which this app could not have generated', (_l, tmuxSession) => {
+    expect(
+      deathHookCommand({
+        reporter: '/tmp/prcli/prcli-hook',
+        tabId: 'a1b2c3d4e5f60718',
+        tmuxSession,
+        windowId: '@7',
+      }),
+    ).toBeNull()
   })
 
   // The two must agree exactly, minus the window id, or the spawn-time

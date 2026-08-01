@@ -191,7 +191,20 @@ function normaliseLayout(value: unknown, known: Set<string>): TabLayout | null {
   }
 }
 
-/** Tab rows whose layout still describes panes that are on disk. */
+/**
+ * Tab rows whose layout still describes panes that are on disk, each pane
+ * claimed by at most one row.
+ *
+ * `normaliseLayout` dedupes kids within a row; the shrinking `known` set is
+ * what dedupes them across rows. A pane in two tabs is not a shape this app
+ * writes, but it is one a hand-edited or half-written file can have, and a
+ * pane drawn in two tabs at once has no sane rendering. First row wins, and a
+ * row left with no kids of its own is dropped exactly as one naming only dead
+ * panes is. Harmless today — restore rebuilds tab membership from live tmux on
+ * every launch and never consults `saved.tabs` for existence — but 2b writes
+ * tab rows from the renderer, and then this is the only thing between a bad
+ * file and two tabs fighting over one pane.
+ */
 function tabRows(value: unknown, panes: PaneRecord[]): TabRow[] {
   if (!Array.isArray(value)) return []
   const known = new Set(panes.map((pane) => pane.id))
@@ -202,6 +215,10 @@ function tabRows(value: unknown, panes: PaneRecord[]): TabRow[] {
     if (typeof candidate.id !== 'string') continue
     const layout = normaliseLayout(candidate.layout, known)
     if (!layout) continue
+    // Spent, so no later row can claim them. `normaliseLayout` has already
+    // rescaled this row's shares over the kids it actually kept, so a row that
+    // loses a kid to an earlier one still describes a whole tab.
+    for (const kid of layout.kids) known.delete(kid)
     rows.push({
       id: candidate.id,
       // Selection has to name a pane this tab actually holds; null is "the
@@ -220,10 +237,15 @@ function tabRows(value: unknown, panes: PaneRecord[]): TabRow[] {
  * One tab per pane, in pane order — the shape every version before v5 had,
  * where a tab *was* one pane.
  *
- * Exported because `restoreWorkspace` writes a workspace of one-pane tabs too;
- * a second copy of this there would be one place for the two to drift.
+ * Migration's, and only migration's. `restoreWorkspace` deliberately does not
+ * use it, and the reason is worth writing down so it is not re-derived: a tab
+ * row must carry the GROUP's frozen id, and a group outlives its founder, so a
+ * row named after whichever pane survived would stop matching the tab on the
+ * next restore. For a one-pane tab the two are byte-identical, which is
+ * exactly why sharing this would look right and be wrong for the case this
+ * milestone exists for. Restore builds its rows in `tabRowFor` instead.
  */
-export function oneTabPerPane(panes: readonly PaneRecord[]): TabRow[] {
+function oneTabPerPane(panes: readonly PaneRecord[]): TabRow[] {
   return panes.map((pane) => ({
     id: pane.id,
     activePaneId: pane.id,

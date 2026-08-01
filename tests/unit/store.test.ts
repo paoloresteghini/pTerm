@@ -266,7 +266,7 @@ describe('ConfigStore migration', () => {
     ],
   }
 
-  it('reads a v2 file as v4, keeping tab order', async () => {
+  it('reads a v2 file as v5, keeping tab order', async () => {
     await writeFile(file, JSON.stringify(v2), 'utf8')
     const config = await new ConfigStore(file).read()
     expect(config.version).toBe(5)
@@ -703,6 +703,58 @@ describe('ConfigStore.read, v5 layouts', () => {
     // Selection has to name something the tab actually holds; null means "the
     // first one", which is a pane that exists.
     expect(config.tabs[0].activePaneId).toBeNull()
+  })
+
+  // Not a shape this app writes, and one a hand-edited or half-written file
+  // can have. A pane drawn in two tabs at once has no sane rendering, so the
+  // first row to name it keeps it — the same first-wins rule `normaliseLayout`
+  // already applies to a kid repeated WITHIN one row.
+  it('lets only one tab row claim a pane', async () => {
+    const store = await withTabs([
+      {
+        id: paneA.id,
+        activePaneId: paneA.id,
+        layout: { dir: 'row', ratio: [0.5, 0.5], kids: [paneA.id, paneB.id] },
+      },
+      {
+        id: paneB.id,
+        activePaneId: paneB.id,
+        layout: { dir: 'row', ratio: [1], kids: [paneB.id] },
+      },
+    ])
+
+    const config = await store.read()
+
+    // The second row named nothing of its own, so it goes the way a row naming
+    // only dead panes goes.
+    expect(config.tabs).toHaveLength(1)
+    expect(config.tabs[0].id).toBe(paneA.id)
+    expect(config.tabs[0].layout.kids).toEqual([paneA.id, paneB.id])
+  })
+
+  it('leaves a second row holding whatever the first did not claim', async () => {
+    const store = await withTabs([
+      {
+        id: paneA.id,
+        activePaneId: paneA.id,
+        layout: { dir: 'row', ratio: [1], kids: [paneA.id] },
+      },
+      {
+        id: paneB.id,
+        activePaneId: paneB.id,
+        // Claims the pane above as well as its own.
+        layout: { dir: 'row', ratio: [0.25, 0.75], kids: [paneA.id, paneB.id] },
+      },
+    ])
+
+    const config = await store.read()
+
+    // Both tabs survive; only the duplicate kid goes.
+    expect(config.tabs.map((tab) => tab.id)).toEqual([paneA.id, paneB.id])
+    expect(config.tabs[1].layout.kids).toEqual([paneB.id])
+    // And the row that lost a kid still describes a whole tab rather than the
+    // 0.75 it had when it thought it held two.
+    expect(config.tabs[1].layout.ratio).toEqual([1])
   })
 
   it('defaults an unreadable axis to a row rather than dropping the tab', async () => {
