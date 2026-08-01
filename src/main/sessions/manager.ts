@@ -273,6 +273,14 @@ export class SessionManager {
       ? { kind: 'found', id: windowId }
       : await this.awaitWindowId(entry.record.tmuxSession)
     if (lookup.kind !== 'found') return
+    // A window this member only appears to be in is not one to resize — and
+    // not one to cache on the entry either, since `kill()` and every later
+    // `resize()` would then take the cached id for this pane's own. A split
+    // pane's window is `window-size manual`, so the sibling would simply stay
+    // at whatever size this pane's client happens to be.
+    if (windowId === null && !(await this.ownsWindow(entry.record.tmuxSession, lookup.id))) {
+      return
+    }
     entry.windowId = lookup.id
     await this.resizeWindow(entry, cols, rows)
   }
@@ -332,6 +340,28 @@ export class SessionManager {
 
     const window = lookup.id
 
+    // A window this member has only fallen back onto belongs to a sibling,
+    // whose own hook is already on it — naming the sibling's tab id and
+    // reaping the sibling's session. Overwriting it sends the red dot to the
+    // wrong pane and reaps the wrong session, leaving this window's real
+    // owner behind as a stray.
+    //
+    // Nothing is taken back off on this path, deliberately, and it is the one
+    // early return here that does not: `remain-on-exit` on this window is the
+    // SIBLING's — set for the sibling's pane, and paired with the sibling's
+    // hook. Turning it off to satisfy the together-or-not-at-all rule would
+    // break that pairing and cost the sibling the very reaping the rule
+    // exists to guarantee. This member has no window of its own, so it has
+    // nothing of its own left here to leak.
+    if (windowId === null && !(await this.ownsWindow(record.tmuxSession, window))) {
+      console.error(
+        `PRCLI: ${record.tmuxSession} reports window ${window}, which a sibling pane of the ` +
+          'same tab already owns — its own window has died. Leaving that window alone; ' +
+          'this pane will show grey instead of red when it exits',
+      )
+      return
+    }
+
     const command = deathHookCommand({
       reporter,
       tabId: record.id,
@@ -380,6 +410,54 @@ export class SessionManager {
     } catch {
       // Nothing further to try. See above.
     }
+  }
+
+  /**
+   * Whether `tmuxSession` is the member entitled to write to `windowId` — the
+   * window it has just reported as its own.
+   *
+   * `display-message -t '=member:' '#{window_id}'` answers "the window this
+   * session is currently showing", which is not the same question as "the
+   * window this pane's process is in". When a member's OWN window dies, tmux
+   * silently falls it back onto a sibling's (measured, in both directions) and
+   * its session survives — so for exactly that member the answer names its
+   * sibling's window and its sibling's process. `restoreWorkspace` was taught
+   * to detect this state on this branch; everything here — the death hook, the
+   * attach-time resize, the kill — trusted the lookup, and each one wrote to
+   * the sibling's window because of it.
+   *
+   * The tie is broken the same way `withoutSharedWindows` breaks it, and must
+   * stay that way: the FOUNDER wins, the pane whose own id is the tab's, which
+   * is the direction pre-flight measured (a joined member falling back onto the
+   * founder's window). Which member truly owns a shared window is not
+   * recoverable from tmux, so a rule that answered "neither" would leave the
+   * founder unable to size or reap its own window; one that answered "both"
+   * would restore the clobbering this exists to stop. When the founder itself
+   * has gone — a group outlives it — the first claimant in tmux's own order
+   * takes it, so the answer is at least stable across calls.
+   *
+   * One `list-sessions` for a tab that has never been split, which is the
+   * ordinary case: an ungrouped session has no sibling that could shadow it and
+   * returns before asking tmux anything else.
+   */
+  private async ownsWindow(tmuxSession: string, windowId: string): Promise<boolean> {
+    const rows = await this.adapter.listSessionsWithGroups()
+    const group = rows.find((row) => row.name === tmuxSession)?.group
+    if (!group) return true
+
+    // In tmux's order, with this member in its own place — `claimants[0]` is
+    // then the fallback owner rather than whoever happened to ask.
+    const claimants: string[] = []
+    for (const row of rows) {
+      if (row.group !== group) continue
+      if (row.name === tmuxSession) claimants.push(row.name)
+      else if ((await this.adapter.windowIdOf(row.name)) === windowId) claimants.push(row.name)
+    }
+    if (claimants.length < 2) return true
+
+    const tabId = tabIdFromGroupName(group)
+    const founder = claimants.find((name) => decodeSessionName(name)?.id === tabId)
+    return (founder ?? claimants[0]) === tmuxSession
   }
 
   /**
@@ -673,11 +751,29 @@ export class SessionManager {
    * resize could arrive last and leave the window at a size the renderer has
    * already moved on from — the same "last writer wins by accident" that the
    * geometry rule exists to remove.
+   *
+   * Both halves of that staleness are checked, and they are not the same
+   * check. The size guard catches a resize the renderer has superseded; the
+   * identity guard catches an entry the MANAGER has superseded — a pane
+   * detached and reopened (which `moveTabToProject` does on every move) has a
+   * new entry with new geometry, while this one's `cols`/`rows` are exactly as
+   * they were and sail through the size guard. Same identity comparison
+   * `session.onExit` makes, and for the same reason.
    */
   private async resizeWindow(entry: Entry, cols: number, rows: number): Promise<void> {
-    const windowId = entry.windowId ?? (await this.adapter.windowIdOf(entry.record.tmuxSession))
-    if (!windowId) return
-    entry.windowId = windowId
+    let windowId = entry.windowId
+    if (!windowId) {
+      const found = await this.adapter.windowIdOf(entry.record.tmuxSession)
+      // Not cached, and not resized, when a sibling owns it: see `ownsWindow`.
+      // Asked once per entry rather than per resize — a drag would otherwise
+      // put a `list-sessions` between every frame — because this branch only
+      // runs while the entry has no window id, and it either gets one here or
+      // stays out of the window's way for good.
+      if (!found || !(await this.ownsWindow(entry.record.tmuxSession, found))) return
+      entry.windowId = found
+      windowId = found
+    }
+    if (this.entries.get(entry.record.id) !== entry) return
     if (entry.cols !== cols || entry.rows !== rows) return
     await this.adapter.resizeWindow(windowId, cols, rows)
   }
@@ -714,16 +810,26 @@ export class SessionManager {
    * `windowIdOf`, not `lookupWindow`: this only ever needs a bare id to hand
    * `killWindow`, and every way tmux can decline to give one — session gone,
    * tmux unreachable — comes to the same thing here, nothing left to kill.
+   *
+   * The window is killed only when this pane is the one entitled to it. A
+   * member whose own window died reports its SIBLING's, so killing what it
+   * reports would destroy the other pane's window and the process inside it —
+   * the user closes one pane and the other one's shell dies. Its session is
+   * still killed either way; that is the only object it still has.
    */
   async kill(id: string): Promise<void> {
     const entry = this.entries.get(id)
     if (entry) {
       const windowId = entry.windowId ?? (await this.adapter.windowIdOf(entry.record.tmuxSession))
+      // Asked before the session is killed, and it has to be: the check reads
+      // this session's group out of `list-sessions`, and there is no row left
+      // to read once it has gone.
+      const own = windowId !== '' && (await this.ownsWindow(entry.record.tmuxSession, windowId))
       entry.intent = 'killed'
       this.entries.delete(id)
       entry.session.detach()
       await this.adapter.killSession(entry.record.tmuxSession)
-      if (windowId) await this.adapter.killWindow(windowId)
+      if (own) await this.adapter.killWindow(windowId)
       return
     }
 
@@ -731,8 +837,9 @@ export class SessionManager {
     // Resolving here would report success without killing anything.
     if (!orphan) throw new Error(`kill: no tmux session found for tab ${id}`)
     const windowId = await this.adapter.windowIdOf(orphan.tmuxSession)
+    const own = windowId !== '' && (await this.ownsWindow(orphan.tmuxSession, windowId))
     await this.adapter.killSession(orphan.tmuxSession)
-    if (windowId) await this.adapter.killWindow(windowId)
+    if (own) await this.adapter.killWindow(windowId)
   }
 
   /**

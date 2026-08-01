@@ -894,6 +894,120 @@ describe('SessionManager.moveTabToProject', () => {
   })
 })
 
+/**
+ * A member whose OWN window has died silently falls back onto a sibling's —
+ * measured on tmux 3.7b, in both directions — and its session survives.
+ * `restoreWorkspace` is the only place in the app that knew about this state;
+ * everywhere else `display-message -t '=member:' '#{window_id}'` was taken to
+ * mean "the window this pane's process is in", which for such a member names
+ * the SIBLING's window and its sibling's process.
+ *
+ * Each test below writes to a window through the fallen-back member and
+ * asserts the sibling is untouched: its geometry, its process, its hook.
+ */
+describe('SessionManager and a member that has fallen back onto a sibling window', () => {
+  /**
+   * Split a tab, then kill the second pane's window only. Its client goes
+   * first, because killing a window under an attached client is a different
+   * sequence — this reproduces a pane whose process died and was reaped while
+   * the app was not looking, which is what leaves the member behind.
+   */
+  async function fallenBack(manager: SessionManager) {
+    const founder = manager.open({ projectSlug: 'lumio', cwd: tmpdir(), cols: 120, rows: 40 })
+    await waitFor(manager, founder.id, /\$|%|#/)
+    const second = await manager.splitTab({ paneId: founder.id, cols: 100, rows: 30 })
+    const founderWindow = await windowIdOf(founder.tmuxSession)
+    const secondWindow = await windowIdOf(second.tmuxSession)
+    expect(founderWindow).toMatch(/^@\d+$/)
+    expect(secondWindow).not.toBe(founderWindow)
+
+    manager.detach(second.id)
+    await run('tmux', ['-L', SOCKET, 'kill-window', '-t', secondWindow])
+    // The fallback itself, asserted rather than assumed: without it every
+    // test below would be about an ordinary split and would pass on anything.
+    await expect.poll(() => windowIdOf(second.tmuxSession), { timeout: 8000 }).toBe(founderWindow)
+    expect(await sessionExists(second.tmuxSession)).toBe(true)
+    return { founder, second, founderWindow }
+  }
+
+  // New with Task 5: before it there was no attach-time `resize-window` at
+  // all, so one pane's reattach could not reshape its sibling.
+  it("does not resize the sibling's window when it reattaches", async () => {
+    const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
+    const { founder, second, founderWindow } = await fallenBack(manager)
+    expect(await windowSize(founder.tmuxSession)).toBe('120x40')
+
+    manager.open({
+      id: second.id, projectSlug: 'lumio', cwd: tmpdir(),
+      tmuxSession: second.tmuxSession, cols: 60, rows: 20,
+    })
+    // The client really did attach — otherwise "the window did not change"
+    // would be true because nothing happened at all.
+    await expect.poll(() => clients(second.tmuxSession), { timeout: 8000 }).toHaveLength(1)
+    // An attach's window sizing is asynchronous: it has to wait for tmux to
+    // name a window before it can resize one, measured at ~25ms. A second is
+    // two orders of magnitude of headroom, and this assertion is RED without
+    // the ownership check — so the wait is demonstrably long enough to catch
+    // the resize it is asserting does not happen.
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    expect(await windowSize(founder.tmuxSession)).toBe('120x40')
+    expect(await windowIdOf(founder.tmuxSession)).toBe(founderWindow)
+    manager.detachAll()
+  })
+
+  it("kills its own session without taking the sibling's window and process", async () => {
+    const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
+    const { founder, second, founderWindow } = await fallenBack(manager)
+    // Reattached first, which is the path the finding names: Task 5 caches
+    // `entry.windowId` from the same lookup, so a kill that trusts the cache
+    // and one that re-asks tmux both arrive at the sibling's window.
+    manager.open({
+      id: second.id, projectSlug: 'lumio', cwd: tmpdir(),
+      tmuxSession: second.tmuxSession, cols: 60, rows: 20,
+    })
+    await expect.poll(() => clients(second.tmuxSession), { timeout: 8000 }).toHaveLength(1)
+    // Read before the kill: afterwards there may be no pane left to ask.
+    const pid = await panePid(founder.tmuxSession)
+    expect(pid).toMatch(/^\d+$/)
+
+    await manager.kill(second.id)
+
+    expect(await sessionExists(second.tmuxSession)).toBe(false)
+    expect(await sessionExists(founder.tmuxSession)).toBe(true)
+    expect(await windowIdOf(founder.tmuxSession)).toBe(founderWindow)
+    // The harm this prevents, stated as the process rather than the window:
+    // the user closes one pane and the OTHER pane's shell is killed.
+    expect(isRunning(pid)).toBe(true)
+    manager.detachAll()
+  })
+
+  // Pre-existing rather than new — the reinstall call is byte-identical to the
+  // one at `81cd203` — but Task 7 established in the same branch that this
+  // state is real and detectable, so it is fixed with the rest of it.
+  it("does not rewrite the sibling's death hook when the tab is moved", async () => {
+    const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }), {
+      deathReporter: join(tmpdir(), 'prcli-hook-test-reporter'),
+    })
+    const { founder, second, founderWindow } = await fallenBack(manager)
+    // `open()`'s hook installs asynchronously. Moving before it lands would
+    // leave nothing for the move to clobber.
+    await expect.poll(() => hooksOf(founderWindow), { timeout: 10_000 }).toContain('pane-died')
+
+    const moved = await manager.moveTabToProject(founder.id, 'gco')
+    expect(moved.length).toBeGreaterThan(0)
+
+    // The founder's window still reports the founder's death, and still reaps
+    // the founder's own session. A hook naming the other pane sends the red
+    // dot to the wrong tab and reaps the wrong session, leaving the founder's
+    // own behind as a stray.
+    const hooks = await hooksOf(founderWindow)
+    expect(hooks).toContain(`PRCLI_TAB_ID=${founder.id}`)
+    expect(hooks).toContain(`=prcli-gco-${founder.id}`)
+    expect(hooks).not.toContain(second.id)
+    manager.detachAll()
+  })
+})
+
 describe('SessionManager tab id in the session environment', () => {
   it('puts the tab id in the session environment, where a hook can read it', async () => {
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
