@@ -253,11 +253,19 @@ export interface PrcliApi {
   scanCandidates(): Promise<Candidate[]>
   /** The chosen folder, or null when the user cancelled. */
   pickFolder(): Promise<string | null>
-  /** Moves the tab by renaming its tmux session; everything in it keeps running. */
+  /**
+   * Moves the tab by renaming the tmux session of every pane in it; everything
+   * running inside them keeps running.
+   *
+   * `panes` is every pane that moved, never one: a pane's project membership
+   * lives in its own session name, so a split tab has as many renames — and as
+   * many updated records — as it has panes. Non-empty whenever this resolves,
+   * because a tab with no panes is a move that throws.
+   */
   moveTabToProject(
     tabId: string,
     projectId: string,
-  ): Promise<{ projects: ProjectDescriptor[]; tab: TabDescriptor }>
+  ): Promise<{ projects: ProjectDescriptor[]; panes: TabDescriptor[] }>
   input(id: string, data: string): void
   resize(id: string, cols: number, rows: number): void
   detach(id: string): void

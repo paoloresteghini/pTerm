@@ -309,11 +309,13 @@ export function App() {
         onAdd={() => setAdding(true)}
         onOpenSettings={() => setSettingsOpen(true)}
         onMoveTab={(tabId, projectId) => {
-          // Renames the tmux session. The tab id is the other half of the
-          // name, so it keeps its scrollback and everything running in it.
+          // Renames each pane's tmux session. A pane id is the other half of
+          // the name it keeps, so every pane keeps its scrollback and
+          // everything running in it. The reply lists every pane that moved —
+          // one, until 2b lets a tab hold more.
           window.prcli
             .moveTabToProject(tabId, projectId)
-            .then(({ projects, tab }) => dispatch({ type: 'movedTab', tab, projects }))
+            .then(({ projects, panes }) => dispatch({ type: 'movedTab', panes, projects }))
             .catch(fail)
         }}
         onRename={(id, name) => {

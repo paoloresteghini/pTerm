@@ -546,23 +546,79 @@ describe('project channels', () => {
     await waitForPrompt(tab.id)
     const before = tab.tmuxSession
 
-    const moved = await invoke<{ projects: ProjectDescriptor[]; tab: TabDescriptor }>(
+    const moved = await invoke<{ projects: ProjectDescriptor[]; panes: TabDescriptor[] }>(
       CHANNELS.moveTabToProject,
       tab.id,
       project.id,
     )
 
-    expect(moved.tab.projectSlug).toBe('lumio')
-    expect(moved.tab.id).toBe(tab.id)
-    expect(moved.tab.tmuxSession).toBe(`prcli-lumio-${tab.id}`)
+    // One pane, because this tab was never split — asserted before anything
+    // reads out of the list.
+    expect(moved.panes).toHaveLength(1)
+    expect(moved.panes[0].projectSlug).toBe('lumio')
+    expect(moved.panes[0].id).toBe(tab.id)
+    expect(moved.panes[0].tmuxSession).toBe(`prcli-lumio-${tab.id}`)
     const adapter = new TmuxAdapter({ socket: SOCKET })
-    await expect(adapter.hasSession(moved.tab.tmuxSession)).resolves.toBe(true)
+    await expect(adapter.hasSession(moved.panes[0].tmuxSession)).resolves.toBe(true)
     await expect(adapter.hasSession(before)).resolves.toBe(false)
     // Nothing is stray any more, so there is nothing for Unsorted to hold.
     expect(moved.projects.map((p) => p.id)).toEqual([project.id])
     await expect(store.read().then((c) => c.panes.map((p) => p.tmuxSession))).resolves.toEqual([
-      moved.tab.tmuxSession,
+      moved.panes[0].tmuxSession,
     ])
+  })
+
+  // A pane's project lives in its own member session name and, on disk, in its
+  // own row — so a move that writes back one row leaves the tab split across
+  // two projects the moment a second pane exists. No IPC splits a tab yet
+  // (plan 2b), so the second pane is made through the manager and its row
+  // written the way that command's handler will write it.
+  //
+  // Both panes are detached first: that is what makes the per-pane `known` map
+  // load-bearing. A detached pane is resolved through tmux, whose
+  // `pane_current_path` answers with the symlink-resolved `/private/var/...`
+  // rather than the `/var/...` config holds, so a row whose cwd survives
+  // verbatim can only have come from config.
+  it('moves every pane of a split tab, and saves a row for each', async () => {
+    const [project] = await invoke<ProjectDescriptor[]>(CHANNELS.addProject, {
+      name: 'Lumio',
+      cwd: tmpdir(),
+    })
+    const founder = await openTabIn('stray')
+    await waitForPrompt(founder.id)
+    // Its own directory, so a write-back that put one pane's record into both
+    // rows shows up as well as one that left a row behind.
+    const secondCwd = join(configDir, 'second-pane')
+    await mkdir(secondCwd, { recursive: true })
+    const second = await manager.splitTab({ paneId: founder.id, cwd: secondCwd })
+    await waitForPrompt(second.id)
+    const seeded = await store.read()
+    await store.write({ ...seeded, panes: [...seeded.panes, second] })
+    detachTab(founder.id)
+    detachTab(second.id)
+    await settle(500)
+
+    await invoke<{ projects: ProjectDescriptor[]; panes: TabDescriptor[] }>(
+      CHANNELS.moveTabToProject,
+      founder.id,
+      project.id,
+    )
+
+    // Live tmux, not the reply: every member session carries the destination
+    // slug in its own name.
+    const live = await manager.panesOfTab(founder.id)
+    expect(live).toHaveLength(2)
+    for (const pane of live) expect(pane.projectSlug).toBe('lumio')
+
+    // And config says the same for both, which is what a relaunch reads.
+    const saved = (await store.read()).panes
+    expect(saved).toHaveLength(2)
+    for (const row of saved) {
+      expect(row.projectSlug).toBe('lumio')
+      expect(row.tmuxSession).toBe(`prcli-lumio-${row.id}`)
+    }
+    expect(saved.map((row) => row.id).sort()).toEqual([founder.id, second.id].sort())
+    expect(saved.find((row) => row.id === second.id)?.cwd).toBe(secondCwd)
   })
 
   // The same session name, so there is nothing to rename and nothing to
@@ -576,21 +632,23 @@ describe('project channels', () => {
     const tab = await openTabIn('lumio')
     await waitForPrompt(tab.id)
 
-    const moved = await invoke<{ projects: ProjectDescriptor[]; tab: TabDescriptor }>(
+    const moved = await invoke<{ projects: ProjectDescriptor[]; panes: TabDescriptor[] }>(
       CHANNELS.moveTabToProject,
       tab.id,
       project.id,
     )
 
-    expect(moved.tab.tmuxSession).toBe(tab.tmuxSession)
+    expect(moved.panes).toHaveLength(1)
+    expect(moved.panes[0].tmuxSession).toBe(tab.tmuxSession)
     expect(manager.get(tab.id)?.tmuxSession).toBe(tab.tmuxSession)
     const adapter = new TmuxAdapter({ socket: SOCKET })
     await expect(adapter.hasSession(tab.tmuxSession)).resolves.toBe(true)
   })
 
   // A detached tab is still movable: its session is running, it just has no
-  // client here. The move finds it through `findOrphans`, which has to
-  // synthesise a cwd — so the directory config already holds has to survive.
+  // client here. The move finds its panes through `panesOfTab`, which for a
+  // pane with no open entry has to ask tmux for a cwd — so the directory
+  // config already holds has to survive, which is what `known` is for.
   it('moves a detached tab without losing its working directory', async () => {
     const [project] = await invoke<ProjectDescriptor[]>(CHANNELS.addProject, {
       name: 'Lumio',
@@ -603,14 +661,15 @@ describe('project channels', () => {
     detachTab(tab.id)
     await settle(500)
 
-    const moved = await invoke<{ tab: TabDescriptor }>(
+    const moved = await invoke<{ panes: TabDescriptor[] }>(
       CHANNELS.moveTabToProject,
       tab.id,
       project.id,
     )
 
-    expect(moved.tab.tmuxSession).toBe(`prcli-lumio-${tab.id}`)
-    expect(moved.tab.cwd).toBe(before)
+    expect(moved.panes).toHaveLength(1)
+    expect(moved.panes[0].tmuxSession).toBe(`prcli-lumio-${tab.id}`)
+    expect(moved.panes[0].cwd).toBe(before)
     await expect(store.read().then((c) => c.panes.map((p) => p.cwd))).resolves.toEqual([before])
   })
 

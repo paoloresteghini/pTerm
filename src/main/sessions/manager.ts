@@ -732,9 +732,12 @@ export class SessionManager {
    * stays visible — so no refit follows to correct a default-sized attach, and
    * the pane would simply stay wrapped at 80 columns.
    *
-   * The single-pane path through `moveTabToProject`, kept as its own method
-   * because most callers only have one pane's `known` to offer and a `Pick`
-   * is a plainer thing to pass than a one-entry `Map`.
+   * The single-pane path through `moveTabToProject`, for a caller holding
+   * exactly one pane's `known` that would otherwise wrap it in a one-entry
+   * `Map`. No production caller does: the IPC move passes the whole tab's map
+   * as of 2026-08-01, because writing back one pane's row is what left a split
+   * tab's sibling on disk under the project it came from. Only
+   * `manager.test.ts`'s two geometry regressions still come through here.
    */
   async moveToProject(
     id: string,

@@ -41,7 +41,7 @@ export type WorkspaceAction =
   | { type: 'removed'; id: string }
   | { type: 'activatedTab'; id: string }
   | { type: 'activatedProject'; id: string }
-  | { type: 'movedTab'; tab: TabDescriptor; projects: ProjectDescriptor[] }
+  | { type: 'movedTab'; panes: TabDescriptor[]; projects: ProjectDescriptor[] }
   | { type: 'statusSnapshot'; status: Record<string, TabState> }
   | { type: 'statusChanged'; tabId: string; state: TabState | null }
   | { type: 'died'; id: string; code: number }
@@ -217,19 +217,25 @@ export function workspaceReducer(
 
     case 'movedTab': {
       const stillThere = action.projects.some((project) => project.id === state.activeProjectId)
+      const moved = new Map(action.panes.map((pane) => [pane.id, pane]))
       return {
         ...state,
         projects: action.projects,
-        // Replaced in place: the tab keeps its position, and only its slug —
-        // and therefore which project owns it — has changed.
-        tabs: state.tabs.map((tab) => (tab.id === action.tab.id ? action.tab : tab)),
+        // Replaced in place: each pane keeps its position, and only its slug —
+        // and therefore which project owns it — has changed. Keyed by pane id,
+        // so every pane the reply names is replaced rather than only the one
+        // whose id is also the tab's. `state.tabs` is still one entry per pane
+        // until 2b gives a tab a pane list of its own, and this is where that
+        // change lands when it does.
+        tabs: state.tabs.map((tab) => moved.get(tab.id) ?? tab),
         // Filing the last stray leaves nothing for Unsorted to hold, so the
         // reply drops it and the selection would dangle — the same hazard the
         // `projects` case guards. Follow the tab, so the window ends up showing
-        // where it went rather than nothing at all.
+        // where it went rather than nothing at all. Any moved pane names the
+        // destination: they all landed in the same project.
         activeProjectId: stillThere
           ? state.activeProjectId
-          : (action.projects.find((project) => project.slug === action.tab.projectSlug)?.id ??
+          : (action.projects.find((project) => project.slug === action.panes[0]?.projectSlug)?.id ??
             action.projects[0]?.id ??
             null),
       }

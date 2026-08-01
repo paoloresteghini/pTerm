@@ -386,30 +386,45 @@ export function registerIpc(
       const target = config.projects.find((project) => project.id === projectId)
       if (!target) throw new Error(`moveTabToProject: no project ${projectId}`)
 
-      // Renames the tmux session, so this either moves the tab or throws —
-      // there is no half-applied outcome to unpick here. The saved row goes
-      // along because a tab whose client has gone is found through
-      // `findOrphans`, which has to synthesise a cwd; config holds the real one.
-      const saved = config.panes.find((row) => row.id === tabId)
-      const tab = await manager.moveToProject(tabId, target.slug, saved)
-      // Replace in place where config already lists the tab, so the tab bar
-      // keeps its order; append where it does not. A plain `map` would quietly
-      // drop the new record for a tab config had never written — the invariant
-      // that restore always writes one first holds on every path this milestone
-      // exercises, but it is an invariant, not a guarantee, and the cost of it
-      // failing is a session running under a name nothing on disk knows. This
-      // invents nothing: the rename above succeeded, so the session is there.
+      // Every pane of the tab, or none of them. A pane's project membership
+      // lives in its own member session name, so moving the founder alone
+      // would leave the tab split across two projects; `moveTabToProject`
+      // renames every member and rolls the lot back if any rename is refused.
       //
-      // Still one pane: `manager.moveToProject` is the singular call, so this
-      // moves the founder and writes back the founder's row. A tab with a
-      // second pane in it would have that pane left behind under the old slug
-      // — unreachable today, because no IPC exposes splitting yet.
-      const panes = saved
-        ? config.panes.map((row) => (row.id === tabId ? tab : row))
-        : [...config.panes, tab]
+      // The saved rows go along because a pane whose client has gone is
+      // resolved through tmux, which synthesises a cwd and knows no command at
+      // all; config holds the real ones. The map is keyed by pane id over the
+      // whole of `config.panes` rather than over this tab's rows alone: the
+      // callee looks up only the panes it actually moves, so the other entries
+      // cost a lookup that never happens, and narrowing it by the tab's layout
+      // row would drop the truth for a pane whose row is on disk but whose tab
+      // row — layout only, and dropped by `read()` whenever it stops
+      // describing panes that exist — is not.
+      const known = new Map<string, Pick<PaneRecord, 'cwd' | 'command'>>(
+        config.panes.map((row) => [row.id, { cwd: row.cwd, command: row.command }]),
+      )
+      const moved = await manager.moveTabToProject(tabId, target.slug, known)
+
+      // Replace in place where config already lists a pane, so the tab bar
+      // keeps its order; append the ones it does not list. A plain `map` would
+      // quietly drop the record for a pane config had never written — the
+      // invariant that restore always writes one first holds on every path
+      // this milestone exercises, but it is an invariant, not a guarantee, and
+      // the cost of it failing is a session running under a name nothing on
+      // disk knows. This invents nothing: the renames above succeeded, so the
+      // sessions are there.
+      //
+      // The tab's own row is deliberately untouched: it carries layout, and a
+      // move changes no pane id, no axis and no ratio.
+      const byId = new Map<string, PaneRecord>(moved.map((pane) => [pane.id, pane]))
+      const listed = new Set(config.panes.map((row) => row.id))
+      const panes = [
+        ...config.panes.map((row) => byId.get(row.id) ?? row),
+        ...moved.filter((pane) => !listed.has(pane.id)),
+      ]
       const updated: PrcliConfig = { ...config, panes }
       await store.write(updated)
-      return { projects: await described(updated), tab }
+      return { projects: await described(updated), panes: moved }
     }),
   )
 

@@ -249,10 +249,29 @@ describe('workspaceReducer', () => {
     }
     const next = workspaceReducer(state, {
       type: 'movedTab',
-      tab: tab('aaa', 'lumio'),
+      panes: [tab('aaa', 'lumio')],
       projects: state.projects,
     })
     expect(next.tabs.map((t) => t.projectSlug)).toEqual(['lumio', 'scratch'])
+  })
+
+  // The reply names every pane that moved, because a split tab has one session
+  // name — and one record — per pane. Replacing only the first would leave the
+  // rest drawn under the project they came from until the next relaunch.
+  it('re-slugs every pane the reply names', () => {
+    const state: WorkspaceState = {
+      projects: [project('p1', 'lumio')],
+      tabs: [tab('aaa', 'scratch'), tab('bbb', 'scratch'), tab('ccc', 'scratch')],
+      activeProjectId: 'p1',
+      status: {},
+      dead: {},
+    }
+    const next = workspaceReducer(state, {
+      type: 'movedTab',
+      panes: [tab('aaa', 'lumio'), tab('bbb', 'lumio')],
+      projects: state.projects,
+    })
+    expect(next.tabs.map((t) => t.projectSlug)).toEqual(['lumio', 'lumio', 'scratch'])
   })
 
   // Filing the last stray empties Unsorted, so the reply omits it — and the
@@ -268,7 +287,7 @@ describe('workspaceReducer', () => {
     }
     const next = workspaceReducer(state, {
       type: 'movedTab',
-      tab: tab('aaa', 'lumio'),
+      panes: [tab('aaa', 'lumio')],
       projects: [project('p1', 'lumio')],
     })
     expect(next.activeProjectId).toBe('p1')
@@ -285,7 +304,7 @@ describe('workspaceReducer', () => {
     }
     const next = workspaceReducer(state, {
       type: 'movedTab',
-      tab: tab('aaa', 'lumio'),
+      panes: [tab('aaa', 'lumio')],
       projects: state.projects,
     })
     expect(next.activeProjectId).toBe('p2')
