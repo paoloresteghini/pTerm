@@ -904,11 +904,71 @@ describe('splitPane and closePane', () => {
     expect(row.id).toBe(founder.id)
     expect(row.activePaneId).toBe(second.id)
     expect(row.layout.kids).toEqual([founder.id, second.id])
+    // The FIRST split of this tab, which is the only one the requested axis
+    // decides — see the two tests below.
     expect(row.layout.dir).toBe('col')
     expect(row.layout.ratio).toHaveLength(2)
     expect(row.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
     // And the reply is the row that was written, not a second opinion about it.
     expect(shape.tabs).toEqual([row])
+  })
+
+  // The ruling: a tab's axis is set by the split that creates it, and a later
+  // split adds a pane along that axis rather than re-orienting every pane in
+  // the tab — which with terminals means reflowing them and resizing their
+  // real tmux sessions, a cost paid by panes the user did not act on.
+  it("adds a pane along an already-split tab's axis rather than re-orienting it", async () => {
+    const { founder } = await splitOnce('row')
+
+    const shape = await invoke<TabShape>(CHANNELS.splitPane, {
+      paneId: founder.id,
+      dir: 'col',
+      cols: 100,
+      rows: 30,
+    })
+    expect(shape.panes).toHaveLength(3)
+    await waitForPrompt(shape.panes[1].id)
+
+    const config = await written()
+    expect(config.tabs).toHaveLength(1)
+    // The axis the tab was created with, not the one just asked for.
+    expect(config.tabs[0].layout.dir).toBe('row')
+    // And the pane did land — this is "ignored the direction", not "ignored
+    // the split", which was the other candidate and was rejected.
+    expect(config.tabs[0].layout.kids).toHaveLength(3)
+    expect(config.tabs[0].layout.kids).toContain(shape.panes[1].id)
+  })
+
+  // The gate is "already split", not "a row exists". Restore writes a row for
+  // every tab it brings back, one-pane tabs included, so keying off the row
+  // alone would make a direction request a no-op on any tab relaunched since it
+  // was opened. Reached here without a relaunch: a tab split and then closed
+  // back down to one pane has a row and no axis on screen, which is the same
+  // state.
+  it('lets a tab that is down to one pane choose its axis again', async () => {
+    const { founder, second } = await splitOnce('row')
+    await invoke<TabShape>(CHANNELS.closePane, second.id)
+
+    // The precondition, asserted rather than assumed: a row survives, it says
+    // `row`, and it holds one pane.
+    const before = await written()
+    expect(before.tabs).toHaveLength(1)
+    expect(before.tabs[0].layout.dir).toBe('row')
+    expect(before.tabs[0].layout.kids).toEqual([founder.id])
+
+    const shape = await invoke<TabShape>(CHANNELS.splitPane, {
+      paneId: founder.id,
+      dir: 'col',
+      cols: 100,
+      rows: 30,
+    })
+    expect(shape.panes).toHaveLength(2)
+    await waitForPrompt(shape.panes[1].id)
+
+    const after = await written()
+    expect(after.tabs).toHaveLength(1)
+    expect(after.tabs[0].layout.dir).toBe('col')
+    expect(after.tabs[0].layout.kids).toHaveLength(2)
   })
 
   // The insertion point, which is the one thing about `kids` that a two-pane

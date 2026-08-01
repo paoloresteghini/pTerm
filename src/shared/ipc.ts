@@ -213,6 +213,16 @@ export interface RestartRequest {
 export interface SplitRequest {
   /** The pane the new one goes next to. Its tab is the tab they share. */
   paneId: string
+  /**
+   * The axis to arrange the tab along — honoured only by the split that turns
+   * a single pane into a split tab.
+   *
+   * A tab that is already split keeps the axis it has and the new pane joins
+   * it, so asking for the other direction adds a pane rather than re-orienting
+   * the panes already there. A ruling, not a consequence of one-axis-per-tab:
+   * re-orienting reflows every pane in the tab and resizes its tmux session,
+   * which is a cost paid by panes the user did not act on. See `splitPane`.
+   */
   dir: 'row' | 'col'
   cols: number
   rows: number

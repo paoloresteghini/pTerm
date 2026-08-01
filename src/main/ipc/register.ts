@@ -663,7 +663,27 @@ export function registerIpc(
         // The pane the user just asked for is the one they are looking at.
         activePaneId: record.id,
         layout: {
-          dir,
+          // A tab's axis is set by the split that CREATES it, and a later
+          // split adds a pane along that axis instead of re-orienting the tab.
+          //
+          // A RULING, not something the one-axis-per-tab rule forces — three
+          // answers are consistent with that rule and this is the chosen one,
+          // so it is written down rather than left to be re-derived. Applying
+          // the request every time was the other behaviour this had: it makes
+          // the axis always reflect the last split asked for, but the cost
+          // lands on panes the user did not touch, and with terminals a
+          // re-orientation is not cosmetic — every pane reflows and its real
+          // tmux session is resized. Refusing the split outright was the third,
+          // rejected as a dead key with no explanation. Ignoring is the only
+          // one where nothing the user did not act on moves.
+          //
+          // Gated on the tab actually being split, not merely on a row
+          // existing. Restore writes a row for every tab it brings back,
+          // one-pane tabs included, so keying off `saved` alone would make
+          // ⇧⌘D silently do ⌘D on any tab relaunched since it was opened — the
+          // dead-key failure the ruling exists to avoid, reached from the other
+          // side. A tab of one pane has no axis on screen to preserve.
+          dir: saved && siblings.length > 1 ? saved.layout.dir : dir,
           // Even across the kids. A share carved out of the sibling's alone
           // would preserve the other panes' widths, but it would also let a
           // tab split repeatedly hand each new pane a sliver of a sliver;
