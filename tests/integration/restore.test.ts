@@ -1,12 +1,17 @@
 import { describe, it, expect, afterEach, beforeAll } from 'vitest'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TmuxAdapter } from '../../src/main/tmux/adapter'
-import { SessionManager } from '../../src/main/sessions/manager'
-import { ConfigStore, type ProjectRecord } from '../../src/main/state/store'
+import { SessionManager, type PaneRecord } from '../../src/main/sessions/manager'
+import {
+  ConfigStore,
+  type PrcliConfig,
+  type ProjectRecord,
+  type TabRow,
+} from '../../src/main/state/store'
 import { restoreWorkspace } from '../../src/main/ipc/restore'
 import { UNSORTED_ID } from '../../src/shared/ipc'
 
@@ -61,6 +66,76 @@ function tab(id: string, slug = 'lumio') {
     cwd: tmpdir(),
     tmuxSession: `prcli-${slug}-${id}`,
   }
+}
+
+/** A v5 file, written as the app writes one: flat panes plus tab rows. */
+async function v5ConfigWith(config: {
+  projects: ProjectRecord[]
+  activeProjectId: string | null
+  panes: PaneRecord[]
+  tabs: TabRow[]
+}): Promise<{ store: ConfigStore; file: string }> {
+  const dir = await mkdtemp(join(tmpdir(), 'prcli-restore-v5-'))
+  const file = join(dir, 'config.json')
+  await writeFile(file, JSON.stringify({ version: 5, ...config }), 'utf8')
+  return { store: new ConfigStore(file), file }
+}
+
+/**
+ * The file exactly as restore wrote it.
+ *
+ * Read raw rather than through `store.read()` on purpose: `normaliseLayout`
+ * rescales a layout's ratios to sum to 1 on the way in, so a reconcile that
+ * dropped a pane and never redistributed its share would be repaired by the
+ * reader and the test would pass on a defect.
+ */
+async function written(file: string): Promise<PrcliConfig> {
+  return JSON.parse(await readFile(file, 'utf8')) as PrcliConfig
+}
+
+/** What tmux itself thinks the session's window measures. */
+async function windowSize(name: string): Promise<string> {
+  const { stdout } = await run('tmux', [
+    '-L', SOCKET, 'display-message', '-p', '-t', `=${name}:`, '#{window_width}x#{window_height}',
+  ])
+  return stdout.trim()
+}
+
+/** The window a member session is currently showing. */
+async function windowIdOf(name: string): Promise<string> {
+  const { stdout } = await run('tmux', [
+    '-L', SOCKET, 'display-message', '-p', '-t', `=${name}:`, '#{window_id}',
+  ])
+  return stdout.trim()
+}
+
+/** Whether a tmux session by this name currently exists. */
+async function sessionExists(name: string): Promise<boolean> {
+  try {
+    await run('tmux', ['-L', SOCKET, 'has-session', '-t', `=${name}`])
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Resolves once the tab's client has emitted something matching `match`. */
+function waitFor(manager: SessionManager, id: string, match: RegExp, ms = 8000): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let buffer = ''
+    const timer = setTimeout(
+      () => reject(new Error(`timed out waiting for ${match}; saw: ${JSON.stringify(buffer)}`)),
+      ms,
+    )
+    manager.onData((emittedId, data) => {
+      if (emittedId !== id) return
+      buffer += data
+      if (match.test(buffer)) {
+        clearTimeout(timer)
+        resolve(buffer)
+      }
+    })
+  })
 }
 
 beforeAll(killServer)
@@ -448,6 +523,266 @@ describe('restoreWorkspace projects', () => {
       ['id-lumio', '1111111111111111'],
       ['id-gco', '3333333333333333'],
     ])
+    manager.detachAll()
+  })
+})
+
+/**
+ * The half of a relaunch that only a real split can show: live tmux says what
+ * exists and how it is grouped, and config supplies the axis and the ratios —
+ * the two things tmux cannot report.
+ */
+describe('restoreWorkspace panes and tabs', () => {
+  it('brings a split tab back as one tab, at its saved axis and ratios', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const before = new SessionManager(adapter)
+    const founder = before.open({ projectSlug: 'lumio', cwd: tmpdir(), cols: 120, rows: 40 })
+    await waitFor(before, founder.id, /\$|%|#/)
+    const second = await before.splitTab({ paneId: founder.id, cols: 100, rows: 30 })
+    before.detachAll()
+
+    const { store, file } = await v5ConfigWith({
+      projects: [project('Lumio', 'lumio', tmpdir(), founder.id)],
+      activeProjectId: 'id-lumio',
+      panes: [founder, second],
+      tabs: [
+        {
+          id: founder.id,
+          activePaneId: second.id,
+          layout: { dir: 'col', ratio: [0.25, 0.75], kids: [founder.id, second.id] },
+        },
+      ],
+    })
+
+    const manager = new SessionManager(adapter)
+    const result = await restoreWorkspace(manager, store, immediate)
+
+    // Both panes, and one tab holding both of them.
+    expect(result.tabs).toHaveLength(2)
+    expect(result.tabs.map((pane) => pane.id).sort()).toEqual([founder.id, second.id].sort())
+    const saved = await written(file)
+    expect(saved.panes.map((pane) => pane.id).sort()).toEqual([founder.id, second.id].sort())
+    expect(saved.tabs).toHaveLength(1)
+    const row = saved.tabs[0]
+    expect(row.id).toBe(founder.id)
+    expect(row.activePaneId).toBe(second.id)
+    expect(row.layout.dir).toBe('col')
+    expect(row.layout.kids).toEqual([founder.id, second.id])
+    expect(row.layout.ratio).toHaveLength(2)
+    expect(row.layout.ratio[0]).toBeCloseTo(0.25)
+    expect(row.layout.ratio[1]).toBeCloseTo(0.75)
+
+    // Each pane's own window, sized to the client restore attached to it —
+    // 120x40 and 100x30 before the relaunch, so a window nothing re-sized
+    // reads back its old geometry rather than the reattached client's.
+    await expect.poll(() => windowSize(founder.tmuxSession), { timeout: 10_000 }).toBe('80x24')
+    await expect.poll(() => windowSize(second.tmuxSession), { timeout: 10_000 }).toBe('80x24')
+
+    // No two live members of this tab may report the same window: one window
+    // rendered by two xterms is the failure a fallen-back member causes.
+    expect(result.tabs.length).toBeGreaterThan(1)
+    const windows = await Promise.all(result.tabs.map((pane) => windowIdOf(pane.tmuxSession)))
+    expect(new Set(windows).size).toBe(windows.length)
+    manager.detachAll()
+  })
+
+  // Two things at once, and deliberately: a ⌘R or a renderer crash restores a
+  // second time in one app lifetime, and `findOrphans` excludes sessions this
+  // app has attached — so without the `detachAll()` that opens the reconcile,
+  // the second pass would see nothing, return an empty workspace and write it
+  // over config, stranding every session the user had open. The layout
+  // assertions ride along on the pass that reads restore's OWN output rather
+  // than a hand-written fixture.
+  it('brings the same split tab back on a second restore in one app lifetime', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const before = new SessionManager(adapter)
+    const founder = before.open({ projectSlug: 'lumio', cwd: tmpdir() })
+    await waitFor(before, founder.id, /\$|%|#/)
+    const second = await before.splitTab({ paneId: founder.id })
+    before.detachAll()
+
+    const { store, file } = await v5ConfigWith({
+      projects: [project('Lumio', 'lumio', tmpdir(), founder.id)],
+      activeProjectId: 'id-lumio',
+      panes: [founder, second],
+      tabs: [
+        {
+          id: founder.id,
+          activePaneId: second.id,
+          layout: { dir: 'col', ratio: [0.4, 0.6], kids: [founder.id, second.id] },
+        },
+      ],
+    })
+
+    const manager = new SessionManager(adapter)
+    expect((await restoreWorkspace(manager, store, immediate)).tabs).toHaveLength(2)
+    const result = await restoreWorkspace(manager, store, immediate)
+
+    expect(result.tabs.map((pane) => pane.id).sort()).toEqual([founder.id, second.id].sort())
+    const saved = await written(file)
+    expect(saved.tabs).toHaveLength(1)
+    expect(saved.tabs[0].layout.kids).toEqual([founder.id, second.id])
+    expect(saved.tabs[0].layout.dir).toBe('col')
+    expect(saved.tabs[0].layout.ratio).toHaveLength(2)
+    expect(saved.tabs[0].layout.ratio[0]).toBeCloseTo(0.4)
+    expect(saved.tabs[0].activePaneId).toBe(second.id)
+    manager.detachAll()
+  })
+
+  it('drops a saved pane whose session is gone and redistributes its share', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const before = new SessionManager(adapter)
+    const founder = before.open({ projectSlug: 'lumio', cwd: tmpdir() })
+    await waitFor(before, founder.id, /\$|%|#/)
+    const middle = await before.splitTab({ paneId: founder.id })
+    const last = await before.splitTab({ paneId: founder.id })
+    // Session and window both, which is what a pane closed from the UI leaves.
+    await before.kill(middle.id)
+    before.detachAll()
+    expect(await sessionExists(middle.tmuxSession)).toBe(false)
+
+    const { store, file } = await v5ConfigWith({
+      projects: [project('Lumio', 'lumio', tmpdir(), founder.id)],
+      activeProjectId: 'id-lumio',
+      // All three rows are still on disk, so it is the reconcile — not
+      // `store.read()`'s own pruning of a kid with no pane row — that has to
+      // notice the middle pane's session has gone.
+      panes: [founder, middle, last],
+      tabs: [
+        {
+          id: founder.id,
+          activePaneId: middle.id,
+          layout: { dir: 'row', ratio: [0.2, 0.3, 0.5], kids: [founder.id, middle.id, last.id] },
+        },
+      ],
+    })
+
+    const manager = new SessionManager(adapter)
+    const result = await restoreWorkspace(manager, store, immediate)
+
+    expect(result.tabs.map((pane) => pane.id).sort()).toEqual([founder.id, last.id].sort())
+    const saved = await written(file)
+    expect(saved.tabs).toHaveLength(1)
+    const layout = saved.tabs[0].layout
+    expect(layout.kids).toEqual([founder.id, last.id])
+    expect(layout.ratio).toHaveLength(2)
+    // The survivors' shares are 0.2 and 0.5 on disk. Redistributed they must
+    // still describe a whole tab, and the wider pane must still be the wider
+    // one — a share that is merely renormalised keeps both, one that is
+    // replaced by an even split keeps only the first.
+    expect(layout.ratio[0] + layout.ratio[1]).toBeCloseTo(1)
+    expect(layout.ratio[1]).toBeGreaterThan(layout.ratio[0])
+    // Selection followed the pane that went.
+    expect(saved.tabs[0].activePaneId).toBe(founder.id)
+    manager.detachAll()
+  })
+
+  // A live tab alongside the dead one, so "dropped" cannot be satisfied by
+  // writing nothing at all: an implementation that kept every saved row would
+  // write two, and one that wrote none would lose the survivor.
+  it('drops a tab whose panes have all gone, and keeps the one that has not', async () => {
+    await createStray('prcli-lumio-1111111111111111')
+    const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
+    const gone = [tab('00000000000000ff'), tab('00000000000000fe')]
+    const { store, file } = await v5ConfigWith({
+      projects: [project('Lumio', 'lumio', tmpdir(), gone[0].id)],
+      activeProjectId: 'id-lumio',
+      panes: [
+        ...gone.map((row) => ({ ...row, type: 'shell' as const })),
+        { ...tab('1111111111111111'), type: 'shell' as const },
+      ],
+      tabs: [
+        {
+          id: gone[0].id,
+          activePaneId: gone[0].id,
+          layout: { dir: 'row', ratio: [0.5, 0.5], kids: [gone[0].id, gone[1].id] },
+        },
+        {
+          id: '1111111111111111',
+          activePaneId: '1111111111111111',
+          layout: { dir: 'row', ratio: [1], kids: ['1111111111111111'] },
+        },
+      ],
+    })
+
+    const result = await restoreWorkspace(manager, store, immediate)
+
+    expect(result.tabs.map((pane) => pane.id)).toEqual(['1111111111111111'])
+    const saved = await written(file)
+    expect(saved.panes.map((pane) => pane.id)).toEqual(['1111111111111111'])
+    expect(saved.tabs.map((row) => row.id)).toEqual(['1111111111111111'])
+    manager.detachAll()
+  })
+
+  it('gives a pane config never knew about a one-pane tab of its own', async () => {
+    await createStray('prcli-lumio-a1b2c3d4e5f60718')
+    const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
+    const { store, file } = await v5ConfigWith({
+      projects: [],
+      activeProjectId: null,
+      panes: [],
+      tabs: [],
+    })
+
+    await restoreWorkspace(manager, store, immediate)
+
+    const saved = await written(file)
+    expect(saved.tabs).toHaveLength(1)
+    expect(saved.tabs[0]).toEqual({
+      id: 'a1b2c3d4e5f60718',
+      activePaneId: 'a1b2c3d4e5f60718',
+      layout: { dir: 'row', ratio: [1], kids: ['a1b2c3d4e5f60718'] },
+    })
+    manager.detachAll()
+  })
+
+  // The one form of a lost window/member binding restore can actually see.
+  // Rebinding is not available to it — the only window it could bind a member
+  // to is the one that member already reports, which here is the sibling's —
+  // so the pane whose window died is pruned instead.
+  it('restores one pane, not two, when a dead window left two members sharing one', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const before = new SessionManager(adapter)
+    const founder = before.open({ projectSlug: 'lumio', cwd: tmpdir() })
+    await waitFor(before, founder.id, /\$|%|#/)
+    const second = await before.splitTab({ paneId: founder.id })
+    before.detachAll()
+    // The window only. Its member session survives and silently falls back to
+    // the founder's window — measured on tmux 3.7b, in both directions.
+    const orphanedWindow = await windowIdOf(second.tmuxSession)
+    await run('tmux', ['-L', SOCKET, 'kill-window', '-t', orphanedWindow])
+    expect(await sessionExists(second.tmuxSession)).toBe(true)
+    expect(await windowIdOf(second.tmuxSession)).toBe(await windowIdOf(founder.tmuxSession))
+
+    const { store, file } = await v5ConfigWith({
+      projects: [project('Lumio', 'lumio', tmpdir(), founder.id)],
+      activeProjectId: 'id-lumio',
+      panes: [founder, second],
+      tabs: [
+        {
+          id: founder.id,
+          activePaneId: founder.id,
+          layout: { dir: 'row', ratio: [0.5, 0.5], kids: [founder.id, second.id] },
+        },
+      ],
+    })
+
+    const manager = new SessionManager(adapter)
+    const result = await restoreWorkspace(manager, store, immediate)
+
+    expect(result.tabs).toHaveLength(1)
+    expect(result.tabs[0].id).toBe(founder.id)
+    // Stated as the invariant rather than as a count, because it is the
+    // invariant that matters: whatever came back, no two of this tab's panes
+    // may be looking at one window.
+    expect(result.tabs.length).toBeGreaterThan(0)
+    const windows = await Promise.all(result.tabs.map((pane) => windowIdOf(pane.tmuxSession)))
+    expect(new Set(windows).size).toBe(windows.length)
+
+    const saved = await written(file)
+    expect(saved.tabs).toHaveLength(1)
+    expect(saved.tabs[0].layout.kids).toEqual([founder.id])
+    expect(saved.tabs[0].layout.ratio).toEqual([1])
     manager.detachAll()
   })
 })

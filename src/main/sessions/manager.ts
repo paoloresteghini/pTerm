@@ -1073,6 +1073,20 @@ export class SessionManager {
     return this.adapter.hasSession(tmuxSession)
   }
 
+  /**
+   * The window a pane's member session is currently showing, or `''` when tmux
+   * will not say.
+   *
+   * `windowIdOf`, not `lookupWindow`: the one caller — restore, comparing one
+   * member's window against its siblings' — has nothing better to do with
+   * "gone" than with "tmux would not answer". Both mean it cannot tell whether
+   * this pane is looking at a sibling's window, and neither is grounds for
+   * pruning a live session.
+   */
+  async windowOfMember(tmuxSession: string): Promise<string> {
+    return this.adapter.windowIdOf(tmuxSession)
+  }
+
   onExit(listener: (record: PaneRecord, code: number, reason: ExitReason) => void): void {
     this.exitListeners.add(listener)
   }

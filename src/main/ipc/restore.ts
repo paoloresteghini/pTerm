@@ -1,6 +1,6 @@
 import { homedir } from 'node:os'
 import type { SessionManager, PaneRecord } from '../sessions/manager'
-import { oneTabPerPane, type ConfigStore, type ProjectRecord } from '../state/store'
+import type { ConfigStore, ProjectRecord, TabRow } from '../state/store'
 import { readManifest, mergePresets } from '../projects/manifest'
 import { isDirectory } from '../fsutil'
 // One definition, shared with the renderer — `TabDescriptor` and `PaneRecord`
@@ -80,12 +80,137 @@ export function withUnsorted(
 }
 
 /**
+ * Everything `restoreWorkspace` itself can answer. `CHANNELS.restore`'s
+ * handler in `register.ts` adds `status` on top, from the registry it — not
+ * this function — has access to; see `RestoreResult.status`.
+ */
+export type WorkspaceReconcile = Omit<RestoreResult, 'status'>
+
+/**
+ * One live tab's panes, minus any whose member session is showing a window
+ * another member of the same tab has already claimed.
+ *
+ * A member's binding to its window is tmux server state and outlives every
+ * client, so a reattach never has to restore it — measured: a member still
+ * reads its own `@1 1` after the client that bound it has gone and a
+ * `new-session -A` has attached a new one. But when a member's OWN window
+ * dies, that member silently falls back to a sibling's (measured, `@0 0`) and
+ * its session survives. Both members then name one window, and giving each of
+ * them a client would render one pane in two xterms and size that one window
+ * twice.
+ *
+ * Re-binding is not the repair and was measured not to be: the only window
+ * this app could bind a member to is the one that member already reports,
+ * which is either already right (a no-op) or the sibling's (cementing the
+ * fault). Detecting it is what is left, so the shadowing pane is dropped from
+ * the tab exactly as a pane whose session has gone is.
+ *
+ * Which of the two members truly owns the surviving window is not recoverable
+ * from tmux: killing either side's window leaves both members reporting the
+ * survivor — measured in both directions — and nothing on a window records the
+ * member it was made for. The window's own `pane-died` hook does name one, and
+ * is deliberately not consulted: that hook, when it runs, kills the member
+ * session of the pane whose window died, so a member that has outlived its
+ * window is by definition one whose hook did not run, and reading it back
+ * would be least reliable exactly where it is needed.
+ *
+ * So the founder is preferred — the pane whose id is the tab's, which is the
+ * direction pre-flight measured (a joined member falling back onto the
+ * founder's window). When the guess is wrong the surviving process is still
+ * shown, once, under the other pane's id and saved cwd/command/type; when
+ * nothing prunes at all it is shown twice, which is the failure this exists
+ * for.
+ */
+async function withoutSharedWindows(
+  manager: SessionManager,
+  tab: { tabId: string; panes: PaneRecord[] },
+): Promise<PaneRecord[]> {
+  // A tab of one pane has no sibling to shadow, and asking tmux for its window
+  // would put a round trip on every ordinary unsplit tab for nothing.
+  if (tab.panes.length < 2) return tab.panes
+
+  const founderFirst = [
+    ...tab.panes.filter((pane) => pane.id === tab.tabId),
+    ...tab.panes.filter((pane) => pane.id !== tab.tabId),
+  ]
+  const claimed = new Set<string>()
+  const kept: PaneRecord[] = []
+  for (const pane of founderFirst) {
+    const window = await manager.windowOfMember(pane.tmuxSession)
+    // An empty answer is "tmux would not say", not "the same window as its
+    // sibling" — two panes tmux declined to describe are not evidence of
+    // anything, and pruning a live session on that would lose a pane rather
+    // than deduplicate one.
+    if (window && claimed.has(window)) continue
+    if (window) claimed.add(window)
+    kept.push(pane)
+  }
+  return kept
+}
+
+/**
+ * The tab row for one live tmux group.
+ *
+ * Existence is settled before this runs — `panes` is what actually came back
+ * from tmux and attached, and is never empty. All this adds is what tmux
+ * cannot report: the axis, the ratios and which pane was selected, taken from
+ * the saved row where it still describes panes that are here.
+ *
+ * A pane the saved row never knew about is appended rather than ignored: a tab
+ * split during the last run has no multi-pane row on disk at all (nothing
+ * writes one yet), so on the first relaunch after a split every sibling
+ * arrives this way.
+ */
+function tabRowFor(tabId: string, panes: PaneRecord[], saved: TabRow | undefined): TabRow {
+  const ids = panes.map((pane) => pane.id)
+  const savedKids = saved?.layout.kids ?? []
+  const kids = [
+    ...savedKids.filter((kid) => ids.includes(kid)),
+    ...ids.filter((id) => !savedKids.includes(id)),
+  ]
+
+  // A kid the saved row knew keeps its own share; anything else takes an even
+  // one. `store.read()` has already made the saved shares positive, finite and
+  // one per kid, so the only unknown here is a pane that row never had.
+  const even = 1 / kids.length
+  const shares = kids.map((kid) => {
+    const at = savedKids.indexOf(kid)
+    return at === -1 || !saved ? even : saved.layout.ratio[at]
+  })
+  // Rescaled, not used as they are: dropping a kid leaves the survivors summing
+  // to less than 1, and appending one leaves them summing to more. A layout
+  // that does not describe a whole tab renders every pane in it at the wrong
+  // size — and `store.read()` would quietly rescale it on the way back in, so
+  // nothing downstream would ever report the loss.
+  const total = shares.reduce((sum, share) => sum + share, 0)
+
+  // The saved selection only if that pane is still one of this tab's, else the
+  // first one — which is what a null `activePaneId` means anyway, said outright
+  // so no reader has to know that.
+  const active = saved?.activePaneId
+  return {
+    // The group's own id, never a pane's: a group outlives its founder, and a
+    // row named after whichever sibling happened to survive would stop matching
+    // the tab on the next restore.
+    id: tabId,
+    activePaneId: active && kids.includes(active) ? active : kids[0],
+    layout: {
+      dir: saved?.layout.dir ?? 'row',
+      ratio: shares.map((share) => share / total),
+      kids,
+    },
+  }
+}
+
+/**
  * Reconcile the saved workspace against what tmux actually has.
  *
- * Live tmux sessions decide what exists; config supplies display order, which
- * project is selected and which tab is active inside each. Deriving existence
- * from config instead is what made a session the app had lost track of
- * unreachable from the UI.
+ * Live tmux sessions decide what exists — which panes, and which tab each one
+ * belongs to; config supplies display order, which project is selected, which
+ * tab is active inside each, and each tab's axis and drag ratios, which are the
+ * two things tmux genuinely cannot report. Deriving existence from config
+ * instead is what made a session the app had lost track of unreachable from the
+ * UI.
  *
  * A tab belongs to the project whose slug its session name carries. Nothing
  * stores that association, so it cannot go stale, and Unsorted is a definition
@@ -93,15 +218,9 @@ export function withUnsorted(
  *
  * The whole reconcile runs inside the caller's config write queue: it reads and
  * then writes, and an interleaved write from `open` or an exit would otherwise
- * be lost.
+ * be lost. Nothing inside it may call `serialise` again — that queue has no
+ * reentrancy protection and would deadlock without a word.
  */
-/**
- * Everything `restoreWorkspace` itself can answer. `CHANNELS.restore`'s
- * handler in `register.ts` adds `status` on top, from the registry it — not
- * this function — has access to; see `RestoreResult.status`.
- */
-export type WorkspaceReconcile = Omit<RestoreResult, 'status'>
-
 export async function restoreWorkspace(
   manager: SessionManager,
   store: ConfigStore,
@@ -117,19 +236,44 @@ export async function restoreWorkspace(
     // writes it over config, stranding every session the user had open.
     // Detaching first also makes tmux redraw each pane into the fresh xterm.
     manager.detachAll()
-    const orphans = await manager.findOrphans()
-    const byId = new Map(orphans.map((orphan) => [orphan.id, orphan]))
+
+    // Grouped by live tmux, not by anything saved: `findOrphanTabs` reads each
+    // pane's `session_group`, which is what a split tab actually is, and takes
+    // the tab's id from the group name's frozen id half. Its slug is never
+    // read — a pane's project comes from that pane's own session name.
+    const liveTabs: { tabId: string; panes: PaneRecord[] }[] = []
+    for (const tab of await manager.findOrphanTabs()) {
+      liveTabs.push({ tabId: tab.tabId, panes: await withoutSharedWindows(manager, tab) })
+    }
+
+    const byId = new Map<string, PaneRecord>()
+    const tabOf = new Map<string, string>()
+    for (const tab of liveTabs) {
+      for (const pane of tab.panes) {
+        byId.set(pane.id, pane)
+        tabOf.set(pane.id, tab.tabId)
+      }
+    }
 
     // Saved order first, skipping rows whose session is gone.
+    //
+    // Skipped, never reopened, and that is the whole answer to a saved pane
+    // whose session has died: `manager.open()` creates with `new-session -A`
+    // and no `-t <group>`, so reopening one from its saved row would create it
+    // afresh OUTSIDE the group its tab is — silently un-splitting the tab and
+    // putting a brand-new shell where the user's dead pane was. Every pane
+    // below came out of live tmux, so nothing here can reach `open()` with a
+    // name tmux does not already have; a dead pane is pruned from the layout
+    // instead, by `tabRowFor` never being given it.
     const ordered: PaneRecord[] = []
     for (const row of saved.panes) {
-      const orphan = byId.get(row.id)
-      if (!orphan) continue
+      const pane = byId.get(row.id)
+      if (!pane) continue
       byId.delete(row.id)
-      // The saved row carries the real cwd, command and type; the orphan's
+      // The saved row carries the real cwd, command and type; the live pane's
       // are synthesised and, for type, always 'shell' — using them here would
       // downgrade a claude or preset tab back to plain shell on every restore.
-      ordered.push({ ...orphan, cwd: row.cwd, command: row.command, type: row.type })
+      ordered.push({ ...pane, cwd: row.cwd, command: row.command, type: row.type })
     }
     // Then anything tmux has that config did not know about.
     ordered.push(...byId.values())
@@ -155,6 +299,27 @@ export async function restoreWorkspace(
         continue
       }
     }
+
+    // The panes that actually attached, back under the tab each one belongs
+    // to, in the order those panes are listed above — so a tab's position
+    // follows saved pane order for the same reason the panes themselves do.
+    const held = new Map<string, PaneRecord[]>()
+    for (const pane of tabs) {
+      // Every pane here came out of a group above, so the fallback only makes
+      // this total: a pane that is its own tab is exactly what an ungrouped
+      // session already is.
+      const tabId = tabOf.get(pane.id) ?? pane.id
+      const already = held.get(tabId)
+      if (already) already.push(pane)
+      else held.set(tabId, [pane])
+    }
+    const tabRows = [...held].map(([tabId, panes]) =>
+      tabRowFor(
+        tabId,
+        panes,
+        saved.tabs.find((row) => row.id === tabId),
+      ),
+    )
 
     // One descriptor per saved project, in saved order — so the write below can
     // take each resolved active tab from here rather than resolving twice.
@@ -186,12 +351,11 @@ export async function restoreWorkspace(
       }),
       activeProjectId,
       panes: tabs,
-      // One tab per pane, which is the shape v4 had. This reconcile reattaches
-      // one session per tab and has no notion of a pane group, so a multi-pane
-      // layout that was on disk does not survive it. That is this function's
-      // limit, not the format's: v5 can hold the layout, and grouping restored
-      // panes back into their tabs is a change to the reconcile itself.
-      tabs: oneTabPerPane(tabs),
+      // One row per tab live tmux still has, holding the saved axis and ratios
+      // wherever a saved row still describes panes that came back. A tab whose
+      // panes have all gone has no row here at all — dropped by having no
+      // entry in `held` rather than by anything filtering it out.
+      tabs: tabRows,
       notifications: saved.notifications,
     })
 
