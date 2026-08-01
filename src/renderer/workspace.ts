@@ -19,7 +19,12 @@ export interface WorkspaceState {
    */
   tabs: TabRow[]
   activeProjectId: string | null
-  /** What each tab is doing. A tab absent from this draws no dot. */
+  /**
+   * What each PANE is doing, keyed by pane id: main's registry keys by the
+   * session id it sends hook events under, and every pane is its own session.
+   * A pane absent from this draws no dot; a tab's dot is the worst of its
+   * panes' entries, which is `stateOfTab`.
+   */
   status: Record<string, TabState>
   /**
    * Panes whose tmux session has died, by exit code, kept in the bar until
@@ -122,16 +127,83 @@ export function activeTabId(state: WorkspaceState): string | null {
   return activeProject(state)?.activeTabId ?? null
 }
 
-/** Null means "draw no dot", which is not the same as `unknown`. */
-export function stateOfTab(state: WorkspaceState, id: string): TabState | null {
-  return state.status[id] ?? null
+/**
+ * One pane's own state. Null means "draw no dot", which is not the same as
+ * `unknown`.
+ *
+ * Per pane, and staying that way: the tab bar lists panes, one entry each, so
+ * its dots answer for a pane and not for the tab around it. The fold that
+ * answers for a whole tab is `stateOfTab`, below — two names, because they are
+ * two questions, and a split tab is exactly where the answers diverge.
+ */
+export function stateOfPane(state: WorkspaceState, paneId: string): TabState | null {
+  return state.status[paneId] ?? null
 }
 
-/** A project row takes the worst state among its tabs. */
-export function stateOfProject(state: WorkspaceState, projectId: string): TabState | null {
-  const states = tabsOfProject(state, projectId)
-    .map((tab) => state.status[tab.id])
+/**
+ * The panes a group id stands for: a row's, or the one pane that names itself.
+ *
+ * The same dichotomy `paneGroups` draws, and for the same reason — a pane no
+ * row names is a group of its own, keyed by its own id, which is every tab
+ * opened this run and never split. Without this branch such a tab would fold
+ * over nothing and lose its dot the moment aggregation arrived.
+ */
+function panesOfGroup(state: WorkspaceState, groupId: string): TabDescriptor[] {
+  const panes = panesOfTab(state, groupId)
+  if (panes.length > 0) return panes
+  const lone = state.panes.find((pane) => pane.id === groupId)
+  return lone ? [lone] : []
+}
+
+/**
+ * A tab's dot: the worst state among its panes, by the order in
+ * `shared/status.ts`.
+ *
+ * The failure this exists to prevent is a split tab reported by one of its
+ * panes — a crashed second pane leaving the tab green on a tool whose whole job
+ * is saying which session needs a human. The ranking itself is not here: it is
+ * reached through `worst`, whose one reading of `SEVERITY` is also the one main
+ * fires notifications off and the dock badge counts. A copy of that order in
+ * this file would be a copy that can disagree with the badge, which is what
+ * `shared/status.ts`'s own comment asks the next person not to write.
+ *
+ * `state.dead` is deliberately not consulted. The exit code kept there is the
+ * *attach client's*, and it is 0 however the pane died; what actually killed a
+ * pane is read off tmux's `pane_dead_status` and arrives in `state.status` like
+ * every other state. See `PaneBox.dead`.
+ *
+ * Null when no pane of the tab has a state at all — "draw no dot". A tab whose
+ * panes have all reported `unknown` is `unknown`, which `worst` gives without
+ * help: `unknown` is in `SEVERITY`, and only an empty list falls off the end.
+ */
+export function stateOfTab(state: WorkspaceState, tabId: string): TabState | null {
+  const states = panesOfGroup(state, tabId)
+    .map((pane) => state.status[pane.id])
     .filter((candidate): candidate is TabState => candidate !== undefined)
+  return worst(states)
+}
+
+/**
+ * A project row takes the worst state among its tabs.
+ *
+ * Structurally the worst of the tab dots, rather than a second fold straight
+ * over the project's panes that would happen to agree with them: one rule, at
+ * both levels, so neither can be changed without the other.
+ *
+ * The tabs are found through the project's panes, since nothing stores which
+ * project owns a *tab* — a tab is owned by the slug its panes carry. A tab
+ * whose panes disagree about that is a move that half-landed, and it is then
+ * listed under both projects, each row reporting the whole tab. That
+ * over-reports rather than under-reports, which is the safe direction for a dot
+ * whose only job is to make you look.
+ */
+export function stateOfProject(state: WorkspaceState, projectId: string): TabState | null {
+  const groups = new Set(
+    tabsOfProject(state, projectId).map((pane) => tabOfPane(state, pane.id)?.id ?? pane.id),
+  )
+  const states = [...groups]
+    .map((tabId) => stateOfTab(state, tabId))
+    .filter((candidate): candidate is TabState => candidate !== null)
   return worst(states)
 }
 
@@ -575,11 +647,12 @@ export function workspaceReducer(
       return { ...state, status: action.status }
 
     case 'statusChanged': {
-      // Null means the tab was forgotten — dismissed, or killed on purpose —
+      // Null means the pane was forgotten — dismissed, or killed on purpose —
       // not a seventh state to draw. Storing it as a value would let it slip
-      // into `stateOfProject`'s ranking (it filters on `undefined`, not on
-      // `null`) and it would sit in `state.status` forever, since nothing
-      // else ever removes a key once `statusChanged` has written it.
+      // into the fold behind every dot above a pane (`stateOfTab` filters the
+      // statuses it reads on `undefined`, not on `null`) and it would sit in
+      // `state.status` forever, since nothing else ever removes a key once
+      // `statusChanged` has written it.
       if (action.state === null) {
         const { [action.tabId]: _dropped, ...status } = state.status
         return { ...state, status }

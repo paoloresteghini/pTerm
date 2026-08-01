@@ -7,6 +7,7 @@ import {
   tabsOfProject,
   activeProject,
   activeTabId,
+  stateOfPane,
   stateOfTab,
   stateOfProject,
   needsYou,
@@ -22,6 +23,7 @@ import {
   type TabDescriptor,
   type TabRow,
 } from '../../src/shared/ipc'
+import { SEVERITY, type TabState } from '../../src/shared/status'
 
 function tab(id: string, projectSlug = 'lumio'): TabDescriptor {
   return {
@@ -502,6 +504,132 @@ describe('a dead pane', () => {
   })
 })
 
+/**
+ * What a tab's dot says, and what a project's says over it.
+ *
+ * The failure these exist to prevent: a split tab whose second pane has
+ * crashed, reported by whichever single pane happens to answer for the tab.
+ * On a tool whose whole job is saying which of a dozen sessions needs a human,
+ * a green dot over a crash is worse than no dot at all.
+ */
+describe("a tab's dot", () => {
+  /** One project: a split tab (aaa + bbb) and an unsplit one (ccc). */
+  const splitTab: WorkspaceState = {
+    projects: [project('p1', 'lumio', 'aaa')],
+    panes: [tab('aaa'), tab('bbb'), tab('ccc')],
+    tabs: [tabRow('aaa', ['aaa', 'bbb'])],
+    activeProjectId: 'p1',
+    status: {},
+    dead: {},
+  }
+
+  function withStatus(state: WorkspaceState, status: Record<string, TabState>): WorkspaceState {
+    return { ...state, status }
+  }
+
+  it('is the worst of its panes, not the founder\'s', () => {
+    const state = withStatus(splitTab, { aaa: 'idle', bbb: 'crashed' })
+    // The pane list first, always. `worst([])` is null and `[].every()` is
+    // true, so a fold over nothing passes almost any assertion by accident —
+    // and a tab whose panes had gone missing is exactly how that would happen.
+    expect(panesOfTab(state, 'aaa').map((pane) => pane.id)).toEqual(['aaa', 'bbb'])
+    expect(stateOfTab(state, 'aaa')).toBe('crashed')
+  })
+
+  it('does not care which pane holds the worse state', () => {
+    const state = withStatus(splitTab, { aaa: 'crashed', bbb: 'idle' })
+    expect(panesOfTab(state, 'aaa')).toHaveLength(2)
+    expect(stateOfTab(state, 'aaa')).toBe('crashed')
+  })
+
+  // Every pair that could invert, in both arrangements, rather than the two or
+  // three a hand-written list would reach for: any fold that disagrees with
+  // `SEVERITY` anywhere disagrees on some pair, and the pair it disagrees on is
+  // not knowable in advance. `waiting` beside `running` is in here, and so is
+  // every other ordering the dock badge already counts on.
+  it('ranks every pair of states the way SEVERITY does, whichever pane holds which', () => {
+    expect(SEVERITY.length).toBeGreaterThan(1)
+    for (const [index, worse] of SEVERITY.entries()) {
+      for (const better of SEVERITY.slice(index + 1)) {
+        const founderWorse = withStatus(splitTab, { aaa: worse, bbb: better })
+        const siblingWorse = withStatus(splitTab, { aaa: better, bbb: worse })
+        expect(panesOfTab(founderWorse, 'aaa')).toHaveLength(2)
+        expect(stateOfTab(founderWorse, 'aaa')).toBe(worse)
+        expect(stateOfTab(siblingWorse, 'aaa')).toBe(worse)
+      }
+    }
+  })
+
+  it('is unknown when every pane is unknown, rather than no dot at all', () => {
+    // The distinction `worst` is built around: null means "nothing to report",
+    // `unknown` means "this should have a state and does not". A tab of panes
+    // that have all said `unknown` has plenty to report.
+    const state = withStatus(splitTab, { aaa: 'unknown', bbb: 'unknown' })
+    expect(panesOfTab(state, 'aaa')).toHaveLength(2)
+    expect(stateOfTab(state, 'aaa')).toBe('unknown')
+  })
+
+  it('draws no dot when no pane of it has a state', () => {
+    expect(panesOfTab(splitTab, 'aaa')).toHaveLength(2)
+    expect(stateOfTab(splitTab, 'aaa')).toBeNull()
+  })
+
+  it('reads only its own panes', () => {
+    const state = withStatus(splitTab, { aaa: 'idle', bbb: 'idle', ccc: 'crashed' })
+    expect(panesOfTab(state, 'aaa').map((pane) => pane.id)).toEqual(['aaa', 'bbb'])
+    expect(stateOfTab(state, 'aaa')).toBe('idle')
+  })
+
+  it('treats a pane no row names as the tab of one that it is', () => {
+    // The same dichotomy `paneGroups` draws: every pane opened this run and
+    // never split has no row at all, and is its own group keyed by its own id.
+    const state = withStatus(splitTab, { ccc: 'waiting' })
+    expect(panesOfTab(state, 'ccc')).toHaveLength(0)
+    expect(state.panes.some((pane) => pane.id === 'ccc')).toBe(true)
+    expect(stateOfTab(state, 'ccc')).toBe('waiting')
+  })
+
+  it('has nothing to say about an id that names neither a tab nor a pane', () => {
+    const state = withStatus(splitTab, { aaa: 'crashed' })
+    expect(stateOfTab(state, 'zzz')).toBeNull()
+  })
+
+  it('takes a dead pane\'s state from status, never from the tombstone', () => {
+    // `state.dead` holds the ATTACH CLIENT's exit code, which is 0 however the
+    // pane died — see `PaneBox.dead`. What killed a pane is read off tmux's own
+    // `pane_dead_status` and arrives in `state.status`. Folding deadness into
+    // the severity rule would paint a tab red over a pane that is merely idle.
+    const state = { ...withStatus(splitTab, { aaa: 'idle', bbb: 'idle' }), dead: { bbb: 0 } }
+    expect(panesOfTab(state, 'aaa')).toHaveLength(2)
+    expect(stateOfTab(state, 'aaa')).toBe('idle')
+  })
+
+  it('carries the whole way up: a project row is the worst of its tabs', () => {
+    const state = withStatus(splitTab, { aaa: 'idle', bbb: 'crashed', ccc: 'waiting' })
+    // Both levels, side by side, so the two rules cannot drift: the tab dots
+    // first, then the row that must be the worst of them.
+    expect(tabsOfProject(state, 'p1')).toHaveLength(3)
+    expect([stateOfTab(state, 'aaa'), stateOfTab(state, 'ccc')]).toEqual(['crashed', 'waiting'])
+    expect(stateOfProject(state, 'p1')).toBe('crashed')
+  })
+
+  it('leaves a project row unknown when that is all its tabs have to say', () => {
+    const state = withStatus(splitTab, { aaa: 'unknown', bbb: 'unknown', ccc: 'unknown' })
+    expect(tabsOfProject(state, 'p1')).toHaveLength(3)
+    expect(stateOfProject(state, 'p1')).toBe('unknown')
+  })
+
+  it('reports a pane\'s own state on its own, which is what the tab bar draws', () => {
+    // The tab bar lists PANES, one entry each, so its dots are per-pane and
+    // stay that way. This is the accessor for that, kept separate from the
+    // fold above rather than answering both questions through one name.
+    const state = withStatus(splitTab, { aaa: 'idle', bbb: 'crashed' })
+    expect(stateOfPane(state, 'aaa')).toBe('idle')
+    expect(stateOfPane(state, 'bbb')).toBe('crashed')
+    expect(stateOfPane(state, 'ccc')).toBeNull()
+  })
+})
+
 describe('workspaceReducer', () => {
   it('starts empty', () => {
     expect(INITIAL_WORKSPACE_STATE).toEqual({
@@ -744,7 +872,7 @@ describe('workspaceReducer', () => {
       type: 'statusSnapshot',
       status: { 'aaa': 'waiting' },
     })
-    expect(stateOfTab(next, 'aaa')).toBe('waiting')
+    expect(stateOfPane(next, 'aaa')).toBe('waiting')
   })
 
   it('updates one tab without disturbing the others', () => {
@@ -759,15 +887,16 @@ describe('workspaceReducer', () => {
       state: 'waiting',
     })
 
-    expect(stateOfTab(next, 'aaa')).toBe('waiting')
-    expect(stateOfTab(next, 'bbb')).toBe('thinking')
+    expect(stateOfPane(next, 'aaa')).toBe('waiting')
+    expect(stateOfPane(next, 'bbb')).toBe('thinking')
   })
 
   // I3: `registry.forget` now emits a transition to `null` — dismissed, or
   // killed on purpose — over the wire as `statusChanged`'s `state`. Storing
-  // that as a value would let it slip into `stateOfProject`'s ranking (which
-  // filters on `undefined`, not `null`) and sit in `state.status` forever, so
-  // a null clears the key instead of setting it.
+  // that as a value would let it slip into the fold behind every dot above a
+  // pane (`stateOfTab` filters the statuses it reads on `undefined`, not
+  // `null`) and sit in `state.status` forever, so a null clears the key
+  // instead of setting it.
   it('drops the key on a null statusChanged, rather than storing null', () => {
     const seeded = workspaceReducer(three, {
       type: 'statusSnapshot',
@@ -776,13 +905,13 @@ describe('workspaceReducer', () => {
 
     const next = workspaceReducer(seeded, { type: 'statusChanged', tabId: 'aaa', state: null })
 
-    expect(stateOfTab(next, 'aaa')).toBeNull()
+    expect(stateOfPane(next, 'aaa')).toBeNull()
     expect(Object.prototype.hasOwnProperty.call(next.status, 'aaa')).toBe(false)
-    expect(stateOfTab(next, 'bbb')).toBe('thinking')
+    expect(stateOfPane(next, 'bbb')).toBe('thinking')
   })
 
   it('has no state for a tab nothing has said anything about', () => {
-    expect(stateOfTab(three, 'aaa')).toBeNull()
+    expect(stateOfPane(three, 'aaa')).toBeNull()
   })
 
   it('gives a project row the worst state among its tabs', () => {
@@ -869,7 +998,7 @@ describe('workspaceReducer', () => {
 
     const next = workspaceReducer(seeded, { type: 'removed', id: 'aaa' })
 
-    expect(stateOfTab(next, 'aaa')).toBeNull()
+    expect(stateOfPane(next, 'aaa')).toBeNull()
   })
 
   it('resets status and tombstones on restore', () => {

@@ -26,6 +26,16 @@ describe('worst', () => {
     }
   })
 
+  // The distinction the tab-level fold rests on: `unknown` is a state and
+  // ranks like one, and only an empty list falls off the end of SEVERITY. A
+  // tab whose panes have all reported `unknown` has something to say; a tab
+  // none of whose panes has said anything has not.
+  it('answers unknown for nothing but unknowns, which is not the null that means no dot', () => {
+    expect(worst(['unknown'])).toBe('unknown')
+    expect(worst(['unknown', 'unknown'])).toBe('unknown')
+    expect(worst([])).toBeNull()
+  })
+
   it('ranks a finished tab below a live idle one, and unknown last of all', () => {
     expect(worst(['ended', 'idle'])).toBe('idle')
     expect(worst(['unknown', 'ended'])).toBe('ended')
