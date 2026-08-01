@@ -473,7 +473,8 @@ the pane would flatten it.
 The temptation to draw red from the tombstone is worth naming, because the
 tombstone is the nearest thing to hand and it is the wrong source. What
 `state.dead` holds is the *attach client's* exit code, and for a pane death that
-is 0 however the pane went — see `StatusRegistry.applyDead`, whose comment says
+is 0 however the pane went — see the comment on `StatusRegistry`'s `explained`
+set, which says
 so outright. Reading it would answer a segfault with a clean 0. What actually
 killed a pane is read off tmux's own `pane_dead_status` and arrives through the
 status channel like every other state, so the pane's colour comes from

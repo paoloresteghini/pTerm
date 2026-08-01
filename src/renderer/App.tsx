@@ -138,9 +138,18 @@ export function App() {
       // drawn as two boxes — one live, one dead — reads as one pane there and
       // ⇧⌘D would silently re-orient a tab the user is looking at as split.
       // Asking here instead, where the boxes actually are, and sending the axis
-      // already on screen so both sides reach the same answer whichever way main
-      // counts. Still only ever honoured by a split that CREATES a split tab;
-      // see `SplitRequest.dir`.
+      // already on screen. Still only ever honoured by a split that CREATES a
+      // split tab; see `SplitRequest.dir`.
+      //
+      // Two computations of one rule, but NOT two authorities — which is the
+      // thing that made `tabIdOf` and `tabIdFromGroupName` dangerous, and the
+      // reason to say why it does not apply here. Main can only ever OVERRIDE
+      // what is sent, with `saved.layout.dir`, and only when its own row has
+      // more than one kid; so the value below decides the axis exactly when
+      // main declines to. When main does not decline, the two agree by
+      // provenance rather than by luck: `row` came from main's own reply (or
+      // from `tabRowFor`), and `withKeptPanes` spreads `...next.layout`, so
+      // `row.layout.dir` IS main's `dir` travelled back.
       const row = tabOfPane(state, activePaneId)
       const drawn = row ? panesOfTab(state, row.id) : []
       const axis = row && drawn.length > 1 ? row.layout.dir : dir

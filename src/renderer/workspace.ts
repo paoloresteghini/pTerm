@@ -522,7 +522,7 @@ export function paneGroups(state: WorkspaceState): PaneGroup[] {
 
 /**
  * `next`, with any kid of the row it replaces that is still a pane here but
- * that main did not name, put back at the index it held.
+ * that main did not name, put back where it was.
  *
  * This is the seam between two rules that are each right on their own. Main
  * owns existence and forgets a pane the moment its session dies — `forgetTab`
@@ -560,10 +560,34 @@ export function paneGroups(state: WorkspaceState): PaneGroup[] {
  * sums to a whole tab.
  *
  * Falls back to an even split when the kept shares leave no room, or when the
- * incoming row's own shares sum to nothing. Neither is reachable from a row
- * `store.read()` has normalised, but a zero share is a 0%-wide box, which fits
- * to tmux's 2x1 floor — the geometry defect wearing different numbers — so the
- * arithmetic answers rather than trusting its inputs.
+ * incoming row's own shares sum to nothing.
+ *
+ * **`store.read()` is not what makes that unreachable, and citing it would be
+ * citing a file this never sees.** Neither row here has been through it:
+ * `prior` is renderer state — a previous reply, possibly already re-merged by
+ * this very function — and `next` is main's reply, written either by
+ * `splitPane`'s `kids.map(() => 1 / kids.length)`, which `store.read()` is not
+ * upstream of at all, or by `tabRowFor`, where it is two hops away. What
+ * actually keeps every share positive is those two writers plus this
+ * function's own output, which is positive in both branches — an invariant
+ * that is partly self-referential, and worth saying so rather than borrowing
+ * someone else's guarantee.
+ *
+ * Given positive shares, `held === 1` needs every kid of `prior` to be
+ * missing. On the close path that is **structural**: `priorRow` is found by
+ * `kids.includes(paneId)`, so the closed pane is always in `prior.kids`, and
+ * it is filtered out of `panes` before this runs, so it can never be in
+ * `missing` — `missing` is a strict subset and `held < 1`. On the split path
+ * the same argument needs the split pane to be in `prior.kids`, which holds
+ * only because a founder can no longer fall out of its own row; nothing
+ * asserts it, so the branch stays.
+ *
+ * **Its own cost, which is not free and is the reason it is a last resort:**
+ * an even split RESIZES EVERY TOMBSTONE — measured, two dead panes at half a
+ * tab each come back at a third — which is exactly the symptom the paragraph
+ * above rejects renormalising for. It is taken anyway only because the
+ * alternative is worse: a zero share is a 0%-wide box, which fits to tmux's
+ * 2x1 floor, and that is the geometry defect wearing different numbers.
  */
 function withKeptPanes(
   prior: TabRow | undefined,
@@ -587,12 +611,28 @@ function withKeptPanes(
     id,
     share: usable ? ((next.layout.ratio[index] ?? 0) / incoming) * room : 0,
   }))
-  // In ascending prior index, which is the order `prior.layout.kids` is already
-  // in, so each splice lands before the ones after it are placed. Clamped to
-  // the current length because the row it is being put back into may be shorter
-  // than the one it left — a close removes a kid.
+  // Put back in front of the kid that followed it, NOT at the index it held.
+  //
+  // The two are not interchangeable and cannot both be satisfied: main inserts
+  // a new pane directly after the sibling it was split from — deliberately, and
+  // `persistence.test.ts` has a dedicated test for it — so restoring a
+  // tombstone to its old absolute index pushes the new pane away from the pane
+  // the user split. Measured: `[aaa, bbb(dead), ccc]` split at `aaa` gave
+  // `[aaa, bbb, new, ccc]`, with a dead pane sitting between the two halves of
+  // the split that had just been asked for.
+  //
+  // Anchoring on the successor satisfies both. The tombstone keeps its position
+  // relative to the panes it was among, and main's insertion point survives
+  // intact: the same case gives `[aaa, new, bbb, ccc]`.
+  //
+  // The first surviving successor, not simply the next id, so a run of adjacent
+  // tombstones lands in its original order — each one anchors on the one after
+  // it once that has been placed. A tombstone that was last in `prior` has no
+  // successor and goes to the end.
   for (const entry of missing) {
-    entries.splice(Math.min(entry.index, entries.length), 0, { id: entry.id, share: entry.share })
+    const after = prior.layout.kids.slice(entry.index + 1)
+    const at = entries.findIndex((candidate) => after.includes(candidate.id))
+    entries.splice(at === -1 ? entries.length : at, 0, { id: entry.id, share: entry.share })
   }
   return {
     ...next,

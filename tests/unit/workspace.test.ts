@@ -1340,6 +1340,117 @@ describe('a tombstone when its tab is split or closed', () => {
     expect(groups[0].panes[0].dead).toBe(true)
   })
 
+  it('leaves the new pane beside the pane it was split from', () => {
+    // Main inserts a new pane directly after the sibling it was split from, and
+    // has a dedicated test for it. Putting a tombstone back at its old ABSOLUTE
+    // index breaks that silently — `[aaa, bbb(dead), ccc]` split at `aaa` gave
+    // `[aaa, bbb, new, ccc]`, a dead pane wedged between the two halves of the
+    // split just asked for. Anchoring on the successor keeps both properties.
+    const state: WorkspaceState = {
+      ...deadFounder,
+      panes: [tab('aaa'), tab('bbb'), tab('ccc')],
+      tabs: [ratioRow('aaa', ['aaa', 'bbb', 'ccc'], [0.4, 0.2, 0.4])],
+      status: { aaa: 'idle', bbb: 'crashed', ccc: 'idle' },
+      dead: { bbb: 0 },
+    }
+    const next = workspaceReducer(state, {
+      type: 'split',
+      shape: {
+        panes: [tab('aaa'), tab('new'), tab('ccc')],
+        tabs: [ratioRow('aaa', ['aaa', 'new', 'ccc'], [1 / 3, 1 / 3, 1 / 3])],
+      },
+    })
+    const kids = next.tabs.find((candidate) => candidate.id === 'aaa')?.layout.kids
+    expect(kids).toEqual(['aaa', 'new', 'bbb', 'ccc'])
+    // The tombstone is still between the two panes it was between, and still
+    // holds the fifth of the tab it held.
+    const ratio = next.tabs.find((candidate) => candidate.id === 'aaa')?.layout.ratio ?? []
+    expect(ratio[kids?.indexOf('bbb') ?? -1]).toBeCloseTo(0.2)
+    expect(ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+  })
+
+  it('keeps a tombstone that was before the split pane where it was', () => {
+    // The control for the case above, so the boundary is pinned from both
+    // sides rather than only where it moved.
+    const state: WorkspaceState = {
+      ...deadFounder,
+      panes: [tab('zzz'), tab('aaa'), tab('ccc')],
+      tabs: [ratioRow('zzz', ['zzz', 'aaa', 'ccc'], [0.2, 0.4, 0.4])],
+      status: { zzz: 'crashed', aaa: 'idle', ccc: 'idle' },
+      dead: { zzz: 0 },
+    }
+    const next = workspaceReducer(state, {
+      type: 'split',
+      shape: {
+        panes: [tab('aaa'), tab('new'), tab('ccc')],
+        tabs: [ratioRow('zzz', ['aaa', 'new', 'ccc'], [1 / 3, 1 / 3, 1 / 3])],
+      },
+    })
+    expect(next.tabs.find((candidate) => candidate.id === 'zzz')?.layout.kids).toEqual([
+      'zzz',
+      'aaa',
+      'new',
+      'ccc',
+    ])
+  })
+
+  it('keeps two tombstones in one tab, in order and at their own shares', () => {
+    // A run of tombstones has to come back in its original order, which is what
+    // anchoring each on the first SURVIVING successor buys — each anchors on the
+    // one after it once that has been placed.
+    const state: WorkspaceState = {
+      ...deadFounder,
+      panes: [tab('aaa'), tab('bbb'), tab('ccc')],
+      tabs: [ratioRow('aaa', ['aaa', 'bbb', 'ccc'], [0.5, 0.25, 0.25])],
+      status: { aaa: 'crashed', bbb: 'ended', ccc: 'idle' },
+      dead: { aaa: 0, bbb: 0 },
+    }
+    const next = workspaceReducer(state, {
+      type: 'split',
+      shape: {
+        panes: [tab('ccc'), tab('ddd')],
+        tabs: [ratioRow('aaa', ['ccc', 'ddd'], [0.5, 0.5])],
+      },
+    })
+    const row = next.tabs.find((candidate) => candidate.id === 'aaa')
+    expect(row?.layout.kids).toEqual(['aaa', 'bbb', 'ccc', 'ddd'])
+    const ratio = row?.layout.ratio ?? []
+    expect(ratio).toHaveLength(4)
+    // Both tombstones keep their shares exactly; the two live panes divide what
+    // is left in the proportions main asked for. The even-split fallback would
+    // resize both dead panes, which is what its own comment now says it costs.
+    expect(ratio[0]).toBeCloseTo(0.5)
+    expect(ratio[1]).toBeCloseTo(0.25)
+    expect(ratio[2]).toBeCloseTo(0.125)
+    expect(ratio[3]).toBeCloseTo(0.125)
+    expect(ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+  })
+
+  it('lets a merged-back tombstone be restarted into its own slot', () => {
+    const merged = workspaceReducer(deadFounder, { type: 'split', shape: splitReply })
+    const next = workspaceReducer(merged, { type: 'opened', tab: tab('aaa') })
+    const groups = paneGroups(next)
+    expect(groups).toHaveLength(1)
+    const boxes = groups[0].panes
+    expect(boxes.map((box) => box.pane.id)).toEqual(['aaa', 'bbb', 'ccc'])
+    // Alive again, in the slot it never left, still holding its own share.
+    expect(boxes[0].dead).toBe(false)
+    expect(boxes[0].style.flexBasis).toBe('50%')
+  })
+
+  it('lets a merged-back tombstone be dismissed, and renormalises what is left', () => {
+    const merged = workspaceReducer(deadFounder, { type: 'split', shape: splitReply })
+    const next = workspaceReducer(merged, { type: 'dismissed', id: 'aaa' })
+    expect(next.panes.map((pane) => pane.id)).toEqual(['bbb', 'ccc'])
+    const groups = paneGroups(next)
+    expect(groups).toHaveLength(1)
+    // The row still names the dismissed pane — nothing rewrites kids on a
+    // dismiss — and `boxesOfRow` drops the kid whose pane has gone and shares
+    // its ratio out, which is the path that already existed.
+    expect(groups[0].panes.map((box) => box.pane.id)).toEqual(['bbb', 'ccc'])
+    for (const box of groups[0].panes) expect(box.style.flexBasis).toBe('50%')
+  })
+
   it('does not invent a kid for a pane that was never in the row', () => {
     // A pane in `state.panes` that the prior row never named — an `opened` tab
     // awaiting its first row — must not be swept into some other tab by the
