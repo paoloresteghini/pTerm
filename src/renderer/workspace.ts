@@ -271,15 +271,20 @@ function visibleGroupId(state: WorkspaceState): string | null {
  *
  * **At most one box per pane is enforced here**, by `claimed` across rows and
  * by `boxed` within one — no input can make this mount two xterms on one tmux
- * pane. **At least one box per pane is inherited from store.ts**, which keys a
- * row by its founder pane and so never emits two rows with the same id. Given
- * that, a pane whose group is already built was either boxed by the row that
- * built it or claimed by an earlier one, so it is somewhere. Without it — two
- * rows sharing an id — the second row is skipped by `seen` and its panes are
- * dropped, which is a pane that never mounts. That case is not defended
- * against because there is no non-arbitrary way to choose between two rows
- * claiming to be the same tab; it is named so the next person does not have to
- * rediscover which half of this is a guarantee.
+ * pane. **At least one box per pane is inherited from the two writers of
+ * `tabs`**: `restore.ts` builds its rows from a Map keyed by tab id and
+ * replaces `tabs` wholesale, and `register.ts`'s `withTabRow` replaces the row
+ * at a matching id or appends — neither can mint a second row with an id it
+ * already has. Not from `store.ts`: its `tabRows` takes `candidate.id` as it
+ * finds it, and the set it shrinks dedupes *kids*, not row ids, so two rows
+ * sharing an id with disjoint kids survive a `read()` intact. Given unique row
+ * ids, a pane whose group is already built was either boxed by the row that
+ * built it or claimed by an earlier one, so it is somewhere. Without them the
+ * second row is skipped by `seen` and its panes are dropped, which is a pane
+ * that never mounts. That case is not defended against because there is no
+ * non-arbitrary way to choose between two rows claiming to be the same tab; it
+ * is named so the next person does not have to rediscover which half of this
+ * is a guarantee and where the other half comes from.
  *
  * Driven by `state.panes` rather than by `state.tabs` for two reasons. Every
  * pane gets a group whether or not a row names it — nothing here can drop a
