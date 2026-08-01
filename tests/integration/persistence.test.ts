@@ -890,12 +890,23 @@ describe('a tab that re-founds', () => {
     expect(secondWindow).toMatch(/^@\d+$/)
 
     // A session of tmux's own, so that killing both panes does not take the
-    // server down with them. The last kill on a socket ends the server, and
-    // the exit handler's "did the session survive?" question then cannot be
-    // answered at all — it defaults to "alive", which is the safe answer and
-    // the wrong one here, leaving a dead pane's row on disk. Measured on this
-    // socket: without this one of the two rows survives, and which one is a
-    // race. Its name decodes to nothing, so no lookup in main can see it.
+    // server down with them — the last kill on a socket ends the server.
+    //
+    // Measured, and the measurement is all this rests on: without this line
+    // one of the two pane rows is still on disk when the deaths have landed,
+    // which one is a race, and `waitForSavedIds` below times out on it. The
+    // CAUSE is not identified and is deliberately not guessed at here. The
+    // obvious explanation — the exit handler cannot tell whether the session
+    // survived and falls back to "alive" — is wrong for the two shapes a
+    // reader would check first: `adapter.hasSession` answers **false** for
+    // both `no server running` and `error connecting to … no such file or
+    // directory` (`isNoServer`, folded into `isNoSuchSession`), so
+    // `sessionSurvived` never reaches its `catch` and `forgetTab` does run.
+    // Something else about a server going down mid-teardown does it.
+    //
+    // The keeper's own name decodes to nothing, so no lookup in main can see
+    // it: `findOrphans` filters on `isPrcliSession`, and every match in
+    // `memberOfTab` and `panesOfTab` goes through `decodeSessionName`.
     await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-s', 'keeper'])
 
     const founderExit = waitForExitEvent(founder.id)
