@@ -29,10 +29,14 @@ import { describe, it, expect } from 'vitest'
  * - moving this JSX into its own component file — all 4. This test reads
  *   `App.tsx` by path; it follows the code nowhere.
  * - renaming `container` in Terminal.tsx — the guard assertion.
- * - renaming `pane` in DeadPane.tsx, renaming `restartTab` in App.tsx, or
- *   renaming the `pane-restart-` testid — 1 each, the wiring assertion. It
- *   reads all three by name, because what it says is that *this* glyph reaches
- *   *that* handler, and there is no way to say that without naming both ends.
+ * - renaming `restartTab` in App.tsx, or renaming the `pane-restart-` testid —
+ *   1 each, the wiring assertion. It reads both by name, because what it says
+ *   is that *this* glyph reaches *that* handler, and there is no way to say
+ *   that without naming both ends.
+ * - renaming `pane` in DeadPane.tsx — 2: the wiring assertion, and the overlay
+ *   assertion, which anchors on `` data-testid={`dead-${pane.id}`} ``.
+ * - renaming the `dead-` testid — 1, that same anchor. It is the only testid in
+ *   DeadPane.tsx that is load-bearing here; the dot's and the dismiss's are not.
  * - moving DeadPane's strip classes into a `cn(` call — 1, the overlay
  *   assertion, which reads a `className="..."` literal.
  *
@@ -47,6 +51,13 @@ import { describe, it, expect } from 'vitest'
  * green. So do the edits the dead-pane block was written not to care about:
  * swapping which of ↻ and × is drawn first, changing either glyph, renaming
  * the dot's testid, and wrapping the `<DeadPane>` render in a fragment.
+ *
+ * The overlay assertion's anchor is the one place that trade was made the other
+ * way, and deliberately: unanchored, it read the first `className="` in the
+ * file, and an element added above the strip carrying `absolute` and
+ * `pointer-events-none` satisfied it while describing the wrong element —
+ * measured, and silent. Two names for one anchor is the price of that not
+ * happening.
  */
 
 /**
@@ -131,8 +142,34 @@ function elements(source: string, tag: string): string[] {
   return source
     .split(tag)
     .slice(1)
-    .map((rest) => rest.slice(0, rest.indexOf(close)))
+    .map((rest) => {
+      const end = rest.indexOf(close)
+      // Never `slice(0, end)` with `end` unchecked. `indexOf` answers -1 for an
+      // element with no closing tag — a self-closing one, or an unclosed one —
+      // and `slice(0, -1)` reads that as "everything to the end bar one
+      // character", which is the over-capture this bounding exists to prevent,
+      // reintroduced in the one case it was written for. Measured silent: a
+      // last-position `<button ... />` that had lost its `pointer-events-auto`
+      // passed the loop below by borrowing a following sibling's. An element
+      // this cannot bound is one it must not describe.
+      if (end === -1) throw new Error(`No ${close} for an opening ${tag}`)
+      return rest.slice(0, end)
+    })
 }
+
+describe('the elements() helper the dead-pane assertions read through', () => {
+  it('bounds each element at its own closing tag, and refuses one that has none', () => {
+    const two = '<button a>one</button> between <button b>two</button> after'
+    expect(elements(two, '<button')).toEqual([' a>one', ' b>two'])
+    // The case worth a test of its own, because it is the one that fails
+    // quietly. `indexOf` answers -1 for an element with no closing tag, and
+    // `slice(0, -1)` reads that as "to the end bar one character" — the whole
+    // rest of the file, which is exactly the over-capture the bounding exists
+    // to prevent. It still contains every string a caller greps for, so the
+    // assertion reading it goes on passing while describing something else.
+    expect(() => elements('<button a>one', '<button')).toThrow(/<\/button>/)
+  })
+})
 
 describe('the chrome over a dead pane', () => {
   /**
@@ -189,7 +226,12 @@ describe('the chrome over a dead pane', () => {
     // positioned and lands over a pane that did not die.
     expect((box?.[1] ?? '').split(' ')).toContain('relative')
 
-    const strip = /className="([^"]*)"/.exec(deadPane)
+    // Anchored on the strip's own testid, for the reason the two assertions
+    // above are anchored on a `key`: unanchored, this takes the first
+    // `className="` in the file, and an element added above the strip carrying
+    // both of these classes would satisfy it while describing the wrong thing.
+    // The strip's is first today, which is exactly how long that holds.
+    const strip = /data-testid=\{`dead-\$\{pane\.id\}`\}.*?className="([^"]*)"/.exec(deadPane)
     expect(strip).not.toBeNull()
     const classes = (strip?.[1] ?? '').split(' ')
     // A strip in the flow would shrink the box, `Terminal` would fit itself to
