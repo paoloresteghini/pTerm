@@ -132,10 +132,12 @@ if (!isPrimaryInstance) {
   app.quit()
 }
 
-// The renderer owns ⌘T, ⌘W and ⇧⌘\: they act on tabs and on the presets
-// panel. A menu accelerator fires instead of whatever the renderer does with
-// the event, so the default File menu's "Close Window" would win and take
-// every session's client down with it.
+// The renderer owns ⌘T, ⌘W, ⇧⌘\, ⌘D, ⇧⌘D and the ⌘⌥arrows: they act on tabs,
+// on panes and on the presets panel. A menu accelerator fires instead of
+// whatever the renderer does with the event, so the default File menu's
+// "Close Window" would win and take every session's client down with it — and
+// the pane bindings would take their keystrokes off whatever is running in the
+// pane, which here is usually Claude.
 // Same menu as Electron's default, with those items' accelerators shown but
 // not registered.
 /**
@@ -166,13 +168,16 @@ function installMenu(): void {
           click: () => sendMenuCommand('newTab'),
         },
         {
-          id: 'close-tab',
-          label: 'Close Tab',
+          // Pane, not tab: ⌘W closes the pane that is listening, and takes
+          // the tab with it only when that was the tab's last one. The old
+          // label was true right up until a tab could hold two panes.
+          id: 'close-pane',
+          label: 'Close Pane',
           accelerator: 'CmdOrCtrl+W',
           // Displayed, but not claimed from the system — the keystroke
           // reaches the renderer instead.
           registerAccelerator: false,
-          click: () => sendMenuCommand('closeTab'),
+          click: () => sendMenuCommand('closePane'),
         },
         { type: 'separator' },
         {
@@ -207,6 +212,66 @@ function installMenu(): void {
         { role: 'zoomOut' },
         { type: 'separator' },
         { role: 'togglefullscreen' },
+      ],
+    },
+    {
+      label: 'Pane',
+      submenu: [
+        {
+          id: 'split-right',
+          label: 'Split Right',
+          accelerator: 'CmdOrCtrl+D',
+          registerAccelerator: false,
+          click: () => sendMenuCommand('splitRight'),
+        },
+        {
+          id: 'split-down',
+          label: 'Split Down',
+          accelerator: 'Shift+CmdOrCtrl+D',
+          registerAccelerator: false,
+          click: () => sendMenuCommand('splitDown'),
+        },
+        {
+          // Not a command — a disabled line of explanation, because on a tab
+          // that is already split these two items do exactly the same thing
+          // and there is nowhere else to say why. A tab's axis is set by the
+          // split that creates it, so ⇧⌘D on a row tab adds a pane along the
+          // row. Re-orienting instead would reflow every pane in the tab and
+          // resize the real tmux session behind each one, for panes the user
+          // did not act on. See `SplitRequest.dir`.
+          id: 'split-axis-note',
+          label: 'A tab keeps the axis of its first split',
+          enabled: false,
+        },
+        { type: 'separator' },
+        {
+          id: 'focus-left',
+          label: 'Focus Left',
+          accelerator: 'CmdOrCtrl+Alt+Left',
+          registerAccelerator: false,
+          click: () => sendMenuCommand('focusLeft'),
+        },
+        {
+          id: 'focus-right',
+          label: 'Focus Right',
+          accelerator: 'CmdOrCtrl+Alt+Right',
+          registerAccelerator: false,
+          click: () => sendMenuCommand('focusRight'),
+        },
+        {
+          id: 'focus-up',
+          label: 'Focus Up',
+          accelerator: 'CmdOrCtrl+Alt+Up',
+          registerAccelerator: false,
+          click: () => sendMenuCommand('focusUp'),
+        },
+        {
+          id: 'focus-down',
+          label: 'Focus Down',
+          accelerator: 'CmdOrCtrl+Alt+Down',
+          registerAccelerator: false,
+          click: () => sendMenuCommand('focusDown'),
+        },
       ],
     },
     { role: 'windowMenu' },

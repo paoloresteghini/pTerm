@@ -3,9 +3,42 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 
-export function Terminal({ tabId, visible }: { tabId: string; visible: boolean }) {
+/**
+ * Every mounted pane's terminal, by tab id.
+ *
+ * A module-level map rather than something handed upward, because the caller
+ * that needs it — App's ⌘D — holds no reference to any terminal and has to
+ * name the pane it is splitting by id. The only alternative in reach is
+ * measuring the box in pixels and dividing by a guessed cell size.
+ */
+const mounted = new Map<string, XTerm>()
+
+/**
+ * The cell grid `tabId`'s terminal is showing right now, or null when no
+ * terminal is mounted for it.
+ *
+ * Null rather than a default pair: a split sized from a made-up grid is the
+ * 80x24 defect wearing different numbers, and the caller has a better answer
+ * for "not measured" than this file does.
+ */
+export function paneGrid(tabId: string): { cols: number; rows: number } | null {
+  const term = mounted.get(tabId)
+  return term ? { cols: term.cols, rows: term.rows } : null
+}
+
+export function Terminal({
+  tabId,
+  visible,
+  /** Whether this pane is the one the keyboard is talking to. */
+  focused,
+}: {
+  tabId: string
+  visible: boolean
+  focused: boolean
+}) {
   const containerRef = useRef<HTMLDivElement>(null)
   const fitRef = useRef<(() => void) | null>(null)
+  const termRef = useRef<XTerm | null>(null)
 
   useEffect(() => {
     const container = containerRef.current
@@ -26,6 +59,8 @@ export function Terminal({ tabId, visible }: { tabId: string; visible: boolean }
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(container)
+    termRef.current = term
+    mounted.set(tabId, term)
 
     const offData = window.prcli.onData(({ id, data }) => {
       if (id === tabId) term.write(data)
@@ -61,6 +96,12 @@ export function Terminal({ tabId, visible }: { tabId: string; visible: boolean }
       offData()
       term.dispose()
       fitRef.current = null
+      termRef.current = null
+      // Only if it is still this terminal's entry. Nothing schedules a mount
+      // for one id ahead of the matching cleanup today, but the cost of being
+      // wrong about that is a live pane whose grid nothing can read, which
+      // makes ⌘D on it refuse to split.
+      if (mounted.get(tabId) === term) mounted.delete(tabId)
     }
   }, [tabId])
 
@@ -71,6 +112,15 @@ export function Terminal({ tabId, visible }: { tabId: string; visible: boolean }
     })
     return () => cancelAnimationFrame(frame)
   }, [visible])
+
+  // Typing has to land in the pane the app says is active, or it goes to
+  // whichever terminal happened to hold focus. This only ever takes focus, and
+  // only on the way in: nothing here blurs a pane, and a pane that is not on
+  // screen is never asked for focus because the caller passes false for one.
+  useEffect(() => {
+    if (!focused) return
+    termRef.current?.focus()
+  }, [focused])
 
   return <div data-testid="terminal" ref={containerRef} className="h-full w-full" />
 }

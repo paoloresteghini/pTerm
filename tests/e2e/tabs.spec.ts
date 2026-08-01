@@ -420,7 +420,7 @@ test('the File and View menu items do what their accelerators do', async () => {
   await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(2)
   await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(2)
 
-  await clickMenuItem(app, 'close-tab')
+  await clickMenuItem(app, 'close-pane')
   await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(1)
   await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(1)
 

@@ -44,8 +44,24 @@ export const CHANNELS = {
  * claimed by the menu — that part was always right. What was missing is that
  * *clicking* the item did nothing at all, because the renderer owns every one
  * of these actions and main had no way to ask for them.
+ *
+ * That is why the pane commands are here too. ⌘D, ⇧⌘D and the ⌘⌥arrows are
+ * handled in the renderer's own keydown handler, beside ⌥⌘1; these values
+ * exist so that CLICKING their menu items does the same thing. A registered
+ * accelerator would take the keystroke off whatever is running in the pane,
+ * which for this app is usually Claude.
  */
-export type MenuCommand = 'newTab' | 'closeTab' | 'togglePresets' | 'settings'
+export type MenuCommand =
+  | 'newTab'
+  | 'closePane'
+  | 'splitRight'
+  | 'splitDown'
+  | 'focusLeft'
+  | 'focusRight'
+  | 'focusUp'
+  | 'focusDown'
+  | 'togglePresets'
+  | 'settings'
 
 /**
  * What a tab was launched as.

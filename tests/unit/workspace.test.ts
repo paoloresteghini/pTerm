@@ -11,6 +11,7 @@ import {
   stateOfProject,
   needsYou,
   paneGroups,
+  paneInDirection,
   panesOfTab,
   tabOfPane,
   type WorkspaceState,
@@ -168,6 +169,73 @@ describe('tabOfPane', () => {
 
   it('is undefined against a fully empty WorkspaceState', () => {
     expect(tabOfPane(INITIAL_WORKSPACE_STATE, 'aaa')).toBeUndefined()
+  })
+})
+
+describe('paneInDirection', () => {
+  /** A `col` tab over `kids`, evenly split — `tabRow` only builds `row` ones. */
+  function colRow(id: string, kids: string[]): TabRow {
+    return {
+      id,
+      activePaneId: kids[0] ?? null,
+      layout: { dir: 'col', ratio: kids.map(() => 1 / kids.length), kids },
+    }
+  }
+
+  const split: WorkspaceState = { ...three, tabs: [tabRow('aaa', ['aaa', 'bbb', 'ccc'])] }
+
+  it('steps one pane along the axis, in kids order', () => {
+    // Non-empty first: an assertion about a step through a list says nothing
+    // if the list turns out to be empty.
+    expect(panesOfTab(split, 'aaa')).toHaveLength(3)
+    expect(paneInDirection(split, 'aaa', 'right')?.id).toBe('bbb')
+    expect(paneInDirection(split, 'bbb', 'right')?.id).toBe('ccc')
+    expect(paneInDirection(split, 'ccc', 'left')?.id).toBe('bbb')
+    expect(paneInDirection(split, 'bbb', 'left')?.id).toBe('aaa')
+  })
+
+  it('is undefined at either end rather than wrapping round', () => {
+    // Both ends, because a wrap at one of them is a wrap. Wrapping would put
+    // focus at the far side of the screen from where the key pointed.
+    expect(paneInDirection(split, 'aaa', 'left')).toBeUndefined()
+    expect(paneInDirection(split, 'ccc', 'right')).toBeUndefined()
+  })
+
+  it('ignores a direction across the tab\'s axis', () => {
+    // A `row` tab has nothing above or below any of its panes.
+    expect(paneInDirection(split, 'aaa', 'down')).toBeUndefined()
+    expect(paneInDirection(split, 'bbb', 'up')).toBeUndefined()
+  })
+
+  it('steps down and up a col tab, and ignores left and right there', () => {
+    const state: WorkspaceState = { ...three, tabs: [colRow('aaa', ['aaa', 'bbb'])] }
+    expect(panesOfTab(state, 'aaa')).toHaveLength(2)
+    expect(paneInDirection(state, 'aaa', 'down')?.id).toBe('bbb')
+    expect(paneInDirection(state, 'bbb', 'up')?.id).toBe('aaa')
+    expect(paneInDirection(state, 'bbb', 'down')).toBeUndefined()
+    expect(paneInDirection(state, 'aaa', 'right')).toBeUndefined()
+  })
+
+  it('is undefined for a pane no row names, rather than throwing', () => {
+    // Every tab opened this run, until something splits it.
+    expect(paneInDirection(three, 'aaa', 'right')).toBeUndefined()
+  })
+
+  it('is undefined for a pane id nothing knows', () => {
+    expect(paneInDirection(split, 'zzz', 'right')).toBeUndefined()
+  })
+
+  it('steps over a kid whose pane is gone, onto the next one that renders', () => {
+    // `panesOfTab` is the order on screen — `paneGroups` boxes exactly those
+    // panes — so a kid with no pane is drawn nowhere, and stepping onto it
+    // would be a key that moved focus to nothing.
+    const state: WorkspaceState = { ...three, tabs: [tabRow('aaa', ['aaa', 'ghost', 'bbb'])] }
+    expect(panesOfTab(state, 'aaa').map((p) => p.id)).toEqual(['aaa', 'bbb'])
+    expect(paneInDirection(state, 'aaa', 'right')?.id).toBe('bbb')
+  })
+
+  it('is undefined against a fully empty WorkspaceState', () => {
+    expect(paneInDirection(INITIAL_WORKSPACE_STATE, 'aaa', 'right')).toBeUndefined()
   })
 })
 
@@ -808,6 +876,82 @@ describe('workspaceReducer', () => {
       expect(next.panes.map((p) => p.id)).toEqual(['bbb', 'ccc'])
       expect(next.tabs).toEqual([])
       expect(tabOfPane(next, 'aaa')).toBeUndefined()
+    })
+
+    // The selection is what the tab bar highlights, what `setActive` reports
+    // to main and what the keyboard acts on next — and since v5 it names a
+    // pane. Leaving it on the pane that just closed points every one of those
+    // at something that is gone: `visibleGroupId` resolves it through
+    // `tabOfPane`, finds no row and no group keyed by it, and the window shows
+    // no terminal at all.
+    it('hands the selection to the tab\'s surviving pane when the closed one had it', () => {
+      const state: WorkspaceState = {
+        ...three,
+        projects: [project('p1', 'lumio', 'ccc')],
+        tabs: [tabRow('bbb', ['bbb', 'ccc'])],
+      }
+      const next = workspaceReducer(state, {
+        type: 'closedPane',
+        paneId: 'ccc',
+        shape: { panes: [tab('bbb')], tabs: [tabRow('bbb', ['bbb'])] },
+      })
+      // Main's own answer, not a guess: `closePane` names the survivor that
+      // takes over in the row it hands back.
+      expect(activeTabId(next)).toBe('bbb')
+    })
+
+    it('hands it to a neighbouring tab when the closed pane was the tab\'s last', () => {
+      const state: WorkspaceState = {
+        ...three,
+        tabs: [tabRow('bbb', ['bbb'])],
+      }
+      const next = workspaceReducer(state, {
+        type: 'closedPane',
+        paneId: 'bbb',
+        shape: { panes: [], tabs: [] },
+      })
+      expect(next.panes.map((p) => p.id)).toEqual(['aaa', 'ccc'])
+      // The row is gone, so there is no surviving pane to name and the rule
+      // is the tab bar's own: the tab to the right, or the left when it was
+      // last.
+      expect(activeTabId(next)).toBe('ccc')
+    })
+
+    it('leaves the selection alone when some other pane closes', () => {
+      const state: WorkspaceState = { ...three, tabs: [tabRow('aaa', ['aaa'])] }
+      const next = workspaceReducer(state, {
+        type: 'closedPane',
+        paneId: 'aaa',
+        shape: { panes: [], tabs: [] },
+      })
+      expect(activeTabId(next)).toBe('bbb')
+    })
+
+    it('leaves every other project\'s selection alone', () => {
+      const state: WorkspaceState = {
+        projects: [project('p1', 'lumio', 'aaa'), project('p2', 'gco', 'bbb')],
+        panes: [tab('aaa', 'lumio'), tab('bbb', 'gco')],
+        tabs: [tabRow('aaa', ['aaa'])],
+        activeProjectId: 'p2',
+        status: {},
+        dead: {},
+      }
+      const next = workspaceReducer(state, {
+        type: 'closedPane',
+        paneId: 'aaa',
+        shape: { panes: [], tabs: [] },
+      })
+      expect(next.projects[1].activeTabId).toBe('bbb')
+    })
+
+    it('leaves the selection alone for a pane it does not have', () => {
+      const next = workspaceReducer(three, {
+        type: 'closedPane',
+        paneId: 'zzz',
+        shape: { panes: [], tabs: [] },
+      })
+      expect(activeTabId(next)).toBe('bbb')
+      expect(next.panes.map((p) => p.id)).toEqual(['aaa', 'bbb', 'ccc'])
     })
 
     it('leaves state untouched for a pane that had no row to begin with', () => {

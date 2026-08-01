@@ -166,6 +166,52 @@ export function tabOfPane(state: WorkspaceState, paneId: string): TabRow | undef
   return state.tabs.find((row) => row.layout.kids.includes(paneId))
 }
 
+/**
+ * Which way a movement points. The axis half of it is the tab's own `dir`:
+ * left/right walk a `row` tab, up/down a `col` one.
+ */
+export type PaneDirection = 'left' | 'right' | 'up' | 'down'
+
+/**
+ * The pane one step from `paneId` along its tab's axis.
+ *
+ * Undefined is four different "no" answers, and every one of them is the same
+ * no-op for the caller: the pane is in no tab, the direction is across the
+ * tab's axis (⌘⌥↑ on a `row` tab), the pane is already at that end, or the id
+ * names nothing. Total, like `panesOfTab` and `tabOfPane`, for the reason
+ * given there.
+ *
+ * Falling off the end is undefined rather than the pane at the other end:
+ * wrapping puts focus at the far side of the screen from where the key
+ * pointed.
+ *
+ * Named here, beside the two lookups it is built from, because the step is not
+ * a single call in terms of either: `panesOfTab` needs a tab id and the caller
+ * has a pane id, and neither answers "one along" — so every call site would
+ * otherwise compose `tabOfPane`, `panesOfTab` and a `findIndex` inline.
+ *
+ * The step is over `panesOfTab` rather than over `kids` directly, so it lands
+ * on the pane drawn next: `paneGroups` boxes exactly the kids whose panes
+ * exist, so a kid without one is on screen nowhere and stepping onto it would
+ * move focus to nothing.
+ */
+export function paneInDirection(
+  state: WorkspaceState,
+  paneId: string,
+  direction: PaneDirection,
+): TabDescriptor | undefined {
+  const row = tabOfPane(state, paneId)
+  if (!row) return undefined
+  const axis = direction === 'left' || direction === 'right' ? 'row' : 'col'
+  if (row.layout.dir !== axis) return undefined
+  const panes = panesOfTab(state, row.id)
+  const at = panes.findIndex((pane) => pane.id === paneId)
+  if (at === -1) return undefined
+  // `panes[-1]` and `panes[length]` are both undefined, which is the no-wrap
+  // answer without a bounds test of its own.
+  return panes[at + (direction === 'right' || direction === 'down' ? 1 : -1)]
+}
+
 /** A pane and the share of its tab's axis it takes. */
 export interface PaneBox {
   pane: TabDescriptor
@@ -515,6 +561,10 @@ export function workspaceReducer(
       // pane hands back an empty `panes` and an empty `tabs` with nothing in
       // either to name it.
       const priorRow = state.tabs.find((row) => row.layout.kids.includes(action.paneId))
+      // Read before the filter below drops it: the selection rule needs to
+      // know which project owned the pane, and a pane's project lives in its
+      // own record.
+      const closed = state.panes.find((pane) => pane.id === action.paneId)
       const panes = state.panes.filter((pane) => pane.id !== action.paneId)
       const nextRow = action.shape.tabs[0]
       const tabs = priorRow
@@ -524,7 +574,30 @@ export function workspaceReducer(
             state.tabs.map((row) => (row.id === priorRow.id ? nextRow : row))
           : state.tabs.filter((row) => row.id !== priorRow.id)
         : state.tabs
-      return { ...state, panes, tabs }
+      const next = { ...state, panes, tabs }
+
+      // The selection names a pane, and the pane it names has just gone. Left
+      // alone it points at nothing: `visibleGroupId` resolves it through
+      // `tabOfPane`, finds no row and no group keyed by it, and the window
+      // shows no terminal at all — as well as leaving the keyboard acting on a
+      // pane that is not there.
+      //
+      // Only the project that owned the closed pane moves, exactly as
+      // `removeTab` does it: every other project keeps whatever it was on.
+      if (!closed) return next
+      const owner = projectIdForTab(state.projects, closed)
+      const project = state.projects.find((candidate) => candidate.id === owner)
+      if (project?.activeTabId !== action.paneId) return next
+      // Main's own answer first — `closePane` names the survivor that takes
+      // over in the row it hands back — and the tab bar's neighbour rule when
+      // there is no row left to name one, which is a tab that has closed
+      // entirely. `neighbourOf` is asked over the panes from BEFORE the close,
+      // since it finds the neighbour by the closed pane's own position.
+      return setActiveTab(
+        next,
+        owner,
+        nextRow?.activePaneId ?? neighbourOf(tabsOfProject(state, owner), action.paneId),
+      )
     }
 
     case 'activatedPane': {

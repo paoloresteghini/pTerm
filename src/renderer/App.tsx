@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useState } from 'react'
-import { Terminal } from './Terminal'
+import { Terminal, paneGrid } from './Terminal'
 import { TabBar } from './TabBar'
 import { Sidebar } from './Sidebar'
 import { RightPanel } from './RightPanel'
@@ -12,10 +12,13 @@ import {
   activeTabId,
   needsYou,
   paneGroups,
+  paneInDirection,
   projectIdForTab,
   stateOfProject,
+  tabOfPane,
   tabsOfProject,
   workspaceReducer,
+  type PaneDirection,
 } from './workspace'
 import { projectMuted, toggleProjectMute } from './mute'
 import { UNSORTED_ID, type NotificationConfig, type TabDescriptor, type TabType } from '../shared/ipc'
@@ -66,14 +69,98 @@ export function App() {
 
   const openTab = useCallback(() => launch(undefined), [launch])
 
-  const closeTab = useCallback(
-    (id: string) => {
+  // The selection is a PANE id — the tab bar lists panes — so this is the
+  // pane ⌘D splits, ⌘W closes and ⌘⌥arrow moves off. Every route that changes
+  // which pane is active writes it, so the tab bar's highlight, the focused
+  // xterm and what `setActive` tells main are one fact and cannot drift apart.
+  const activePaneId = currentTabId
+
+  /**
+   * Close one pane, and the tab with it when it was the last one.
+   *
+   * `closePane`, never `kill`: it does everything the kill did — the pending
+   * kill, the forgotten status, geometry and pane, the config row — and also
+   * maintains the tab's layout row. Sending a user's close down the other
+   * path would leave a stale row behind the first time it was used on a split
+   * tab.
+   */
+  const closePane = useCallback(
+    (paneId: string) => {
       window.prcli
-        .kill(id)
-        .then(() => dispatch({ type: 'removed', id }))
+        .closePane(paneId)
+        .then((shape) => dispatch({ type: 'closedPane', paneId, shape }))
         .catch(fail)
     },
     [fail],
+  )
+
+  /**
+   * Add a pane beside the active one, along `dir`.
+   *
+   * `dir` is honoured only by the split that turns a single pane into a split
+   * tab; after that the tab keeps its axis and the new pane joins it. See
+   * `SplitRequest.dir` — and the note in the Pane menu, which is where a user
+   * finds out.
+   */
+  const splitActive = useCallback(
+    (dir: 'row' | 'col') => {
+      if (!activePaneId) return
+      const grid = paneGrid(activePaneId)
+      // No terminal mounted for the selection, so there is no pane on screen
+      // to split off. Sending an unmeasured size instead is what `SplitRequest`
+      // exists to refuse.
+      if (!grid) return
+      // Half the pane being split, along the axis being split — exact for the
+      // first split of a tab and an approximation for each one after it, since
+      // the other panes give up a share too. It only has to be a real grid
+      // rather than tmux's 80x24 default: the new pane's Terminal fits itself
+      // to its own box the moment it mounts and sends the true size.
+      const half = (cells: number): number => Math.max(1, Math.floor(cells / 2))
+      window.prcli
+        .splitPane({
+          paneId: activePaneId,
+          dir,
+          cols: dir === 'row' ? half(grid.cols) : grid.cols,
+          rows: dir === 'col' ? half(grid.rows) : grid.rows,
+        })
+        .then((shape) => {
+          dispatch({ type: 'split', shape })
+          // Main names the pane it just made, in the row it hands back. The
+          // pane the user asked for is the one they should be typing into.
+          const active = shape.tabs[0]?.activePaneId
+          if (active) dispatch({ type: 'activatedTab', id: active })
+        })
+        .catch(fail)
+    },
+    [activePaneId, fail],
+  )
+
+  /** Make `paneId` the pane the keyboard talks to, and record it on its tab. */
+  const selectPane = useCallback(
+    (paneId: string) => {
+      if (paneId === activePaneId) return
+      const row = tabOfPane(state, paneId)
+      if (row) dispatch({ type: 'activatedPane', tabId: row.id, paneId })
+      dispatch({ type: 'activatedTab', id: paneId })
+    },
+    [state, activePaneId],
+  )
+
+  /**
+   * Move the selection one pane along its tab's axis.
+   *
+   * A movement that would fall off either end does nothing, and so does one
+   * across the tab's axis — see `paneInDirection`, which answers both with
+   * undefined.
+   */
+  const focusPane = useCallback(
+    (direction: PaneDirection) => {
+      if (!activePaneId) return
+      const target = paneInDirection(state, activePaneId, direction)
+      if (!target) return
+      selectPane(target.id)
+    },
+    [state, activePaneId, selectPane],
   )
 
   useEffect(() => {
@@ -216,10 +303,28 @@ export function App() {
           case 'newTab':
             openTab()
             return
-          case 'closeTab':
-            // Same guard the ⌘W handler applies: with no tab there is nothing
-            // to close, and closeTab(null) is not a thing to ask for.
-            if (currentTabId) closeTab(currentTabId)
+          case 'closePane':
+            // Same guard the ⌘W handler applies: with no pane there is nothing
+            // to close, and closePane(null) is not a thing to ask for.
+            if (activePaneId) closePane(activePaneId)
+            return
+          case 'splitRight':
+            splitActive('row')
+            return
+          case 'splitDown':
+            splitActive('col')
+            return
+          case 'focusLeft':
+            focusPane('left')
+            return
+          case 'focusRight':
+            focusPane('right')
+            return
+          case 'focusUp':
+            focusPane('up')
+            return
+          case 'focusDown':
+            focusPane('down')
             return
           case 'togglePresets':
             setPanelOpen((open) => !open)
@@ -228,7 +333,7 @@ export function App() {
             setSettingsOpen(true)
         }
       }),
-    [currentTabId, openTab, closeTab],
+    [activePaneId, openTab, closePane, splitActive, focusPane],
   )
 
   useEffect(() => {
@@ -255,10 +360,36 @@ export function App() {
         openTab()
         return
       }
-      if (event.code === 'KeyW' && !event.altKey && currentTabId) {
+      if (event.code === 'KeyW' && !event.altKey && activePaneId) {
         event.preventDefault()
-        closeTab(currentTabId)
+        closePane(activePaneId)
         return
+      }
+      // Both here rather than as registered menu accelerators, for the reason
+      // the whole File menu is unregistered: an accelerator the menu claims
+      // never reaches the window, and these keystrokes are typed at panes
+      // running Claude. ⇧ picks the axis, so `KeyD` covers both.
+      if (event.code === 'KeyD' && !event.altKey) {
+        event.preventDefault()
+        splitActive(event.shiftKey ? 'col' : 'row')
+        return
+      }
+      // ⌘⌥ + an arrow. `event.code` matters twice over here: ⌥ rewrites `key`
+      // for letters, and while it leaves the arrows' `key` alone, one rule for
+      // every binding in this handler is one rule to get right.
+      if (event.altKey && !event.shiftKey) {
+        const along: Record<string, PaneDirection> = {
+          ArrowLeft: 'left',
+          ArrowRight: 'right',
+          ArrowUp: 'up',
+          ArrowDown: 'down',
+        }
+        const direction = along[event.code]
+        if (direction) {
+          event.preventDefault()
+          focusPane(direction)
+          return
+        }
       }
       if (event.code === 'Backslash' && event.shiftKey) {
         event.preventDefault()
@@ -290,7 +421,7 @@ export function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [currentTabId, currentTabs, state.projects, openTab, closeTab])
+  }, [activePaneId, currentTabs, state.projects, openTab, closePane, splitActive, focusPane])
 
   return (
     <div className="flex h-screen w-screen bg-bg">
@@ -356,7 +487,7 @@ export function App() {
           status={state.status}
           dead={state.dead}
           onActivate={(id) => dispatch({ type: 'activatedTab', id })}
-          onClose={closeTab}
+          onClose={closePane}
           onRestart={restartTab}
           onDismiss={dismissTab}
           onNew={openTab}
@@ -403,15 +534,38 @@ export function App() {
                 <div
                   key={box.pane.id}
                   data-testid={`pane-${box.pane.id}`}
-                  // `min-w-0 min-h-0`: a flex item's automatic minimum size is
-                  // its content's, not zero, so an xterm canvas still sized for
-                  // the whole tab could hold this box open past its share — and
-                  // the fit that would resize that canvas measures this box, so
-                  // it would have nothing to correct itself to.
-                  className="min-h-0 min-w-0"
+                  data-active={box.pane.id === activePaneId ? 'true' : 'false'}
+                  // Clicking a pane makes it the one the keyboard talks to.
+                  // `onMouseDown` rather than `onClick` so the app has recorded
+                  // it before the click moves DOM focus into that pane's
+                  // textarea — and so a drag that starts a selection inside a
+                  // pane counts as choosing it too.
+                  onMouseDown={() => selectPane(box.pane.id)}
+                  className={cn(
+                    // `min-w-0 min-h-0`: a flex item's automatic minimum size
+                    // is its content's, not zero, so an xterm canvas still
+                    // sized for the whole tab could hold this box open past its
+                    // share — and the fit that would resize that canvas
+                    // measures this box, so it would have nothing to correct
+                    // itself to.
+                    'min-h-0 min-w-0',
+                    // Which pane is listening, said out loud — but only where
+                    // there is a choice to make. An inset ring rather than a
+                    // border: it takes no space, so marking a pane cannot
+                    // resize it and set off a fit of the real tmux session.
+                    group.panes.length > 1 &&
+                      box.pane.id === activePaneId &&
+                      'shadow-[inset_0_0_0_1px_var(--color-accent)]',
+                  )}
                   style={box.style}
                 >
-                  <Terminal tabId={box.pane.id} visible={group.visible} />
+                  <Terminal
+                    tabId={box.pane.id}
+                    visible={group.visible}
+                    // Never for a tab that is off screen: taking focus into one
+                    // would move typing to a terminal the user cannot see.
+                    focused={group.visible && box.pane.id === activePaneId}
+                  />
                 </div>
               ))}
             </div>
