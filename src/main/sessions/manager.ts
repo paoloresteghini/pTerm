@@ -60,6 +60,20 @@ interface Entry {
    * its membership lived in its tmux session's group and the death hook kills
    * that session; `register.ts`'s `forgetTab` deletes its config row; and
    * `store.read()`'s `normaliseLayout` then drops it from the tab row's kids.
+   *
+   * Written once, at creation, and there is no setter — which is an obligation
+   * on anything added later, not a property of the field. Every producer today
+   * creates the entry at the moment the pane joins its tab, so the two cannot
+   * disagree: `splitTab` makes a new entry for the new member, and
+   * `moveTabToProject` disposes each entry and makes another, carrying this
+   * value across. **An operation that moves a pane between tabs without
+   * recreating its entry — an unsplit, a drag of a pane into another tab —
+   * must write this field too.** Leaving it is invisible: nothing reads it
+   * while the pane lives, so the tab bar, the layout and tmux all stay
+   * correct, and the stale value first has an effect when that pane dies and
+   * is restarted, at which point it silently rejoins the tab it used to be in.
+   * That is the failure this whole field exists to remove, reintroduced from
+   * inside.
    */
   tabId: string
   /**
