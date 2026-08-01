@@ -175,6 +175,15 @@ function panesOfGroup(state: WorkspaceState, groupId: string): TabDescriptor[] {
  * Null when no pane of the tab has a state at all — "draw no dot". A tab whose
  * panes have all reported `unknown` is `unknown`, which `worst` gives without
  * help: `unknown` is in `SEVERITY`, and only an empty list falls off the end.
+ *
+ * **Nothing outside this file calls this yet, and that is not an oversight:**
+ * the tab bar lists panes, one entry each with its own dot, so no element on
+ * screen today stands for a whole tab and none of them lies. `stateOfProject`
+ * is the only caller. **The moment a tab-bar entry stands for a tab — the `⊞n`
+ * badge, or any other collapse of a split tab into one row — that entry's dot
+ * must come from here.** Reading `status[tab.id]` for it instead is the exact
+ * defect this function was written ahead of: the founder pane's state, wearing
+ * the whole tab's dot, showing green over a crashed sibling.
  */
 export function stateOfTab(state: WorkspaceState, tabId: string): TabState | null {
   const states = panesOfGroup(state, tabId)
