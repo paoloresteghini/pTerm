@@ -673,6 +673,41 @@ describe('project channels', () => {
     await expect(store.read().then((c) => c.panes.map((p) => p.cwd))).resolves.toEqual([before])
   })
 
+  // A pane's launch intent is not recoverable from tmux — `panesOfTab`
+  // synthesises `shell` for a pane with no open entry, because a session name
+  // does not say what it was started for. So a DETACHED claude pane moved
+  // between projects was written back to disk as a shell, and the next restore
+  // opened it as one: no dot of its own, and nothing left on disk saying what
+  // it was. The cwd assertion above covers the same hole for a different
+  // field; this is the one the branch's `known` map did not carry.
+  it('moves a detached claude tab without downgrading it to a shell', async () => {
+    const [project] = await invoke<ProjectDescriptor[]>(CHANNELS.addProject, {
+      name: 'Lumio',
+      cwd: tmpdir(),
+    })
+    const tab = await invoke<TabDescriptor>(CHANNELS.open, {
+      projectSlug: 'stray',
+      cwd: tmpdir(),
+      type: 'claude',
+    })
+    await waitForPrompt(tab.id)
+    expect((await store.read()).panes.find((row) => row.id === tab.id)?.type).toBe('claude')
+    detachTab(tab.id)
+    await settle(500)
+
+    const moved = await invoke<{ panes: TabDescriptor[] }>(
+      CHANNELS.moveTabToProject,
+      tab.id,
+      project.id,
+    )
+
+    expect(moved.panes).toHaveLength(1)
+    expect(moved.panes[0].type).toBe('claude')
+    const saved = (await store.read()).panes
+    expect(saved).toHaveLength(1)
+    expect(saved[0].type).toBe('claude')
+  })
+
   it('refuses to move a tab into a project that does not exist', async () => {
     const tab = await openTab()
     await expect(invoke(CHANNELS.moveTabToProject, tab.id, 'nope')).rejects.toThrow(/no project/i)

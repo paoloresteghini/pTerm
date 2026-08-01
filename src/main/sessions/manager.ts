@@ -906,8 +906,8 @@ export class SessionManager {
    * simply throws. The client is then cycled anyway, which reattaches under the
    * new name and makes tmux redraw the pane into the waiting xterm.
    *
-   * `known` carries the tab's real cwd and command when the caller has them on
-   * record. A tab whose client has already gone — detached, and still perfectly
+   * `known` carries the tab's real cwd, command and type when the caller has
+   * them on record. A tab whose client has already gone — detached, and still perfectly
    * movable — is found through `findOrphans`, which synthesises a cwd and knows
    * no command, so moving one without this would return $HOME as its directory
    * for the caller to save over the truth. Restore does the same fix-up when it
@@ -928,7 +928,7 @@ export class SessionManager {
   async moveToProject(
     id: string,
     projectSlug: string,
-    known?: Pick<PaneRecord, 'cwd' | 'command'>,
+    known?: Pick<PaneRecord, 'cwd' | 'command' | 'type'>,
   ): Promise<PaneRecord> {
     const [moved] = await this.moveTabToProject(
       id,
@@ -957,10 +957,10 @@ export class SessionManager {
    * routinely called on a tab this app has open, and `findOrphanTabs`
    * deliberately excludes exactly those panes.
    *
-   * `known` carries each pane's real cwd/command, keyed by pane id, for the
-   * same reason `moveToProject` takes one — a pane found through
-   * `panesOfTab` rather than an open entry has a tmux-synthesised cwd and no
-   * command.
+   * `known` carries each pane's real cwd, command and type, keyed by pane id,
+   * for the same reason `moveToProject` takes one — a pane found through
+   * `panesOfTab` rather than an open entry has a tmux-synthesised cwd, no
+   * command, and a type of `'shell'` whatever it really is.
    *
    * Each reattach carries that pane's own live geometry forward, same as
    * `moveToProject` — nothing in the renderer changes size across a move, so
@@ -969,7 +969,7 @@ export class SessionManager {
   async moveTabToProject(
     tabId: string,
     projectSlug: string,
-    known?: Map<string, Pick<PaneRecord, 'cwd' | 'command'>>,
+    known?: Map<string, Pick<PaneRecord, 'cwd' | 'command' | 'type'>>,
   ): Promise<PaneRecord[]> {
     const panes = await this.panesOfTab(tabId)
     if (panes.length === 0) throw new Error(`moveTabToProject: no session for tab ${tabId}`)
@@ -1078,10 +1078,18 @@ export class SessionManager {
       const overrides = known?.get(pane.id)
       const cwd = overrides?.cwd ?? pane.cwd
       const command = overrides?.command ?? pane.command
+      // `type` comes from the caller's row for the same reason `cwd` and
+      // `command` do, and is the easiest of the three to lose: `panesOfTab`
+      // synthesises `'shell'` for a pane with no open entry — a launch intent
+      // is not recoverable from a session name — so moving a DETACHED claude
+      // or preset pane used to write it back as a shell, and the next restore
+      // opened it as one. `restore.ts` already restores `type: row.type` from
+      // the saved row for exactly this reason.
+      const type = overrides?.type ?? pane.type
       // Already there: nothing was renamed, and nothing worth tearing a
       // working client down for.
       if (to === pane.tmuxSession) {
-        moved.push({ ...pane, cwd, command })
+        moved.push({ ...pane, cwd, command, type })
         continue
       }
 
@@ -1104,7 +1112,7 @@ export class SessionManager {
           cwd,
           command,
           tmuxSession: to,
-          type: pane.type,
+          type,
           ...size,
         }),
       )

@@ -400,8 +400,11 @@ export function registerIpc(
       // row would drop the truth for a pane whose row is on disk but whose tab
       // row — layout only, and dropped by `read()` whenever it stops
       // describing panes that exist — is not.
-      const known = new Map<string, Pick<PaneRecord, 'cwd' | 'command'>>(
-        config.panes.map((row) => [row.id, { cwd: row.cwd, command: row.command }]),
+      const known = new Map<string, Pick<PaneRecord, 'cwd' | 'command' | 'type'>>(
+        config.panes.map((row) => [
+          row.id,
+          { cwd: row.cwd, command: row.command, type: row.type },
+        ]),
       )
       const moved = await manager.moveTabToProject(tabId, target.slug, known)
 
