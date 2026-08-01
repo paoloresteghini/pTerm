@@ -1,17 +1,29 @@
-import { UNSORTED_ID, type ProjectDescriptor, type TabDescriptor } from '../shared/ipc'
+import {
+  UNSORTED_ID,
+  type ProjectDescriptor,
+  type TabDescriptor,
+  type TabRow,
+  type TabShape,
+} from '../shared/ipc'
 import { worst, type TabState } from '../shared/status'
 
 export interface WorkspaceState {
   /** Sidebar order. Unsorted, when present, is last. */
   projects: ProjectDescriptor[]
-  /** Every tab across every project. The tab bar filters this. */
-  tabs: TabDescriptor[]
+  /** Every pane, flat. Which tab holds one is `tabs[].layout.kids`. */
+  panes: TabDescriptor[]
+  /**
+   * Order, selection and layout — never existence. Main is authoritative: a
+   * pane naming no row here is recorded in `panes` and left there rather than
+   * invented into one.
+   */
+  tabs: TabRow[]
   activeProjectId: string | null
   /** What each tab is doing. A tab absent from this draws no dot. */
   status: Record<string, TabState>
   /**
-   * Tabs whose tmux session has died, by exit code, kept in the bar until the
-   * user restarts or dismisses them.
+   * Panes whose tmux session has died, by exit code, kept in the bar until
+   * the user restarts or dismisses them.
    *
    * Renderer-side only: main forgot the row when the session died and config
    * is written from live state, so none of this reaches disk and a relaunch
@@ -25,10 +37,11 @@ export type WorkspaceAction =
   | {
       type: 'restored'
       projects: ProjectDescriptor[]
-      tabs: TabDescriptor[]
+      panes: TabDescriptor[]
+      tabs: TabRow[]
       activeProjectId: string | null
       /**
-       * Optional so a test that only cares about `projects`/`tabs` need not
+       * Optional so a test that only cares about `projects`/`panes` need not
        * supply it — it defaults to `{}`, same as before this field existed.
        * Production code always has one: it comes from the same `restore()`
        * response as everything else here, rather than a second, separately
@@ -46,9 +59,19 @@ export type WorkspaceAction =
   | { type: 'statusChanged'; tabId: string; state: TabState | null }
   | { type: 'died'; id: string; code: number }
   | { type: 'dismissed'; id: string }
+  /** What `splitPane` resolved to: the new pane, and the tab's replacement row. */
+  | { type: 'split'; shape: TabShape }
+  /**
+   * What `closePane` resolved to. `paneId` is what was asked to close — the
+   * one piece `shape` cannot carry, since a tab's last pane closing leaves
+   * `shape` with nothing in it to identify which pane that was.
+   */
+  | { type: 'closedPane'; paneId: string; shape: TabShape }
+  | { type: 'activatedPane'; tabId: string; paneId: string }
 
 export const INITIAL_WORKSPACE_STATE: WorkspaceState = {
   projects: [],
+  panes: [],
   tabs: [],
   activeProjectId: null,
   status: {},
@@ -77,7 +100,7 @@ export function projectIdForTab(projects: ProjectDescriptor[], tab: TabDescripto
 }
 
 export function tabsOfProject(state: WorkspaceState, projectId: string): TabDescriptor[] {
-  return state.tabs.filter((tab) => projectIdForTab(state.projects, tab) === projectId)
+  return state.panes.filter((tab) => projectIdForTab(state.projects, tab) === projectId)
 }
 
 export function activeProject(state: WorkspaceState): ProjectDescriptor | undefined {
@@ -110,7 +133,7 @@ export function stateOfProject(state: WorkspaceState, projectId: string): TabSta
  * everything, which is the sidebar you already have.
  */
 export function needsYou(state: WorkspaceState): TabDescriptor[] {
-  const ranked = state.tabs.filter((tab) => {
+  const ranked = state.panes.filter((tab) => {
     const status = state.status[tab.id]
     return status === 'waiting' || status === 'crashed'
   })
@@ -118,6 +141,50 @@ export function needsYou(state: WorkspaceState): TabDescriptor[] {
     const order = (tab: TabDescriptor): number => (state.status[tab.id] === 'crashed' ? 0 : 1)
     return order(left) - order(right)
   })
+}
+
+/**
+ * A tab's panes, in `layout.kids` order. A tab id naming no row is an empty
+ * list, not an error — the rest of the plan calls this from outside a React
+ * render, where "nothing to show" has to be a value, not a throw.
+ */
+export function panesOfTab(state: WorkspaceState, tabId: string): TabDescriptor[] {
+  const row = state.tabs.find((candidate) => candidate.id === tabId)
+  if (!row) return []
+  const byId = new Map(state.panes.map((pane) => [pane.id, pane]))
+  return row.layout.kids
+    .map((id) => byId.get(id))
+    .filter((pane): pane is TabDescriptor => pane !== undefined)
+}
+
+/**
+ * The row whose `layout.kids` names this pane, or undefined when none does —
+ * true of any pane main has not yet filed under a tab. Total, like
+ * `panesOfTab`, for the same reason.
+ */
+export function tabOfPane(state: WorkspaceState, paneId: string): TabRow | undefined {
+  return state.tabs.find((row) => row.layout.kids.includes(paneId))
+}
+
+/**
+ * Folds a `TabShape` reply into state: every pane it names is upserted into
+ * `state.panes` in place, with any pane not already present appended, and its
+ * one row — when it has one — replaces the matching entry in `state.tabs` or
+ * is appended if this tab had none yet. Shared by `split`, which always gets
+ * a row back, and the surviving-panes half of `closedPane`.
+ */
+function applyTabShape(state: WorkspaceState, shape: TabShape): WorkspaceState {
+  const panes = [
+    ...state.panes.map((pane) => shape.panes.find((incoming) => incoming.id === pane.id) ?? pane),
+    ...shape.panes.filter((incoming) => !state.panes.some((pane) => pane.id === incoming.id)),
+  ]
+  const row = shape.tabs[0]
+  const tabs = row
+    ? state.tabs.some((candidate) => candidate.id === row.id)
+      ? state.tabs.map((candidate) => (candidate.id === row.id ? row : candidate))
+      : [...state.tabs, row]
+    : state.tabs
+  return { ...state, panes, tabs }
 }
 
 function setActiveTab(
@@ -139,7 +206,7 @@ function setActiveTab(
  * written once.
  */
 function removeTab(state: WorkspaceState, id: string): WorkspaceState {
-  const tab = state.tabs.find((candidate) => candidate.id === id)
+  const tab = state.panes.find((candidate) => candidate.id === id)
   if (!tab) return state
   const owner = projectIdForTab(state.projects, tab)
   // Only the owning project's selection moves; every other project keeps
@@ -149,7 +216,7 @@ function removeTab(state: WorkspaceState, id: string): WorkspaceState {
   const nextActive =
     project?.activeTabId === id ? neighbourOf(siblings, id) : (project?.activeTabId ?? null)
   return setActiveTab(
-    { ...state, tabs: state.tabs.filter((candidate) => candidate.id !== id) },
+    { ...state, panes: state.panes.filter((candidate) => candidate.id !== id) },
     owner,
     nextActive,
   )
@@ -163,6 +230,7 @@ export function workspaceReducer(
     case 'restored':
       return {
         projects: action.projects,
+        panes: action.panes,
         tabs: action.tabs,
         activeProjectId: action.activeProjectId,
         status: action.status ?? {},
@@ -181,16 +249,16 @@ export function workspaceReducer(
 
     case 'opened': {
       const { [action.tab.id]: _revived, ...dead } = state.dead
-      const existing = state.tabs.some((tab) => tab.id === action.tab.id)
+      const existing = state.panes.some((tab) => tab.id === action.tab.id)
       const owner = projectIdForTab(state.projects, action.tab)
       return setActiveTab(
         {
           ...state,
           // Replaced in place on a restart, appended on a genuine open. A
           // plain append would leave two rows for one session.
-          tabs: existing
-            ? state.tabs.map((tab) => (tab.id === action.tab.id ? action.tab : tab))
-            : [...state.tabs, action.tab],
+          panes: existing
+            ? state.panes.map((tab) => (tab.id === action.tab.id ? action.tab : tab))
+            : [...state.panes, action.tab],
           dead,
         },
         owner,
@@ -199,7 +267,7 @@ export function workspaceReducer(
     }
 
     case 'activatedTab': {
-      const tab = state.tabs.find((candidate) => candidate.id === action.id)
+      const tab = state.panes.find((candidate) => candidate.id === action.id)
       if (!tab) return state
       return setActiveTab(state, projectIdForTab(state.projects, tab), action.id)
     }
@@ -224,10 +292,10 @@ export function workspaceReducer(
         // Replaced in place: each pane keeps its position, and only its slug —
         // and therefore which project owns it — has changed. Keyed by pane id,
         // so every pane the reply names is replaced rather than only the one
-        // whose id is also the tab's. `state.tabs` is still one entry per pane
-        // until 2b gives a tab a pane list of its own, and this is where that
-        // change lands when it does.
-        tabs: state.tabs.map((tab) => moved.get(tab.id) ?? tab),
+        // whose id is also its tab's founder. A move renames sessions, not tab
+        // membership, so `state.tabs` — one row per group, in `layout.kids` —
+        // is untouched here.
+        panes: state.panes.map((pane) => moved.get(pane.id) ?? pane),
         // Filing the last stray leaves nothing for Unsorted to hold, so the
         // reply drops it and the selection would dangle — the same hazard the
         // `projects` case guards. Follow the tab, so the window ends up showing
@@ -268,6 +336,37 @@ export function workspaceReducer(
       // Same selection move a close makes, so dismissing the tab you are
       // looking at does not leave the pane showing nothing.
       return { ...removeTab(state, action.id), dead }
+    }
+
+    case 'split':
+      return applyTabShape(state, action.shape)
+
+    case 'closedPane': {
+      // The row from before the close, found by its old `kids` — `shape`
+      // alone cannot tell us which pane just left, since closing a tab's last
+      // pane hands back an empty `panes` and an empty `tabs` with nothing in
+      // either to name it.
+      const priorRow = state.tabs.find((row) => row.layout.kids.includes(action.paneId))
+      const panes = state.panes.filter((pane) => pane.id !== action.paneId)
+      const nextRow = action.shape.tabs[0]
+      const tabs = priorRow
+        ? nextRow
+          ? // Row ids are frozen to the founder pane, so `nextRow.id` is always
+            // `priorRow.id` here — never a rename to chase.
+            state.tabs.map((row) => (row.id === priorRow.id ? nextRow : row))
+          : state.tabs.filter((row) => row.id !== priorRow.id)
+        : state.tabs
+      return { ...state, panes, tabs }
+    }
+
+    case 'activatedPane': {
+      if (!state.tabs.some((row) => row.id === action.tabId)) return state
+      return {
+        ...state,
+        tabs: state.tabs.map((row) =>
+          row.id === action.tabId ? { ...row, activePaneId: action.paneId } : row,
+        ),
+      }
     }
   }
 }

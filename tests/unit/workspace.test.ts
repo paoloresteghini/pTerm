@@ -10,9 +10,16 @@ import {
   stateOfTab,
   stateOfProject,
   needsYou,
+  panesOfTab,
+  tabOfPane,
   type WorkspaceState,
 } from '../../src/renderer/workspace'
-import { UNSORTED_ID, type ProjectDescriptor, type TabDescriptor } from '../../src/shared/ipc'
+import {
+  UNSORTED_ID,
+  type ProjectDescriptor,
+  type TabDescriptor,
+  type TabRow,
+} from '../../src/shared/ipc'
 
 function tab(id: string, projectSlug = 'lumio'): TabDescriptor {
   return {
@@ -36,9 +43,19 @@ function project(id: string, slug: string, activeTabId: string | null = null): P
   }
 }
 
+/** A tab row over `kids`, evenly split, with the founder active by default. */
+function tabRow(id: string, kids: string[], activePaneId: string | null = kids[0] ?? null): TabRow {
+  return {
+    id,
+    activePaneId,
+    layout: { dir: 'row', ratio: kids.map(() => 1 / kids.length), kids },
+  }
+}
+
 const three: WorkspaceState = {
   projects: [project('p1', 'lumio', 'bbb')],
-  tabs: [tab('aaa'), tab('bbb'), tab('ccc')],
+  panes: [tab('aaa'), tab('bbb'), tab('ccc')],
+  tabs: [],
   activeProjectId: 'p1',
   status: {},
   dead: {},
@@ -46,11 +63,11 @@ const three: WorkspaceState = {
 
 describe('neighbourOf', () => {
   it('prefers the tab to the right', () => {
-    expect(neighbourOf(three.tabs, 'aaa')).toBe('bbb')
+    expect(neighbourOf(three.panes, 'aaa')).toBe('bbb')
   })
 
   it('falls back to the left for the last tab', () => {
-    expect(neighbourOf(three.tabs, 'ccc')).toBe('bbb')
+    expect(neighbourOf(three.panes, 'ccc')).toBe('bbb')
   })
 
   it('returns null when it was the only tab', () => {
@@ -58,7 +75,7 @@ describe('neighbourOf', () => {
   })
 
   it('returns null for an unknown id', () => {
-    expect(neighbourOf(three.tabs, 'zzz')).toBeNull()
+    expect(neighbourOf(three.panes, 'zzz')).toBeNull()
   })
 })
 
@@ -76,7 +93,8 @@ describe('tabsOfProject', () => {
   it('returns only that project\'s tabs', () => {
     const state: WorkspaceState = {
       projects: [project('p1', 'lumio'), project('p2', 'gco')],
-      tabs: [tab('aaa', 'lumio'), tab('bbb', 'gco'), tab('ccc', 'lumio')],
+      panes: [tab('aaa', 'lumio'), tab('bbb', 'gco'), tab('ccc', 'lumio')],
+      tabs: [],
       activeProjectId: 'p1',
       status: {},
       dead: {},
@@ -87,7 +105,8 @@ describe('tabsOfProject', () => {
   it('collects every unmatched tab under Unsorted', () => {
     const state: WorkspaceState = {
       projects: [project('p1', 'lumio')],
-      tabs: [tab('aaa', 'lumio'), tab('bbb', 'scratch'), tab('ccc', 'old')],
+      panes: [tab('aaa', 'lumio'), tab('bbb', 'scratch'), tab('ccc', 'old')],
+      tabs: [],
       activeProjectId: 'p1',
       status: {},
       dead: {},
@@ -107,10 +126,47 @@ describe('activeProject and activeTabId', () => {
   })
 })
 
+describe('panesOfTab', () => {
+  it('returns a tab\'s panes in kids order', () => {
+    const state: WorkspaceState = {
+      ...three,
+      tabs: [tabRow('aaa', ['aaa', 'ccc'])],
+    }
+    expect(panesOfTab(state, 'aaa').map((p) => p.id)).toEqual(['aaa', 'ccc'])
+  })
+
+  it('is empty for a tab id naming no row, rather than throwing', () => {
+    expect(panesOfTab(three, 'nope')).toEqual([])
+  })
+
+  it('skips a kid whose pane is not in state.panes, rather than throwing', () => {
+    const state: WorkspaceState = {
+      ...three,
+      tabs: [tabRow('aaa', ['aaa', 'ghost'])],
+    }
+    expect(panesOfTab(state, 'aaa').map((p) => p.id)).toEqual(['aaa'])
+  })
+})
+
+describe('tabOfPane', () => {
+  it('finds the row naming a pane in its kids', () => {
+    const state: WorkspaceState = {
+      ...three,
+      tabs: [tabRow('aaa', ['aaa', 'ccc'])],
+    }
+    expect(tabOfPane(state, 'ccc')?.id).toBe('aaa')
+  })
+
+  it('is undefined for a pane in no tab\'s kids, rather than throwing', () => {
+    expect(tabOfPane(three, 'aaa')).toBeUndefined()
+  })
+})
+
 describe('workspaceReducer', () => {
   it('starts empty', () => {
     expect(INITIAL_WORKSPACE_STATE).toEqual({
       projects: [],
+      panes: [],
       tabs: [],
       activeProjectId: null,
       status: {},
@@ -122,11 +178,29 @@ describe('workspaceReducer', () => {
     const next = workspaceReducer(three, {
       type: 'restored',
       projects: [project('p9', 'gco', 'zzz')],
-      tabs: [tab('zzz', 'gco')],
+      panes: [tab('zzz', 'gco')],
+      tabs: [],
       activeProjectId: 'p9',
     })
-    expect(next.tabs.map((t) => t.id)).toEqual(['zzz'])
+    expect(next.panes.map((t) => t.id)).toEqual(['zzz'])
     expect(next.activeProjectId).toBe('p9')
+  })
+
+  // A payload naming a pane in no tab's kids is not invented into one — the
+  // renderer trusts main. `restored` is where that first matters: a genuine
+  // reply can carry a pane with no row (a one-pane tab opened this run has
+  // none on disk), and the reducer must not fabricate one for it.
+  it('does not invent a tab row for a pane no row claims', () => {
+    const next = workspaceReducer(three, {
+      type: 'restored',
+      projects: [project('p9', 'gco', 'zzz')],
+      panes: [tab('zzz', 'gco'), tab('yyy', 'gco')],
+      tabs: [tabRow('zzz', ['zzz'])],
+      activeProjectId: 'p9',
+    })
+    expect(next.panes.map((t) => t.id)).toEqual(['zzz', 'yyy'])
+    expect(next.tabs.map((t) => t.id)).toEqual(['zzz'])
+    expect(tabOfPane(next, 'yyy')).toBeUndefined()
   })
 
   // I6: `status` used to come from a second, separately raced `status()`
@@ -137,7 +211,8 @@ describe('workspaceReducer', () => {
     const next = workspaceReducer(three, {
       type: 'restored',
       projects: [project('p9', 'gco', 'zzz')],
-      tabs: [tab('zzz', 'gco')],
+      panes: [tab('zzz', 'gco')],
+      tabs: [],
       activeProjectId: 'p9',
       status: { zzz: 'waiting' },
     })
@@ -146,13 +221,13 @@ describe('workspaceReducer', () => {
 
   it('appends an opened tab and makes it its project\'s active one', () => {
     const next = workspaceReducer(three, { type: 'opened', tab: tab('ddd') })
-    expect(next.tabs.map((t) => t.id)).toEqual(['aaa', 'bbb', 'ccc', 'ddd'])
+    expect(next.panes.map((t) => t.id)).toEqual(['aaa', 'bbb', 'ccc', 'ddd'])
     expect(activeTabId(next)).toBe('ddd')
   })
 
   it('ignores an opened tab that is already present', () => {
     const next = workspaceReducer(three, { type: 'opened', tab: tab('bbb') })
-    expect(next.tabs.map((t) => t.id)).toEqual(['aaa', 'bbb', 'ccc'])
+    expect(next.panes.map((t) => t.id)).toEqual(['aaa', 'bbb', 'ccc'])
   })
 
   it('activates a tab', () => {
@@ -165,7 +240,7 @@ describe('workspaceReducer', () => {
 
   it('removes a tab and moves the active one to its neighbour', () => {
     const next = workspaceReducer(three, { type: 'removed', id: 'bbb' })
-    expect(next.tabs.map((t) => t.id)).toEqual(['aaa', 'ccc'])
+    expect(next.panes.map((t) => t.id)).toEqual(['aaa', 'ccc'])
     expect(activeTabId(next)).toBe('ccc')
   })
 
@@ -176,13 +251,14 @@ describe('workspaceReducer', () => {
   it('goes back to nothing active when a project\'s last tab is removed', () => {
     const one: WorkspaceState = {
       projects: [project('p1', 'lumio', 'aaa')],
-      tabs: [tab('aaa')],
+      panes: [tab('aaa')],
+      tabs: [],
       activeProjectId: 'p1',
       status: {},
       dead: {},
     }
     const next = workspaceReducer(one, { type: 'removed', id: 'aaa' })
-    expect(next.tabs).toEqual([])
+    expect(next.panes).toEqual([])
     expect(activeTabId(next)).toBeNull()
   })
 
@@ -192,8 +268,8 @@ describe('workspaceReducer', () => {
 
   // I7: a kill drops the tab via `removed`, and the reducer already cleared
   // `status` for it — but left `dead` holding a tombstone for a tab no
-  // longer in `state.tabs` at all, accumulating one stale entry per close for
-  // the life of the window.
+  // longer in `state.panes` at all, accumulating one stale entry per close
+  // for the life of the window.
   it('drops the tombstone too when a dead tab is removed outright', () => {
     const died = workspaceReducer(three, { type: 'died', id: 'aaa', code: 1 })
     const next = workspaceReducer(died, { type: 'removed', id: 'aaa' })
@@ -204,7 +280,8 @@ describe('workspaceReducer', () => {
   it('only touches the owning project\'s active tab', () => {
     const state: WorkspaceState = {
       projects: [project('p1', 'lumio', 'aaa'), project('p2', 'gco', 'bbb')],
-      tabs: [tab('aaa', 'lumio'), tab('bbb', 'gco')],
+      panes: [tab('aaa', 'lumio'), tab('bbb', 'gco')],
+      tabs: [],
       activeProjectId: 'p2',
       status: {},
       dead: {},
@@ -231,7 +308,7 @@ describe('workspaceReducer', () => {
 
   it('replaces the project list without disturbing tabs', () => {
     const next = workspaceReducer(three, { type: 'projects', projects: [project('p1', 'lumio')] })
-    expect(next.tabs).toEqual(three.tabs)
+    expect(next.panes).toEqual(three.panes)
   })
 
   it('drops the selection when the selected project disappears', () => {
@@ -242,7 +319,8 @@ describe('workspaceReducer', () => {
   it('re-slugs a moved tab in place, keeping its position', () => {
     const state: WorkspaceState = {
       projects: [project('p1', 'lumio')],
-      tabs: [tab('aaa', 'scratch'), tab('bbb', 'scratch')],
+      panes: [tab('aaa', 'scratch'), tab('bbb', 'scratch')],
+      tabs: [],
       activeProjectId: 'p1',
       status: {},
       dead: {},
@@ -252,7 +330,7 @@ describe('workspaceReducer', () => {
       panes: [tab('aaa', 'lumio')],
       projects: state.projects,
     })
-    expect(next.tabs.map((t) => t.projectSlug)).toEqual(['lumio', 'scratch'])
+    expect(next.panes.map((t) => t.projectSlug)).toEqual(['lumio', 'scratch'])
   })
 
   // The reply names every pane that moved, because a split tab has one session
@@ -261,7 +339,8 @@ describe('workspaceReducer', () => {
   it('re-slugs every pane the reply names', () => {
     const state: WorkspaceState = {
       projects: [project('p1', 'lumio')],
-      tabs: [tab('aaa', 'scratch'), tab('bbb', 'scratch'), tab('ccc', 'scratch')],
+      panes: [tab('aaa', 'scratch'), tab('bbb', 'scratch'), tab('ccc', 'scratch')],
+      tabs: [],
       activeProjectId: 'p1',
       status: {},
       dead: {},
@@ -271,7 +350,7 @@ describe('workspaceReducer', () => {
       panes: [tab('aaa', 'lumio'), tab('bbb', 'lumio')],
       projects: state.projects,
     })
-    expect(next.tabs.map((t) => t.projectSlug)).toEqual(['lumio', 'lumio', 'scratch'])
+    expect(next.panes.map((t) => t.projectSlug)).toEqual(['lumio', 'lumio', 'scratch'])
   })
 
   // Filing the last stray empties Unsorted, so the reply omits it — and the
@@ -280,7 +359,8 @@ describe('workspaceReducer', () => {
   it('follows the tab when the move empties the project it was selected in', () => {
     const state: WorkspaceState = {
       projects: [project('p1', 'lumio'), project(UNSORTED_ID, UNSORTED_ID, 'aaa')],
-      tabs: [tab('aaa', 'scratch')],
+      panes: [tab('aaa', 'scratch')],
+      tabs: [],
       activeProjectId: UNSORTED_ID,
       status: {},
       dead: {},
@@ -297,7 +377,8 @@ describe('workspaceReducer', () => {
   it('keeps the selection when the selected project is still in the reply', () => {
     const state: WorkspaceState = {
       projects: [project('p1', 'lumio'), project('p2', 'gco'), project(UNSORTED_ID, UNSORTED_ID)],
-      tabs: [tab('aaa', 'scratch'), tab('bbb', 'scratch')],
+      panes: [tab('aaa', 'scratch'), tab('bbb', 'scratch')],
+      tabs: [],
       activeProjectId: 'p2',
       status: {},
       dead: {},
@@ -398,7 +479,7 @@ describe('workspaceReducer', () => {
 
     // The behaviour this milestone changes: a crashed `npm run dev` used to
     // vanish and tell you nothing, which made `crashed` unrenderable.
-    expect(next.tabs.some((tab) => tab.id === 'aaa')).toBe(true)
+    expect(next.panes.some((tab) => tab.id === 'aaa')).toBe(true)
     expect(next.dead['aaa']).toBe(1)
   })
 
@@ -414,7 +495,7 @@ describe('workspaceReducer', () => {
 
     const next = workspaceReducer(died, { type: 'dismissed', id: 'aaa' })
 
-    expect(next.tabs.some((tab) => tab.id === 'aaa')).toBe(false)
+    expect(next.panes.some((tab) => tab.id === 'aaa')).toBe(false)
     expect(next.dead['aaa']).toBeUndefined()
   })
 
@@ -429,7 +510,7 @@ describe('workspaceReducer', () => {
 
   it('clears the tombstone when a dead tab is restarted', () => {
     const died = workspaceReducer(three, { type: 'died', id: 'aaa', code: 1 })
-    const tab = died.tabs.find((candidate) => candidate.id === 'aaa')
+    const tab = died.panes.find((candidate) => candidate.id === 'aaa')
     if (!tab) throw new Error('fixture lost the tab')
 
     const next = workspaceReducer(died, { type: 'opened', tab })
@@ -437,7 +518,7 @@ describe('workspaceReducer', () => {
     // Restart reuses the id. A tombstone left behind would keep offering
     // Restart on a session that is already running.
     expect(next.dead['aaa']).toBeUndefined()
-    expect(next.tabs.filter((candidate) => candidate.id === 'aaa')).toHaveLength(1)
+    expect(next.panes.filter((candidate) => candidate.id === 'aaa')).toHaveLength(1)
   })
 
   it('drops the status of a tab that is closed outright', () => {
@@ -456,11 +537,119 @@ describe('workspaceReducer', () => {
     const next = workspaceReducer(seeded, {
       type: 'restored',
       projects: seeded.projects,
+      panes: seeded.panes,
       tabs: seeded.tabs,
       activeProjectId: seeded.activeProjectId,
     })
 
     expect(next.status).toEqual({})
     expect(next.dead).toEqual({})
+  })
+
+  describe('split', () => {
+    it('inserts the new pane and replaces the tab row', () => {
+      // aaa starts as a one-pane tab with no row of its own — exactly what a
+      // tab opened this run looks like before it is ever split.
+      const next = workspaceReducer(three, {
+        type: 'split',
+        shape: {
+          panes: [tab('aaa'), tab('new')],
+          tabs: [tabRow('aaa', ['aaa', 'new'])],
+        },
+      })
+      expect(next.panes.map((p) => p.id)).toEqual(['aaa', 'bbb', 'ccc', 'new'])
+      expect(next.tabs.map((t) => t.id)).toEqual(['aaa'])
+      expect(panesOfTab(next, 'aaa').map((p) => p.id)).toEqual(['aaa', 'new'])
+    })
+
+    it('replaces an existing row in place rather than appending a second one', () => {
+      const state: WorkspaceState = {
+        ...three,
+        tabs: [tabRow('aaa', ['aaa', 'bbb'])],
+      }
+      const next = workspaceReducer(state, {
+        type: 'split',
+        shape: {
+          panes: [tab('aaa'), tab('bbb'), tab('new')],
+          tabs: [tabRow('aaa', ['aaa', 'bbb', 'new'])],
+        },
+      })
+      expect(next.tabs).toHaveLength(1)
+      expect(panesOfTab(next, 'aaa').map((p) => p.id)).toEqual(['aaa', 'bbb', 'new'])
+    })
+  })
+
+  describe('closedPane', () => {
+    it('removes the pane and updates the row when siblings remain', () => {
+      const state: WorkspaceState = {
+        ...three,
+        tabs: [tabRow('aaa', ['aaa', 'bbb'])],
+      }
+      const next = workspaceReducer(state, {
+        type: 'closedPane',
+        paneId: 'bbb',
+        shape: {
+          panes: [tab('aaa')],
+          tabs: [tabRow('aaa', ['aaa'])],
+        },
+      })
+      expect(next.panes.map((p) => p.id)).toEqual(['aaa', 'ccc'])
+      expect(panesOfTab(next, 'aaa').map((p) => p.id)).toEqual(['aaa'])
+    })
+
+    it('drops the row too when the closed pane was the tab\'s last one', () => {
+      const state: WorkspaceState = {
+        ...three,
+        tabs: [tabRow('aaa', ['aaa'])],
+      }
+      const next = workspaceReducer(state, {
+        type: 'closedPane',
+        paneId: 'aaa',
+        shape: { panes: [], tabs: [] },
+      })
+      expect(next.panes.map((p) => p.id)).toEqual(['bbb', 'ccc'])
+      expect(next.tabs).toEqual([])
+      expect(tabOfPane(next, 'aaa')).toBeUndefined()
+    })
+
+    it('leaves state untouched for a pane that had no row to begin with', () => {
+      // aaa is a one-pane tab with no row on disk — closing it removes the
+      // pane but there is no row to drop.
+      const next = workspaceReducer(three, {
+        type: 'closedPane',
+        paneId: 'aaa',
+        shape: { panes: [], tabs: [] },
+      })
+      expect(next.panes.map((p) => p.id)).toEqual(['bbb', 'ccc'])
+      expect(next.tabs).toEqual([])
+    })
+  })
+
+  describe('activatedPane', () => {
+    it('sets the tab\'s activePaneId', () => {
+      const state: WorkspaceState = {
+        ...three,
+        tabs: [tabRow('aaa', ['aaa', 'bbb'], 'aaa')],
+      }
+      const next = workspaceReducer(state, {
+        type: 'activatedPane',
+        tabId: 'aaa',
+        paneId: 'bbb',
+      })
+      expect(next.tabs.find((t) => t.id === 'aaa')?.activePaneId).toBe('bbb')
+    })
+
+    it('ignores activation naming an unknown tab', () => {
+      const state: WorkspaceState = {
+        ...three,
+        tabs: [tabRow('aaa', ['aaa', 'bbb'], 'aaa')],
+      }
+      const next = workspaceReducer(state, {
+        type: 'activatedPane',
+        tabId: 'nope',
+        paneId: 'bbb',
+      })
+      expect(next).toEqual(state)
+    })
   })
 })

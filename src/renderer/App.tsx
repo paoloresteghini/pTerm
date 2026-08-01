@@ -86,16 +86,10 @@ export function App() {
       // `status` to `{}` — so the direction that lost blanked the board at
       // every launch with real sessions running. One response has nothing
       // left to race against.
-      //
-      // `panes` only, for now: the reply also carries `tabs` — layout, one
-      // row per group — but nothing downstream reads it until a later
-      // milestone task turns it into a real split.
-      const [{ projects, panes, activeProjectId, status }, notificationConfig] = await Promise.all([
-        window.prcli.restore(),
-        window.prcli.notifications(),
-      ])
+      const [{ projects, panes, tabs, activeProjectId, status }, notificationConfig] =
+        await Promise.all([window.prcli.restore(), window.prcli.notifications()])
       if (cancelled) return
-      dispatch({ type: 'restored', projects, tabs: panes, activeProjectId, status })
+      dispatch({ type: 'restored', projects, panes, tabs, activeProjectId, status })
       setNotifications(notificationConfig)
       setReady(true)
     })().catch((reason: unknown) => {
@@ -156,7 +150,7 @@ export function App() {
   )
 
   // A clicked toast asking for a tab that may belong to a project other than
-  // the one on screen. Depends on `state.tabs`/`state.projects` rather than
+  // the one on screen. Depends on `state.panes`/`state.projects` rather than
   // `[]` so the closure always has the current lookup tables instead of the
   // ones from first mount — the resubscribe this costs is a synchronous
   // `removeListener`/`on` pair on every workspace change, cheap next to a
@@ -164,12 +158,12 @@ export function App() {
   useEffect(
     () =>
       window.prcli.onFocusTab((tabId) => {
-        const tab = state.tabs.find((candidate) => candidate.id === tabId)
+        const tab = state.panes.find((candidate) => candidate.id === tabId)
         if (!tab) return
         dispatch({ type: 'activatedProject', id: projectIdForTab(state.projects, tab) })
         dispatch({ type: 'activatedTab', id: tabId })
       }),
-    [state.tabs, state.projects],
+    [state.panes, state.projects],
   )
 
   const restartTab = useCallback(
@@ -383,7 +377,7 @@ export function App() {
           ) : null}
           {/* Every terminal stays mounted, across every project. Unmounting
               would dispose its xterm and lose scrollback on each switch. */}
-          {state.tabs.map((tab) => {
+          {state.panes.map((tab) => {
             const visible = tab.id === currentTabId
             return (
               <div
