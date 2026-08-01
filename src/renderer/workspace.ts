@@ -170,8 +170,15 @@ export function tabOfPane(state: WorkspaceState, paneId: string): TabRow | undef
  * Folds a `TabShape` reply into state: every pane it names is upserted into
  * `state.panes` in place, with any pane not already present appended, and its
  * one row — when it has one — replaces the matching entry in `state.tabs` or
- * is appended if this tab had none yet. Shared by `split`, which always gets
- * a row back, and the surviving-panes half of `closedPane`.
+ * is appended if this tab had none yet.
+ *
+ * Only `split` uses this. `closedPane` looked like a second caller at first —
+ * it also gets a `TabShape` back — but it needs to *remove* a pane by an id
+ * `shape` may not even carry (a last-pane close hands back an empty shape
+ * with nothing to name what just left) and to drop a row outright rather than
+ * only ever replace or insert one. Bending this helper to also subtract would
+ * make it answer two different questions through one signature; `closedPane`
+ * stays its own short, honest block below instead.
  */
 function applyTabShape(state: WorkspaceState, shape: TabShape): WorkspaceState {
   const panes = [

@@ -146,6 +146,10 @@ describe('panesOfTab', () => {
     }
     expect(panesOfTab(state, 'aaa').map((p) => p.id)).toEqual(['aaa'])
   })
+
+  it('is empty against a fully empty WorkspaceState', () => {
+    expect(panesOfTab(INITIAL_WORKSPACE_STATE, 'aaa')).toEqual([])
+  })
 })
 
 describe('tabOfPane', () => {
@@ -159,6 +163,10 @@ describe('tabOfPane', () => {
 
   it('is undefined for a pane in no tab\'s kids, rather than throwing', () => {
     expect(tabOfPane(three, 'aaa')).toBeUndefined()
+  })
+
+  it('is undefined against a fully empty WorkspaceState', () => {
+    expect(tabOfPane(INITIAL_WORKSPACE_STATE, 'aaa')).toBeUndefined()
   })
 })
 
@@ -595,6 +603,12 @@ describe('workspaceReducer', () => {
       })
       expect(next.panes.map((p) => p.id)).toEqual(['aaa', 'ccc'])
       expect(panesOfTab(next, 'aaa').map((p) => p.id)).toEqual(['aaa'])
+      // Direct on the row's own kids, not just panesOfTab's filtered view of
+      // it — panesOfTab quietly drops a kid whose pane is gone from
+      // state.panes, so it reads right even if the row itself were never
+      // updated. This is the assertion that actually depends on the row
+      // having been replaced.
+      expect(next.tabs.find((t) => t.id === 'aaa')?.layout.kids).toEqual(['aaa'])
     })
 
     it('drops the row too when the closed pane was the tab\'s last one', () => {
