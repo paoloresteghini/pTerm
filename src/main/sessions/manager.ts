@@ -63,12 +63,18 @@ interface Entry {
    *
    * Written once, at creation, and there is no setter — which is an obligation
    * on anything added later, not a property of the field. Every producer today
-   * creates the entry at the moment the pane joins its tab, so the two cannot
-   * disagree: `splitTab` makes a new entry for the new member, and
-   * `moveTabToProject` disposes each entry and makes another, carrying this
-   * value across. **An operation that moves a pane between tabs without
-   * recreating its entry — an unsplit, a drag of a pane into another tab —
-   * must write this field too.** Leaving it is invisible: nothing reads it
+   * sets it from the tab the pane is in **at the moment the entry is made**,
+   * which is why the two cannot disagree, and each gets there differently:
+   * `CHANNELS.open` founds a tab, so the pane's own id is the answer;
+   * `splitTab` reads the group it is about to join the new member to;
+   * `restoreWorkspace` reads live tmux (`restore.ts:261-267`) — usually a run
+   * later than the pane joined that tab, so the entry is new and the
+   * membership is not; and `moveTabToProject` does not change tab membership
+   * at all — it carries the old entry's value onto the one it makes, or, for a
+   * pane already under the target name, makes no new entry (`continue`) and
+   * leaves the old one standing. **An operation that moves a pane between
+   * tabs without recreating its entry — an unsplit, a drag of a pane into
+   * another tab — must write this field too.** Leaving it is invisible: nothing reads it
    * while the pane lives, so the tab bar, the layout and tmux all stay
    * correct, and the stale value first has an effect when that pane dies and
    * is restarted, at which point it silently rejoins the tab it used to be in.
