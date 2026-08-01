@@ -71,6 +71,12 @@ async function windowIdOf(name: string): Promise<string> {
   return stdout.trim()
 }
 
+/** The hooks installed on a window, as `show-hooks -w` prints them. */
+async function hooksOf(windowId: string): Promise<string> {
+  const { stdout } = await run('tmux', ['-L', SOCKET, 'show-hooks', '-w', '-t', windowId])
+  return stdout
+}
+
 /** The window ids a tab's group holds, seen through one of its members. */
 async function windowsIn(name: string): Promise<string[]> {
   const { stdout } = await run('tmux', [
@@ -707,6 +713,42 @@ describe('SessionManager.moveTabToProject', () => {
     manager.detachAll()
   })
 
+  // The rollback's own defect, mirrored: a pane renamed back to its old name
+  // while its hook still names the one it was briefly renamed to is exactly
+  // the same staleness this task closes, just reached from the undo side
+  // instead of the forward one.
+  it('restores a rolled-back pane\'s hook to its original name too, not only the session', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const manager = new SessionManager(adapter, {
+      deathReporter: join(tmpdir(), 'prcli-hook-test-reporter'),
+    })
+    const founder = manager.open({ projectSlug: 'lumio', cwd: tmpdir() })
+    await waitFor(manager, founder.id, /\$|%|#/)
+    await expect
+      .poll(async () => hooksOf(await windowIdOf(founder.tmuxSession)), { timeout: 10_000 })
+      .toContain('pane-died')
+    const second = await manager.splitTab({ paneId: founder.id })
+    await waitFor(manager, second.id, /\$|%|#/)
+
+    // Occupy the name the SECOND pane would move to, so its rename is refused
+    // while the founder's has already gone through — and already picked up a
+    // hook naming the destination it will shortly be undone out of.
+    await run('tmux', [
+      '-L', SOCKET, 'new-session', '-d', '-s', `prcli-gco-${second.id}`, 'sleep', '600',
+    ])
+
+    await expect(manager.moveTabToProject(founder.id, 'gco')).rejects.toThrow()
+
+    // The founder's session is back under its original name...
+    expect(await sessionExists(founder.tmuxSession)).toBe(true)
+    // ...and so is its hook: naming the session as restored, never the
+    // destination it was renamed to and then undone from.
+    const hooks = await hooksOf(await windowIdOf(founder.tmuxSession))
+    expect(hooks).toContain(`=${founder.tmuxSession}`)
+    expect(hooks).not.toContain(`prcli-gco-${founder.id}`)
+    manager.detachAll()
+  })
+
   // The rollback needs one of its own. A rename back can be refused too —
   // something took the source name in the meantime — and the loop used to
   // abort on the spot: every pane it had not reached yet stayed in the
@@ -750,6 +792,79 @@ describe('SessionManager.moveTabToProject', () => {
     expect(await sessionExists(`prcli-gco-${middle.id}`)).toBe(true)
     // And the pane whose rename failed never moved at all.
     expect(await sessionExists(last.tmuxSession)).toBe(true)
+    manager.detachAll()
+  })
+
+  // The residue plan 1 left behind: hooks used to be reinstalled in a second
+  // loop, only after every rename had already landed. So a pane dying between
+  // two renames still met a hook naming the session that FIRST rename had
+  // just made stop existing — and `kill-session` is the first command in that
+  // hook, so its failure forfeits the `kill-window` after it (measured, see
+  // `deathHookCommand`). The dead pane, its window and its now-orphaned
+  // session are all left behind.
+  //
+  // A real kill was tried and rejected: it can be timed deterministically
+  // through the same `renameSession` spy used below, but the aftermath is not
+  // about this residue at all. `moveTabToProject`'s own reattach recreates a
+  // killed pane's session with a bare `new-session -A`, which — reaped
+  // correctly or not — falls straight out of the tab's tmux group, a real and
+  // separate defect this task does not touch. Asserting through that would
+  // make the test about group membership, not about stale hooks. So this
+  // asserts the invariant the residue violates directly: before EVERY rename
+  // in the loop, every hook this run has already installed for an earlier
+  // pane is read back from tmux, and the session it names is checked to still
+  // exist. A hook only reinstalled after the whole loop fails this the moment
+  // the second pane's rename begins; one reinstalled alongside its own rename
+  // never does.
+  it('never leaves a hook naming a session that an earlier rename in the same move has already renamed away', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    // `wireDeathHook` returns on its first line with no `deathReporter` — a
+    // manager built without one installs no hooks at all, and every check
+    // below would pass vacuously.
+    const manager = new SessionManager(adapter, {
+      deathReporter: join(tmpdir(), 'prcli-hook-test-reporter'),
+    })
+
+    const founder = manager.open({ projectSlug: 'lumio', cwd: tmpdir() })
+    await waitFor(manager, founder.id, /\$|%|#/)
+    // `open()`'s hook installs asynchronously, once its session exists.
+    // Renaming out from under it before that lands would test nothing.
+    await expect
+      .poll(async () => hooksOf(await windowIdOf(founder.tmuxSession)), { timeout: 10_000 })
+      .toContain('pane-died')
+    const second = await manager.splitTab({ paneId: founder.id })
+    await waitFor(manager, second.id, /\$|%|#/)
+
+    const order = await manager.panesOfTab(founder.id)
+    expect(order.length).toBeGreaterThan(0) // never iterate a pane list unchecked
+    const windowIds: string[] = []
+    for (const pane of order) windowIds.push(await windowIdOf(pane.tmuxSession))
+
+    const violations: string[] = []
+    const rename = adapter.renameSession.bind(adapter)
+    vi.spyOn(adapter, 'renameSession').mockImplementation(async (from, to) => {
+      for (const windowId of windowIds) {
+        const hooks = await hooksOf(windowId)
+        const match = hooks.match(/kill-session -t =(\S+)/)
+        if (match && !(await sessionExists(match[1]))) {
+          violations.push(`${windowId} still names ${match[1]}: ${hooks.trim()}`)
+        }
+      }
+      return rename(from, to)
+    })
+
+    const moved = await manager.moveTabToProject(founder.id, 'gco')
+    expect(moved.length).toBeGreaterThan(0)
+
+    expect(violations).toEqual([])
+
+    // And by the time the move has returned, every pane's hook names its
+    // CURRENT session, never the one it came from.
+    for (const pane of moved) {
+      const hooks = await hooksOf(await windowIdOf(pane.tmuxSession))
+      expect(hooks).toContain(`=${pane.tmuxSession}`)
+      expect(hooks).not.toContain('prcli-lumio-')
+    }
     manager.detachAll()
   })
 })

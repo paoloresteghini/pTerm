@@ -741,15 +741,47 @@ export class SessionManager {
       to: encodeSessionName({ projectSlug, id: pane.id }),
     }))
 
-    // Rename every member before any client is touched. Undo, in reverse
-    // order, whatever succeeded before the failure — that is what keeps a
-    // refused rename from leaving the tab split across two projects.
-    const renamed: { from: string; to: string }[] = []
+    // Rename every member before any client is touched, and reinstall each
+    // one's death hook immediately after ITS OWN rename lands — not once,
+    // in bulk, after the whole loop. Undo, in reverse order, whatever
+    // succeeded before the failure — that is what keeps a refused rename
+    // from leaving the tab split across two projects.
+    //
+    // The hook bakes the member session's name in as a literal, so a rename
+    // makes the hook installed for it stale the instant the rename lands. That
+    // is not a cosmetic staleness: a tmux command list ABORTS AT THE FIRST
+    // FAILURE, measured —
+    //
+    //   $ tmux kill-session -t '=prcli-gone-0000000000000000' ';' kill-window -t @1
+    //   can't find session: prcli-gone-0000000000000000
+    //   windows after: @0 @1        # @1 survived
+    //
+    // — and `kill-session` comes first in the hook, because spec finding 2
+    // requires the member's client to be gone before its window is. So a pane
+    // dying while its hook names the old session reports its status correctly
+    // (`run-shell` runs first, and the red dot is right) and then reaps
+    // NOTHING: the dead pane preserved by `remain-on-exit`, its window and its
+    // session both left behind.
+    //
+    // Reinstalling in a second loop, after every rename has already landed,
+    // narrows that gap from "the whole of a move" to only nothing for the
+    // last pane renamed — every earlier pane still has a hook naming a
+    // session that pane's own rename has already made stop existing, for as
+    // long as the rest of the loop takes to run. Reinstalling right here,
+    // inside the same iteration as the rename that just made it stale, is
+    // what closes that: the gap for any one pane is now only what one more
+    // tmux round trip takes, not the whole remainder of the loop.
+    //
+    // Swallowed for the same reason `attach`'s hook install is: a tab whose
+    // death shows grey is not worth failing an otherwise-successful rename
+    // over, and the reattach later tries again regardless.
+    const renamed: { pane: PaneRecord; from: string; to: string }[] = []
     try {
       for (const { pane, to } of targets) {
         if (to === pane.tmuxSession) continue
         await this.adapter.renameSession(pane.tmuxSession, to)
-        renamed.push({ from: pane.tmuxSession, to })
+        renamed.push({ pane, from: pane.tmuxSession, to })
+        await this.wireDeathHook({ ...pane, tmuxSession: to }, null).catch(() => {})
       }
     } catch (error) {
       // Every undo is attempted, and one that is refused does not stop the
@@ -758,10 +790,20 @@ export class SessionManager {
       // the loop there would leave the already-moved panes in the destination
       // project: the tab split across two projects, which is the single
       // outcome this method exists to prevent, arrived at silently.
+      //
+      // Each undone rename gets its hook put back too — a pane renamed back to
+      // its old name while its hook still names the new one is the same
+      // defect mirrored, and the next thing to touch this session is the
+      // caller, not a client cycle that would otherwise paper over it.
       const undoFailures: unknown[] = []
-      for (const { from, to } of [...renamed].reverse()) {
+      for (const { pane, from, to } of [...renamed].reverse()) {
         try {
           await this.adapter.renameSession(to, from)
+          // `pane.tmuxSession` is already `from` — this is the pane as
+          // `panesOfTab` reported it, before any rename touched it — so
+          // nothing needs overriding here the way the forward loop overrides
+          // `to` above.
+          await this.wireDeathHook(pane, null).catch(() => {})
         } catch (undoError) {
           undoFailures.push(undoError)
         }
@@ -779,37 +821,6 @@ export class SessionManager {
         `moveTabToProject: tab ${tabId} may now be split across projects — ` +
           `${undoFailures.length} of ${renamed.length} renames could not be undone`,
       )
-    }
-
-    // Reinstall every pane's death hook under its new name, before any client
-    // is cycled and before this method returns.
-    //
-    // The hook bakes the member session's name in as a literal, so the renames
-    // above have just made every installed hook stale. That is not a cosmetic
-    // staleness: a tmux command list ABORTS AT THE FIRST FAILURE, measured —
-    //
-    //   $ tmux kill-session -t '=prcli-gone-0000000000000000' ';' kill-window -t @1
-    //   can't find session: prcli-gone-0000000000000000
-    //   windows after: @0 @1        # @1 survived
-    //
-    // — and `kill-session` comes first in the hook, because spec finding 2
-    // requires the member's client to be gone before its window is. So a pane
-    // dying while its hook names the old session reports its status correctly
-    // (`run-shell` runs first, and the red dot is right) and then reaps
-    // NOTHING: the dead pane preserved by `remain-on-exit`, its window and its
-    // session both left behind.
-    //
-    // The reattach below installs a correct hook eventually, but only
-    // asynchronously and only after each client has been torn down and
-    // rebuilt. Doing it here narrows the window from "the whole of a move" to
-    // the milliseconds between one rename and the next.
-    //
-    // Swallowed for the same reason `attach`'s is: a tab whose death shows
-    // grey is not worth failing a move that has already succeeded over, and
-    // the reattach tries again regardless.
-    for (const { pane, to } of targets) {
-      if (to === pane.tmuxSession) continue
-      await this.wireDeathHook({ ...pane, tmuxSession: to }, null).catch(() => {})
     }
 
     const moved: PaneRecord[] = []
