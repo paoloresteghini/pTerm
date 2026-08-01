@@ -33,11 +33,14 @@ import { describe, it, expect } from 'vitest'
  *   answer that keeps this honest.
  * - renaming `splitActive` — 1, the axis assertion, which reads the call as
  *   well as the branch. `activePaneId` and `focusPane` are not read by name.
- * - reordering the operands of a modifier gate, `!event.altKey &&
- *   event.code === 'KeyD'` — 1, the gate assertion. Deliberately not loosened:
+ * - reordering the operands of a modifier gate — the handler reads
+ *   `event.code === 'KeyD' && !event.altKey`, and writing the same guard the
+ *   other way round would fail the gate assertion. Deliberately not loosened:
  *   matching the two operands independently would stop the assertion saying
  *   that this binding is gated on that modifier, which is the whole of what it
- *   says. Reordering a `&&` is a deliberate edit; re-point the assertion.
+ *   says. Reordering a `&&` is a deliberate edit; re-point the assertion. All
+ *   three letter bindings are spelled the one way for the same reason — one
+ *   guard with two spellings is a guard nothing pins.
  * - moving any of these files, or moving the keydown handler out of `App.tsx`
  *   into a module of its own. This test reads files by path; it follows the
  *   code nowhere.
