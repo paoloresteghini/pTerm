@@ -378,9 +378,9 @@ export function App() {
         splitActive(event.shiftKey ? 'col' : 'row')
         return
       }
-      // ⌘⌥ + an arrow. `event.code` matters twice over here: ⌥ rewrites `key`
-      // for letters, and while it leaves the arrows' `key` alone, one rule for
-      // every binding in this handler is one rule to get right.
+      // ⌘⌥ + an arrow, on `event.code` like every other binding here. ⌥ is
+      // held, which is what rewrites `key` for the letter bindings above; one
+      // rule for the whole handler is one rule to get right.
       if (event.altKey && !event.shiftKey) {
         const along: Record<string, PaneDirection> = {
           ArrowLeft: 'left',
