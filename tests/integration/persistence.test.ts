@@ -1615,9 +1615,17 @@ describe('splitPane and closePane', () => {
     await exited
     await expect.poll(() => written().then((c) => c.panes.length), { timeout: 8000 }).toBe(2)
 
-    const before = await written()
-    // The precondition, asserted rather than assumed: the row on disk names two
-    // panes and the message names three.
+    // Read through `store.read()`, not `written()` — the same substitution
+    // `store.read()`'s own comment above this one explains: `forgetTab` writes
+    // back `{...config, panes}` from a read taken while `second`'s row entry
+    // was still present, so the RAW file still names it. Nothing rewrites
+    // `tabs` between the kill and here — no restart in this test — so
+    // `written()` at this point would still show `[founder, middle, second]`.
+    // `store.read()`'s `normaliseLayout` is what drops a kid whose pane no
+    // longer exists, and that is the row main would actually use next.
+    const before = await store.read()
+    // The precondition, asserted rather than assumed: the row main would use
+    // next names two panes and the message names three.
     expect(before.tabs[0].layout.kids).toEqual([founder.id, middle.id])
 
     ipc.listeners.get(CHANNELS.setLayout)?.(

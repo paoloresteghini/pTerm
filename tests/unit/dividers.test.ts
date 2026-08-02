@@ -225,9 +225,10 @@ describe('a drag is written to disk once it ends', () => {
   // itself staying correct on screen hid the write to disk going missing.
 
   it('commitLayout writes the row through window.prcli.setLayout', () => {
-    // Measured: deleting the `window.prcli.setLayout(tabId, row.layout.ratio)`
-    // line from `commitLayout` fails only this assertion — nothing else in
-    // this file or `workspace.test.ts` reaches main's IPC boundary at all.
+    // Measured: deleting the whole `window.prcli.setLayout(tabId,
+    // Object.fromEntries(...))` call from `commitLayout` fails only this
+    // assertion — nothing else in this file or `workspace.test.ts` reaches
+    // main's IPC boundary at all.
     expect(app).toMatch(/window\.prcli\.setLayout\(/)
   })
 
@@ -238,5 +239,24 @@ describe('a drag is written to disk once it ends', () => {
     // (see the listener test above), so an unwired prop is silently a no-op
     // and every other assertion here is indifferent to it.
     expect(app).toMatch(/onCommit=\{\(\) => commitLayout\(/)
+  })
+
+  it('sends a record built from row.layout.kids paired with row.layout.ratio, not just some call', () => {
+    // The previous test only sees THAT `window.prcli.setLayout(` appears —
+    // sending `{}`, or pairing the ratio to the wrong ids, leaves it green.
+    // Three bare-token pins, in the style of the arithmetic assertions above:
+    // not a full parse, but each one names a specific piece of the pairing.
+    //
+    // Measured against the real file: deleting `Object.fromEntries(` and
+    // sending `{}` in its place fails only this assertion's first line.
+    // Changing `row.layout.kids.map(` to build the record from anything else
+    // (`state.tabs.map(`, a hand-written literal) fails only the second.
+    // Indexing `row.layout.ratio` by anything other than the SAME `index`
+    // `kids.map` iterates on — `[0]`, a second `.indexOf(id)` — fails only the
+    // third; that is the one that would silently pair a kid with the wrong
+    // pane's share.
+    expect(app).toMatch(/Object\.fromEntries\(/)
+    expect(app).toMatch(/row\.layout\.kids\.map\(/)
+    expect(app).toMatch(/row\.layout\.ratio\[index\]/)
   })
 })
