@@ -15,6 +15,8 @@ import {
   paneInDirection,
   panesOfTab,
   tabOfPane,
+  minRatioFor,
+  resizeKids,
   type WorkspaceState,
 } from '../../src/renderer/workspace'
 import {
@@ -1462,5 +1464,79 @@ describe('a tombstone when its tab is split or closed', () => {
       'bbb',
       'ccc',
     ])
+  })
+})
+
+describe('minRatioFor', () => {
+  it('is the fraction of the axis those cells take', () => {
+    expect(minRatioFor(20, 200)).toBeCloseTo(0.1)
+  })
+
+  it('never exceeds the whole tab', () => {
+    // A window narrower than the floor itself. Returning >1 would make every
+    // drag impossible AND make `resizeKids`' bounds cross on a tab that is
+    // merely small, rather than on one that is genuinely squeezed.
+    expect(minRatioFor(20, 10)).toBe(1)
+  })
+
+  it('answers 0 rather than Infinity for an unmeasured axis', () => {
+    expect(minRatioFor(20, 0)).toBe(0)
+  })
+})
+
+describe('resizeKids', () => {
+  it('moves share from one kid to its neighbour and leaves the rest alone', () => {
+    const next = resizeKids([0.25, 0.25, 0.5], 0, 0.1, 0.05, 0.05)
+    expect(next).toEqual([0.35, 0.15, 0.5])
+  })
+
+  it('preserves the sum, with no renormalising', () => {
+    const next = resizeKids([0.7, 0.3], 0, -0.2, 0.05, 0.05)
+    expect(next.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+    // Not `toEqual`: `0.7 - 0.2` is `0.49999999999999994` in IEEE 754, not
+    // `0.5`. The property held here is that the sum is preserved BY
+    // CONSTRUCTION — what one kid loses the other gains, with no rescale step
+    // — which is exact algebraically and holds to within an ulp in floats.
+    expect(next[0]).toBeCloseTo(0.5)
+    expect(next[1]).toBeCloseTo(0.5)
+  })
+
+  it('clamps at the low kid’s floor', () => {
+    const next = resizeKids([0.2, 0.8], 0, -0.5, 0.1, 0.1)
+    expect(next[0]).toBeCloseTo(0.1)
+    expect(next[1]).toBeCloseTo(0.9)
+  })
+
+  it('clamps at the high kid’s floor', () => {
+    const next = resizeKids([0.2, 0.8], 0, 0.95, 0.1, 0.1)
+    expect(next[0]).toBeCloseTo(0.9)
+    expect(next[1]).toBeCloseTo(0.1)
+  })
+
+  it('lets a pane already below its floor be dragged back open', () => {
+    // Ruling 4: a window resize can squeeze a pane through the floor. The
+    // clamp is on the MOVEMENT, so the only moves refused are ones that make
+    // it worse — opening it back up must still work.
+    const next = resizeKids([0.02, 0.98], 0, 0.2, 0.1, 0.1)
+    expect(next[0]).toBeCloseTo(0.22)
+  })
+
+  it('refuses to make a below-floor pane smaller', () => {
+    const next = resizeKids([0.02, 0.98], 0, -0.01, 0.1, 0.1)
+    expect(next).toEqual([0.02, 0.98])
+  })
+
+  it('does nothing when both kids are below their floors', () => {
+    // Growing the low kid to its floor would take the high kid further below
+    // its own, and the reverse is just as true — no move satisfies both
+    // floors. Both bounds land on exactly 0, so the honest answer is no move
+    // at all rather than whichever direction happened to win a comparison.
+    const next = resizeKids([0.02, 0.03], 0, 0.5, 0.4, 0.4)
+    expect(next).toEqual([0.02, 0.03])
+  })
+
+  it('returns the ratios unchanged when the index names no pair', () => {
+    expect(resizeKids([0.5, 0.5], 1, 0.1, 0.1, 0.1)).toEqual([0.5, 0.5])
+    expect(resizeKids([0.5, 0.5], -1, 0.1, 0.1, 0.1)).toEqual([0.5, 0.5])
   })
 })

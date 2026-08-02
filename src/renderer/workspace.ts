@@ -303,6 +303,69 @@ export function paneInDirection(
   return panes[at + (direction === 'right' || direction === 'down' ? 1 : -1)]
 }
 
+/**
+ * A floor of `cells` expressed as a fraction of an axis `totalCells` long.
+ *
+ * Cells, not percent, because what makes a terminal unusable is column count —
+ * 80-column output wrapping — and not its share of a window. A percentage floor
+ * misses that at exactly the sizes where it matters.
+ *
+ * Capped at 1, and 0 for an unmeasured axis. Neither is decoration: an
+ * uncapped value above 1 would make `resizeKids`' bounds cross on a tab that is
+ * merely small rather than genuinely squeezed, and `cells / 0` is `Infinity`,
+ * which would poison every comparison it reached.
+ */
+export function minRatioFor(cells: number, totalCells: number): number {
+  if (totalCells <= 0) return 0
+  return Math.min(1, cells / totalCells)
+}
+
+/**
+ * A drag of the divider between kid `index` and kid `index + 1`.
+ *
+ * Share moves between exactly those two; every other kid is untouched. That is
+ * what makes the sum invariant BY CONSTRUCTION — what one loses the other
+ * gains — so there is no rescale step here and nothing for a rescale to get
+ * wrong. Plan 2b's Critical had a share bug behind it, and the branch that
+ * renormalised every share alike was the part that resized a pane nobody had
+ * touched.
+ *
+ * **The clamp is on the movement, not on the result.** A pane already below its
+ * floor — squeezed there by a narrow window, which ruling 4 allows — is never
+ * made worse by a drag, and can still be dragged back open. Validating the
+ * outcome instead would freeze such a pane at its size for good.
+ *
+ * Both bounds are clamped through zero, so "no movement" is always a legal
+ * answer: `lower` is at most 0, `upper` is at least 0. A kid already below its
+ * floor makes the OTHER bound — the one that would shrink it further — clamp
+ * to 0 rather than going positive; growing it back toward its floor is still
+ * open on the bound that lets it. When both kids are below their floors, both
+ * bounds land on exactly 0 and the only room is none, which is the honest
+ * answer: no move satisfies both floors, so nothing moves.
+ */
+export function resizeKids(
+  ratio: readonly number[],
+  index: number,
+  delta: number,
+  minLow: number,
+  minHigh: number,
+): number[] {
+  const low = ratio[index]
+  const high = ratio[index + 1]
+  // A divider with nothing on one side of it. Total, like every other lookup
+  // in this file, because the caller is a pointer handler where "no such pair"
+  // has to be a value rather than a throw.
+  if (low === undefined || high === undefined) return [...ratio]
+
+  const lower = Math.min(0, minLow - low)
+  const upper = Math.max(0, high - minHigh)
+  const room = Math.min(Math.max(delta, lower), upper)
+  const next = [...ratio]
+  next[index] = low + room
+  next[index + 1] = high - room
+  return next
+}
+
 /** A pane and the share of its tab's axis it takes. */
 export interface PaneBox {
   pane: TabDescriptor
