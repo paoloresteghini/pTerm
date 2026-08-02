@@ -784,7 +784,22 @@ export function App() {
                   everywhere the strips are not — each strip opts back in — and
                   no `key` juggling: a divider is keyed by the pane it precedes,
                   in a list of its own, so nothing here can disturb a pane box's
-                  key or unmount a terminal. */}
+                  key or unmount a terminal.
+
+                  That opting back in reaches further than this overlay, and it
+                  is worth knowing which guard it leans on. A hidden tab carries
+                  `pointer-events-none` on the container above, and a descendant
+                  that sets `pointer-events: auto` is not covered by it — so what
+                  actually keeps an off-screen divider from being grabbed is the
+                  `invisible` beside it: `visibility: hidden` is not hit-tested,
+                  and nothing in here sets `visibility: visible` to undo it. That
+                  class is therefore load-bearing for input as well as for what is
+                  drawn, and is not to be traded for something weaker. None of it
+                  is new with the dividers — `DeadPane`'s ↻ and × are
+                  `pointer-events-auto` inside the same hidden container and have
+                  always rested on the same thing — which is why this is written
+                  down here rather than fixed by drawing the overlay only for the
+                  visible group. */}
               <div
                 data-testid={`dividers-${group.id}`}
                 className="pointer-events-none absolute inset-2 z-20"

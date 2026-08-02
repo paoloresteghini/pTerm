@@ -8,11 +8,13 @@ import { describe, it, expect } from 'vitest'
  * `vitest.config.mts` runs in `environment: 'node'`: there is no DOM to render
  * `PaneDivider` into, and a DOM alone would not be enough — jsdom performs no
  * layout, so `offsetWidth` and a percentage `left` would both report nothing
- * about the thing at stake. The arithmetic a drag runs on is unit-tested
- * properly, in `resizeKids` and `minRatioFor` (workspace.test.ts). What is left
- * over is *that the gesture is wired to it*, *that the strip takes no space in
- * the layout it exists to adjust*, and *that the box the divider is positioned
- * against is the box the panes are laid out in*.
+ * about the thing at stake. The arithmetic a drag runs *once it has its inputs*
+ * is unit-tested properly, in `resizeKids` and `minRatioFor` (workspace.test.ts)
+ * — though not the arithmetic in `App.tsx` that decides what to hand them, which
+ * is declared below rather than covered. What is left over is *that the gesture
+ * is wired to it*, *that the strip takes no space in the layout it exists to
+ * adjust*, and *that the box the divider is positioned against is the box the
+ * panes are laid out in*.
  *
  * **What this does NOT cover, stated so it is not mistaken for coverage:**
  *
@@ -22,6 +24,20 @@ import { describe, it, expect } from 'vitest'
  *   the text `window.removeEventListener`, nothing more;
  * - that a pane follows the cursor 1:1 over a long drag, that it stops at the
  *   floor, or that the tmux session reflows behind it;
+ * - **`grabPane`'s refusal guards** — the length check and the two identity
+ *   checks that stop a box index being taken for a kid index. That is the
+ *   subtlest logic in this whole change and nothing anywhere executes it:
+ *   measured, deleting all three leaves this file nine of nine green. It is not
+ *   pinned by a text assertion either, deliberately — one would catch a deletion
+ *   while saying nothing about the far likelier regression, a guard that is
+ *   present and wrong, and would leave this bullet reading like coverage;
+ * - **the floor derivation** — `axisCells = grid.cols / low.share`, and the
+ *   `minRatioFor` call it feeds. New arithmetic, living in `App.tsx`, with no
+ *   unit test here or in workspace.test.ts. The `minRatioFor(` assertion below
+ *   is a bare token and was measured to be one: swapping its two arguments
+ *   passes, and so does turning that `/` into a `*`. The way to close this is to
+ *   move the derivation into `workspace.ts` and test it as a function, not to
+ *   add a cleverer grep;
  * - **where the divider lands.** `offset` is a cumulative sum computed in
  *   `App.tsx` and turned into a percentage at runtime. A wrong sum draws the
  *   strip over the wrong seam — or at the tab's leading edge — and every

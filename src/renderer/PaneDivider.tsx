@@ -126,9 +126,21 @@ export function PaneDivider({
           : 'pointer-events-auto absolute right-0 left-0 z-20 h-[7px] -translate-y-1/2 cursor-row-resize'
       }
       // The seam is at `offset` of the axis, and the strip is centred on it by
-      // the translate above. Off by whatever share of the `gap-px` hairline
-      // falls to this side of it — under a pixel on any tab this app can open,
-      // against a 7px target.
+      // the translate above — but not exactly, and the earlier claim that the
+      // error was "under a pixel" was only true of two-pane tabs. The `gap-px`
+      // hairlines are paid for by shrinking the panes in proportion to their
+      // bases, so the k-th seam of an n-pane tab sits `offset·(n−1) − k + 0.5`
+      // pixels from where this draws it, measured to the middle of the 1px gap
+      // (half a pixel more to the next pane's leading edge). That is independent
+      // of how wide the tab is, and it was simulated against the flex model
+      // rather than reasoned at: under half a pixel for two panes at ANY ratio,
+      // then growing with the pane count and with how uneven the split is —
+      // 0.9px at the second seam of a 0.15/0.15/0.70 three-pane row, 1.6px at
+      // the third of a 0.1/0.1/0.1/0.7 four-pane one — and bounded by `n − 1.5`.
+      // The strip is 7px, so it still covers the seam on tabs of up to five
+      // panes even at ratios the floor would not let a drag reach. What a user
+      // could notice is the strip sitting a pixel or two off the hairline on a
+      // lopsided three- or four-pane tab, not a strip that misses it.
       style={dir === 'row' ? { left: `${offset * 100}%` } : { top: `${offset * 100}%` }}
     />
   )
