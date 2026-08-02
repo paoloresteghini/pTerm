@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { sharesAroundClaims, claimFor, tombstonesOf, inLiveFrame } from '../../src/main/ipc/shares'
+import {
+  sharesAroundClaims,
+  claimFor,
+  tombstonesOf,
+  inLiveFrame,
+  routeShares,
+  layoutWrite,
+} from '../../src/main/ipc/shares'
 import { tabRowFor } from '../../src/main/ipc/restore'
 import type { TabRow } from '../../src/main/state/store'
 
@@ -232,6 +239,98 @@ describe('tombstonesOf', () => {
 
   it('is empty for a tab with no claims at all, which is every tab that has never lost a pane', () => {
     expect(tombstonesOf('tab3', ['a', 'b'], claims)).toEqual([])
+  })
+})
+
+describe('routeShares', () => {
+  const owes = (id: string): boolean => id === 'b' || id === 'c'
+
+  it('projects the saved kids’ shares into the frame the row is written in', () => {
+    // The renderer's vector is whole-tab: `a` and `n` hold 0.6 between them and
+    // `b` — which the row does not name — holds 0.4. The row gets 0.5/0.5, the
+    // same division a split does, so a drag and a split cannot disagree about
+    // the frame.
+    const routed = routeShares({ a: 0.3, n: 0.3, b: 0.4 }, ['a', 'n'], owes)
+    expect(routed.ok).toBe(true)
+    if (!routed.ok) return
+    expect(routed.ratio).toEqual([0.5, 0.5])
+    expect(routed.owed).toEqual([{ id: 'b', share: 0.4 }])
+  })
+
+  it('keeps the saved kids’ order, not the record’s', () => {
+    const routed = routeShares({ n: 0.25, a: 0.75 }, ['a', 'n'], owes)
+    expect(routed.ok).toBe(true)
+    if (!routed.ok) return
+    expect(routed.ratio).toEqual([0.75, 0.25])
+  })
+
+  it('refuses a record naming a pane the tab cannot place', () => {
+    // Not a silent drop wearing a new shape: the caller logs this, and it is
+    // the only branch that logs. It needs a renderer kid that is neither on
+    // disk nor owed a share, which no path this plan can name produces.
+    const routed = routeShares({ a: 0.5, zzz: 0.5 }, ['a'], owes)
+    expect(routed.ok).toBe(false)
+    if (routed.ok) return
+    expect(routed.why).toContain('zzz')
+  })
+
+  it('refuses a record that does not name every saved kid', () => {
+    // Pairing what is there would leave `ratio` shorter than `kids`, and
+    // `normaliseLayout` reads a short ratio as unusable and flattens the whole
+    // row to an even split — a drag that silently resets the tab.
+    const routed = routeShares({ a: 1 }, ['a', 'n'], owes)
+    expect(routed.ok).toBe(false)
+    if (routed.ok) return
+    expect(routed.why).toContain('n')
+  })
+
+  it('refuses a record whose saved kids hold nothing', () => {
+    const routed = routeShares({ a: 0, n: 0, b: 1 }, ['a', 'n'], owes)
+    expect(routed.ok).toBe(false)
+  })
+})
+
+describe('layoutWrite', () => {
+  // The wiring `CHANNELS.setLayout`'s handler runs, minus `store.read()` and
+  // the `tombstones.set()` loop — the only two things left that a unit test
+  // still cannot see without a real pane death. Everything else the handler
+  // decides is here, given a `TabRow` and a `Map` this file built by hand.
+  const saved: TabRow = {
+    id: 'tab',
+    groupId: 'tab',
+    activePaneId: 'a',
+    layout: { dir: 'row', ratio: [0.6, 0.4], kids: ['a', 'n'] },
+  }
+
+  it('routes a drag through claimFor and hands back the row it would write', () => {
+    // `b` is a tombstone of THIS tab, recorded at 0.2 when it died. The user
+    // then drags the divider between `a` and `n`, widening `b` to 0.4 at the
+    // same time — this is the decision the whole `owed` branch exists to
+    // make: the ENTRY IN `owed` HAS TO BE THE DRAGGED 0.4, not the 0.2 the
+    // tombstone died at, or the next split would reserve the wrong share for
+    // it. Building `tombstones` by hand, rather than through a real death, is
+    // the whole point of extracting this function.
+    const tombstones = new Map([['b', { tabId: 'tab', share: 0.2 }]])
+    const result = layoutWrite(saved, { a: 0.3, n: 0.3, b: 0.4 }, 'tab', tombstones)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.row.layout.kids).toEqual(['a', 'n'])
+    expect(result.row.layout.ratio).toEqual([0.5, 0.5])
+    expect(result.owed).toEqual([{ id: 'b', share: 0.4 }])
+  })
+
+  it('reads a claim only against its own tab, so a stranger tab’s claim does not license the pane', () => {
+    // Same shape as `claimFor`'s own "ignores a claim recorded against
+    // another tab" case, but exercised through the wiring `setLayout` actually
+    // runs: `b` is a real tombstone, just not of `tab`, so it may not be named.
+    const tombstones = new Map([['b', { tabId: 'other-tab', share: 0.2 }]])
+    const result = layoutWrite(saved, { a: 0.3, n: 0.3, b: 0.4 }, 'tab', tombstones)
+    expect(result.ok).toBe(false)
+  })
+
+  it('refuses a pane that is neither a saved kid nor a claim, and writes nothing', () => {
+    const result = layoutWrite(saved, { a: 0.5, n: 0.3, zzz: 0.2 }, 'tab', new Map())
+    expect(result.ok).toBe(false)
   })
 })
 

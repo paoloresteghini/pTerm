@@ -451,9 +451,17 @@ export interface PrcliApi {
    * Persist a tab's ratios after a drag. Fire-and-forget: the renderer already
    * has the layout on screen, and a failed write costs a ratio, not a session.
    *
+   * `shares` is one fraction per pane the renderer draws in this tab, keyed
+   * by pane id — every live kid AND every tombstone — as a fraction of the
+   * WHOLE tab, summing to 1. Named rather than positional so that a tab
+   * holding a tombstone, whose renderer-side `kids` is a permanent superset
+   * of main's saved row, cannot be pairing its shares with the wrong panes:
+   * main routes each share to the pane it names, not to a position in an
+   * array.
+   *
    * Sent ONCE, on pointer release. Ratios live in renderer state during the
    * gesture — throttled writes would push several a second through a queue
    * shared with restore and the exit handler.
    */
-  setLayout(tabId: string, ratio: number[]): void
+  setLayout(tabId: string, shares: Record<string, number>): void
 }

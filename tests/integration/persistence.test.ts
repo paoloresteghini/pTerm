@@ -1388,7 +1388,11 @@ describe('splitPane and closePane', () => {
    * drops it from the kids, and `restartTab` writes the pane back without
    * putting it back in the layout. Nothing repairs it before the next restore.
    */
-  async function splitThenRestartSibling(ratio?: number[]): Promise<{
+  // Keyed by role ('founder'/'second'), not by pane id: the caller cannot name
+  // the ids `splitOnce` is about to mint before it runs. Remapped onto the
+  // real ids the moment they exist, below — the message the wire actually
+  // carries is named by pane id like every other one in this file.
+  async function splitThenRestartSibling(shares?: Record<string, number>): Promise<{
     founder: TabDescriptor
     second: TabDescriptor
   }> {
@@ -1396,8 +1400,9 @@ describe('splitPane and closePane', () => {
     // Dragged before the death, when a caller wants the two panes at a
     // deliberate size rather than the even one a split leaves them at. The
     // same listener and the same settle the drag tests above use.
-    if (ratio) {
-      ipc.listeners.get(CHANNELS.setLayout)?.(null as never, founder.id as never, ratio as never)
+    if (shares) {
+      const named = { [founder.id]: shares.founder, [second.id]: shares.second }
+      ipc.listeners.get(CHANNELS.setLayout)?.(null as never, founder.id as never, named as never)
       await settle(200)
     }
     const adapter = new TmuxAdapter({ socket: SOCKET })
@@ -1570,7 +1575,11 @@ describe('splitPane and closePane', () => {
     const before = await written()
     expect(before.panes).toHaveLength(2)
 
-    ipc.listeners.get(CHANNELS.setLayout)?.(null as never, founder.id as never, [0.7, 0.3] as never)
+    ipc.listeners.get(CHANNELS.setLayout)?.(
+      null as never,
+      founder.id as never,
+      { [founder.id]: 0.7, [second.id]: 0.3 } as never,
+    )
     await settle(200)
 
     const after = await written()
@@ -1584,19 +1593,73 @@ describe('splitPane and closePane', () => {
     )
   })
 
-  it('ignores a ratio whose length does not match the row', async () => {
-    const { founder } = await splitOnce()
-    ipc.listeners.get(CHANNELS.setLayout)?.(null as never, founder.id as never, [0.5, 0.3, 0.2] as never)
+  it('writes a drag on a tab holding a tombstone, which used to be dropped in silence', async () => {
+    // CT-1's persistence half, end to end. `bbb` has died, so main's saved row
+    // no longer names it while the renderer still draws it — the state in which
+    // EVERY drag on this tab was silently discarded by the old length guard.
+    const { founder, second } = await splitOnce()
+    const third = await invoke<TabShape>(CHANNELS.splitPane, {
+      paneId: founder.id, dir: 'row', cols: 100, rows: 30,
+    })
+    const middle = third.panes[1]
+    await waitForPrompt(middle.id)
+
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const window = await adapter.windowIdOf(second.tmuxSession)
+    expect(window).toMatch(/^@\d+$/)
+    const exited = waitForExitEvent(second.id)
+    await run('tmux', [
+      '-L', SOCKET,
+      'kill-session', '-t', `=${second.tmuxSession}`, ';', 'kill-window', '-t', window,
+    ])
+    await exited
+    await expect.poll(() => written().then((c) => c.panes.length), { timeout: 8000 }).toBe(2)
+
+    const before = await written()
+    // The precondition, asserted rather than assumed: the row on disk names two
+    // panes and the message names three.
+    expect(before.tabs[0].layout.kids).toEqual([founder.id, middle.id])
+
+    ipc.listeners.get(CHANNELS.setLayout)?.(
+      null as never,
+      founder.id as never,
+      { [founder.id]: 0.3, [middle.id]: 0.3, [second.id]: 0.4 } as never,
+    )
     await settle(200)
+
     const after = await written()
     const row = after.tabs.find((candidate) => candidate.id === founder.id)
-    expect(row?.layout.ratio).toHaveLength(2)
-    expect(row?.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+    expect(row?.layout.kids).toEqual([founder.id, middle.id])
+    // The live kids held 0.6 of the tab between them, so the row that describes
+    // only them is 0.5/0.5. Read from the raw file, not through `store.read()`,
+    // which would rescale a wrong answer into a right-looking one.
+    expect(row?.layout.ratio[0]).toBeCloseTo(0.5)
+    expect(row?.layout.ratio[1]).toBeCloseTo(0.5)
+    expect(after.panes.map((pane) => pane.id).sort()).toEqual(
+      before.panes.map((pane) => pane.id).sort(),
+    )
+  })
+
+  it('ignores a record naming a pane the tab does not have, and writes nothing', async () => {
+    const { founder, second } = await splitOnce()
+    const before = await written()
+    ipc.listeners.get(CHANNELS.setLayout)?.(
+      null as never,
+      founder.id as never,
+      { [founder.id]: 0.5, [second.id]: 0.3, 'not-a-pane': 0.2 } as never,
+    )
+    await settle(200)
+    const after = await written()
+    expect(after.tabs[0].layout.ratio).toEqual(before.tabs[0].layout.ratio)
   })
 
   it('carves the new pane out of the pane being split, leaving others alone', async () => {
     const { founder, second } = await splitOnce()
-    ipc.listeners.get(CHANNELS.setLayout)?.(null as never, founder.id as never, [0.7, 0.3] as never)
+    ipc.listeners.get(CHANNELS.setLayout)?.(
+      null as never,
+      founder.id as never,
+      { [founder.id]: 0.7, [second.id]: 0.3 } as never,
+    )
     await settle(200)
 
     // Split the 30, which should become two 15s and leave the 70 untouched.
@@ -1645,7 +1708,7 @@ describe('splitPane and closePane', () => {
     ipc.listeners.get(CHANNELS.setLayout)?.(
       null as never,
       founder.id as never,
-      [0.3, 0.2, 0.5] as never,
+      { [founder.id]: 0.3, [third.id]: 0.2, [second.id]: 0.5 } as never,
     )
     await settle(200)
 
@@ -1728,7 +1791,7 @@ describe('splitPane and closePane', () => {
    * that is left: 0.35, 0.35, 0.3.
    */
   it('gives a restarted pane the share it had when it died, not an even one', async () => {
-    const { founder, second } = await splitThenRestartSibling([0.7, 0.3])
+    const { founder, second } = await splitThenRestartSibling({ founder: 0.7, second: 0.3 })
 
     // The precondition the numbers below are derived from, asserted rather
     // than assumed — `splitThenRestartSibling` pins the kids, this pins the
@@ -1802,7 +1865,7 @@ describe('splitPane and closePane', () => {
     ipc.listeners.get(CHANNELS.setLayout)?.(
       null as never,
       founder.id as never,
-      [0.5, 0.3, 0.2] as never,
+      { [founder.id]: 0.5, [third.id]: 0.3, [second.id]: 0.2 } as never,
     )
     await settle(200)
 
@@ -1884,7 +1947,7 @@ describe('splitPane and closePane', () => {
     ipc.listeners.get(CHANNELS.setLayout)?.(
       null as never,
       founder.id as never,
-      [0.5, 0.3, 0.2] as never,
+      { [founder.id]: 0.5, [third.id]: 0.3, [second.id]: 0.2 } as never,
     )
     await settle(200)
 
@@ -1948,6 +2011,88 @@ describe('splitPane and closePane', () => {
     expect(at(third.id)).toBeCloseTo(0.3)
     expect(at(founder.id)).toBeCloseTo(0.35)
     expect(at(fourth.id)).toBeCloseTo(0.35)
+    expect(row.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+  })
+
+  // The addendum's own test: the ONE place the `owed` write — `CHANNELS.setLayout`'s
+  // `tombstones.set(entry.id, { tabId, share: entry.share })` — has ever been
+  // exercised through a real death and a real restart, rather than through
+  // `layoutWrite` with a `Map` built by hand (see `shares.test.ts`).
+  it('keeps what a tombstone is owed current, so the next split reserves the dragged share', async () => {
+    // A, C, B at 0.5/0.3/0.2. C dies and stays dead — a tombstone. B dies and
+    // is restarted, so main owes it a claim and the row does not name it. The
+    // user then drags C wider, and the next split must reserve the DRAGGED
+    // share rather than the one C died at.
+    const { founder, second } = await splitOnce()
+    const split2 = await invoke<TabShape>(CHANNELS.splitPane, {
+      paneId: founder.id, dir: 'row', cols: 100, rows: 30,
+    })
+    const third = split2.panes[1]
+    await waitForPrompt(third.id)
+    expect(split2.tabs[0].layout.kids).toEqual([founder.id, third.id, second.id])
+    ipc.listeners.get(CHANNELS.setLayout)?.(
+      null as never,
+      founder.id as never,
+      { [founder.id]: 0.5, [third.id]: 0.3, [second.id]: 0.2 } as never,
+    )
+    await settle(200)
+
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    // The same two-command death every other test in this file stages.
+    const kill = async (pane: TabDescriptor): Promise<void> => {
+      const window = await adapter.windowIdOf(pane.tmuxSession)
+      expect(window).toMatch(/^@\d+$/)
+      const exited = waitForExitEvent(pane.id)
+      await run('tmux', [
+        '-L', SOCKET,
+        'kill-session', '-t', `=${pane.tmuxSession}`, ';', 'kill-window', '-t', window,
+      ])
+      await exited
+      await expect(adapter.hasSession(pane.tmuxSession)).resolves.toBe(false)
+    }
+
+    // C dies and stays dead — the tombstone the drag below has to widen.
+    await kill(third)
+    await expect
+      .poll(async () => (await written()).panes.length, { timeout: 8000 })
+      .toBe(2)
+
+    // B dies and is restarted: live, back in `config.panes`, owed a claim, and
+    // — being restarted rather than rebuilt by a split or a close — still
+    // unnamed by the row.
+    await kill(second)
+    const restarted = await invoke<TabDescriptor>(CHANNELS.restartTab, {
+      tab: second, cols: 100, rows: 30,
+    })
+    await expect.poll(() => adapter.hasSession(restarted.tmuxSession), { timeout: 8000 }).toBe(true)
+
+    // The precondition, asserted rather than assumed: both deaths have left
+    // the row naming only the founder.
+    const before = await written()
+    const beforeRow = before.tabs.find((candidate) => candidate.id === founder.id)
+    expect(beforeRow).toBeDefined()
+    expect(beforeRow?.layout.kids).toEqual([founder.id])
+
+    // The user then drags C — still dead, still off the row — wider.
+    ipc.listeners.get(CHANNELS.setLayout)?.(
+      null as never,
+      founder.id as never,
+      { [founder.id]: 0.4, [third.id]: 0.4, [second.id]: 0.2 } as never,
+    )
+    await settle(200)
+
+    const shape = await invoke<TabShape>(CHANNELS.splitPane, {
+      paneId: founder.id, dir: 'row', cols: 100, rows: 30,
+    })
+    await waitForPrompt(shape.panes[shape.panes.length - 1].id)
+    const row = shape.tabs[0]
+    const at = (id: string): number => row.layout.ratio[row.layout.kids.indexOf(id)]
+    // Whole tab: founder 0.2, new 0.2, second 0.2, third(tombstone) 0.4. The
+    // three live kids hold 0.6, so each takes a third of the row. Without the
+    // drag reaching the record, `third` would still be owed the 0.3 it died at,
+    // the live kids would hold 0.7, and `second` would come back at 2/7 = 0.286.
+    expect(at(second.id)).toBeCloseTo(1 / 3)
+    expect(at(founder.id)).toBeCloseTo(1 / 3)
     expect(row.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
   })
 })

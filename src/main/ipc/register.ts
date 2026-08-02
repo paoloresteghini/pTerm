@@ -25,7 +25,7 @@ import {
   tabRowFor,
   withUnsorted,
 } from './restore'
-import { sharesAroundClaims, tombstonesOf, claimFor, inLiveFrame, type Claim } from './shares'
+import { sharesAroundClaims, tombstonesOf, claimFor, inLiveFrame, layoutWrite, type Claim } from './shares'
 import { isDirectory } from '../fsutil'
 import { scanCandidates } from '../projects/discovery'
 import { hookPaths, installHooks, readHooksState, uninstallHooks } from '../hooks/install'
@@ -712,46 +712,43 @@ export function registerIpc(
    * into existence from a ratio alone would be inventing membership, which is
    * exactly the thing `withTabRow` exists to never do implicitly.
    *
-   * The length guard's dominant trigger is NOT a race, and saying so overstates
-   * how rarely this fires. A race is real but rare: a ratio captured at
-   * `grabPane` describes the row as it stood at pointerdown, and a split or a
-   * close landing mid-drag changes `kids` under it before this handler runs —
-   * that costs one gesture, once.
-   *
-   * The common case is structural. Any tab holding a tombstone, or a pane that
-   * died and was restarted but has not yet been rebuilt into a saved row by a
-   * split or a close, has a renderer-side `layout.kids` that is a PERMANENT
-   * strict superset of `saved.layout.kids` on disk: `forgetTab` drops the dead
-   * pane's row entry and `normaliseLayout` then drops its kid, but the
-   * renderer's reducer never removes a dead kid from `state.tabs` on its own
-   * (`died` only writes `state.dead`; `removeTab` filters `state.panes` and
-   * leaves `kids` alone). Every ratio this handler is sent for such a tab
-   * fails the length check, every single time, for as long as the tab holds
-   * that pane — which can be indefinitely, since only a split or a close
-   * rebuilds the row and closes the gap.
-   *
-   * Silent in both cases, and the consequence is the same either way: the
-   * drag is not persisted. The user sees the dragged ratio on screen — that
-   * came from the reducer dispatching `resized`, not from disk — but the
-   * write to `config.tabs` is dropped here, so the next launch reverts to the
-   * ratio before the drag, and so does the next split or close: both rebuild
-   * the row from `saved.layout.ratio`, i.e. from whatever this handler last
-   * actually managed to write, as if the drag had never happened.
+   * The shares arrive named, not positional, and `layoutWrite` — `shares.ts` —
+   * is where they are routed: every share for a pane `saved.layout.kids`
+   * names goes in the row, scaled into that row's own frame the same way a
+   * split scales one; every other share has to name a pane this tab already
+   * owes a claim to, and becomes that claim's new, current value. A message
+   * naming a pane that is neither is refused whole, logged below, and nothing
+   * is written — the alternative, pairing what can be placed and dropping the
+   * rest, would leave the row in one frame and the claims in another, and a
+   * short ratio paired with the row's kids is worse still: `normaliseLayout`
+   * reads a ratio shorter than its kids as unusable and flattens the whole tab
+   * to an even split. The invariant this used to lean on — that the
+   * renderer's kids are always a superset of main's, so equal length implies
+   * equal membership — is no longer load-bearing: every share now carries the
+   * pane it belongs to, so nothing here depends on position at all.
    *
    * Writes `config.tabs` and nothing else. Layout, never existence: a ratio
    * has no business touching `config.panes`, and the "leaves the panes alone"
    * test exists to catch a handler that reaches for it anyway.
    */
-  ipcMain.on(CHANNELS.setLayout, (_event, tabId: string, ratio: number[]) => {
+  ipcMain.on(CHANNELS.setLayout, (_event, tabId: string, shares: Record<string, number>) => {
     void serialise(async () => {
       const config = await store.read()
       const saved = config.tabs.find((row) => row.id === tabId)
       if (!saved) return
-      if (ratio.length !== saved.layout.kids.length) return
-      const tabs = withTabRow(config.tabs, tabId, {
-        ...saved,
-        layout: { ...saved.layout, ratio },
-      })
+      const routed = layoutWrite(saved, shares, tabId, tombstones)
+      if (!routed.ok) {
+        console.warn(`PRCLI: ignored a layout for ${tabId} — ${routed.why}`)
+        return
+      }
+      // The renderer wins on a tombstone's share, and only here: it is what the
+      // user is looking at and what they just dragged. Main's record is
+      // corrected by every commit rather than defended against one. An
+      // in-memory write, so this adds no new path back into `serialise`.
+      for (const entry of routed.owed) {
+        tombstones.set(entry.id, { tabId, share: entry.share })
+      }
+      const tabs = withTabRow(config.tabs, tabId, routed.row)
       await store.write({ ...config, tabs })
     })
   })

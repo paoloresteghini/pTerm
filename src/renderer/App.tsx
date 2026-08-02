@@ -363,7 +363,14 @@ export function App() {
     (tabId: string) => {
       const row = state.tabs.find((candidate) => candidate.id === tabId)
       if (!row) return
-      window.prcli.setLayout(tabId, row.layout.ratio)
+      // Named, not positional: main's row is a subset of this one whenever the
+      // tab holds a tombstone, and pairing the two by index is what dropped
+      // every such drag. Whole-tab fractions, tombstones included — which is
+      // what this row holds, on every path that writes it.
+      window.prcli.setLayout(
+        tabId,
+        Object.fromEntries(row.layout.kids.map((id, index) => [id, row.layout.ratio[index] ?? 0])),
+      )
     },
     [state.tabs],
   )

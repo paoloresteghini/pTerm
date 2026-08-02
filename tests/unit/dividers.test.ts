@@ -23,17 +23,13 @@ import { describe, it, expect } from 'vitest'
  *
  * **What this does NOT cover, stated so it is not mistaken for coverage:**
  *
- * - **that main actually persists what this handler sends.** `setLayout`'s
- *   own length guard (`register.ts`) drops a ratio silently whenever it
- *   disagrees in length with the saved row — and that is not a rare race.
- *   Any tab holding a tombstone, or a pane that died and was restarted but
- *   has not yet been rebuilt into a saved row by a split or a close, has a
- *   renderer-side `kids` that is a PERMANENT strict superset of the saved
- *   one, so every drag on such a tab fails the guard and is silently not
- *   persisted — reachable in ordinary use, and this file cannot see it: it
- *   only reaches as far as the IPC call being made, never what main does
- *   with it once it arrives. `register.ts`'s own doc comment on
- *   `CHANNELS.setLayout` names this the same way;
+ * - **that main actually persists what this handler sends.** This file only
+ *   reaches as far as the IPC call being made — `window.prcli.setLayout(...)`
+ *   — and never what main does with it once it arrives; that is not this
+ *   file's ground to cover and never was. What main does with it is now
+ *   pinned elsewhere: `layoutWrite` and `routeShares` in `shares.test.ts`
+ *   cover the routing decision, and `persistence.test.ts` covers the write
+ *   reaching disk, tombstone and all;
  * - that a pointerdown starts a drag at all, or that a pointerup ends one;
  * - that the cursor changes, or that a 7px strip is comfortable to hit;
  * - that React actually calls the effect's cleanup — the assertion below reads

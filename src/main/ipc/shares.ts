@@ -1,3 +1,5 @@
+import type { TabRow } from '../../shared/ipc'
+
 /**
  * What one tab owes one pane its row does not name, as a fraction of the WHOLE
  * tab.
@@ -173,6 +175,92 @@ export function sharesAroundClaims(
   const shares = entries.map((entry) => entry.claim ?? entry.base)
   const total = held + bases
   return total > 0 ? shares.map((share) => share / total) : entries.map(() => 1 / entries.length)
+}
+
+/**
+ * A layout message's shares, split into what belongs in the row and what
+ * belongs in the tombstone record.
+ *
+ * The renderer's shares are whole-tab and cover its whole row — every live kid
+ * AND every tombstone — so they sum to 1. Main's row covers only the panes it
+ * has, so the saved kids' shares are divided by their own total: the same
+ * projection `inLiveFrame` does for a split, so a drag and a split cannot
+ * disagree about the frame. What is left over names panes the row does not
+ * have, and each one has to be a pane this tab already owes a share to.
+ *
+ * **All or nothing.** A message that names a pane this tab cannot place, or
+ * that fails to name a saved kid, describes a tab main and the renderer
+ * disagree about the membership of. Applying half of it would put the row in
+ * one frame and the record in another, and pairing a short ratio with the
+ * row's kids is worse still: `normaliseLayout` reads a ratio shorter than its
+ * kids as unusable and flattens the whole tab to an even split, so a drag
+ * would silently reset the layout it was adjusting. Refused, with a reason the
+ * caller logs — and that log is the only one on this path, because this is the
+ * only outcome that is not simply a drag being written down.
+ *
+ * Nothing here checks that the shares sum to 1. That is the channel's
+ * contract, held by the renderer's own row invariant, and it is a
+ * cross-process fact this side cannot verify; a tolerance check here would be
+ * the length guard back in another shape. `ratio` is immune to it either way —
+ * it is a projection — while `owed` is not, and that is stated rather than
+ * defended.
+ */
+export type RoutedShares =
+  | { ok: true; ratio: number[]; owed: { id: string; share: number }[] }
+  | { ok: false; why: string }
+
+export function routeShares(
+  shares: Readonly<Record<string, number>>,
+  savedKids: readonly string[],
+  owes: (paneId: string) => boolean,
+): RoutedShares {
+  const missing = savedKids.filter((kid) => shares[kid] === undefined)
+  if (missing.length > 0) return { ok: false, why: `no share for ${missing.join(', ')}` }
+  const rest = Object.keys(shares).filter((id) => !savedKids.includes(id))
+  const unplaced = rest.filter((id) => !owes(id))
+  if (unplaced.length > 0) return { ok: false, why: `no pane or claim for ${unplaced.join(', ')}` }
+  const mine = savedKids.map((kid) => shares[kid] ?? 0)
+  const held = mine.reduce((sum, share) => sum + share, 0)
+  if (!(held > 0)) return { ok: false, why: 'the saved kids hold none of the tab' }
+  return {
+    ok: true,
+    ratio: mine.map((share) => share / held),
+    owed: rest.map((id) => ({ id, share: shares[id] ?? 0 })),
+  }
+}
+
+/**
+ * `routeShares`, wired to one tab's saved row and its tombstone record —
+ * the whole decision `CHANNELS.setLayout`'s handler exists to make, minus the
+ * two impure things around it: reading `saved` off `config.tabs` and writing
+ * `owed` back into the live `tombstones` map.
+ *
+ * That split exists for exactly one reason: `tombstones` is private to
+ * `registerIpc`'s closure, and the only way anything outside this file could
+ * ever put a claim in it was a real pane death — which meant the whole
+ * decision this function makes, "does this drag's shares route through
+ * `claimFor` and `routeShares` into the row and the claims a tab actually
+ * has", had exactly one witness, and it was the most pty-expensive test in
+ * the plan. Taking a `tombstones` map as a plain argument means a unit test
+ * can hand it one built by hand — no death, no restart, no tmux — and watch
+ * the SAME wiring `register.ts` runs decide what a drag owes a tombstone.
+ * What is left over in the handler is `store.read()`, the `!saved` guard, the
+ * `!ok` log, and a loop writing `owed` into the map: no decision left to get
+ * wrong, only I/O.
+ */
+export function layoutWrite(
+  saved: TabRow,
+  shares: Readonly<Record<string, number>>,
+  tabId: string,
+  tombstones: ReadonlyMap<string, Claim>,
+): { ok: true; row: TabRow; owed: { id: string; share: number }[] } | { ok: false; why: string } {
+  const routed = routeShares(shares, saved.layout.kids, (id) => claimFor(tabId, id, tombstones) !== undefined)
+  if (!routed.ok) return { ok: false, why: routed.why }
+  return {
+    ok: true,
+    row: { ...saved, layout: { ...saved.layout, ratio: routed.ratio } },
+    owed: routed.owed,
+  }
 }
 
 /**
