@@ -887,11 +887,21 @@ function removeTab(state: WorkspaceState, id: string): WorkspaceState {
  * same projection `sharesAroundClaims` and `boxesOfRow` do, not a rescale
  * covering a gap: the pane is gone, and the survivors divide the tab.
  *
- * A row that keeps no kid at all is left alone rather than emptied. That state
- * is unreachable from `dismissed` — the pane being dismissed is dead, and a
- * tab whose every pane is dead has already lost its row through `closedPane` —
- * and an empty row is a container with nothing in it, which `paneGroups`
- * drops. Leaving it whole is the answer that changes nothing.
+ * A row that keeps no kid at all is left alone rather than emptied, and that
+ * state is REACHED rather than hypothetical. Dismissing a tab's panes one
+ * after another arrives here with one kid left; `closedPane`, which would
+ * otherwise have dropped the row, never runs for an all-dead tab, because ⌘W
+ * on a dead pane rejects inside `manager.kill` and dispatches nothing at all
+ * (see `App.tsx`'s `closePane`). Measured through this reducer: `died a`,
+ * `died b`, `dismissed b`, `dismissed a` leaves `panes: []` and
+ * `tabs: [{ id: 'a', kids: ['a'] }]` — a row naming a pane that no longer
+ * exists.
+ *
+ * The guard is right anyway, and that is why it is left as it is: `paneGroups`
+ * walks `state.panes`, so a kid with no pane of its own draws nothing, and an
+ * empty row would be a container with nothing in it, which `paneGroups` drops
+ * regardless. Both spellings are invisible; leaving the row whole is the one
+ * that touches nothing.
  */
 function withoutKid(state: WorkspaceState, id: string): WorkspaceState {
   const row = state.tabs.find((candidate) => candidate.layout.kids.includes(id))

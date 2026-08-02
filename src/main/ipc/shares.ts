@@ -156,12 +156,41 @@ export function tombstonesOf(
  * even split here. A zero share would otherwise be a 0%-wide box, which fits
  * to tmux's floor of 2x1 — the geometry defect wearing different numbers.
  *
- * A claim of exactly 0 would slip both guards and produce that 0%-wide box, so
- * it is refused at the writer instead: `normaliseLayout` returns only shares
- * greater than 0, and `register.ts`'s `forgetTab` — the only producer of a
- * claim — records nothing otherwise. Cited here rather than defended a second
- * time, because a zero claim is a caller error and there is no non-arbitrary
- * share for this function to invent in its place.
+ * A claim of exactly 0 slips both guards and produces that 0%-wide box, and
+ * this function does not defend against it — a zero claim is a caller error and
+ * there is no non-arbitrary share to invent in its place. **Not every writer
+ * refuses one.** There are three, and they do not agree:
+ *
+ * - `register.ts`'s `forgetTab` guards, at the death: `if (claim > 0)`.
+ * - `register.ts`'s `CHANNELS.setLayout` handler does NOT. It writes
+ *   `{ tabId, share: entry.share }` for every entry in `routeShares`'s `owed`,
+ *   and `owed` is built as `shares[id] ?? 0` straight off a drag message with
+ *   no positivity check anywhere on the path.
+ * - `rescaledClaims`, on a dismiss, divides existing shares by `1 - gone` and
+ *   so preserves whatever it is given: it neither creates a zero nor removes
+ *   one.
+ *
+ * Measured, the drag path really can deliver one. `minRatioFor` answers 0 for
+ * an unmeasured axis (`totalCells <= 0`, which `grabFor` reaches when a mounted
+ * terminal reports a zero grid), `resizeKids` with a floor of 0 clamps the
+ * movement and not the result — `resizeKids([.5, .5], 0, -1, 0, 0)` is
+ * `[0, 1]` — and `commitLayout` sends that row whole. For a pane main holds a
+ * claim for, `routeShares` then routes the 0 into `owed`.
+ *
+ * What it costs depends on whether that pane comes back. While it stays dead
+ * the claim is harmless: `held` gains nothing and `inLiveFrame` strips the
+ * entry, so the row is untouched — measured `[0.5, 0.5]`, unchanged. Once it
+ * restarts and a rebuild names it, `claimFor` returns the 0, this function
+ * takes the claim branch, and the pane's share is exactly 0 — measured, a row
+ * of `[1, 0]`. `normaliseLayout` reads one non-positive share as making the
+ * whole ratio unusable and flattens the tab to an even split on the next
+ * `store.read()`, so the cost lands on every pane in the tab rather than on the
+ * one that was dragged.
+ *
+ * Recorded, not fixed: whether the guard belongs at the handler, at
+ * `routeShares`, or here is Paolo's call. Note that guarding `owed` alone would
+ * not close the drag path — `routeShares` keeps a zero for a SAVED kid in
+ * `ratio` too, where it reaches the row without passing through a claim at all.
  */
 export function sharesAroundClaims(
   entries: readonly { claim?: number; base: number }[],
@@ -176,6 +205,11 @@ export function sharesAroundClaims(
   const total = held + bases
   return total > 0 ? shares.map((share) => share / total) : entries.map(() => 1 / entries.length)
 }
+
+/** `routeShares`'s answer: the row's ratio and the record's shares, or a refusal. */
+export type RoutedShares =
+  | { ok: true; ratio: number[]; owed: { id: string; share: number }[] }
+  | { ok: false; why: string }
 
 /**
  * A layout message's shares, split into what belongs in the row and what
@@ -205,10 +239,6 @@ export function sharesAroundClaims(
  * it is a projection — while `owed` is not, and that is stated rather than
  * defended.
  */
-export type RoutedShares =
-  | { ok: true; ratio: number[]; owed: { id: string; share: number }[] }
-  | { ok: false; why: string }
-
 export function routeShares(
   shares: Readonly<Record<string, number>>,
   savedKids: readonly string[],
@@ -264,6 +294,38 @@ export function layoutWrite(
 }
 
 /**
+ * `claims`, with every share this tab still owes grown into the space a
+ * dismissed pane left.
+ *
+ * A dismiss is the one event that removes a pane from a tab without either
+ * side rebuilding the row: the renderer drops the kid and renormalises what is
+ * left (see `workspace.ts`'s `withoutKid`), so every surviving share — live
+ * pane and tombstone alike — becomes a fraction of a smaller tab. Main has to
+ * follow, or its record and the renderer's row are in two frames again, which
+ * is the defect this whole plan exists to remove.
+ *
+ * Only this tab's claims, because `gone` is a fraction of this tab.
+ * `gone <= 0` and `gone >= 1` are both left alone rather than divided by:
+ * nothing was owed, or the whole tab was, and neither has a rescale that means
+ * anything. A close needs none of this — the renderer keeps a tombstone at its
+ * prior share across `closedPane` and scales main's row into the rest, so the
+ * two already agree.
+ */
+export function rescaledClaims(
+  tabId: string,
+  gone: number,
+  claims: ReadonlyMap<string, Claim>,
+): Map<string, Claim> {
+  const room = 1 - gone
+  if (!(gone > 0 && room > 0)) return new Map(claims)
+  return new Map(
+    [...claims].map(([id, held]) =>
+      held.tabId === tabId ? [id, { ...held, share: held.share / room }] : [id, held],
+    ),
+  )
+}
+
+/**
  * The `live` ids' shares, re-expressed as shares of what they hold between
  * them — selected out of a whole-tab vector by pane id, not by position.
  *
@@ -304,38 +366,6 @@ export function layoutWrite(
  * states and nothing tests, in a change whose whole point is that a share
  * travels with the pane it belongs to, not with a position in an array.
  */
-/**
- * `claims`, with every share this tab still owes grown into the space a
- * dismissed pane left.
- *
- * A dismiss is the one event that removes a pane from a tab without either
- * side rebuilding the row: the renderer drops the kid and renormalises what is
- * left (see `workspace.ts`'s `withoutKid`), so every surviving share — live
- * pane and tombstone alike — becomes a fraction of a smaller tab. Main has to
- * follow, or its record and the renderer's row are in two frames again, which
- * is the defect this whole plan exists to remove.
- *
- * Only this tab's claims, because `gone` is a fraction of this tab.
- * `gone <= 0` and `gone >= 1` are both left alone rather than divided by:
- * nothing was owed, or the whole tab was, and neither has a rescale that means
- * anything. A close needs none of this — the renderer keeps a tombstone at its
- * prior share across `closedPane` and scales main's row into the rest, so the
- * two already agree.
- */
-export function rescaledClaims(
-  tabId: string,
-  gone: number,
-  claims: ReadonlyMap<string, Claim>,
-): Map<string, Claim> {
-  const room = 1 - gone
-  if (!(gone > 0 && room > 0)) return new Map(claims)
-  return new Map(
-    [...claims].map(([id, held]) =>
-      held.tabId === tabId ? [id, { ...held, share: held.share / room }] : [id, held],
-    ),
-  )
-}
-
 export function inLiveFrame(
   whole: readonly number[],
   ids: readonly string[],
