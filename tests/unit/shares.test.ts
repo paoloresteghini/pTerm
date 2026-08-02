@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { sharesAroundClaims, tabRowFor } from '../../src/main/ipc/restore'
+import { sharesAroundClaims, claimFor, tombstonesOf } from '../../src/main/ipc/shares'
+import { tabRowFor } from '../../src/main/ipc/restore'
 import type { TabRow } from '../../src/main/state/store'
 
 /**
@@ -134,5 +135,53 @@ describe('sharesAroundClaims', () => {
   // `share / total` rescale it replaced at both call sites.
   it('is a plain rescale when nothing is claimed', () => {
     expect(sharesAroundClaims([{ base: 3 }, { base: 1 }])).toEqual([0.75, 0.25])
+  })
+})
+
+describe('tombstonesOf', () => {
+  const claims = new Map([
+    ['b', { tabId: 'tab1', share: 0.2 }],
+    ['c', { tabId: 'tab1', share: 0.3 }],
+    ['far', { tabId: 'tab2', share: 0.4 }],
+  ])
+
+  it('answers with the claims this tab’s kids do not name', () => {
+    expect(tombstonesOf('tab1', ['a', 'c'], claims)).toEqual([{ id: 'b', share: 0.2 }])
+  })
+
+  it('reads only its own tab’s claims', () => {
+    // Two tabs with unspent claims at once — the state that made the tab-id
+    // filter vacuously true everywhere for a milestone. Without it, `far`
+    // would be reported as a tombstone of tab1 and 0.4 of that tab would be
+    // held back for a pane in another one.
+    expect(tombstonesOf('tab1', ['a'], claims).map((entry) => entry.id)).toEqual(['b', 'c'])
+    expect(tombstonesOf('tab2', ['a'], claims)).toEqual([{ id: 'far', share: 0.4 }])
+  })
+
+  it('is empty when every claim has been spent', () => {
+    expect(tombstonesOf('tab1', ['a', 'b', 'c'], claims)).toEqual([])
+  })
+
+  it('is empty for a tab with no claims at all, which is every tab that has never lost a pane', () => {
+    expect(tombstonesOf('tab3', ['a', 'b'], claims)).toEqual([])
+  })
+})
+
+describe('claimFor', () => {
+  const claims = new Map([['b', { tabId: 'tab1', share: 0.2 }]])
+
+  it('gives the share a pane is owed in the tab that owes it', () => {
+    expect(claimFor('tab1', 'b', claims)).toBeCloseTo(0.2)
+  })
+
+  it('gives nothing for the same pane read against another tab', () => {
+    // The same filter `tombstonesOf` applies, in the other half of the split:
+    // a claim is a fraction of ONE tab, and reading it against a different one
+    // would put a share of somebody else's tab into this row.
+    expect(claimFor('tab2', 'b', claims)).toBeUndefined()
+  })
+
+  it('gives nothing for a pane nothing was recorded for', () => {
+    expect(claimFor('tab1', 'zzz', claims)).toBeUndefined()
   })
 })

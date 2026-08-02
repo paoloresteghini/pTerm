@@ -3,6 +3,7 @@ import type { SessionManager, PaneRecord } from '../sessions/manager'
 import type { ConfigStore, ProjectRecord, TabRow } from '../state/store'
 import { readManifest, mergePresets } from '../projects/manifest'
 import { isDirectory } from '../fsutil'
+import { sharesAroundClaims } from './shares'
 // One definition, shared with the renderer — `TabDescriptor` and `PaneRecord`
 // are the same shape, and duplicating the types here would let them drift.
 import {
@@ -161,93 +162,6 @@ async function withoutSharedWindows(
 }
 
 /**
- * Shares for one row's kids, where a `claim` is a share of the WHOLE tab and a
- * `base` is a share of whatever that leaves.
- *
- * Every kid whose share is derived from the saved row supplies a `base`; those
- * bases are meaningful only relative to one another, so they are normalised
- * among themselves and then scaled into `room` — what the claims do not take.
- * A kid with a `claim` gets that claim untouched. The vector therefore sums to
- * 1 by construction rather than by a rescale bolted on to cover a gap.
- *
- * A claim is what a remembered share is, on Paolo's ruling: a pane that died
- * at 0.3 of its tab comes back at 0.3 of its tab, not at 0.3 of a row that has
- * already claimed the whole of it. Injecting the remembered share alongside
- * the saved-derived ones and renormalising the lot was the other candidate and
- * it does not deliver that — measured, a pane that died at 0.3 came back at
- * 0.231. "The user can drag it back" is the argument this plan's Ruling 2
- * already rejected for the split path; it is no better here.
- *
- * **The renderer's own rule for the arithmetic — and only the arithmetic.**
- * `withKeptPanes` in `src/renderer/workspace.ts` solves this exact problem
- * for a tombstone on screen, with the same `held`/`room` shape and the same
- * two guards, and given the SAME claims the two agree: a remembered share is
- * scaled in, never renormalised away. What they are not given is the same
- * claims, and that is where the two sides are known to disagree rather than
- * agree.
- *
- * This function only ever sees a claim for a pane that is a LIVE sibling at
- * the moment `carveRatio`/`tabRowFor` rebuilds the row — `register.ts`'s
- * `splitPane`/`closePane` build `siblings`/`ids` from what tmux and the saved
- * row currently show, and a pane that is still a tombstone is neither.
- * `withKeptPanes` sees a claim for every pane still in the renderer's
- * `state.dead`, live sibling or not. A pane that died and has not been
- * restarted is therefore a claim on the renderer's side and no claim at all
- * here — `register.ts`'s `claimForDeath` names this the same open gap from
- * main's side; see its doc.
- *
- * Traced, not hypothetical. Tab `A .5 / C .3 / B .2`. B dies and is never
- * restarted. C dies and IS restarted before the next split. The user splits
- * A. Main rebuilds the row over `siblings = [A, C]` — B is not live, so its
- * claim never reaches this function, and A/C/the new pane divide the WHOLE
- * tab among themselves: A 0.35, new 0.35, C 0.30 (C's claim correctly
- * recovered at exactly what it died at — the two-death case `claimForDeath`
- * gets right). The renderer, independently, still lists B in `state.dead` and
- * `withKeptPanes` reserves its 0.2 on top of that already-whole vector,
- * scaling everything else down to make room a second time: measured, C ends
- * up drawn at 0.24, not 0.30, though nobody touched it. That is the drift a
- * "not a second rule" claim would paper over — the arithmetic is one rule,
- * agreed on both sides; the INPUT to it is not, and fixing that needs a death
- * ordinal or an equivalent, which is deliberately not attempted in this wave.
- *
- * **With no claim among the entries this is arithmetically today's code.**
- * `held` is 0, `room` is 1, and every base is divided by the total of the
- * bases — which is precisely the `share / total` rescale both call sites used
- * to do inline. That is why no existing expectation moves, and it is a
- * property worth knowing rather than assuming.
- *
- * The two guard CONDITIONS are `withKeptPanes`'s, for its reasons: claims
- * summing to 1 or more leave no room, and bases summing to nothing leave
- * nothing to scale. What is done about them is not the same, and this is the
- * better half of the pair — `withKeptPanes` falls back to an even split, which
- * by its own admission resizes every tombstone, while this renormalises the
- * entries in the proportions they came in with, which preserves them. Only an
- * all-zero set, where there are no proportions to preserve, falls back to an
- * even split here. A zero share would otherwise be a 0%-wide box, which fits
- * to tmux's floor of 2x1 — the geometry defect wearing different numbers.
- *
- * A claim of exactly 0 would slip both guards and produce that 0%-wide box, so
- * it is refused at the writer instead: `normaliseLayout` returns only shares
- * greater than 0, and `register.ts`'s `forgetTab` — the only producer of a
- * claim — records nothing otherwise. Cited here rather than defended a second
- * time, because a zero claim is a caller error and there is no non-arbitrary
- * share for this function to invent in its place.
- */
-export function sharesAroundClaims(
-  entries: readonly { claim?: number; base: number }[],
-): number[] {
-  const held = entries.reduce((sum, entry) => sum + (entry.claim ?? 0), 0)
-  const room = 1 - held
-  const bases = entries.reduce((sum, entry) => sum + (entry.claim === undefined ? entry.base : 0), 0)
-  if (room > 0 && bases > 0) {
-    return entries.map((entry) => entry.claim ?? (entry.base / bases) * room)
-  }
-  const shares = entries.map((entry) => entry.claim ?? entry.base)
-  const total = held + bases
-  return total > 0 ? shares.map((share) => share / total) : entries.map(() => 1 / entries.length)
-}
-
-/**
  * The tab row for one tab, given the panes it holds and the row saved for it.
  *
  * Existence is settled before this runs — `ids` is what the tab actually
@@ -280,7 +194,8 @@ export function tabRowFor(
    * The share a pane held when it died, as a fraction of the whole tab, by
    * pane id — for kids the saved row does not know, whose row entry went with
    * them. Absent for restore, which prunes dead panes at launch and so never
-   * meets one. Only `share` is read; see `register.ts`'s `shareWhenItDied`.
+   * meets one. Only `share` is read; see `register.ts`'s `tombstones` and
+   * `shares.ts`'s `Claim`.
    */
   remembered?: ReadonlyMap<string, { share: number }>,
 ): TabRow {
@@ -295,8 +210,8 @@ export function tabRowFor(
   // and came back — claims the share it died at outright, and the rest scale
   // into what that leaves. Anything else takes an even share. `store.read()`
   // has already made the saved shares positive, finite and one per kid, and it
-  // is the same reader `shareWhenItDied` captures through, so both inputs here
-  // are shares of a whole tab.
+  // is the same reader `register.ts`'s `tombstones` is captured through, so
+  // both inputs here are shares of a whole tab.
   //
   // The rescale that used to live here is `sharesAroundClaims`'s job now, and
   // it is not optional: dropping a kid leaves the survivors summing to less

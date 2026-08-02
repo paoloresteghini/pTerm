@@ -18,14 +18,14 @@ describe('claimForDeath', () => {
     // Two tabs, each with one unspent claim. If the tab-id filter were
     // dropped, tab2's claim would leak into tab1's `taken` and shrink this
     // claim below what it should be.
-    const shareWhenItDied = new Map([
+    const tombstones = new Map([
       ['other-pane', { tabId: 'tab2', share: 0.4 }],
     ])
     const claim = claimForDeath({
       share: 0.3,
       tabId: 'tab1',
       kids: ['a', 'c'],
-      shareWhenItDied,
+      tombstones,
     })
     // No claim recorded for tab1, so taken = 0 and the pane's own share
     // passes through untouched.
@@ -36,12 +36,12 @@ describe('claimForDeath', () => {
     // 'b' died once, was restarted, and a split or a close has already
     // written it back into the row (so it is a kid again). Its old claim
     // must not still discount a fresh death in the same tab.
-    const shareWhenItDied = new Map([['b', { tabId: 'tab1', share: 0.2 }]])
+    const tombstones = new Map([['b', { tabId: 'tab1', share: 0.2 }]])
     const claim = claimForDeath({
       share: 0.3,
       tabId: 'tab1',
       kids: ['a', 'b', 'c'], // 'b' is present: its claim is spent
-      shareWhenItDied,
+      tombstones,
     })
     expect(claim).toBeCloseTo(0.3)
   })
@@ -55,7 +55,7 @@ describe('claimForDeath', () => {
       share: 0.3,
       tabId: 'tab1',
       kids: ['a', 'b', 'c'],
-      shareWhenItDied: new Map(),
+      tombstones: new Map(),
     })
     expect(claim).toBeCloseTo(0.3)
   })
@@ -66,12 +66,12 @@ describe('claimForDeath', () => {
     // 0.625/0.375. C then dies too, with B's claim still unspent: this must
     // discount B's claim out of C's before converting, recovering C's true
     // 0.3 rather than leaving it at 0.375.
-    const shareWhenItDied = new Map([['b', { tabId: 'tab1', share: 0.2 }]])
+    const tombstones = new Map([['b', { tabId: 'tab1', share: 0.2 }]])
     const claim = claimForDeath({
       share: 0.375,
       tabId: 'tab1',
       kids: ['a', 'c'], // the row as it stood the instant C died
-      shareWhenItDied,
+      tombstones,
     })
     expect(claim).toBeCloseTo(0.3)
   })

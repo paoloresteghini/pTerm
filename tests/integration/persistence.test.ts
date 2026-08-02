@@ -1707,7 +1707,8 @@ describe('splitPane and closePane', () => {
    * (`withKeptPanes`), so nothing on screen moved. Main's side did not:
    * `forgetTab` drops the pane's row at its death, so the next rebuild of that
    * tab's row met a kid the saved row had never heard of and handed it an even
-   * share. `shareWhenItDied` is what main remembers across those two events.
+   * share. `register.ts`'s `tombstones` is what main remembers across those
+   * two events.
    *
    * All THREE shares are asserted, not just the restarted pane's. Before the
    * fix every share here is 1/3 — `shareOf` falls through to
@@ -1769,7 +1770,7 @@ describe('splitPane and closePane', () => {
    * The same ruling on the OTHER rebuild of a tab's row.
    *
    * `splitPane` goes through `carveRatio` and `closePane` through
-   * `tabRowFor`, and both now read the same `shareWhenItDied` through the same
+   * `tabRowFor`, and both now read the same `tombstones` through the same
    * `sharesAroundClaims`. One authority, so the two cannot drift — but a
    * passing suite is what makes that true tomorrow, and with only the split
    * test above, dropping the map from `closePane`'s call would leave every
