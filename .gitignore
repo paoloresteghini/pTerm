@@ -6,3 +6,8 @@ out/
 .superpowers/
 *.log
 test-results/
+# Playwright's HTML reporter writes here. Added on `e2e-plan-revision` ahead of
+# the plan's Task 4, which turns that reporter on: without this line Task 4's
+# own "git diff on production files must be empty" gate trips on the report it
+# just generated.
+playwright-report/
