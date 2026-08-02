@@ -762,11 +762,34 @@ export function registerIpc(
           // dead-key failure the ruling exists to avoid, reached from the other
           // side. A tab of one pane has no axis on screen to preserve.
           dir: saved && siblings.length > 1 ? saved.layout.dir : dir,
-          // Even across the kids. A share carved out of the sibling's alone
-          // would preserve the other panes' widths, but it would also let a
-          // tab split repeatedly hand each new pane a sliver of a sliver;
-          // ratios are the one thing the user can drag straight back.
-          ratio: kids.map(() => 1 / kids.length),
+          // Carved out of the pane being split: it keeps half its share and
+          // the new pane takes the other half. Every other pane's width is
+          // untouched, so the sum is preserved by construction with no rescale.
+          //
+          // This overturns plan 2b's even split, whose stated reason was that
+          // "ratios are the one thing the user can drag straight back" — drag
+          // did not exist then, and recoverable is not the same as not
+          // destroyed. 2b's objection to carving was that repeated splits hand
+          // each new pane a sliver of a sliver; that is answered by the floor,
+          // which makes `splitActive` refuse such a split before it is sent.
+          //
+          // A kid the saved row does not know has no share to halve — a
+          // restarted pane, whose row entry went when it died. `shareOf` falls
+          // back to an even share for it; Task 8 gives it the share it had.
+          ratio: (() => {
+            const sourceAt = siblings.indexOf(paneId)
+            const savedRatio = saved?.layout.ratio ?? []
+            const shareOf = (id: string): number => {
+              const at = savedKids.indexOf(id)
+              return at === -1 ? 1 / siblings.length : (savedRatio[at] ?? 1 / siblings.length)
+            }
+            const source = sourceAt === -1 ? 1 / kids.length : shareOf(paneId)
+            const shares = kids.map((kid) =>
+              kid === record.id || kid === paneId ? source / 2 : shareOf(kid),
+            )
+            const total = shares.reduce((sum, share) => sum + share, 0)
+            return total > 0 ? shares.map((share) => share / total) : kids.map(() => 1 / kids.length)
+          })(),
           kids,
         },
       }

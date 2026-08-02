@@ -1586,6 +1586,24 @@ describe('splitPane and closePane', () => {
     expect(row?.layout.ratio).toHaveLength(2)
     expect(row?.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
   })
+
+  it('carves the new pane out of the pane being split, leaving others alone', async () => {
+    const { founder, second } = await splitOnce()
+    ipc.listeners.get(CHANNELS.setLayout)?.(null as never, founder.id as never, [0.7, 0.3] as never)
+    await settle(200)
+
+    // Split the 30, which should become two 15s and leave the 70 untouched.
+    const shape = await invoke<TabShape>(CHANNELS.splitPane, {
+      paneId: second.id, dir: 'row', cols: 40, rows: 20,
+    })
+    await waitForPrompt(shape.panes[shape.panes.length - 1].id)
+    const row = shape.tabs[0]
+    expect(row.layout.kids).toHaveLength(3)
+    const at = (id: string): number => row.layout.ratio[row.layout.kids.indexOf(id)]
+    expect(at(founder.id)).toBeCloseTo(0.7)
+    expect(at(second.id)).toBeCloseTo(0.15)
+    expect(row.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+  })
 })
 
 describe('project channels', () => {

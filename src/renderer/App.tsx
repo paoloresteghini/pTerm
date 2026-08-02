@@ -173,6 +173,27 @@ export function App() {
       const row = tabOfPane(state, activePaneId)
       const drawn = row ? panesOfTab(state, row.id) : []
       const axis = row && drawn.length > 1 ? row.layout.dir : dir
+      // Refused here rather than in main, because this is where the only
+      // cell-accurate numbers are: main has no idea what a column is. Checked
+      // against `axis`, not the requested `dir` — a split on a tab already
+      // split with more than one pane is added along the tab's OWN axis
+      // regardless of which shortcut asked for it (the ruling just above), so
+      // `dir` alone can name the wrong dimension: a tab split `row` and then
+      // asked for ⇧⌘D (`dir` = `col`) still carves along `row`, and a check
+      // against `dir` would test `grid.rows` against `MIN_PANE_ROWS` while the
+      // carve that actually happens tests `grid.cols` against
+      // `MIN_PANE_COLS` — the wrong pair, in both directions: a genuinely
+      // too-narrow carve could pass unrefused, and a genuinely fine one could
+      // be refused for a floor that was never in play. A split that cannot
+      // give the new pane its floor would produce a pane too small to use,
+      // which is 2b's "sliver of a sliver" answered before it happens rather
+      // than tolerated after.
+      const wouldBe = axis === 'row' ? half(grid.cols) : half(grid.rows)
+      const floor = axis === 'row' ? MIN_PANE_COLS : MIN_PANE_ROWS
+      if (wouldBe < floor) {
+        setError(`Not enough room to split: a pane needs at least ${floor} ${axis === 'row' ? 'columns' : 'rows'}`)
+        return
+      }
       window.prcli
         .splitPane({
           paneId: activePaneId,

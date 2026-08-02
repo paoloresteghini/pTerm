@@ -78,6 +78,40 @@ const main = readCode('../../src/main/index.ts')
 const shared = readCode('../../src/shared/ipc.ts')
 const terminal = readCode('../../src/renderer/Terminal.tsx')
 
+/**
+ * The source of a function, from its declaration to the closing bracket of
+ * the outer call that defines it — every case this file scopes is a
+ * `useCallback(...)`. Generic depth over all three bracket types together,
+ * not `(` counted separately from `{` and `[`: well-formed code cannot close
+ * one kind out of order with another, so a single counter still lands on the
+ * true match without having to know which kind opened it.
+ *
+ * Bounding matters here for the reason `elements()` bounds a JSX tag in
+ * appLayout.test.ts: matching a constant against the whole file passes
+ * whether or not the function under test does anything with it. `grabPane`
+ * (Task 4) already uses `MIN_PANE_COLS` a few hundred characters below
+ * `splitActive` — an assertion that never scoped past `app` itself would be
+ * satisfied by that alone, refusal or no refusal.
+ */
+function functionBody(source: string, declaration: string): string {
+  const start = source.indexOf(declaration)
+  expect(start).not.toBe(-1)
+  const openAt = source.indexOf('(', start)
+  expect(openAt).not.toBe(-1)
+  let depth = 0
+  let i = openAt
+  for (; i < source.length; i++) {
+    if ('([{'.includes(source[i])) depth++
+    else if (')]}'.includes(source[i])) depth--
+    if (depth === 0) {
+      i++
+      break
+    }
+  }
+  if (depth !== 0) throw new Error(`No matching close for ${declaration}`)
+  return source.slice(start, i)
+}
+
 /** Every member of the `MenuCommand` union, in declaration order. */
 function menuCommands(): string[] {
   const union = /export type MenuCommand =\s*\|?\s*('\w+'(?:\s*\|\s*'\w+')*)/.exec(shared)
@@ -220,5 +254,29 @@ describe('focus follows the active pane', () => {
     expect(app).toMatch(/focused=\{/)
     expect(terminal).toMatch(/if \(!focused\) return/)
     expect(terminal).toMatch(/termRef\.current\?\.focus\(\)/)
+  })
+})
+
+describe('splitActive refuses a split that would breach the floor', () => {
+  it('refuses a split that would breach the floor', () => {
+    // The check lives beside the only cell-accurate numbers in the system.
+    // Main has no idea what a column is, so it cannot make this call.
+    //
+    // Scoped to splitActive's own body, not matched against the whole file:
+    // Task 4's MIN_PANE_COLS already appears in grabPane's own floor
+    // (App.tsx, around line 296), so `expect(app).toMatch(/MIN_PANE_COLS/)`
+    // passes today, before splitActive refuses anything at all.
+    const body = functionBody(app, 'const splitActive = useCallback(')
+    expect(body).toMatch(/MIN_PANE_COLS/)
+    expect(body).toMatch(/MIN_PANE_ROWS/)
+    // Not a mention — the refusal itself: a halved grid dimension, taken for
+    // whichever axis is being split, set against the floor for that same
+    // axis, and then actually compared with `<`. Three separate assertions
+    // rather than one loose one, so that a refusal which drops one axis, or
+    // which compares the wrong pair, fails here instead of sliding through
+    // a regex broad enough to match both correct and broken code alike.
+    expect(body).toMatch(/half\(grid\.cols\)\s*:\s*half\(grid\.rows\)/)
+    expect(body).toMatch(/MIN_PANE_COLS\s*:\s*MIN_PANE_ROWS/)
+    expect(body).toMatch(/wouldBe\s*<\s*floor/)
   })
 })
