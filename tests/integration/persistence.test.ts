@@ -1604,6 +1604,93 @@ describe('splitPane and closePane', () => {
     expect(at(second.id)).toBeCloseTo(0.15)
     expect(row.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
   })
+
+  // The reviewer's Critical, reproduced for real: `carveRatio`'s
+  // `tests/unit/carveRatio.test.ts` covers the arithmetic in isolation; this
+  // proves the wiring around it — that a pane restarted after its sibling's
+  // row entry went at its death is genuinely detected as "unclaimed" through
+  // live tmux and `config.panes`, the way `splitThenRestartSibling` above
+  // establishes, and that `splitPane` feeds it to `carveRatio` as such.
+  //
+  // Two assertions, not one, because a review round's own A/B found that the
+  // obvious one is not enough. The RELATIVE proportion between the two known
+  // panes (A and C, saved at 0.6:0.4) surviving B's dilution is a real,
+  // worth-having property — but it turns out to hold no matter what share B
+  // is given, correctly computed or not: A and C's own shares never read
+  // B's value, so B only changes the common total everyone divides by, and
+  // that total cancels out of a ratio taken between two panes that both
+  // divide by it. A `splitPane` that dropped B's share to zero would still
+  // pass that assertion. What actually catches it is checking B's OWN final
+  // share is positive — see `carveRatio`'s doc comment for the full account
+  // of why both checks are needed and neither alone is.
+  it('dilutes every known share evenly when carving beside an unclaimed sibling, and keeps their relative sizes', async () => {
+    const { founder, second } = await splitOnce() // A, B — kids [A, B]
+    const split2 = await invoke<TabShape>(CHANNELS.splitPane, {
+      paneId: founder.id, dir: 'row', cols: 100, rows: 30,
+    })
+    expect(split2.panes).toHaveLength(3)
+    const third = split2.panes[1] // C, inserted after A: kids [A, C, B]
+    await waitForPrompt(third.id)
+    expect(split2.tabs[0].layout.kids).toEqual([founder.id, third.id, second.id])
+
+    // A:C:B set to 0.3:0.2:0.5 — chosen so that once B's row entry is gone,
+    // A and C rescale to exactly 0.6:0.4, a round pair that is easy to check.
+    ipc.listeners.get(CHANNELS.setLayout)?.(
+      null as never,
+      founder.id as never,
+      [0.3, 0.2, 0.5] as never,
+    )
+    await settle(200)
+
+    // B dies and comes back the way `splitThenRestartSibling` above
+    // establishes: running, back in `config.panes`, claimed by no row.
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const secondWindow = await adapter.windowIdOf(second.tmuxSession)
+    expect(secondWindow).toMatch(/^@\d+$/)
+    const exitEvent = waitForExitEvent(second.id)
+    await run('tmux', [
+      '-L', SOCKET,
+      'kill-session', '-t', `=${second.tmuxSession}`, ';', 'kill-window', '-t', secondWindow,
+    ])
+    await exitEvent
+    await expect(adapter.hasSession(second.tmuxSession)).resolves.toBe(false)
+    const restarted = await invoke<TabDescriptor>(CHANNELS.restartTab, {
+      tab: second, cols: 100, rows: 30,
+    })
+    await expect.poll(() => adapter.hasSession(restarted.tmuxSession), { timeout: 8000 }).toBe(true)
+
+    // The precondition: A and C alone in the row, rescaled to 0.6/0.4, and B
+    // back on disk but claimed by nothing.
+    const before = await written()
+    expect(before.panes.map((pane) => pane.id).sort()).toEqual(
+      [founder.id, third.id, second.id].sort(),
+    )
+    const beforeRow = before.tabs.find((candidate) => candidate.id === founder.id)
+    expect(beforeRow).toBeDefined()
+    expect(beforeRow?.layout.kids).toEqual([founder.id, third.id])
+    expect(beforeRow?.layout.ratio[0]).toBeCloseTo(0.6)
+    expect(beforeRow?.layout.ratio[1]).toBeCloseTo(0.4)
+
+    // Split A again. B is live, in this tab's tmux group, and in
+    // `config.panes` — but the row just proved it has no seat in
+    // `layout.kids`, which is exactly `splitPane`'s "unclaimed sibling" case.
+    const split3 = await invoke<TabShape>(CHANNELS.splitPane, {
+      paneId: founder.id, dir: 'row', cols: 40, rows: 20,
+    })
+    const fourth = split3.panes[1] // D, inserted after A: kids [A, D, C, B]
+    await waitForPrompt(fourth.id)
+    const row = split3.tabs[0]
+    expect(row.layout.kids).toEqual([founder.id, fourth.id, third.id, second.id])
+    const at = (id: string): number => row.layout.ratio[row.layout.kids.indexOf(id)]
+
+    // Real, worth having — and, per the comment above, NOT what actually
+    // proves B's dilution happened.
+    expect(at(third.id) / (at(founder.id) + at(fourth.id))).toBeCloseTo(0.4 / 0.6)
+    // The assertion that does: B ends up with some share of the axis.
+    expect(at(second.id)).toBeGreaterThan(0)
+    // Necessary, not sufficient on its own — see the comment above.
+    expect(row.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+  })
 })
 
 describe('project channels', () => {

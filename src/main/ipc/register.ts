@@ -32,6 +32,94 @@ import {
   updateProject,
 } from '../projects/projects'
 
+/**
+ * The new pane's ratio, carved out of the pane it split from.
+ *
+ * `sourcePaneId` keeps half its own share and `newPaneId` takes the other
+ * half. Every OTHER kid the saved row already knew about keeps the share
+ * that row had for it — that part genuinely is untouched, and does not need
+ * the normalisation below to make it true.
+ *
+ * The part that is easy to miss is `siblings`, not `savedKids`: `siblings`
+ * is the saved row's kids UNIONED with any live pane that row does not
+ * mention — an "unclaimed" sibling, which today means exactly one thing: a
+ * pane that died and was restarted, whose row entry `forgetTab` dropped at
+ * its death and nothing has put back (`shareOf`'s `at === -1` branch, below,
+ * is where that is felt). Such a pane has no saved share to carry forward,
+ * so it is handed a SYNTHETIC one — an even split of the axis — landed on
+ * top of shares that, for the OTHER kids, already summed to 1. The vector
+ * `shares` builds is therefore not guaranteed to sum to 1 on its own; the
+ * `total > 0 ? shares.map(...) : ...` line is what makes it, and whenever an
+ * unclaimed sibling is present that normalisation is load-bearing, not
+ * vestigial. It moves every OTHER kid's share too — including a pane the
+ * user did not touch at all, which sounds like the very thing this carve
+ * exists to prevent.
+ *
+ * It is not, and the distinction is the point: what a carve preserves is not
+ * the ABSOLUTE width of an untouched pane — it cannot, once a pane with no
+ * accounted-for share is back in the room, somebody has to make space for it
+ * — but the RELATIVE proportion among the kids whose shares were already
+ * known. Two panes at a saved 0.6:0.4 stay at 0.6:0.4 relative to each other
+ * once an unclaimed sibling dilutes both by the same factor, because the
+ * dilution is a single scalar applied to every known share alike, and that
+ * scalar cancels out of a ratio taken between two known kids. `sum ≈ 1`
+ * cannot tell a correct dilution from an unclaimed sibling that was ignored
+ * outright — the normalisation forces the sum to 1 either way.
+ *
+ * Neither, for the same reason, can the relative-proportion check above: two
+ * known kids' ratio to each other is the SAME whether the unclaimed
+ * sibling's share was computed correctly, computed wrong, or dropped to zero
+ * — the common total the ratio divides through by cancels regardless of what
+ * put it there. Proving the unclaimed sibling was actually accounted for
+ * needs a THIRD kind of check: that pane's own final share is positive. Both
+ * checks are real and both are necessary; neither is sufficient alone. Both
+ * are in `tests/unit/carveRatio.test.ts`'s "dilutes every known share evenly
+ * ..." test, which also carries the A/B that found this — the
+ * relative-proportion assertion alone did not fail when the unclaimed
+ * sibling's share was zeroed, which is the reason the third check exists.
+ *
+ * This overturns plan 2b's even split, whose stated reason was that "ratios
+ * are the one thing the user can drag straight back" — drag did not exist
+ * then, and recoverable is not the same as not destroyed. 2b's objection to
+ * carving was that repeated splits hand each new pane a sliver of a sliver;
+ * that is answered by the floor, which makes `splitActive` refuse such a
+ * split before it is sent.
+ *
+ * Task 8 changes the unclaimed case above, on Paolo's ruling: a remembered
+ * kid's share becomes a claim on the WHOLE tab, with every saved share
+ * scaled into whatever is left over, so the vector this returns sums to 1 by
+ * construction and the normalisation stops being load-bearing. `shareOf`'s
+ * `at === -1` fallback is the seam that ruling lands on — this task only
+ * makes today's fallback correct, not gone.
+ *
+ * Exported and pure — no `store`, no `manager`, nothing captured from
+ * `registerIpc`'s closure — so the case above can be pinned in
+ * `tests/unit/carveRatio.test.ts` without a real tmux session anywhere near
+ * it, the way the integration test that exercises the real "which sibling is
+ * unclaimed" detection cannot afford to for every case.
+ */
+export function carveRatio(params: {
+  kids: string[]
+  sourcePaneId: string
+  newPaneId: string
+  siblings: string[]
+  savedKids: string[]
+  savedRatio: number[]
+}): number[] {
+  const { kids, sourcePaneId, newPaneId, siblings, savedKids, savedRatio } = params
+  const sourceAt = siblings.indexOf(sourcePaneId)
+  const shareOf = (id: string): number => {
+    const at = savedKids.indexOf(id)
+    return at === -1 ? 1 / siblings.length : (savedRatio[at] ?? 1 / siblings.length)
+  }
+  const source = sourceAt === -1 ? 1 / kids.length : shareOf(sourcePaneId)
+  const shares = kids.map((kid) =>
+    kid === newPaneId || kid === sourcePaneId ? source / 2 : shareOf(kid),
+  )
+  const total = shares.reduce((sum, share) => sum + share, 0)
+  return total > 0 ? shares.map((share) => share / total) : kids.map(() => 1 / kids.length)
+}
+
 export function registerIpc(
   manager: SessionManager,
   getWindow: () => BrowserWindow | null,
@@ -762,34 +850,17 @@ export function registerIpc(
           // dead-key failure the ruling exists to avoid, reached from the other
           // side. A tab of one pane has no axis on screen to preserve.
           dir: saved && siblings.length > 1 ? saved.layout.dir : dir,
-          // Carved out of the pane being split: it keeps half its share and
-          // the new pane takes the other half. Every other pane's width is
-          // untouched, so the sum is preserved by construction with no rescale.
-          //
-          // This overturns plan 2b's even split, whose stated reason was that
-          // "ratios are the one thing the user can drag straight back" — drag
-          // did not exist then, and recoverable is not the same as not
-          // destroyed. 2b's objection to carving was that repeated splits hand
-          // each new pane a sliver of a sliver; that is answered by the floor,
-          // which makes `splitActive` refuse such a split before it is sent.
-          //
-          // A kid the saved row does not know has no share to halve — a
-          // restarted pane, whose row entry went when it died. `shareOf` falls
-          // back to an even share for it; Task 8 gives it the share it had.
-          ratio: (() => {
-            const sourceAt = siblings.indexOf(paneId)
-            const savedRatio = saved?.layout.ratio ?? []
-            const shareOf = (id: string): number => {
-              const at = savedKids.indexOf(id)
-              return at === -1 ? 1 / siblings.length : (savedRatio[at] ?? 1 / siblings.length)
-            }
-            const source = sourceAt === -1 ? 1 / kids.length : shareOf(paneId)
-            const shares = kids.map((kid) =>
-              kid === record.id || kid === paneId ? source / 2 : shareOf(kid),
-            )
-            const total = shares.reduce((sum, share) => sum + share, 0)
-            return total > 0 ? shares.map((share) => share / total) : kids.map(() => 1 / kids.length)
-          })(),
+          // See `carveRatio`'s own doc comment for what this does and does
+          // not preserve — in particular, for the "dilutes every known share
+          // evenly" case an unclaimed sibling produces, which is not a bug.
+          ratio: carveRatio({
+            kids,
+            sourcePaneId: paneId,
+            newPaneId: record.id,
+            siblings,
+            savedKids,
+            savedRatio: saved?.layout.ratio ?? [],
+          }),
           kids,
         },
       }
