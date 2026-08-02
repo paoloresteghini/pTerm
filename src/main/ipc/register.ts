@@ -396,6 +396,54 @@ export function registerIpc(
     })
   })
 
+  /**
+   * Write a dragged ratio down, once, when the pointer comes up.
+   *
+   * `ipcMain.on`, not `handle`: the renderer already has the layout on
+   * screen — it dispatched `resized` into `state.tabs` on every frame of the
+   * gesture, and `paneGroups` has been drawing from that the whole time. This
+   * handler exists only so the NEXT launch agrees, so there is nothing here
+   * worth a round trip or a rejection the caller would have to do anything
+   * with. A failed write costs a ratio, not a session.
+   *
+   * Sent once, on release, by `App.tsx`'s `commitLayout` — never per frame.
+   * `state.tabs` is where a gesture's ratios live while it runs precisely so
+   * that no push path from the renderer to here exists during a drag; adding
+   * one now would put several writes a second through a queue this same file
+   * shares with restore and the exit handler.
+   *
+   * A row for a tab this handler has no saved layout for is not invented: a
+   * missing `saved` means either a tab younger than this run's last read (its
+   * row comes from `CHANNELS.splitPane`, not from here) or one `store.read()`
+   * has already dropped for naming no live pane in its kids. Guessing a row
+   * into existence from a ratio alone would be inventing membership, which is
+   * exactly the thing `withTabRow` exists to never do implicitly.
+   *
+   * The length guard is the same shape of race: a ratio captured at
+   * `grabPane` describes the row as it stood at pointerdown, and a split or a
+   * close that lands mid-drag changes `kids` under it. A ratio of the wrong
+   * length pairs shares with the wrong kids, and the renderer's own next
+   * frame — drawn from the reducer's reply to whichever request won — is
+   * already correct, so this drops the stale write rather than repair it.
+   *
+   * Writes `config.tabs` and nothing else. Layout, never existence: a ratio
+   * has no business touching `config.panes`, and the "leaves the panes alone"
+   * test exists to catch a handler that reaches for it anyway.
+   */
+  ipcMain.on(CHANNELS.setLayout, (_event, tabId: string, ratio: number[]) => {
+    void serialise(async () => {
+      const config = await store.read()
+      const saved = config.tabs.find((row) => row.id === tabId)
+      if (!saved) return
+      if (ratio.length !== saved.layout.kids.length) return
+      const tabs = withTabRow(config.tabs, tabId, {
+        ...saved,
+        layout: { ...saved.layout, ratio },
+      })
+      await store.write({ ...config, tabs })
+    })
+  })
+
   ipcMain.handle(CHANNELS.addProject, (_event, input: { name: string; cwd: string }) =>
     serialise(async () => {
       const { config } = addProject(await store.read(), input)

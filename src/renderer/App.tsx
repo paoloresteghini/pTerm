@@ -327,18 +327,25 @@ export function App() {
   }, [])
 
   /**
-   * The end of a drag. A stub until Task 5, which writes the tab's ratios to
-   * disk from here — which is why it is called with the tab and not with
-   * nothing, and why the drag itself writes nothing: a persist per frame would
-   * be a file write per pointer move.
+   * The end of a drag: write the tab's ratios to disk, once. This is why it is
+   * called with the tab and not with nothing, and why the drag itself writes
+   * nothing — a persist per frame would be a file write per pointer move.
    *
    * It runs after every release of a divider, including one whose `grabPane`
    * refused and which therefore moved nothing: the divider reports a release it
-   * saw, and it has no way to know the caller declined the grab. Task 5 should
-   * expect that and write the ratios that are there, which in that case are the
-   * ones already on disk.
+   * saw, and it has no way to know the caller declined the grab. That is fine
+   * here — a tab with no row in `state.tabs` sends nothing, and one that has a
+   * row sends the ratios that are there, which in that case are the ones
+   * already on disk.
    */
-  const commitLayout = useCallback((_tabId: string) => undefined, [])
+  const commitLayout = useCallback(
+    (tabId: string) => {
+      const row = state.tabs.find((candidate) => candidate.id === tabId)
+      if (!row) return
+      window.prcli.setLayout(tabId, row.layout.ratio)
+    },
+    [state.tabs],
+  )
 
   useEffect(() => {
     let cancelled = false

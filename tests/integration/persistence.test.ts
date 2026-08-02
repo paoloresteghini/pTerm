@@ -1554,6 +1554,38 @@ describe('splitPane and closePane', () => {
     expect(config.panes).toEqual([])
     expect(config.tabs).toEqual([])
   })
+
+  it('writes a dragged ratio to the tab row and leaves the panes alone', async () => {
+    // `splitOnce` returns the FOUNDER, whose own id is the tab's id — there is
+    // no `tabId` field on a `TabDescriptor`, and reaching for one is the
+    // mistake this comment exists to stop.
+    const { founder, second } = await splitOnce()
+    const before = await written()
+    expect(before.panes).toHaveLength(2)
+
+    ipc.listeners.get(CHANNELS.setLayout)?.(null as never, founder.id as never, [0.7, 0.3] as never)
+    await settle(200)
+
+    const after = await written()
+    const row = after.tabs.find((candidate) => candidate.id === founder.id)
+    expect(row).toBeDefined()
+    expect(row?.layout.ratio).toEqual([0.7, 0.3])
+    expect(row?.layout.kids).toEqual([founder.id, second.id])
+    // A layout write must never touch existence.
+    expect(after.panes.map((pane) => pane.id).sort()).toEqual(
+      before.panes.map((pane) => pane.id).sort(),
+    )
+  })
+
+  it('ignores a ratio whose length does not match the row', async () => {
+    const { founder } = await splitOnce()
+    ipc.listeners.get(CHANNELS.setLayout)?.(null as never, founder.id as never, [0.5, 0.3, 0.2] as never)
+    await settle(200)
+    const after = await written()
+    const row = after.tabs.find((candidate) => candidate.id === founder.id)
+    expect(row?.layout.ratio).toHaveLength(2)
+    expect(row?.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+  })
 })
 
 describe('project channels', () => {

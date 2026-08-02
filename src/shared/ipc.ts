@@ -33,6 +33,7 @@ export const CHANNELS = {
   installHooks: 'prcli:installHooks',
   uninstallHooks: 'prcli:uninstallHooks',
   menuCommand: 'prcli:menuCommand',
+  setLayout: 'prcli:setLayout',
 } as const
 
 /**
@@ -446,4 +447,13 @@ export interface PrcliApi {
   installHooks(): Promise<HooksState>
   /** Removes only PRCLI's own hook groups, restoring the file it found. */
   uninstallHooks(): Promise<HooksState>
+  /**
+   * Persist a tab's ratios after a drag. Fire-and-forget: the renderer already
+   * has the layout on screen, and a failed write costs a ratio, not a session.
+   *
+   * Sent ONCE, on pointer release. Ratios live in renderer state during the
+   * gesture — throttled writes would push several a second through a queue
+   * shared with restore and the exit handler.
+   */
+  setLayout(tabId: string, ratio: number[]): void
 }
