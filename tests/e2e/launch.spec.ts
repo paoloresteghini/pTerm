@@ -1,24 +1,28 @@
 /**
  * The app starting, drawing a terminal, and finding its session again.
  *
- * Three tests, each against the packaged build (`npm run package` in
+ * Four tests, each against the packaged build (`npm run package` in
  * `beforeAll`) and a real tmux server on the `prcli-e2e` socket: typed input
  * reaches the shell and its output comes back; a quit and relaunch reattaches
- * the same session with its scrollback; and closing the window and reopening
- * it through macOS `activate` reattaches rather than replacing, leaving
- * exactly one `prcli-` session on the socket.
+ * the same session with its scrollback; closing the window and reopening it
+ * through macOS `activate` reattaches rather than replacing, leaving exactly
+ * one `prcli-` session on the socket; and a fourth that opens no tmux session
+ * at all — it reads the four `PRCLI_*` env vars back out of the launched
+ * app's own `process.env` and asserts each equals the temp path this file
+ * made for it, not merely that it is set to something.
  *
  * **Measured, 2026-08-02, this file run alone** (`npx playwright test
- * tests/e2e/launch.spec.ts`): renaming `data-testid="terminal"` to
- * `terminal-box` in `src/renderer/Terminal.tsx` fails all three — 3 failed,
- * 0 passed, reproduced on a second independent run. So the file is
- * load-bearing for a terminal being on screen at all. It is also the bluntest
- * of the four mutations Task 1 measured: everything here waits on that one
- * testid, so a failure in this file says "no terminal", not which of the
- * three behaviours broke. This file therefore has no recorded edit that it
- * survives: the one mutation measured against it took all three tests with
- * it, so there is nothing here of the "passes anyway" kind the other three
- * headers record.
+ * tests/e2e/launch.spec.ts`), against the three tests that existed at the
+ * time: renaming `data-testid="terminal"` to `terminal-box` in
+ * `src/renderer/Terminal.tsx` fails all three — 3 failed, 0 passed,
+ * reproduced on a second independent run. So the file is load-bearing for a
+ * terminal being on screen at all. It is also the bluntest of the four
+ * mutations Task 1 measured: everything those three tests wait on is that one
+ * testid, so a failure among them says "no terminal", not which of the three
+ * behaviours broke. Unmeasured against that mutation is the fourth test added
+ * after: it never opens a tab or looks at the terminal, so it would survive a
+ * `terminal-box` rename intact — the one "passes anyway" case in this file,
+ * and expected, since it is checking something else entirely.
  *
  * **What this file does NOT see** — read off this file's own text unless a
  * line says measured:
@@ -216,5 +220,28 @@ test('reattaches the same session after closing and reopening the window', async
   const sessions = stdout.split('\n').map((line) => line.trim()).filter(Boolean)
   expect(sessions.filter((name) => name.startsWith('prcli-'))).toHaveLength(1)
 
+  await app.close()
+})
+
+// tests/unit/e2eSafety.test.ts checks that every spec's source text sets all
+// four PRCLI_* vars — but a var pointing at the wrong path satisfies that
+// check just as well as a var pointing at the right one. Only a runtime read
+// from inside the launched app can tell the difference, which is what this
+// test does. It opens no tab and clicks nothing, so it opens no tmux session
+// and costs no pty.
+test('runs against overridden paths, never the developer’s own', async () => {
+  const app = await launch()
+  const seen = await app.evaluate(() => ({
+    config: process.env.PRCLI_CONFIG_DIR,
+    projects: process.env.PRCLI_PROJECTS_ROOT,
+    settings: process.env.PRCLI_CLAUDE_SETTINGS,
+    socket: process.env.PRCLI_TMUX_SOCKET,
+  }))
+  // Asserted as "is the temp path we made", not as "is set": an override
+  // pointing at the wrong place is set, and is exactly as dangerous.
+  expect(seen.config).toBe(configDir)
+  expect(seen.projects).toBe(projectsRoot)
+  expect(seen.settings).toBe(claudeSettingsPath)
+  expect(seen.socket).toBe(SOCKET)
   await app.close()
 })
