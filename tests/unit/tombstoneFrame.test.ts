@@ -483,3 +483,230 @@ describe('a dismiss, then a restart and split', () => {
     expect(shares.c).toBeCloseTo(0.375)
   })
 })
+
+describe('the whole-tab property, exhaustively', () => {
+  /**
+   * The four describes above are the seed; this is the check that there is no
+   * fifth. The property is the recommendation's central claim: for any
+   * sequence of deaths, restarts and dismisses, main's row — `kill`/`splitRow`
+   * above, the exact steps `forgetTab`/`splitPane` take — composed through the
+   * renderer's merge (`workspaceReducer`'s `split`, via `withKeptPanes`)
+   * reproduces the whole-tab vector a tab of A .5 / C .3 / B .2 should show.
+   *
+   * **Enumerated, not generated.** Over three panes, "which die, in which
+   * order, which come back, which are dismissed, then which surviving pane is
+   * split" is small enough to enumerate completely — 276 reachable cases,
+   * derived by a closed form independent of the generator below and pinned in
+   * the first `it`, so a change to the generator cannot silently shrink the
+   * count without a test noticing. Reproducible, prints the exact case it
+   * failed on, and needs no library — a random property test would be the
+   * first of its kind in this repo and would bring flake, seeds and shrinking
+   * decisions that nothing here needs. The day three panes stops being enough
+   * to enumerate is the day to reach for one.
+   *
+   * **The oracle is a model kept by the test itself (`buildModel`, below),
+   * independent of every production function.** Starts at `STARTING_ROW`'s own
+   * `{a: .5, c: .3, b: .2}`; a death changes nothing; a restart changes
+   * nothing; a dismiss removes the entry and divides the rest by what is
+   * left; a split halves the source's entry and gives the other half to the
+   * new pane. `kill`, `splitRow` and `workspaceReducer` are the real functions
+   * under test; the model shares no code with any of them, which is what
+   * makes its agreement with them evidence rather than a tautology — and also
+   * why its SECOND A/B, below, breaks the model rather than the code: an
+   * oracle that drifts from what the app should do is a test that pins the
+   * wrong thing.
+   *
+   * **What this does NOT show, and cannot: `inLiveFrame`.** The property is
+   * asserted off `paneGroups` — what is actually drawn — and `inLiveFrame` is
+   * exactly one positive scalar over every live share: `withKeptPanes`
+   * divides by the incoming sum (`src/renderer/workspace.ts:757`) and
+   * `boxesOfRow` divides by the kept total (`src/renderer/workspace.ts:559`),
+   * so a uniform rescale of main's row is invisible to both. A mutation that
+   * broke only `inLiveFrame` would leave every case here green — not because
+   * this property is weak, but because `inLiveFrame` is a wire-frame
+   * conversion, not a screen one; the file's own A/B (a), below, mutates a
+   * different line for exactly this reason. `inLiveFrame` is pinned on the
+   * wire instead, by `tests/unit/carveRatio.test.ts`, `tests/unit/shares.test.ts`,
+   * and by this file's own wire-level assertions in the four-orderings,
+   * two-compositions and dismiss describes above.
+   *
+   * **Skipped: a tab whose every pane is dead, with none restarted.** There is
+   * then no live pane to split from, and `closedPane` — never exercised by
+   * this property, which only ever drives a `split` — is what would drop such
+   * a tab's row instead. Every other combination reaches a split; the skip
+   * count is pinned alongside the case count in the first `it`, below.
+   */
+
+  type PaneId = 'a' | 'c' | 'b'
+  const ALL: PaneId[] = ['a', 'c', 'b']
+  const START: Record<string, number> = Object.fromEntries(
+    STARTING_ROW.layout.kids.map((id, index) => [id, STARTING_ROW.layout.ratio[index]]),
+  )
+
+  /** Every subset of `xs`, `[]` included, order-of-generation only. */
+  function subsetsOf<T>(xs: readonly T[]): T[][] {
+    return xs.reduce<T[][]>((subsets, x) => [...subsets, ...subsets.map((s) => [...s, x])], [[]])
+  }
+
+  /** Every ordering of `xs`. `[]` has exactly one: itself. */
+  function permutationsOf<T>(xs: readonly T[]): T[][] {
+    if (xs.length === 0) return [[]]
+    return xs.flatMap((x, at) => {
+      const rest = [...xs.slice(0, at), ...xs.slice(at + 1)]
+      return permutationsOf(rest).map((tail) => [x, ...tail])
+    })
+  }
+
+  /**
+   * The whole-tab vector the app SHOULD show after `dismissed` (in any order —
+   * proved order-independent below) and a final split of `source` into
+   * `newId`. No production function is called here.
+   */
+  function buildModel(
+    dismissed: readonly PaneId[],
+    source: PaneId,
+    newId: string,
+  ): Record<string, number> {
+    const model = { ...START }
+    for (const id of dismissed) {
+      const removed = model[id]
+      delete model[id]
+      const room = 1 - removed
+      for (const key of Object.keys(model)) model[key] = model[key] / room
+    }
+    const half = model[source] / 2
+    model[source] = half
+    model[newId] = half
+    return model
+  }
+
+  interface Case {
+    label: string
+    deathOrder: PaneId[]
+    restarted: PaneId[]
+    dismissed: PaneId[]
+    source: PaneId
+  }
+
+  const cases: Case[] = []
+  const skipped: { deathOrder: PaneId[]; restarted: PaneId[]; dismissed: PaneId[] }[] = []
+
+  for (const dead of subsetsOf(ALL)) {
+    for (const deathOrder of permutationsOf(dead)) {
+      for (const restarted of subsetsOf(dead)) {
+        // Dismissed is a subset of what died and was NOT restarted — a
+        // restarted pane is live again and cannot be dismissed, and a pane
+        // that never died has no claim to dismiss.
+        const stillDead = dead.filter((id) => !restarted.includes(id))
+        for (const dismissed of subsetsOf(stillDead)) {
+          // `stillDead` alone decides which panes are live to split from:
+          // whether a still-dead pane is later dismissed or stays a
+          // tombstone changes nothing about what is SPLITTABLE right now.
+          const live = ALL.filter((id) => !stillDead.includes(id))
+          const tag = `died[${deathOrder.join('') || '-'}] restarted[${restarted.join('') || '-'}] dismissed[${dismissed.join('') || '-'}]`
+          if (live.length === 0) {
+            skipped.push({ deathOrder, restarted, dismissed })
+            continue
+          }
+          for (const source of live) {
+            cases.push({ label: `${tag} split[${source}]`, deathOrder, restarted, dismissed, source })
+          }
+        }
+      }
+    }
+  }
+
+  it('enumerates every reachable case, not a silently smaller number', () => {
+    // Independent of the generator above: for a dead subset of size k, r of
+    // it restarted, the live count to split from is (3-k+r), and the number
+    // of ways to choose which r are restarted and how the other k-r split
+    // between dismissed/still-tombstone is C(k,r)*2^(k-r). Summed over r and
+    // weighted by C(3,k) subsets and k! orderings:
+    //   k=0: 1 * 1 * [1*1*3]                      =  3
+    //   k=1: 3 * 1 * [1*2*2 + 1*1*3]               = 21
+    //   k=2: 3 * 2 * [1*4*1 + 2*2*2 + 1*1*3]        = 90
+    //   k=3: 1 * 6 * [1*8*0 + 3*4*1 + 3*2*2 + 1*1*3] = 162
+    // 3 + 21 + 90 + 162 = 276. The one zero term above (k=3, r=0 — every pane
+    // dead, none restarted) is the only skip: 1 subset * 6 orders * 8
+    // dismissed-subsets-of-the-remaining-three = 48.
+    expect(cases.length).toBe(276)
+    expect(skipped.length).toBe(48)
+  })
+
+  for (const { label, deathOrder, restarted, dismissed, source } of cases) {
+    it(label, () => {
+      const model = buildModel(dismissed, source, 'new')
+
+      // Main's half: `kill` for every death, in order, then each dismiss's
+      // own step — `register.ts`'s `dismissTab`, run by hand exactly as the
+      // dismiss describe above does — then the row a split would carve.
+      const tombstones = new Map<string, Claim>()
+      let savedRow = STARTING_ROW
+      for (const id of deathOrder) savedRow = kill(savedRow, id, tombstones)
+      for (const id of dismissed) {
+        const held = tombstones.get(id)
+        // Never assert over a collection without first asserting it is
+        // non-empty: `id` is in `dismissed` only because it is in `dead`, so
+        // its claim must already be on record.
+        expect(held).toBeDefined()
+        tombstones.delete(id)
+        for (const [paneId, claim] of rescaledClaims(held!.tabId, held!.share, tombstones)) {
+          tombstones.set(paneId, claim)
+        }
+      }
+      const { kids, ratio } = splitRow({
+        saved: savedRow,
+        sourcePaneId: source,
+        newPaneId: 'new',
+        unclaimed: restarted,
+        tombstones,
+      })
+
+      // The renderer's half: the same events, through the real reducer, in
+      // the order they would actually arrive — `died` per death, `opened` per
+      // restart (the action a restart's reply dispatches, and the one that
+      // clears `state.dead`), `dismissed` per dismiss — then the `split`
+      // reply main's half just built.
+      let renderer: WorkspaceState = {
+        projects: [],
+        panes: [pane('a'), pane('c'), pane('b')],
+        tabs: [STARTING_ROW],
+        activeProjectId: null,
+        status: {},
+        dead: {},
+      }
+      for (const id of deathOrder) {
+        renderer = workspaceReducer(renderer, { type: 'died', id, code: 1 })
+      }
+      for (const id of restarted) {
+        renderer = workspaceReducer(renderer, { type: 'opened', tab: pane(id) })
+      }
+      for (const id of dismissed) {
+        renderer = workspaceReducer(renderer, { type: 'dismissed', id })
+      }
+
+      const shape: TabShape = { panes: kids.map((id) => pane(id)), tabs: [row(kids, ratio)] }
+      const next = workspaceReducer(renderer, { type: 'split', shape })
+
+      // `screenShares` asserts exactly one group and every pane boxed exactly
+      // once — the second of the three checks the plan asks for.
+      const shares = screenShares(next)
+      const modelIds = Object.keys(model).sort()
+      const shareIds = Object.keys(shares).sort()
+      // Non-empty before comparing: `model` always keeps every pane that was
+      // not dismissed, plus the new one, so this can never be `[]`.
+      expect(modelIds.length).toBeGreaterThan(0)
+      expect(shareIds).toEqual(modelIds)
+      // Every pane on screen has exactly the model's share, to four places.
+      for (const id of modelIds) {
+        expect(shares[id]).toBeCloseTo(model[id], 4)
+      }
+      // The shares sum to 1 — necessary, not sufficient (a vector that sums
+      // to 1 but has moved a share between two panes would still pass this
+      // alone; the per-pane equality above is what actually pins the
+      // assignment) — and stated as such rather than left to be assumed.
+      const sum = Object.values(shares).reduce((total, share) => total + share, 0)
+      expect(sum).toBeCloseTo(1)
+    })
+  }
+})
