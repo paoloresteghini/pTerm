@@ -1694,6 +1694,17 @@ describe('resizeKids', () => {
     expect(resizeKids([0.5, 0.5], 1, 0.1, 0.1, 0.1)).toEqual([0.5, 0.5])
     expect(resizeKids([0.5, 0.5], -1, 0.1, 0.1, 0.1)).toEqual([0.5, 0.5])
   })
+
+  it('a floor of 0 lets a drag flatten a kid to nothing', () => {
+    // This is why `grabFor` refuses to hand out a floor for an axis it
+    // cannot measure, rather than letting a 0 pass through: a 0 floor is not
+    // a small floor, it is no floor at all, and `resizeKids` honours it
+    // exactly as far as the drag pushes — all the way to a 0 share if asked.
+    // A 0 share reaching `commitLayout` is what `normaliseLayout` reads as an
+    // unusable ratio and flattens the whole tab for on the next restart.
+    const next = resizeKids([0.5, 0.5], 0, -1, 0, 0)
+    expect(next).toEqual([0, 1])
+  })
 })
 
 describe('grabFor', () => {
@@ -1769,5 +1780,21 @@ describe('grabFor', () => {
     const row = ratioRow('aaa', ['aaa', 'bbb'], [0.5, 0.5])
     expect(grabFor(row, boxes([0.5, 0.5], ['aaa', 'bbb']), 1, () => undefined, floors)).toBeNull()
     expect(grabFor(row, boxes([0, 1], ['aaa', 'bbb']), 1, grid, floors)).toBeNull()
+  })
+
+  it('refuses when the mounted terminal reports zero cells on the axis being dragged', () => {
+    // A mounted-but-unmeasured terminal: `gridOf` returns a grid, so the
+    // `!grid` guard above does not fire, but the dimension this row actually
+    // drags along is 0. `axisCells` would come out 0 too, and undetected that
+    // used to reach `minRatioFor` as a `totalCells` of 0 — answered with a
+    // floor of 0 rather than `Infinity`, which is exactly the value that lets
+    // a drag push a share to 0 (see `resizeKids`, below). Refusing here, at
+    // the one place the unmeasured axis is known, means no zero share is ever
+    // computed for one to reach.
+    const rowDir = ratioRow('aaa', ['aaa', 'bbb'], [0.5, 0.5])
+    expect(grabFor(rowDir, boxes([0.5, 0.5], ['aaa', 'bbb']), 1, () => ({ cols: 0, rows: 30 }), floors)).toBeNull()
+
+    const colDir = ratioRow('aaa', ['aaa', 'bbb'], [0.5, 0.5], 'col')
+    expect(grabFor(colDir, boxes([0.5, 0.5], ['aaa', 'bbb']), 1, () => ({ cols: 100, rows: 0 }), floors)).toBeNull()
   })
 })

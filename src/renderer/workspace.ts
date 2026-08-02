@@ -435,7 +435,15 @@ export function grabFor(
   if (row.layout.kids[index] !== high.pane.id) return null
   const grid = gridOf(low.pane.id)
   if (!grid || low.share <= 0) return null
-  const axisCells = (row.layout.dir === 'row' ? grid.cols : grid.rows) / low.share
+  const gridCells = row.layout.dir === 'row' ? grid.cols : grid.rows
+  // A mounted terminal that has not yet reported real dimensions on this
+  // axis. `axisCells` below would still come out non-positive, and
+  // `minRatioFor` would answer a floor of 0 for it — the value that lets
+  // `resizeKids` push a share to 0. Refusing here, where the unmeasured axis
+  // is known by name, means no such share is ever computed for a later step
+  // to route through.
+  if (gridCells <= 0) return null
+  const axisCells = gridCells / low.share
   const floor = row.layout.dir === 'row' ? floors.cols : floors.rows
   return { at: index - 1, ratio: boxes.map((box) => box.share), min: minRatioFor(floor, axisCells) }
 }
