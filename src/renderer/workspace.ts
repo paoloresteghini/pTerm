@@ -370,6 +370,16 @@ export function resizeKids(
 export interface PaneBox {
   pane: TabDescriptor
   /**
+   * The fraction of its tab's axis this box takes, after renormalising.
+   *
+   * Published as a number as well as a `flexBasis` string because the dividers
+   * sit at cumulative boundaries and have to add these up. Parsing the percent
+   * back out of the string would make a value formatted for CSS the source of
+   * truth for arithmetic — and `percent()` rounds to four places, so it is
+   * lossy in exactly the direction that accumulates.
+   */
+  share: number
+  /**
    * `flexBasis` only, so a pane states its share without knowing which axis
    * its tab flexes along — that is the container's `flexDirection`, and the
    * basis follows whichever one it is.
@@ -479,11 +489,15 @@ function boxesOfRow(state: WorkspaceState, row: TabRow, claimed: Set<string>): P
   // the geometry defect wearing different numbers.
   // A dead kid is kept, ratio and all, exactly like a live one — see `PaneBox.dead`
   // and the note on `paneGroups` about why this is the opposite of restore's rule.
-  return kept.map((entry) => ({
-    pane: entry.pane,
-    style: { flexBasis: percent(total > 0 ? entry.share / total : 1 / kept.length) },
-    dead: state.dead[entry.pane.id] !== undefined,
-  }))
+  return kept.map((entry) => {
+    const share = total > 0 ? entry.share / total : 1 / kept.length
+    return {
+      pane: entry.pane,
+      share,
+      style: { flexBasis: percent(share) },
+      dead: state.dead[entry.pane.id] !== undefined,
+    }
+  })
 }
 
 /**
@@ -563,7 +577,7 @@ export function paneGroups(state: WorkspaceState): PaneGroup[] {
     // once has its own id in `seen`, which is what was just checked.
     const panes = row
       ? boxesOfRow(state, row, claimed)
-      : [{ pane, style: { flexBasis: '100%' }, dead: state.dead[pane.id] !== undefined }]
+      : [{ pane, share: 1, style: { flexBasis: '100%' }, dead: state.dead[pane.id] !== undefined }]
     // Only reachable from the same double-naming this guards: a row whose
     // kids were all boxed by rows processed before it has nothing left to
     // show, and an empty container is not a tab, it is a blank screen where

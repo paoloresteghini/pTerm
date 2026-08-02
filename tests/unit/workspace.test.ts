@@ -430,6 +430,42 @@ describe('paneGroups', () => {
   })
 })
 
+describe('PaneBox.share', () => {
+  it('is the normalised fraction, matching the flexBasis beside it', () => {
+    const state: WorkspaceState = {
+      ...three,
+      tabs: [ratioRow('aaa', ['aaa', 'bbb'], [0.7, 0.3])],
+    }
+    const [group] = paneGroups(state)
+    expect(group.panes).toHaveLength(2)
+    expect(group.panes[0].share).toBeCloseTo(0.7)
+    expect(group.panes[1].share).toBeCloseTo(0.3)
+    expect(group.panes[0].style.flexBasis).toBe('70%')
+  })
+
+  it('is 1 for a pane that is its own group', () => {
+    const state: WorkspaceState = { ...three, tabs: [] }
+    const groups = paneGroups(state)
+    expect(groups).not.toHaveLength(0)
+    for (const group of groups) {
+      expect(group.panes).toHaveLength(1)
+      expect(group.panes[0].share).toBe(1)
+    }
+  })
+
+  it('renormalises the share when a kid names no pane', () => {
+    const state: WorkspaceState = {
+      ...three,
+      panes: [tab('aaa'), tab('bbb')],
+      tabs: [ratioRow('aaa', ['aaa', 'gone', 'bbb'], [0.2, 0.6, 0.2])],
+    }
+    const [group] = paneGroups(state)
+    expect(group.panes).toHaveLength(2)
+    expect(group.panes[0].share).toBeCloseTo(0.5)
+    expect(group.panes.reduce((sum, box) => sum + box.share, 0)).toBeCloseTo(1)
+  })
+})
+
 /**
  * A pane whose session has died, as the layout presents it.
  *
