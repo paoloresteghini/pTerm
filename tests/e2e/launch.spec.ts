@@ -16,6 +16,8 @@ let userDataDir: string
 let configDir: string
 let projectsRoot: string
 let projectCwd: string
+let claudeSettingsDir: string
+let claudeSettingsPath: string
 
 async function launch(): Promise<ElectronApplication> {
   return electron.launch({
@@ -29,6 +31,11 @@ async function launch(): Promise<ElectronApplication> {
       // but the default root is the developer's real ~/Code, and defending a
       // directory that must not be touched costs one line.
       PRCLI_PROJECTS_ROOT: projectsRoot,
+      // Read by every live Claude session on this machine. Set in every test
+      // here, including the ones that never open the settings pane — the
+      // same rule PRCLI_PROJECTS_ROOT got after 2b, for a file with far more
+      // riding on it.
+      PRCLI_CLAUDE_SETTINGS: claudeSettingsPath,
     },
   })
 }
@@ -72,11 +79,13 @@ test.beforeEach(async () => {
   configDir = await mkdtemp(join(tmpdir(), 'prcli-e2e-config-'))
   projectsRoot = await mkdtemp(join(tmpdir(), 'prcli-e2e-root-'))
   projectCwd = await seedProject('scratch', 'Scratch')
+  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'prcli-e2e-settings-'))
+  claudeSettingsPath = join(claudeSettingsDir, 'settings.json')
 })
 
 test.afterEach(async () => {
   await killServer()
-  for (const dir of [userDataDir, configDir, projectsRoot, projectCwd]) {
+  for (const dir of [userDataDir, configDir, projectsRoot, projectCwd, claudeSettingsDir]) {
     await rm(dir, { recursive: true, force: true })
   }
 })

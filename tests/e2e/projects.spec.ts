@@ -11,6 +11,8 @@ const SOCKET = 'prcli-e2e-projects'
 let userDataDir: string
 let configDir: string
 let projectsRoot: string
+let claudeSettingsDir: string
+let claudeSettingsPath: string
 
 async function launch(): Promise<ElectronApplication> {
   return electron.launch({
@@ -21,6 +23,11 @@ async function launch(): Promise<ElectronApplication> {
       PRCLI_TMUX_SOCKET: SOCKET,
       // Never scan the developer's real ~/Code.
       PRCLI_PROJECTS_ROOT: projectsRoot,
+      // Read by every live Claude session on this machine. Set in every test
+      // here, including the ones that never open the settings pane — the
+      // same rule PRCLI_PROJECTS_ROOT got after 2b, for a file with far more
+      // riding on it.
+      PRCLI_CLAUDE_SETTINGS: claudeSettingsPath,
     },
   })
 }
@@ -67,11 +74,13 @@ test.beforeEach(async () => {
   userDataDir = await mkdtemp(join(tmpdir(), 'prcli-proj-user-'))
   configDir = await mkdtemp(join(tmpdir(), 'prcli-proj-config-'))
   projectsRoot = await mkdtemp(join(tmpdir(), 'prcli-proj-root-'))
+  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'prcli-proj-settings-'))
+  claudeSettingsPath = join(claudeSettingsDir, 'settings.json')
 })
 
 test.afterEach(async () => {
   await killServer()
-  for (const dir of [userDataDir, configDir, projectsRoot]) {
+  for (const dir of [userDataDir, configDir, projectsRoot, claudeSettingsDir]) {
     await rm(dir, { recursive: true, force: true })
   }
 })
