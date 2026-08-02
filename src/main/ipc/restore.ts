@@ -161,6 +161,58 @@ async function withoutSharedWindows(
 }
 
 /**
+ * Shares for one row's kids, where a `claim` is a share of the WHOLE tab and a
+ * `base` is a share of whatever that leaves.
+ *
+ * Every kid whose share is derived from the saved row supplies a `base`; those
+ * bases are meaningful only relative to one another, so they are normalised
+ * among themselves and then scaled into `room` — what the claims do not take.
+ * A kid with a `claim` gets that claim untouched. The vector therefore sums to
+ * 1 by construction rather than by a rescale bolted on to cover a gap.
+ *
+ * A claim is what a remembered share is, on Paolo's ruling: a pane that died
+ * at 0.3 of its tab comes back at 0.3 of its tab, not at 0.3 of a row that has
+ * already claimed the whole of it. Injecting the remembered share alongside
+ * the saved-derived ones and renormalising the lot was the other candidate and
+ * it does not deliver that — measured, a pane that died at 0.3 came back at
+ * 0.231. "The user can drag it back" is the argument this plan's Ruling 2
+ * already rejected for the split path; it is no better here.
+ *
+ * **This is the renderer's own rule, not a second one.** `withKeptPanes` in
+ * `src/renderer/workspace.ts` solves exactly this problem for a tombstone on
+ * screen, with the same `held`/`room` and the same two guards. Main and the
+ * renderer agreeing about what a remembered share means is the point; two
+ * different answers is how the two sides drift and the pane visibly resizes
+ * the moment main's reply lands.
+ *
+ * **With no claim among the entries this is arithmetically today's code.**
+ * `held` is 0, `room` is 1, and every base is divided by the total of the
+ * bases — which is precisely the `share / total` rescale both call sites used
+ * to do inline. That is why no existing expectation moves, and it is a
+ * property worth knowing rather than assuming.
+ *
+ * Both guards are `withKeptPanes`'s, for its reasons. Claims summing to 1 or
+ * more leave no room, and bases summing to nothing leave nothing to scale;
+ * either way the entries are rescaled together as they stand, and an all-zero
+ * set falls back to an even split. A zero share would otherwise be a 0%-wide
+ * box, which fits to tmux's floor of 2x1 — the geometry defect wearing
+ * different numbers.
+ */
+export function sharesAroundClaims(
+  entries: readonly { claim?: number; base: number }[],
+): number[] {
+  const held = entries.reduce((sum, entry) => sum + (entry.claim ?? 0), 0)
+  const room = 1 - held
+  const bases = entries.reduce((sum, entry) => sum + (entry.claim === undefined ? entry.base : 0), 0)
+  if (room > 0 && bases > 0) {
+    return entries.map((entry) => entry.claim ?? (entry.base / bases) * room)
+  }
+  const shares = entries.map((entry) => entry.claim ?? entry.base)
+  const total = held + bases
+  return total > 0 ? shares.map((share) => share / total) : entries.map(() => 1 / entries.length)
+}
+
+/**
  * The tab row for one tab, given the panes it holds and the row saved for it.
  *
  * Existence is settled before this runs — `ids` is what the tab actually
@@ -189,6 +241,12 @@ export function tabRowFor(
   tab: { id: string; groupId: string },
   ids: string[],
   saved: TabRow | undefined,
+  /**
+   * The share a pane held when it died, by pane id — for kids the saved row
+   * does not know, whose row entry went with them. Absent for restore, which
+   * prunes dead panes at launch and so never meets one.
+   */
+  remembered?: ReadonlyMap<string, number>,
 ): TabRow {
   const savedKids = saved?.layout.kids ?? []
   const kids = [
@@ -196,20 +254,29 @@ export function tabRowFor(
     ...ids.filter((id) => !savedKids.includes(id)),
   ]
 
-  // A kid the saved row knew keeps its own share; anything else takes an even
-  // one. `store.read()` has already made the saved shares positive, finite and
-  // one per kid, so the only unknown here is a pane that row never had.
+  // A kid the saved row knew keeps its own share, relative to the other kids
+  // it knew; a kid it does not know but that is REMEMBERED — a pane that died
+  // and came back — claims the share it died at outright, and the rest scale
+  // into what that leaves. Anything else takes an even share. `store.read()`
+  // has already made the saved shares positive, finite and one per kid, and it
+  // is the same reader `shareWhenItDied` captures through, so both inputs here
+  // are shares of a whole tab.
+  //
+  // The rescale that used to live here is `sharesAroundClaims`'s job now, and
+  // it is not optional: dropping a kid leaves the survivors summing to less
+  // than 1, and appending one leaves them summing to more. A layout that does
+  // not describe a whole tab renders every pane in it at the wrong size — and
+  // `store.read()` would quietly rescale it on the way back in, so nothing
+  // downstream would ever report the loss.
   const even = 1 / kids.length
-  const shares = kids.map((kid) => {
-    const at = savedKids.indexOf(kid)
-    return at === -1 || !saved ? even : saved.layout.ratio[at]
-  })
-  // Rescaled, not used as they are: dropping a kid leaves the survivors summing
-  // to less than 1, and appending one leaves them summing to more. A layout
-  // that does not describe a whole tab renders every pane in it at the wrong
-  // size — and `store.read()` would quietly rescale it on the way back in, so
-  // nothing downstream would ever report the loss.
-  const total = shares.reduce((sum, share) => sum + share, 0)
+  const shares = sharesAroundClaims(
+    kids.map((kid) => {
+      const at = savedKids.indexOf(kid)
+      if (at !== -1 && saved) return { base: saved.layout.ratio[at] }
+      const claim = remembered?.get(kid)
+      return claim === undefined ? { base: even } : { claim, base: claim }
+    }),
+  )
 
   // The saved selection only if that pane is still one of this tab's, else the
   // first one — which is what a null `activePaneId` means anyway, said outright
@@ -225,7 +292,7 @@ export function tabRowFor(
     activePaneId: active && kids.includes(active) ? active : kids[0],
     layout: {
       dir: saved?.layout.dir ?? 'row',
-      ratio: shares.map((share) => share / total),
+      ratio: shares,
       kids,
     },
   }

@@ -1388,11 +1388,18 @@ describe('splitPane and closePane', () => {
    * drops it from the kids, and `restartTab` writes the pane back without
    * putting it back in the layout. Nothing repairs it before the next restore.
    */
-  async function splitThenRestartSibling(): Promise<{
+  async function splitThenRestartSibling(ratio?: number[]): Promise<{
     founder: TabDescriptor
     second: TabDescriptor
   }> {
     const { founder, second } = await splitOnce()
+    // Dragged before the death, when a caller wants the two panes at a
+    // deliberate size rather than the even one a split leaves them at. The
+    // same listener and the same settle the drag tests above use.
+    if (ratio) {
+      ipc.listeners.get(CHANNELS.setLayout)?.(null as never, founder.id as never, ratio as never)
+      await settle(200)
+    }
     const adapter = new TmuxAdapter({ socket: SOCKET })
     const secondWindow = await adapter.windowIdOf(second.tmuxSession)
     expect(secondWindow).toMatch(/^@\d+$/)
@@ -1689,6 +1696,147 @@ describe('splitPane and closePane', () => {
     // The assertion that does: B ends up with some share of the axis.
     expect(at(second.id)).toBeGreaterThan(0)
     // Necessary, not sufficient on its own — see the comment above.
+    expect(row.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+  })
+
+  /**
+   * The ratio survives the death and the restart, and used to flatten on the
+   * next ⌘D.
+   *
+   * The renderer already keeps a dead pane's slot and share on screen
+   * (`withKeptPanes`), so nothing on screen moved. Main's side did not:
+   * `forgetTab` drops the pane's row at its death, so the next rebuild of that
+   * tab's row met a kid the saved row had never heard of and handed it an even
+   * share. `shareWhenItDied` is what main remembers across those two events.
+   *
+   * All THREE shares are asserted, not just the restarted pane's. Before the
+   * fix every share here is 1/3 — `shareOf` falls through to
+   * `1 / siblings.length`, giving `[0.5, 0.5, 0.5]`, which normalises to
+   * thirds — so an assertion on the restarted pane alone would have to
+   * distinguish 0.3 from 0.3333, while the founder's distinguishes 0.35 from
+   * 0.3333 as well. A window admitting both the defect and the fix is worse
+   * than no test, and 0.3333 sits inside any window loose enough to hold both.
+   *
+   * The numbers, derived rather than guessed. The row on disk after the
+   * restart is `kids [founder]`, `ratio [1]` — asserted below, because it is
+   * what makes the rest arithmetic rather than assertion: `restartTab` reads
+   * config while the dead pane's row is still gone, so `normaliseLayout` drops
+   * the dangling kid and rescales the founder's 0.7 to 1.0. The split then
+   * halves that 1.0 between the founder and the new pane, and the remembered
+   * 0.3 is a claim on the WHOLE tab, so those two halves scale into the 0.7
+   * that is left: 0.35, 0.35, 0.3.
+   */
+  it('gives a restarted pane the share it had when it died, not an even one', async () => {
+    const { founder, second } = await splitThenRestartSibling([0.7, 0.3])
+
+    // The precondition the numbers below are derived from, asserted rather
+    // than assumed — `splitThenRestartSibling` pins the kids, this pins the
+    // share they were rescaled to.
+    const before = await written()
+    const beforeRow = before.tabs.find((candidate) => candidate.id === founder.id)
+    expect(beforeRow).toBeDefined()
+    expect(beforeRow?.layout.ratio).toEqual([1])
+
+    // A split is the cheapest thing that makes main rewrite the tab's row,
+    // which is where the share was being lost — the renderer's own copy was
+    // right all along.
+    const shape = await invoke<TabShape>(CHANNELS.splitPane, {
+      paneId: founder.id, dir: 'row', cols: 40, rows: 20,
+    })
+    expect(shape.panes).toHaveLength(3)
+    const third = shape.panes[1]
+    await waitForPrompt(third.id)
+
+    const row = shape.tabs[0]
+    expect(row.layout.kids).toEqual([founder.id, third.id, second.id])
+    const at = (id: string): number => row.layout.ratio[row.layout.kids.indexOf(id)]
+    expect(at(second.id)).toBeCloseTo(0.3)
+    expect(at(founder.id)).toBeCloseTo(0.35)
+    expect(at(third.id)).toBeCloseTo(0.35)
+    // By construction, not by a rescale bolted on afterwards.
+    expect(row.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+
+    // And the file says the same thing the reply did. Read raw: `store.read()`
+    // rescales every ratio by its own total on the way in, so a row written
+    // summing to 1.3 would read back looking perfect.
+    const after = await written()
+    const afterRow = after.tabs.find((candidate) => candidate.id === founder.id)
+    expect(afterRow).toBeDefined()
+    expect(afterRow?.layout).toEqual(row.layout)
+  })
+
+  /**
+   * The same ruling on the OTHER rebuild of a tab's row.
+   *
+   * `splitPane` goes through `carveRatio` and `closePane` through
+   * `tabRowFor`, and both now read the same `shareWhenItDied` through the same
+   * `sharesAroundClaims`. One authority, so the two cannot drift — but a
+   * passing suite is what makes that true tomorrow, and with only the split
+   * test above, dropping the map from `closePane`'s call would leave every
+   * assertion in this file green.
+   *
+   * Needs three panes and its own death: a close only meets the remembered
+   * pane while the row still does not claim it, and a split repairs the row on
+   * its way past, so the split test above cannot be extended into this one.
+   *
+   * The numbers. A:C:B at 0.5:0.3:0.2, then B dies — remembered at 0.2 — and
+   * comes back, leaving the row claiming A and C alone, rescaled to 0.625 and
+   * 0.375. Closing C leaves A as the only kid the row still knows, so A's
+   * 0.625 is the whole of the base and scales into the 0.8 that B's claim
+   * leaves: A 0.8, B 0.2. Without the remembered share B takes an even 0.5
+   * against A's 0.625 and the pair normalise to 0.556 and 0.444 — which sums
+   * to 1 and looks perfectly healthy, so the sum assertion cannot see it and
+   * both shares are pinned instead.
+   */
+  it('gives a restarted pane the share it died at when a sibling is closed', async () => {
+    const { founder, second } = await splitOnce() // A, B — kids [A, B]
+    const split2 = await invoke<TabShape>(CHANNELS.splitPane, {
+      paneId: founder.id, dir: 'row', cols: 100, rows: 30,
+    })
+    expect(split2.panes).toHaveLength(3)
+    const third = split2.panes[1] // C, inserted after A: kids [A, C, B]
+    await waitForPrompt(third.id)
+    expect(split2.tabs[0].layout.kids).toEqual([founder.id, third.id, second.id])
+
+    ipc.listeners.get(CHANNELS.setLayout)?.(
+      null as never,
+      founder.id as never,
+      [0.5, 0.3, 0.2] as never,
+    )
+    await settle(200)
+
+    // B dies for real and comes back — the death hook's own two commands, in
+    // its order, the way every other death in this file is staged.
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const secondWindow = await adapter.windowIdOf(second.tmuxSession)
+    expect(secondWindow).toMatch(/^@\d+$/)
+    const exitEvent = waitForExitEvent(second.id)
+    await run('tmux', [
+      '-L', SOCKET,
+      'kill-session', '-t', `=${second.tmuxSession}`, ';', 'kill-window', '-t', secondWindow,
+    ])
+    await exitEvent
+    await expect(adapter.hasSession(second.tmuxSession)).resolves.toBe(false)
+    const restarted = await invoke<TabDescriptor>(CHANNELS.restartTab, {
+      tab: second, cols: 100, rows: 30,
+    })
+    await expect.poll(() => adapter.hasSession(restarted.tmuxSession), { timeout: 8000 }).toBe(true)
+
+    // The precondition, asserted rather than assumed: A and C alone in the
+    // row at 0.625/0.375, with B live and claimed by nothing.
+    const before = await written()
+    const beforeRow = before.tabs.find((candidate) => candidate.id === founder.id)
+    expect(beforeRow).toBeDefined()
+    expect(beforeRow?.layout.kids).toEqual([founder.id, third.id])
+    expect(beforeRow?.layout.ratio[0]).toBeCloseTo(0.625)
+    expect(beforeRow?.layout.ratio[1]).toBeCloseTo(0.375)
+
+    const closed = await invoke<TabShape>(CHANNELS.closePane, third.id)
+    const row = closed.tabs[0]
+    expect(row.layout.kids).toEqual([founder.id, second.id])
+    const at = (id: string): number => row.layout.ratio[row.layout.kids.indexOf(id)]
+    expect(at(second.id)).toBeCloseTo(0.2)
+    expect(at(founder.id)).toBeCloseTo(0.8)
     expect(row.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
   })
 })

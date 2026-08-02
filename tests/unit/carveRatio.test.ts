@@ -69,11 +69,10 @@ describe('carveRatio', () => {
   // Two things are true about that movement, and this test asserts both,
   // because neither alone is sufficient:
   //
-  // 1. `sum ≈ 1` cannot see whether it happened correctly. The
-  //    `total > 0 ? shares.map(...) : ...` line forces the sum to 1
-  //    regardless of what `shares` held going in, so a `carveRatio` that
-  //    ignored the unclaimed sibling's share entirely would still pass a
-  //    sum-only assertion.
+  // 1. `sum ≈ 1` cannot see whether it happened correctly.
+  //    `sharesAroundClaims` forces the sum to 1 regardless of what it was
+  //    handed, so a `carveRatio` that ignored the unclaimed sibling's share
+  //    entirely would still pass a sum-only assertion.
   //
   // 2. The RELATIVE proportion between the two known kids (`a` and `c`) is
   //    unchanged — still 0.6:0.4 — which sounds like the fix, and IS a real,
@@ -117,5 +116,80 @@ describe('carveRatio', () => {
     expect(b).toBeGreaterThan(0)
     // Necessary, not sufficient on its own — see point 1 above.
     expect(ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+  })
+
+  // Paolo's ruling, in its smallest form: a REMEMBERED unclaimed sibling — one
+  // main watched die, and whose share it kept — claims that share of the WHOLE
+  // tab, and the saved-derived shares scale into what is left.
+  //
+  // The exact numbers are pinned, and they are the ones the integration test
+  // measures on a real tmux tab. The rejected alternative was to inject the
+  // remembered 0.3 alongside the saved shares and renormalise the lot; it gives
+  // `[0.385, 0.385, 0.231]`, which sums to 1 and looks fine, so `sum ≈ 1` does
+  // not separate them and neither does the relative-proportion check — `a` and
+  // `new` are half of the same share under both. The share `b` itself comes
+  // back at is the only thing that tells them apart, which is why it is pinned
+  // exactly rather than as "positive".
+  it('gives a remembered sibling the share it died at, and scales the rest into the rest', () => {
+    const ratio = carveRatio({
+      kids: ['a', 'new', 'b'],
+      sourcePaneId: 'a',
+      newPaneId: 'new',
+      siblings: ['a', 'b'],
+      // The row `restartTab` leaves behind: `b`'s kid entry went with its pane
+      // row, so `a` was rescaled to the whole tab on the way back in.
+      savedKids: ['a'],
+      savedRatio: [1],
+      remembered: new Map([['b', 0.3]]),
+    })
+    expect(ratio[0]).toBeCloseTo(0.35) // a: half of 1, scaled into the 0.7 left
+    expect(ratio[1]).toBeCloseTo(0.35) // new: the other half
+    expect(ratio[2]).toBeCloseTo(0.3) // b: exactly what it died at
+    // By construction here, not by a rescale: 0.35 + 0.35 + 0.3 is 1 because
+    // the two halves were scaled into `1 - 0.3` in the first place.
+    expect(ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+  })
+
+  // The claim survives being halved. Splitting a pane that came back from the
+  // dead divides ITS remembered share between it and the pane carved out of it
+  // — the panes the user did not touch still scale into the rest — rather than
+  // demoting both halves and letting them be renormalised against the saved
+  // kids, which would bring the pair back narrower than the one pane they
+  // replaced.
+  it('halves a remembered pane between it and the pane split out of it', () => {
+    const ratio = carveRatio({
+      kids: ['a', 'b', 'new'],
+      sourcePaneId: 'b',
+      newPaneId: 'new',
+      siblings: ['a', 'b'],
+      savedKids: ['a'],
+      savedRatio: [1],
+      remembered: new Map([['b', 0.3]]),
+    })
+    expect(ratio[0]).toBeCloseTo(0.7) // a: all of what the claim leaves
+    expect(ratio[1]).toBeCloseTo(0.15) // b: half its own remembered share
+    expect(ratio[2]).toBeCloseTo(0.15) // new: the other half
+    expect(ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+  })
+
+  // The no-op property, asserted rather than assumed: with no remembered kid
+  // among these kids, the arithmetic is identical to what it was before any of
+  // this existed. `held` is 0, so `room` is 1, and every share is divided by
+  // the total of the shares — the same rescale, to the last bit. Asserted as an
+  // exact equality between the two calls rather than against pinned numbers, so
+  // it stays true of whatever the shared helper does next.
+  it('is unchanged by a remembered map that names none of the kids', () => {
+    const args = {
+      kids: ['a', 'new', 'c', 'b'],
+      sourcePaneId: 'a',
+      newPaneId: 'new',
+      siblings: ['a', 'c', 'b'],
+      savedKids: ['a', 'c'],
+      savedRatio: [0.6, 0.4],
+    }
+    const without = carveRatio(args)
+    expect(without).toHaveLength(4)
+    expect(carveRatio({ ...args, remembered: new Map() })).toEqual(without)
+    expect(carveRatio({ ...args, remembered: new Map([['elsewhere', 0.9]]) })).toEqual(without)
   })
 })

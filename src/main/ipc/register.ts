@@ -19,7 +19,13 @@ import {
 import type { ExitReason, SessionManager, PaneRecord } from '../sessions/manager'
 import { ConfigStore, type PrcliConfig } from '../state/store'
 import { StatusRegistry } from '../status/registry'
-import { describeProjects, restoreWorkspace, tabRowFor, withUnsorted } from './restore'
+import {
+  describeProjects,
+  restoreWorkspace,
+  sharesAroundClaims,
+  tabRowFor,
+  withUnsorted,
+} from './restore'
 import { isDirectory } from '../fsutil'
 import { scanCandidates } from '../projects/discovery'
 import { hookPaths, installHooks, readHooksState, uninstallHooks } from '../hooks/install'
@@ -37,22 +43,29 @@ import {
  *
  * `sourcePaneId` keeps half its own share and `newPaneId` takes the other
  * half. Every OTHER kid the saved row already knew about keeps the share
- * that row had for it — that part genuinely is untouched, and does not need
- * the normalisation below to make it true.
+ * that row had for it, relative to the other kids that row knew — that part
+ * genuinely is untouched, and does not need a normalisation to make it true.
+ * Its ABSOLUTE width is a different claim and a weaker one; the paragraphs
+ * below say exactly when it moves and why that is not this carve failing.
  *
  * The part that is easy to miss is `siblings`, not `savedKids`: `siblings`
  * is the saved row's kids UNIONED with any live pane that row does not
  * mention — an "unclaimed" sibling, which today means exactly one thing: a
  * pane that died and was restarted, whose row entry `forgetTab` dropped at
  * its death and nothing has put back (`shareOf`'s `at === -1` branch, below,
- * is where that is felt). Such a pane has no saved share to carry forward,
- * so it is handed a SYNTHETIC one — an even split of the axis — landed on
- * top of shares that, for the OTHER kids, already summed to 1. The vector
- * `shares` builds is therefore not guaranteed to sum to 1 on its own; the
- * `total > 0 ? shares.map(...) : ...` line is what makes it, and whenever an
- * unclaimed sibling is present that normalisation is load-bearing, not
- * vestigial. It moves every OTHER kid's share too — including a pane the
- * user did not touch at all, which sounds like the very thing this carve
+ * is where that is felt). Such a pane comes with a share only when main
+ * REMEMBERS the one it died at — `remembered`, which is `register.ts`'s
+ * `shareWhenItDied`. Then that share is a `claim` on the whole tab and every
+ * saved-derived share scales into what is left, so nothing is invented and
+ * the pane comes back the size it was.
+ *
+ * Remembered is not guaranteed, though: the map is process-lifetime, so a
+ * pane adopted from a previous run, or one whose entry a dismiss dropped,
+ * arrives here unclaimed and unremembered. It is then handed a SYNTHETIC
+ * share — an even split of the axis — landed on top of shares that, for the
+ * OTHER kids, already summed to 1, and `sharesAroundClaims` normalises the
+ * lot. That dilution moves every OTHER kid's share too — including a pane
+ * the user did not touch at all, which sounds like the very thing this carve
  * exists to prevent.
  *
  * It is not, and the distinction is the point: what a carve preserves is not
@@ -85,12 +98,12 @@ import {
  * that is answered by the floor, which makes `splitActive` refuse such a
  * split before it is sent.
  *
- * Task 8 changes the unclaimed case above, on Paolo's ruling: a remembered
- * kid's share becomes a claim on the WHOLE tab, with every saved share
- * scaled into whatever is left over, so the vector this returns sums to 1 by
- * construction and the normalisation stops being load-bearing. `shareOf`'s
- * `at === -1` fallback is the seam that ruling lands on — this task only
- * makes today's fallback correct, not gone.
+ * The `remembered` half of that is Paolo's ruling, and it lands on `shareOf`'s
+ * `at === -1` branch — the fallback is made correct, not removed, which is why
+ * the unremembered paragraph above still describes real behaviour. Whenever a
+ * remembered kid IS in play the vector returned sums to 1 by construction and
+ * no normalisation is load-bearing: `sharesAroundClaims` divides the bases
+ * among themselves and scales them into `1 - held`.
  *
  * Exported and pure — no `store`, no `manager`, nothing captured from
  * `registerIpc`'s closure — so the case above can be pinned in
@@ -105,19 +118,40 @@ export function carveRatio(params: {
   siblings: string[]
   savedKids: string[]
   savedRatio: number[]
+  /**
+   * The share a pane held when it died, by pane id. Only ever consulted for a
+   * sibling the saved row does not know — which, per the paragraphs above, is
+   * exactly a pane that died and was restarted.
+   */
+  remembered?: ReadonlyMap<string, number>
 }): number[] {
-  const { kids, sourcePaneId, newPaneId, siblings, savedKids, savedRatio } = params
+  const { kids, sourcePaneId, newPaneId, siblings, savedKids, savedRatio, remembered } = params
   const sourceAt = siblings.indexOf(sourcePaneId)
-  const shareOf = (id: string): number => {
+  // A `base` is a share relative to the other saved-derived shares; a `claim`
+  // is a share of the whole tab. `sharesAroundClaims` is what makes the
+  // difference count — see its doc comment for the ruling and for why, with no
+  // claim in play, it is arithmetically the rescale this used to do inline.
+  const shareOf = (id: string): { claim?: number; base: number } => {
     const at = savedKids.indexOf(id)
-    return at === -1 ? 1 / siblings.length : (savedRatio[at] ?? 1 / siblings.length)
+    if (at !== -1) return { base: savedRatio[at] ?? 1 / siblings.length }
+    const claim = remembered?.get(id)
+    return claim === undefined ? { base: 1 / siblings.length } : { claim, base: claim }
   }
-  const source = sourceAt === -1 ? 1 / kids.length : shareOf(sourcePaneId)
-  const shares = kids.map((kid) =>
-    kid === newPaneId || kid === sourcePaneId ? source / 2 : shareOf(kid),
+  const source = sourceAt === -1 ? { base: 1 / kids.length } : shareOf(sourcePaneId)
+  // The halving carries the claim with it rather than demoting both halves to
+  // bases. Splitting a restarted pane divides the share IT is remembered at
+  // between it and the pane carved out of it — which is what a carve means —
+  // and leaves the panes the user did not touch scaling into the rest. Demoted
+  // instead, the two halves would be renormalised against the saved kids and
+  // the pair would come out narrower than the one pane it replaced, which is
+  // the same collapse this task exists to stop, one split later.
+  const halved = {
+    claim: source.claim === undefined ? undefined : source.claim / 2,
+    base: source.base / 2,
+  }
+  return sharesAroundClaims(
+    kids.map((kid) => (kid === newPaneId || kid === sourcePaneId ? halved : shareOf(kid))),
   )
-  const total = shares.reduce((sum, share) => sum + share, 0)
-  return total > 0 ? shares.map((share) => share / total) : kids.map(() => 1 / kids.length)
 }
 
 export function registerIpc(
@@ -173,6 +207,19 @@ export function registerIpc(
   const forgetTab = (id: string): Promise<void> =>
     serialise(async () => {
       const config = await store.read()
+      // Captured here, before the row goes and inside this same pass, so there
+      // is no window in which the share is gone but unrecorded — and no second
+      // read, since this one is already open. `store.read()` has rescaled the
+      // row's shares to a whole tab on the way in, so what is recorded is a
+      // share OF THE TAB, which is what `sharesAroundClaims` takes a claim to
+      // be. The kid is still in the row at this moment: `normaliseLayout`
+      // drops a kid only once its pane row has gone, and this pane's row is
+      // still in the config that was just read — the `filter` below is what
+      // takes it out.
+      const row = config.tabs.find((candidate) => candidate.layout.kids.includes(id))
+      const at = row?.layout.kids.indexOf(id) ?? -1
+      const share = at === -1 ? undefined : row?.layout.ratio[at]
+      if (share !== undefined) shareWhenItDied.set(id, share)
       // The pane row, not the tab row. Removing the tab row instead would
       // leave the pane on disk for good — and would type-check, because a
       // `TabRow` has an `id` too. Any layout entry left pointing at this pane
@@ -264,6 +311,34 @@ export function registerIpc(
   // geometry on its `Entry`, but the entry is deleted when the session dies,
   // which is precisely when Restart needs it. So it is remembered here too.
   const lastGeometry = new Map<string, { cols: number; rows: number }>()
+
+  /**
+   * The share each pane held when it died, by pane id.
+   *
+   * The third map of a shape that is already here twice —
+   * `SessionManager.tabWasIn` and `lastGeometry` above are both
+   * process-lifetime, keyed by pane id, written at death, read at restart, and
+   * dropped by the same two handlers. This inherits that contract rather than
+   * inventing one, which is also why it is not persisted: restore prunes dead
+   * panes at launch, so a saved share would never have a pane to apply to.
+   *
+   * One difference, stated rather than glossed: the other two are read by the
+   * restart itself, and this one is not read until main next REBUILDS the
+   * tab's row — a split or a close, which may be minutes later or never.
+   *
+   * The renderer keeps a tombstone's share on screen by itself (see
+   * `withKeptPanes`), so this is not what the user is looking at. It is what
+   * main needs the moment it rebuilds the tab's row — at which point the
+   * restarted pane is a kid the saved row never knew, and the even fallback
+   * would flatten a ratio that survived both the death and the restart.
+   *
+   * Never consulted for a kid the saved row DOES know: once a split or a close
+   * has written the restarted pane back into the row, the row is the authority
+   * again and this entry is simply never read. That is why nothing deletes it
+   * at restart — a stale entry cannot outvote a live row, and deleting it there
+   * would break the contract the two maps above keep.
+   */
+  const shareWhenItDied = new Map<string, number>()
 
   registry.onTransition(({ tabId, to }) => {
     const payload: StatusEvent = { tabId, state: to }
@@ -723,8 +798,10 @@ export function registerIpc(
     // drops the state, so the dock badge stops counting a tab nobody can see.
     registry.forget(id)
     lastGeometry.delete(id)
+    shareWhenItDied.delete(id)
     // Dismissing the tombstone is what takes Restart off the screen, so the
-    // tab id kept for it goes the same way its geometry does.
+    // tab id kept for it goes the same way its geometry does — and so does the
+    // share it died at, which only a restart could ever have spent.
     manager.forgetPane(id)
   })
 
@@ -860,6 +937,10 @@ export function registerIpc(
             siblings,
             savedKids,
             savedRatio: saved?.layout.ratio ?? [],
+            // What an unclaimed sibling is owed, when main saw it die. The
+            // same map `closePane` hands `tabRowFor`, so the two rebuilds of a
+            // tab's row agree about what a remembered share means.
+            remembered: shareWhenItDied,
           }),
           kids,
         },
@@ -904,10 +985,12 @@ export function registerIpc(
       pendingKills.delete(paneId)
     }
     // A killed pane is not restartable, so its state, the geometry a restart
-    // would have attached at and the tab a restart would have rejoined all go
-    // together. See `SessionManager.forgetPane`.
+    // would have attached at, the share a restart would have come back at and
+    // the tab a restart would have rejoined all go together. See
+    // `SessionManager.forgetPane`.
     registry.forget(paneId)
     lastGeometry.delete(paneId)
+    shareWhenItDied.delete(paneId)
     manager.forgetPane(paneId)
 
     // After the kill, so it reads the group the tab is left in rather than the
@@ -934,19 +1017,25 @@ export function registerIpc(
       const kids = [...savedKids.filter((kid) => kid !== paneId), ...unclaimed]
 
       // `restore.ts`'s `tabRowFor`, on the same inputs and for the same reason:
-      // a kid the saved row knew keeps its own share, anything else takes an
-      // even one, and the lot is rescaled so the row describes a whole tab.
+      // a kid the saved row knew keeps its own share, a kid it does not know
+      // but that `shareWhenItDied` remembers claims the share it died at, and
+      // anything else takes an even one — with the saved-derived shares scaled
+      // into whatever the claims leave, so the row describes a whole tab.
       // This handler had its own copy of that, converged on it line for line —
       // and the rescale is exactly the part that can rot unnoticed in one copy,
       // since `store.read()` rescales again on the way back in and repairs the
       // evidence.
+      //
+      // `shareWhenItDied` is passed here and nowhere in `restoreWorkspace`,
+      // which is why the parameter is optional: restore prunes dead panes at
+      // launch, so it never has a restarted pane to apply one to.
       //
       // A tab with no panes left loses its row outright rather than keeping an
       // empty one, which would put a tab nobody can see in the bar until the
       // next read swept it. That is why the emptiness is tested here rather
       // than inside `tabRowFor`, whose other caller can never be handed none.
       const row: TabRow | null =
-        kids.length > 0 ? tabRowFor({ id: tabId, groupId }, kids, saved) : null
+        kids.length > 0 ? tabRowFor({ id: tabId, groupId }, kids, saved, shareWhenItDied) : null
 
       const tabs = withTabRow(config.tabs, tabId, row)
       await store.write({ ...config, panes, tabs })
