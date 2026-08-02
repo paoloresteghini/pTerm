@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useReducer, useState } from 'react'
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { Terminal, paneGrid } from './Terminal'
+import { PaneDivider } from './PaneDivider'
 import { TabBar } from './TabBar'
 import { DeadPane } from './DeadPane'
 import { Sidebar } from './Sidebar'
@@ -11,19 +12,38 @@ import {
   INITIAL_WORKSPACE_STATE,
   activeProject,
   activeTabId,
+  minRatioFor,
   needsYou,
   paneGroups,
   paneInDirection,
   panesOfTab,
   projectIdForTab,
+  resizeKids,
   stateOfProject,
   tabOfPane,
   tabsOfProject,
   workspaceReducer,
+  type PaneBox,
   type PaneDirection,
 } from './workspace'
 import { projectMuted, toggleProjectMute } from './mute'
 import { UNSORTED_ID, type NotificationConfig, type TabDescriptor, type TabType } from '../shared/ipc'
+
+/**
+ * The smallest a pane may be dragged to, in cells.
+ *
+ * 20 columns because below it almost anything wraps and a `claude` pane stops
+ * being readable; 5 rows because a shell needs a prompt and a little scrollback
+ * to be worth keeping. Cells rather than a percentage: what makes a terminal
+ * unusable is column count, not its share of the window.
+ *
+ * This governs the DRAG only. A window resize squeezes panes proportionally,
+ * through this floor if it comes to that — refusing that would mean fighting
+ * the user's own window manager, and `Terminal.tsx`'s zero-size guard is what
+ * protects the session there.
+ */
+const MIN_PANE_COLS = 20
+const MIN_PANE_ROWS = 5
 
 export function App() {
   const [state, dispatch] = useReducer(workspaceReducer, INITIAL_WORKSPACE_STATE)
@@ -199,6 +219,126 @@ export function App() {
     },
     [state, activePaneId, selectPane],
   )
+
+  /**
+   * The one drag in progress, as it stood the moment it was grabbed.
+   *
+   * A ref, and not state, for the reason `PaneDivider` keeps its own gesture
+   * facts in one: none of this is rendered, and putting it in state would
+   * re-render every tab on every frame to no visible effect.
+   *
+   * Everything a frame needs is captured here at pointerdown, so a move handler
+   * is a clamp and a dispatch and nothing else. That is not tidiness — it is
+   * what makes a clamped drag behave. `PaneDivider` reports the CUMULATIVE
+   * travel since the press, and applying a cumulative number to a ratio the
+   * previous frame already moved re-adds the whole travel every frame
+   * (0.50 → 0.51 → 0.53 → 0.56 for three even steps of 0.01: quadratic in frame
+   * count, and pinned to the floor within a few of them). Against the ratio as
+   * it was grabbed, the same number means what it says, and the floor behaves
+   * the way a hand expects: push into it, keep pushing, reverse, and the
+   * divider stays pinned until the cursor comes back past the point where the
+   * floor bit. Sending an incremental delta instead would move the divider the
+   * instant the cursor turned round, while the cursor was still deep in
+   * forbidden territory, and the two would never line up again.
+   *
+   * Not cleared on release. A gesture is established whole at every pointerdown
+   * and `PaneDivider` reports no movement without one, so a leftover here is
+   * inert — and clearing it would be one more thing Task 5's `commitLayout` has
+   * to remember to keep doing.
+   */
+  const grabbed = useRef<{ tabId: string; at: number; ratio: number[]; min: number } | null>(null)
+
+  /**
+   * Take hold of the divider before box `index` of `tabId`, or refuse to.
+   *
+   * `boxes` are what is on screen; `row.layout.ratio` is what is stored, and
+   * the two are not always the same list. `boxesOfRow` drops kids whose panes
+   * are absent — or named twice — and renormalises what is left, so a box index
+   * is not a kid index and an on-screen share is not a stored one. Applying a
+   * delta measured against the screen to un-renormalised stored ratios, at an
+   * index that has slid, is the shape of plan 2b's Critical: a pane nobody
+   * touched changing size.
+   *
+   * So the whole question is settled here, once, and in the screen's own units.
+   * Equal lengths mean nothing was dropped, which makes the boxes the kids in
+   * kids order — checked by identity at the pair being dragged rather than
+   * inferred, so the coupling to `boxesOfRow` is stated instead of assumed. The
+   * ratio then taken is the boxes' own shares, which sum to 1 by construction,
+   * so the delta, the floor and the stored ratio are all fractions of the same
+   * axis. Anything else about the row and this refuses, leaving `grabbed` null,
+   * and the drag does nothing at all.
+   *
+   * The floor is computed here rather than in the divider because this is where
+   * the cell size is reachable: `paneGrid` reports a mounted terminal's grid,
+   * and the box's own share says what fraction of the axis that grid covers, so
+   * the axis total falls out without measuring the DOM. Either adjacent pane
+   * can supply it — every terminal is built with the same font — so the low
+   * side is taken, and the choice is noted here so nobody has to wonder whether
+   * it mattered. Captured once, at the grab, rather than recomputed per frame:
+   * the share moves as the drag runs but the grid only catches up when tmux
+   * does, so a per-frame reading would divide a fresh share by a stale grid and
+   * make the floor jitter mid-drag. The window is not being resized while a
+   * divider is being held.
+   */
+  const grabPane = useCallback(
+    (tabId: string, index: number, boxes: PaneBox[]) => {
+      grabbed.current = null
+      const row = state.tabs.find((candidate) => candidate.id === tabId)
+      const low = boxes[index - 1]
+      const high = boxes[index]
+      if (!row || !low || !high) return
+      if (boxes.length !== row.layout.kids.length) return
+      if (row.layout.kids[index - 1] !== low.pane.id) return
+      if (row.layout.kids[index] !== high.pane.id) return
+      const grid = paneGrid(low.pane.id)
+      if (!grid || low.share <= 0) return
+      const axisCells = (row.layout.dir === 'row' ? grid.cols : grid.rows) / low.share
+      const floor = row.layout.dir === 'row' ? MIN_PANE_COLS : MIN_PANE_ROWS
+      grabbed.current = {
+        tabId,
+        at: index - 1,
+        ratio: boxes.map((box) => box.share),
+        min: minRatioFor(floor, axisCells),
+      }
+    },
+    [state.tabs],
+  )
+
+  /**
+   * One frame of the drag `grabPane` set up: clamp the travel and say so.
+   *
+   * Nothing is read from the current state, which is what makes this stable
+   * across renders and free of the compounding described above. The reducer has
+   * the last word on whether the ratio still fits the row — a gesture that
+   * raced a split carries the wrong number of kids, and `resized` drops it.
+   *
+   * There is no push to tmux here and there must not be one: the panes reflow
+   * from `state.tabs`, `Terminal`'s ResizeObserver sees its box change, and the
+   * fit that follows resizes the real session. One path, already tested.
+   */
+  const dragPane = useCallback((delta: number) => {
+    const held = grabbed.current
+    if (!held) return
+    dispatch({
+      type: 'resized',
+      tabId: held.tabId,
+      ratio: resizeKids(held.ratio, held.at, delta, held.min, held.min),
+    })
+  }, [])
+
+  /**
+   * The end of a drag. A stub until Task 5, which writes the tab's ratios to
+   * disk from here — which is why it is called with the tab and not with
+   * nothing, and why the drag itself writes nothing: a persist per frame would
+   * be a file write per pointer move.
+   *
+   * It runs after every release of a divider, including one whose `grabPane`
+   * refused and which therefore moved nothing: the divider reports a release it
+   * saw, and it has no way to know the caller declined the grab. Task 5 should
+   * expect that and write the ratios that are there, which in that case are the
+   * ones already on disk.
+   */
+  const commitLayout = useCallback((_tabId: string) => undefined, [])
 
   useEffect(() => {
     let cancelled = false
@@ -627,6 +767,43 @@ export function App() {
                   ) : null}
                 </div>
               ))}
+              {/* The dividers, in an overlay of their own rather than among the
+                  panes, and `inset-2` is the container's `p-2` written a second
+                  time on purpose. An absolutely positioned element resolves its
+                  percentages — and reports its parent's `offsetWidth` — against
+                  its containing block's PADDING box, while the panes lay out in
+                  the CONTENT box. As direct children of the padded container the
+                  strips missed the real seam by up to the padding and measured a
+                  drag axis two paddings too long, so every drag ran slow and
+                  crept away from the cursor. This overlay IS the content box, so
+                  both resolve against the right one. The duplication is real and
+                  is the price; `dividers.test.ts` pins the two numbers together
+                  so they cannot drift apart quietly.
+
+                  `pointer-events-none` so the overlay is invisible to the mouse
+                  everywhere the strips are not — each strip opts back in — and
+                  no `key` juggling: a divider is keyed by the pane it precedes,
+                  in a list of its own, so nothing here can disturb a pane box's
+                  key or unmount a terminal. */}
+              <div
+                data-testid={`dividers-${group.id}`}
+                className="pointer-events-none absolute inset-2 z-20"
+              >
+                {group.panes.map((box, index) =>
+                  index > 0 ? (
+                    <PaneDivider
+                      key={box.pane.id}
+                      dir={group.style.flexDirection === 'column' ? 'col' : 'row'}
+                      offset={group.panes
+                        .slice(0, index)
+                        .reduce((sum, earlier) => sum + earlier.share, 0)}
+                      onGrab={() => grabPane(group.id, index, group.panes)}
+                      onDrag={dragPane}
+                      onCommit={() => commitLayout(group.id)}
+                    />
+                  ) : null,
+                )}
+              </div>
             </div>
           ))}
         </div>
