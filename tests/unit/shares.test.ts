@@ -6,6 +6,7 @@ import {
   inLiveFrame,
   routeShares,
   layoutWrite,
+  rescaledClaims,
 } from '../../src/main/ipc/shares'
 import { tabRowFor } from '../../src/main/ipc/restore'
 import type { TabRow } from '../../src/main/state/store'
@@ -350,5 +351,33 @@ describe('claimFor', () => {
 
   it('gives nothing for a pane nothing was recorded for', () => {
     expect(claimFor('tab1', 'zzz', claims)).toBeUndefined()
+  })
+})
+
+describe('rescaledClaims', () => {
+  it('grows this tab’s remaining claims into the space the dismissed one left', () => {
+    // B held 0.2 of the tab and has been dismissed, so what is left divides a
+    // tab that is 0.8 of what it was: 0.3 of the old tab is 0.375 of the new
+    // one. The renderer does exactly this to its own row; this is main
+    // following, not main deciding.
+    const next = rescaledClaims('tab1', 0.2, new Map([
+      ['c', { tabId: 'tab1', share: 0.3 }],
+      ['far', { tabId: 'tab2', share: 0.3 }],
+    ]))
+    expect(next.get('c')?.share).toBeCloseTo(0.375)
+    // Another tab's claims are a fraction of another tab. Untouched.
+    expect(next.get('far')?.share).toBeCloseTo(0.3)
+  })
+
+  it('leaves everything alone when the dismissed pane was owed nothing', () => {
+    const claims = new Map([['c', { tabId: 'tab1', share: 0.3 }]])
+    expect(rescaledClaims('tab1', 0, claims).get('c')?.share).toBeCloseTo(0.3)
+  })
+
+  it('leaves everything alone when the dismissed pane held the whole tab', () => {
+    // Dividing by zero here would poison every share it reached. Nothing is a
+    // better answer than Infinity, and the next rebuild renormalises anyway.
+    const claims = new Map([['c', { tabId: 'tab1', share: 0.3 }]])
+    expect(rescaledClaims('tab1', 1, claims).get('c')?.share).toBeCloseTo(0.3)
   })
 })

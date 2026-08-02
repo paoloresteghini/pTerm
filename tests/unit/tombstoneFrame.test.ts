@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { carveRatio, claimForDeath } from '../../src/main/ipc/register'
 import { tabRowFor } from '../../src/main/ipc/restore'
-import type { Claim } from '../../src/main/ipc/shares'
+import { rescaledClaims, type Claim } from '../../src/main/ipc/shares'
 import { workspaceReducer, paneGroups, type WorkspaceState } from '../../src/renderer/workspace'
 import type { TabDescriptor, TabRow, TabShape } from '../../src/shared/ipc'
 
@@ -395,5 +395,91 @@ describe('two compositions beyond a single split', () => {
     expect(shares.b).toBeCloseTo(0.2)
     expect(shares.a).toBeCloseTo(4 / 11)
     expect(shares.c / shares.a).toBeCloseTo(0.3 / 0.25)
+  })
+})
+
+describe('a dismiss, then a restart and split', () => {
+  // `register.ts`'s `dismissTab` handler, run here as its own two steps: read
+  // the claim before deleting it (the record is the only place left that says
+  // which tab a dismissed pane was in), then grow what is left of THAT tab
+  // into the room it leaves. Mirrors `kill` above in spirit — a small
+  // reimplementation of the production step, not a call into `ipcMain`.
+  function dismiss(id: string, tombstones: Map<string, Claim>): void {
+    const held = tombstones.get(id)
+    // Never assert over a collection without first asserting it is non-empty.
+    expect(held).toBeDefined()
+    tombstones.delete(id)
+    for (const [paneId, claim] of rescaledClaims(held!.tabId, held!.share, tombstones)) {
+      tombstones.set(paneId, claim)
+    }
+  }
+
+  it('a dismissed tombstone’s share grows the other into it, on both sides, so a later restart returns it honest', () => {
+    // B dies, then C dies — the same setup case 1 above starts from: main's
+    // persisted row drops to `[A] = [1]` and `tombstones` records B at 0.2,
+    // C at 0.3 (both whole-tab fractions, and both amounts pinned already by
+    // 'records the same two claims...' above).
+    const tombstones = new Map<string, Claim>()
+    const afterFirstDeath = kill(STARTING_ROW, 'b', tombstones)
+    const savedAfterBothDeaths = kill(afterFirstDeath, 'c', tombstones)
+    expect(tombstones.get('b')?.share).toBeCloseTo(0.2)
+    expect(tombstones.get('c')?.share).toBeCloseTo(0.3)
+
+    // B is dismissed. Main's side: `dismiss` above.
+    dismiss('b', tombstones)
+    // Wire value: C's claim, grown from the 0.3 it died at into 0.375 — its
+    // share of the tab now that B's 0.2 is no longer part of it.
+    expect(tombstones.get('c')?.share).toBeCloseTo(0.375)
+    expect(tombstones.get('b')).toBeUndefined()
+
+    // The renderer's side of the same dismiss: `state.tabs`'s row for this tab
+    // is still `STARTING_ROW` untouched (nothing has rewritten it since either
+    // pane died), so `withoutKid`, via the `dismissed` action, drops B out of
+    // it and renormalises A and C over what is left — independently of main,
+    // and by construction from the same starting numbers.
+    const priorWithBothDead: WorkspaceState = { ...priorState('b'), dead: { b: 0, c: 0 } }
+    const afterDismiss = workspaceReducer(priorWithBothDead, { type: 'dismissed', id: 'b' })
+    const dismissedRow = afterDismiss.tabs[0]
+    expect(dismissedRow.layout.kids).toEqual(['a', 'c'])
+    // Screen value: the same 0.375 C's wire claim now carries, reached by the
+    // renderer's own arithmetic rather than by reading main's map. They agree
+    // because both are "the survivor's old share, divided by 1 minus what
+    // left" — the same rule, run twice on the same starting numbers, not a
+    // coincidence of these particular fractions.
+    expect(dismissedRow.layout.ratio[dismissedRow.layout.kids.indexOf('c')]).toBeCloseTo(0.375)
+    expect(dismissedRow.layout.ratio[dismissedRow.layout.kids.indexOf('a')]).toBeCloseTo(0.625)
+
+    // C restarts, A is split. Main carves the row from `savedAfterBothDeaths`
+    // — still `[A] = [1]`, since a dismiss never touches the persisted row,
+    // only the tombstone map — using the now-rescaled `tombstones`.
+    const { kids, ratio } = splitRow({
+      saved: savedAfterBothDeaths,
+      sourcePaneId: 'a',
+      newPaneId: 'new',
+      unclaimed: ['c'],
+      tombstones,
+    })
+    // Wire values: what main puts on the row it writes and hands back.
+    // Without the rescale (Step 5's A/B) this reads A .35 / new .35 / C .30 —
+    // the brief's measured defect, C recovered at what it died at rather than
+    // at what it was worth the moment B left.
+    expect(ratio[kids.indexOf('a')]).toBeCloseTo(0.3125)
+    expect(ratio[kids.indexOf('new')]).toBeCloseTo(0.3125)
+    expect(ratio[kids.indexOf('c')]).toBeCloseTo(0.375)
+    expect(ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+
+    const shape: TabShape = {
+      panes: kids.map((id) => pane(id)),
+      tabs: [row(kids, ratio)],
+    }
+    const next = workspaceReducer(afterDismiss, { type: 'split', shape })
+    const shares = screenShares(next)
+    // Screen values: B is gone outright — dismissed, not merely dead — and C
+    // comes back at exactly the 0.375 it was worth the moment it was
+    // dismissed, not the 0.30 it died at.
+    expect(Object.keys(shares)).not.toContain('b')
+    expect(shares.a).toBeCloseTo(0.3125)
+    expect(shares.new).toBeCloseTo(0.3125)
+    expect(shares.c).toBeCloseTo(0.375)
   })
 })

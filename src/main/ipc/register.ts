@@ -25,7 +25,15 @@ import {
   tabRowFor,
   withUnsorted,
 } from './restore'
-import { sharesAroundClaims, tombstonesOf, claimFor, inLiveFrame, layoutWrite, type Claim } from './shares'
+import {
+  sharesAroundClaims,
+  tombstonesOf,
+  claimFor,
+  inLiveFrame,
+  layoutWrite,
+  rescaledClaims,
+  type Claim,
+} from './shares'
 import { isDirectory } from '../fsutil'
 import { scanCandidates } from '../projects/discovery'
 import { hookPaths, installHooks, readHooksState, uninstallHooks } from '../hooks/install'
@@ -944,7 +952,21 @@ export function registerIpc(
     // drops the state, so the dock badge stops counting a tab nobody can see.
     registry.forget(id)
     lastGeometry.delete(id)
+    // Read before the delete, because the record is the only thing left that
+    // can say which tab this pane was in and what it held: `forgetTab` dropped
+    // its row at its death, and `store.read()` dropped its kid after that. The
+    // tab id travels on the claim for exactly this reason.
+    const held = tombstones.get(id)
     tombstones.delete(id)
+    if (held) {
+      // The renderer has just renormalised its row around this pane leaving.
+      // Following it here is what keeps the two frames in step until the next
+      // rebuild; see `rescaledClaims`. The rescale changes values and never
+      // the key set, so writing each entry back is the whole of applying it.
+      for (const [paneId, claim] of rescaledClaims(held.tabId, held.share, tombstones)) {
+        tombstones.set(paneId, claim)
+      }
+    }
     // Dismissing the tombstone is what takes Restart off the screen, so the
     // tab id kept for it goes the same way its geometry does — and so does the
     // share it died at, which only a restart could ever have spent.

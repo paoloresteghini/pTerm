@@ -304,6 +304,38 @@ export function layoutWrite(
  * states and nothing tests, in a change whose whole point is that a share
  * travels with the pane it belongs to, not with a position in an array.
  */
+/**
+ * `claims`, with every share this tab still owes grown into the space a
+ * dismissed pane left.
+ *
+ * A dismiss is the one event that removes a pane from a tab without either
+ * side rebuilding the row: the renderer drops the kid and renormalises what is
+ * left (see `workspace.ts`'s `withoutKid`), so every surviving share — live
+ * pane and tombstone alike — becomes a fraction of a smaller tab. Main has to
+ * follow, or its record and the renderer's row are in two frames again, which
+ * is the defect this whole plan exists to remove.
+ *
+ * Only this tab's claims, because `gone` is a fraction of this tab.
+ * `gone <= 0` and `gone >= 1` are both left alone rather than divided by:
+ * nothing was owed, or the whole tab was, and neither has a rescale that means
+ * anything. A close needs none of this — the renderer keeps a tombstone at its
+ * prior share across `closedPane` and scales main's row into the rest, so the
+ * two already agree.
+ */
+export function rescaledClaims(
+  tabId: string,
+  gone: number,
+  claims: ReadonlyMap<string, Claim>,
+): Map<string, Claim> {
+  const room = 1 - gone
+  if (!(gone > 0 && room > 0)) return new Map(claims)
+  return new Map(
+    [...claims].map(([id, held]) =>
+      held.tabId === tabId ? [id, { ...held, share: held.share / room }] : [id, held],
+    ),
+  )
+}
+
 export function inLiveFrame(
   whole: readonly number[],
   ids: readonly string[],
