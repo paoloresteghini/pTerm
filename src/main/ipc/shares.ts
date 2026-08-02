@@ -170,27 +170,42 @@ export function tombstonesOf(
  *   so preserves whatever it is given: it neither creates a zero nor removes
  *   one.
  *
- * Measured, the drag path really can deliver one. `minRatioFor` answers 0 for
- * an unmeasured axis (`totalCells <= 0`, which `grabFor` reaches when a mounted
- * terminal reports a zero grid), `resizeKids` with a floor of 0 clamps the
- * movement and not the result — `resizeKids([.5, .5], 0, -1, 0, 0)` is
- * `[0, 1]` — and `commitLayout` sends that row whole. For a pane main holds a
- * claim for, `routeShares` then routes the 0 into `owed`.
+ * The drag path can no longer deliver one. `grabFor` (`workspace.ts`) already
+ * refused a grab whose low pane's share is non-positive (`low.share <= 0`);
+ * the zero-share-guard work added a second refusal beside it for what this
+ * paragraph used to trace — a mounted terminal that has not yet reported real
+ * dimensions on the drag's axis — `if (gridCells <= 0) return null`. With both
+ * guards in place `axisCells` is always the ratio of two positive numbers, so
+ * `minRatioFor` never sees the `totalCells <= 0` it answers 0 for, never hands
+ * `resizeKids` a floor of 0, and `resizeKids` never clamps a share down to an
+ * exact zero for `commitLayout` to send. (`minRatioFor`'s other zero-answer,
+ * for `cells` itself being 0, was already unreachable through this path —
+ * `App.tsx`'s one production call passes the constants `MIN_PANE_COLS` and
+ * `MIN_PANE_ROWS`, 20 and 5, never a floor of 0.)
  *
- * What it costs depends on whether that pane comes back. While it stays dead
- * the claim is harmless: `held` gains nothing and `inLiveFrame` strips the
- * entry, so the row is untouched — measured `[0.5, 0.5]`, unchanged. Once it
- * restarts and a rebuild names it, `claimFor` returns the 0, this function
- * takes the claim branch, and the pane's share is exactly 0 — measured, a row
- * of `[1, 0]`. `normaliseLayout` reads one non-positive share as making the
- * whole ratio unusable and flattens the tab to an even split on the next
- * `store.read()`, so the cost lands on every pane in the tab rather than on the
- * one that was dragged.
+ * A zero claim's cost, whenever one exists, still depends on whether that
+ * pane comes back. While it stays dead the claim is harmless: `held` gains
+ * nothing and `inLiveFrame` strips the entry, so the row is untouched —
+ * measured `[0.5, 0.5]`, unchanged. Once it restarts and a rebuild names it,
+ * `claimFor` returns the 0, this function takes the claim branch, and the
+ * pane's share is exactly 0 — measured, a row of `[1, 0]`. `normaliseLayout`
+ * reads one non-positive share as making the whole ratio unusable and
+ * flattens the tab to an even split on the next `store.read()`, so the cost
+ * lands on every pane in the tab rather than on the one that held the zero.
  *
- * Recorded, not fixed: whether the guard belongs at the handler, at
- * `routeShares`, or here is Paolo's call. Note that guarding `owed` alone would
- * not close the drag path — `routeShares` keeps a zero for a SAVED kid in
- * `ratio` too, where it reaches the row without passing through a claim at all.
+ * What is not fixed: `routeShares` (below) never checks that any one entry is
+ * positive, only that the saved kids' shares SUM to something positive
+ * (`held > 0`), so a lone zero among positive siblings still passes straight
+ * through on either side it builds — into `owed`, which `CHANNELS.setLayout`'s
+ * handler writes as a claim with no guard of its own, and into `ratio`, where
+ * it reaches a SAVED kid directly, with no claim involved at all. I traced no
+ * live caller that currently hands `routeShares` such a zero: the renderer's
+ * whole-tab shares carry either a value the drag produced (which can no
+ * longer be a bare zero) or a value already sitting on the row, and I did not
+ * find another writer that puts one there — but splits, dismissals, and
+ * restores were not audited to the same depth, so this is "no route I could
+ * trace," not a proof that none exists. Whether the missing check belongs at
+ * the handler, at `routeShares`, or here remains Paolo's call.
  */
 export function sharesAroundClaims(
   entries: readonly { claim?: number; base: number }[],
