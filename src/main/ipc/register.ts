@@ -208,9 +208,10 @@ export function carveRatio(params: {
  * the traced case where that visibly moves a pane nobody touched. Sharing the
  * predicate is what this task does, so the two readers cannot drift into
  * disagreeing about WHICH claims are unspent; making `carveRatio`/`tabRowFor`
- * actually call it for a tombstone, closing the gap itself, needs a plan of
- * its own — see the branch review's deferred Importants — not a third
- * revision of this arithmetic squeezed into this wave.
+ * actually call it for a tombstone — closing the gap itself — is Task 3 of
+ * this plan, "Both row builders emit in the live-remainder frame", landing
+ * two commits from here, not a third revision of this arithmetic squeezed
+ * into this one.
  *
  * `!kids.includes` skips a claim that has been SPENT: once a split or a close
  * has written a restarted pane back into the row, the row accounts for it
