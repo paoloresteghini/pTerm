@@ -113,9 +113,20 @@ function screenShares(state: WorkspaceState): Record<string, number> {
   expect(groups).toHaveLength(1)
   const boxes = groups[0].panes
   const ids = boxes.map((box) => box.pane.id)
-  // Every pane boxed exactly once — a regression that drops or duplicates a
-  // terminal changes this count without necessarily moving any one share.
-  expect(new Set(ids).size).toBe(ids.length)
+  // Every pane the state holds, boxed exactly once — checked against
+  // `state.panes` rather than against itself.
+  //
+  // `expect(new Set(ids).size).toBe(ids.length)` was here instead, and could
+  // not fail in either direction it claimed to cover. A DUPLICATE is
+  // impossible to begin with: `boxesOfRow` dedupes within a row and
+  // `paneGroups` across rows, so deleting the dedupe outright left this green.
+  // A DROP cannot move that equality at all — losing a box shortens both sides
+  // of it together. Comparing against the panes that are supposed to be drawn
+  // is what makes a drop fail: the set equality catches it, and the length
+  // beside it would still catch a duplicate if one ever became reachable.
+  expect(state.panes.length).toBeGreaterThan(0)
+  expect(ids.length).toBe(state.panes.length)
+  expect(new Set(ids)).toEqual(new Set(state.panes.map((pane) => pane.id)))
   return Object.fromEntries(boxes.map((box) => [box.pane.id, box.share]))
 }
 
@@ -511,10 +522,14 @@ describe('the whole-tab property, exhaustively', () => {
    * left; a split halves the source's entry and gives the other half to the
    * new pane. `kill`, `splitRow` and `workspaceReducer` are the real functions
    * under test; the model shares no code with any of them, which is what
-   * makes its agreement with them evidence rather than a tautology — and also
-   * why its SECOND A/B, below, breaks the model rather than the code: an
-   * oracle that drifts from what the app should do is a test that pins the
-   * wrong thing.
+   * makes its agreement with them evidence rather than a tautology. It also
+   * makes the model a second thing that can be wrong: an oracle that drifts
+   * from what the app should do is a test that pins the wrong thing. That is
+   * why the second of the two mutations this property was A/B'd under breaks
+   * the MODEL — the dismiss step's renormalise, removed, must fail the dismiss
+   * cases — rather than breaking production code. Neither A/B lives in this
+   * file; both are recorded in the plan, in
+   * `.superpowers/sdd/2026-08-02-prcli-tombstone-membership/task-8-report.md`.
    *
    * **What this does NOT show, and cannot: `inLiveFrame`.** The property is
    * asserted off `paneGroups` — what is actually drawn — and `inLiveFrame` is
@@ -524,17 +539,28 @@ describe('the whole-tab property, exhaustively', () => {
    * so a uniform rescale of main's row is invisible to both. A mutation that
    * broke only `inLiveFrame` would leave every case here green — not because
    * this property is weak, but because `inLiveFrame` is a wire-frame
-   * conversion, not a screen one; the file's own A/B (a), below, mutates a
-   * different line for exactly this reason. `inLiveFrame` is pinned on the
+   * conversion, not a screen one. Both divisions above are unconditional,
+   * which is what makes this a property of the seam rather than of the
+   * fixtures; it is why the first of this property's two A/Bs mutates the
+   * `tombstonesOf` append in `carveRatio` instead, and the reasoning and the
+   * measurements are recorded in the plan, in
+   * `.superpowers/sdd/2026-08-02-prcli-tombstone-membership/task-8-addendum.md`.
+   * `inLiveFrame` is pinned on the
    * wire instead, by `tests/unit/carveRatio.test.ts`, `tests/unit/shares.test.ts`,
    * and by this file's own wire-level assertions in the four-orderings,
    * two-compositions and dismiss describes above.
    *
    * **Skipped: a tab whose every pane is dead, with none restarted.** There is
-   * then no live pane to split from, and `closedPane` — never exercised by
-   * this property, which only ever drives a `split` — is what would drop such
-   * a tab's row instead. Every other combination reaches a split; the skip
-   * count is pinned alongside the case count in the first `it`, below.
+   * then no live pane to split from, so the case has no split to assert
+   * against. Nothing else drops such a tab's row either — `closedPane` would,
+   * but ⌘W on a dead pane rejects inside `manager.kill` and dispatches no
+   * `closedPane` at all, so an all-dead tab never reaches it. What the reducer
+   * really leaves behind is `withoutKid`'s empty-row guard: measured, `died a`,
+   * `died b`, `dismissed b`, `dismissed a` gives `panes: []` with the row still
+   * reading `kids: ['a']`. Harmless, because `paneGroups` walks `state.panes`
+   * and draws nothing for a kid with no pane — see `withoutKid`'s own doc.
+   * Every other combination reaches a split; the skip count is pinned
+   * alongside the case count in the first `it`, below.
    */
 
   type PaneId = 'a' | 'c' | 'b'

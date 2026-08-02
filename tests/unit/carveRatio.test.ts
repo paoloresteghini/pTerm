@@ -232,20 +232,54 @@ describe('carveRatio', () => {
     expect(ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
   })
 
+  // Both tab filters, in the one fixture that can see either of them.
+  //
+  // A fixture whose live kids are all base-derived cannot: every base is
+  // divided by the total of the bases and then scaled into `room`, so a leaked
+  // claim scales all of them by one common factor and `inLiveFrame` divides
+  // that factor straight back out. Measured — the earlier version of this test
+  // was exactly that shape and was bit-for-bit identical with the filters
+  // deleted.
+  //
+  // What makes them load-bearing is a live kid that carries a claim of its own,
+  // here `b` at 0.5. The leaked shares then have to share `room` with it rather
+  // than merely rescaling it, and each filter has its own witness:
+  //
+  // - `far` is not in `kids`, so without `tombstonesOf`'s filter it is appended
+  //   as a tombstone of this tab. 0.5 + 0.9 leaves no room and
+  //   `sharesAroundClaims` drops into its renormalise-everything branch, which
+  //   is not a common factor: measured 0.1714 / 0.1714 / 0.2286 / 0.2857 / 0.1429.
+  // - `d` IS a live kid, unclaimed by the saved row, so without `claimFor`'s
+  //   filter it stops taking an even base and claims 0.4 of the tab outright:
+  //   measured 0.03 / 0.03 / 0.04 / 0.5 / 0.4.
   it('is unchanged by claims recorded against another tab', () => {
     const args = {
       tabId: 'tab',
-      kids: ['a', 'new', 'c', 'b'],
+      kids: ['a', 'new', 'c', 'b', 'd'],
       sourcePaneId: 'a',
       newPaneId: 'new',
-      siblings: ['a', 'c', 'b'],
+      siblings: ['a', 'c', 'b', 'd'],
       savedKids: ['a', 'c'],
       savedRatio: [0.6, 0.4],
+      tombstones: new Map([['b', { tabId: 'tab', share: 0.5 }]]),
     }
     const without = carveRatio(args)
-    expect(without).toHaveLength(4)
-    expect(
-      carveRatio({ ...args, tombstones: new Map([['far', { tabId: 'other', share: 0.9 }]]) }),
-    ).toEqual(without)
+    // The house non-empty guard before the element pins below, not a
+    // discriminator: `carveRatio` returns one entry per kid structurally.
+    expect(without).toHaveLength(5)
+    expect(without[0]).toBeCloseTo(0.12) // a: half of 0.6, scaled into the 0.5 `b` leaves
+    expect(without[1]).toBeCloseTo(0.12) // new: the other half
+    expect(without[2]).toBeCloseTo(0.16) // c: its own 0.4, scaled the same way
+    expect(without[3]).toBeCloseTo(0.5) // b: exactly what it is owed
+    expect(without[4]).toBeCloseTo(0.1) // d: an even base, scaled the same way
+    const leaked = carveRatio({
+      ...args,
+      tombstones: new Map([
+        ...args.tombstones,
+        ['far', { tabId: 'other', share: 0.9 }],
+        ['d', { tabId: 'other', share: 0.4 }],
+      ]),
+    })
+    expect(leaked).toEqual(without)
   })
 })

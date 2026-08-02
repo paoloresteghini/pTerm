@@ -152,17 +152,40 @@ describe('tabRowFor with a remembered pane', () => {
     expect(built.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
   })
 
+  // Both tab filters, in the one fixture that can see either of them — the
+  // mirror of `carveRatio.test.ts`'s test of the same name, and inert for the
+  // same reason before it carried a claimed live kid: with every live kid
+  // base-derived, a leaked claim scales all of them by one common factor and
+  // `inLiveFrame` divides that factor straight back out. `b`'s own claim of 0.5
+  // is what stops it being a common factor, and each filter then has a witness:
+  //
+  // - `far` is not among `ids`, so without `tombstonesOf`'s filter it is
+  //   appended as a tombstone of this tab; 0.5 + 0.9 leaves no room and
+  //   `sharesAroundClaims` renormalises the lot instead — measured
+  //   0.5455 / 0.2727 / 0.1818.
+  // - `c` IS a live kid the saved row does not know, so without `claimFor`'s
+  //   filter it takes 0.4 of the tab outright rather than an even base —
+  //   measured 0.1 / 0.5 / 0.4.
   it('ignores a claim recorded against another tab', () => {
-    const built = tabRowFor(
+    const mine = new Map([['b', { tabId: 'tab', share: 0.5 }]])
+    const built = tabRowFor({ id: 'tab', groupId: 'tab' }, ['a', 'b', 'c'], row(['a'], [1]), mine)
+    expect(built.layout.kids).toEqual(['a', 'b', 'c'])
+    // `a` keeps its saved 1 and `c` takes an even 1/3 as raw shares; the two
+    // are scaled into the 0.5 that `b`'s claim leaves.
+    expect(built.layout.ratio[0]).toBeCloseTo(0.375)
+    expect(built.layout.ratio[1]).toBeCloseTo(0.5)
+    expect(built.layout.ratio[2]).toBeCloseTo(0.125)
+    const leaked = tabRowFor(
       { id: 'tab', groupId: 'tab' },
-      ['a', 'b'],
+      ['a', 'b', 'c'],
       row(['a'], [1]),
-      new Map([['elsewhere', { tabId: 'other', share: 0.5 }]]),
+      new Map([
+        ...mine,
+        ['far', { tabId: 'other', share: 0.9 }],
+        ['c', { tabId: 'other', share: 0.4 }],
+      ]),
     )
-    // Unchanged from the no-tombstone case: `b` is neither saved nor claimed
-    // here, so it takes an even raw share and the two come out 2/3 and 1/3.
-    expect(built.layout.ratio[0]).toBeCloseTo(2 / 3)
-    expect(built.layout.ratio[1]).toBeCloseTo(1 / 3)
+    expect(leaked.layout.ratio).toEqual(built.layout.ratio)
   })
 })
 

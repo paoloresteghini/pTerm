@@ -42,7 +42,9 @@ import { describe, it, expect } from 'vitest'
  *   eleven green. They are now covered by `workspace.test.ts`'s `grabFor`
  *   describe, which moved the guards out of `App.tsx` and exercises each by
  *   name — `refuses when the boxes are the same length but not the same
- *   panes` fails the moment the two identity guards are deleted;
+ *   panes` fails the moment the two identity guards are deleted, and
+ *   `refuses a longer kid list even when the boxes match it pane for pane`
+ *   fails the moment the length guard is, and only it;
  * - **the floor derivation was here too** — `axisCells = grid.cols / low.share`,
  *   and the `minRatioFor` call it fed. It was new arithmetic living in
  *   `App.tsx` with no unit test anywhere, and the `minRatioFor(` token this

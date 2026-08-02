@@ -2013,12 +2013,22 @@ describe('splitPane and closePane', () => {
     const row = shape.tabs[0]
     expect(row.layout.kids).toEqual([founder.id, fourth.id, third.id])
     const at = (id: string): number => row.layout.ratio[row.layout.kids.indexOf(id)]
-    // The share C really died at. Recorded straight off the row it is 0.375,
-    // and the founder and the new pane pay for the difference — 0.3125 each
-    // instead of 0.35 — so all three assertions bite, in both directions.
-    expect(at(third.id)).toBeCloseTo(0.3)
-    expect(at(founder.id)).toBeCloseTo(0.35)
-    expect(at(fourth.id)).toBeCloseTo(0.35)
+    // B died and was never restarted, so its 0.2 claim is still unspent and
+    // this row does not name it: `tombstonesOf` appends it, `sharesAroundClaims`
+    // holds it back, and `inLiveFrame` re-expresses what the three live kids
+    // hold — A 0.25, the new pane 0.25, C 0.30 of the whole tab, which is 0.80
+    // between them — as fractions of that 0.80. Hence 0.3125 / 0.3125 / 0.375
+    // rather than the whole-tab numbers.
+    //
+    // What C's pin still catches: it is `claimForDeath`'s whole-tab correction.
+    // C's row entry read 0.375 at its death, and 0.375 × 0.8 = 0.3 is the share
+    // it really died at. Revert that correction — record 0.375 straight off the
+    // row — and this same call returns 0.265625 / 0.265625 / 0.46875 (measured),
+    // so all three pins move and C's moves furthest. The sum below cannot see
+    // any of it: `sharesAroundClaims` forces the sum to 1 either way.
+    expect(at(third.id)).toBeCloseTo(0.375)
+    expect(at(founder.id)).toBeCloseTo(0.3125)
+    expect(at(fourth.id)).toBeCloseTo(0.3125)
     expect(row.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
   })
 

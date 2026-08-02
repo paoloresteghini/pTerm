@@ -1400,6 +1400,14 @@ describe('a tombstone when its tab is split or closed', () => {
     })
     const row = next.tabs.find((candidate) => candidate.id === 'aaa')
     expect(row?.layout.kids).toEqual(['aaa', 'bbb'])
+    // The shares this test is actually about, and they were unasserted: the
+    // tombstone `aaa` holds the 0.5 it had before the close — the renderer
+    // scales nothing back into a tombstone — and `bbb`, which main handed back
+    // at the whole tab, is scaled into the 0.5 that leaves. The sum below
+    // cannot see either: every branch of `withKeptPanes` normalises, so `≈ 1`
+    // is an identity here rather than a check.
+    expect(row?.layout.ratio[0]).toBeCloseTo(0.5)
+    expect(row?.layout.ratio[1]).toBeCloseTo(0.5)
     expect(row?.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
     // The closed pane is gone and does not come back through the merge.
     expect(next.panes.map((pane) => pane.id)).toEqual(['aaa', 'bbb'])
@@ -1730,6 +1738,18 @@ describe('grabFor', () => {
     // apart, and applying the drag at the box index would resize a pane nobody
     // touched. This is the state a dismiss used to leave behind for good.
     const row = ratioRow('aaa', ['aaa', 'gone', 'bbb'], [0.4, 0.2, 0.4])
+    expect(grabFor(row, boxes([0.5, 0.5], ['aaa', 'bbb']), 1, grid, floors)).toBeNull()
+  })
+
+  it('refuses a longer kid list even when the boxes match it pane for pane', () => {
+    // The length guard's only witness. The test above cannot be it: `gone`
+    // sits at the index the high box is compared against, so the identity
+    // guard rejects that row whether or not the lengths are checked. Here the
+    // extra kid is at the END, so both identity comparisons pass — `aaa`
+    // against `aaa`, `bbb` against `bbb` — and the length check is the one
+    // thing between this drag and a ratio one entry short of its kids, which
+    // `normaliseLayout` reads as unusable and flattens the whole tab for.
+    const row = ratioRow('aaa', ['aaa', 'bbb', 'ccc'], [0.4, 0.4, 0.2])
     expect(grabFor(row, boxes([0.5, 0.5], ['aaa', 'bbb']), 1, grid, floors)).toBeNull()
   })
 
