@@ -107,29 +107,36 @@ export function tombstonesOf(
  * paragraph above is where the two sides still differ.
  *
  * Traced, not hypothetical — and now a description of a FIXED defect, not of
- * current behaviour; kept because the numbers are the evidence that
- * `inLiveFrame` (below) is what closed it. Tab `A .5 / C .3 / B .2`. B dies
- * and is never restarted. C dies and IS restarted before the next split. The
- * user splits A. Before this task, main rebuilt the row over
+ * current behaviour; kept because the numbers are the evidence for WHAT fixed
+ * it, which is not this function — see below. Tab `A .5 / C .3 / B .2`. B
+ * dies and is never restarted. C dies and IS restarted before the next split.
+ * The user splits A. Before this task, main rebuilt the row over
  * `siblings = [A, C]` — B was not live, so its claim never reached this
  * function, and A/C/the new pane divided the WHOLE tab among themselves: A
  * 0.35, new 0.35, C 0.30 (C's claim correctly recovered at exactly what it
- * died at — the two-death case `claimForDeath` gets right). The renderer,
+ * died at — the two-death case `claimForDeath` gets right — but B's claim was
+ * nowhere subtracted from the room A/new split, only from C's). The renderer,
  * independently, still listed B in `state.dead`, and `withKeptPanes` reserved
- * its 0.2 on top of that already-whole vector, scaling everything else down
- * to make room a second time: measured, C ended up drawn at 0.24, not 0.30,
+ * its 0.2 out of that vector: measured, C ended up drawn at 0.24, not 0.30,
  * though nobody had touched it.
  *
  * `carveRatio`/`tabRowFor` now call `tombstonesOf` themselves and hand this
- * function B's claim alongside A/C/new's, so the vector THIS function returns
- * already holds B's 0.2 back — A 0.25, new 0.25, C 0.3, B 0.2 — and
- * `inLiveFrame` re-expresses A/new/C's shares of the remaining 0.8 before the
- * row is written: 0.3125 / 0.3125 / 0.375. The renderer then scales that
- * already-live-remainder vector by the SAME 0.2 it reserves for B, which is
- * one reservation, not two, so C is drawn at 0.375 x 0.8 = 0.3 again. That is
- * the drift a "not a second rule" claim would have papered over — the
- * arithmetic was always one rule, agreed on both sides; the INPUT to it was
- * not, and this task is what made it be.
+ * function B's claim alongside A/C/new's, and THAT is what fixes the screen:
+ * with B's 0.2 held back from the room too, A/new's own room shrinks from 0.7
+ * to 0.5 and they come back at 0.25 each rather than 0.35, while C's own
+ * claim stays exactly 0.3 — the PROPORTION among A/new/C moves from 7:7:6 to
+ * 5:5:6, which is the actual correction and is entirely `tombstonesOf`'s
+ * doing. Measured: reverting `inLiveFrame` below and keeping only this append
+ * still draws C at 0.30, byte-identical to the full fix, because
+ * `withKeptPanes` divides by the incoming sum and `boxesOfRow` divides by the
+ * kept total — the renderer only ever sees PROPORTIONS, and a single positive
+ * scalar over every live share cannot change a proportion between two of
+ * them. `inLiveFrame` is exactly that scalar: it cannot draw C at 0.30 instead
+ * of 0.24, and measured, it never did. What it does is re-express A/new/C's
+ * already-correct shares of the 0.8 they hold as fractions that sum to 1 —
+ * 0.3125 / 0.3125 / 0.375 — the frame `config.tabs` is already in and the one
+ * `normaliseLayout` would put the row into on the next read regardless (see
+ * its own doc, below).
  *
  * **With no claim among the entries this is arithmetically today's code.**
  * `held` is 0, `room` is 1, and every base is divided by the total of the
@@ -184,9 +191,15 @@ export function sharesAroundClaims(
  *
  * `config.tabs` has always been in this frame: `normaliseLayout` rescales
  * every saved row over the panes that exist, and a dead pane's kid is dropped
- * on the way in. Emitting a whole-tab vector into it — which is what both row
- * builders did before this — is what made the renderer reserve a tombstone's
- * share a second time.
+ * on the way in — measured: a row written as `[.25, .25, .3]` (summing to
+ * 0.8, the live kids' true whole-tab total) reads back as
+ * `[.3125, .3125, .375]` on the next `store.read()`. This function just does
+ * that conversion at write time instead of leaving it to the next read, so
+ * the row on disk means what it says without waiting for a reload to fix it.
+ * It does NOT fix what is drawn on screen before that reload: a single
+ * positive scalar over every live share moves no proportion between them, so
+ * this function has no way to change what the renderer draws, and does not —
+ * see `sharesAroundClaims`'s own doc for what actually does.
  *
  * The guard is not provably unreachable and is not written as though it were,
  * for the same reason `sharesAroundClaims`'s `room > 0` note gives: the live
