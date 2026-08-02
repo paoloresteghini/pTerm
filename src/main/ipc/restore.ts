@@ -394,11 +394,19 @@ export async function restoreWorkspace(
             tabId: tabIdOfGroup(groupOf.get(record.id) ?? record.id),
           }),
         )
-      } catch {
+      } catch (error) {
         // One session that will not attach must not cost the user the ones
         // that did — with twelve tabs, rejecting the whole restore would leave
         // every other session attached and invisible. tmux still has this one,
         // so the next restore finds it again and tries afresh.
+        //
+        // But silent: a `catch {}` that discards the error leaves a pane that
+        // fails on every relaunch invisible forever — the one case where this
+        // tool, whose whole job is surfacing which of a dozen sessions needs
+        // attention, hides exactly that. `record.tmuxSession` rather than the
+        // bare id: it carries the project slug too, so it reads as something
+        // the user placed rather than an opaque hex string.
+        console.warn(`PRCLI: could not attach ${record.tmuxSession} on restore`, error)
         continue
       }
     }
