@@ -454,14 +454,20 @@ describe('PaneBox.share', () => {
   })
 
   it('renormalises the share when a kid names no pane', () => {
+    // Asymmetric survivors (0.1 and 0.3, not an even split) so this pins
+    // proportional renormalisation specifically — an even 0.5/0.5 result
+    // would also come out of an implementation that ignored the ratios
+    // entirely and divided by the surviving count, which is exactly the
+    // defect this test exists to catch.
     const state: WorkspaceState = {
       ...three,
       panes: [tab('aaa'), tab('bbb')],
-      tabs: [ratioRow('aaa', ['aaa', 'gone', 'bbb'], [0.2, 0.6, 0.2])],
+      tabs: [ratioRow('aaa', ['aaa', 'gone', 'bbb'], [0.1, 0.6, 0.3])],
     }
     const [group] = paneGroups(state)
     expect(group.panes).toHaveLength(2)
-    expect(group.panes[0].share).toBeCloseTo(0.5)
+    expect(group.panes[0].share).toBeCloseTo(0.25)
+    expect(group.panes[1].share).toBeCloseTo(0.75)
     expect(group.panes.reduce((sum, box) => sum + box.share, 0)).toBeCloseTo(1)
   })
 })
