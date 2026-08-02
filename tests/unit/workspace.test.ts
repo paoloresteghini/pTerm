@@ -538,11 +538,11 @@ describe('a dead pane', () => {
   it('gives its share back to its siblings when it is dismissed', () => {
     const after = workspaceReducer(split, { type: 'dismissed', id: 'bbb' })
     const group = paneGroups(after).find((candidate) => candidate.id === 'aaa')
-    // The row still names 'bbb' — nothing in the renderer rewrites `kids` on a
-    // dismiss, and main has already dropped the pane row on disk. `boxesOfRow`
-    // drops the kid whose pane has gone and renormalises what is left, which
-    // is where the 0.25 actually goes: 0.5 and 0.25 of 0.75.
-    expect(after.tabs[0]?.layout.kids).toEqual(['aaa', 'bbb', 'ccc'])
+    // The row no longer names 'bbb' — a dismiss rewrites `kids` and
+    // renormalises `ratio` itself, so `boxesOfRow`'s own renormalisation is an
+    // identity here rather than the thing doing the work — but the 0.25 lands
+    // in the same place either way: 0.5 and 0.25 of 0.75.
+    expect(after.tabs[0]?.layout.kids).toEqual(['aaa', 'ccc'])
     expect(group?.panes.map((box) => box.pane.id)).toEqual(['aaa', 'ccc'])
     expect(group?.panes.map((box) => box.style.flexBasis)).toEqual(['66.6667%', '33.3333%'])
   })
@@ -1523,11 +1523,79 @@ describe('a tombstone when its tab is split or closed', () => {
     expect(next.panes.map((pane) => pane.id)).toEqual(['bbb', 'ccc'])
     const groups = paneGroups(next)
     expect(groups).toHaveLength(1)
-    // The row still names the dismissed pane — nothing rewrites kids on a
-    // dismiss — and `boxesOfRow` drops the kid whose pane has gone and shares
-    // its ratio out, which is the path that already existed.
+    // The row no longer names the dismissed pane — a dismiss now rewrites
+    // `kids` and renormalises `ratio` itself — so `boxesOfRow`'s own
+    // renormalisation is an identity here rather than the thing doing the
+    // work: both survivors were already equal shares of what remained.
     expect(groups[0].panes.map((box) => box.pane.id)).toEqual(['bbb', 'ccc'])
     for (const box of groups[0].panes) expect(box.style.flexBasis).toBe('50%')
+  })
+
+  it('takes a dismissed pane out of its tab’s kids, so boxes and kids stay 1:1', () => {
+    // CT-1's inert-dividers half. `boxesOfRow` boxes only kids whose pane
+    // exists, so a kid left behind by a dismiss makes boxes one shorter than
+    // kids — and `App.tsx`'s `grabPane` refuses every grab in a tab where those
+    // two disagree, leaving live dividers that do nothing.
+    const state: WorkspaceState = {
+      ...deadFounder,
+      panes: [tab('aaa'), tab('bbb'), tab('ccc')],
+      tabs: [ratioRow('aaa', ['aaa', 'bbb', 'ccc'], [0.5, 0.25, 0.25])],
+      status: { aaa: 'crashed', bbb: 'idle', ccc: 'idle' },
+      dead: { aaa: 0 },
+    }
+    const next = workspaceReducer(state, { type: 'dismissed', id: 'aaa' })
+    const row = next.tabs.find((candidate) => candidate.id === 'aaa')
+    expect(row?.layout.kids).toEqual(['bbb', 'ccc'])
+    const groups = paneGroups(next)
+    expect(groups).toHaveLength(1)
+    expect(groups[0].panes).toHaveLength(row?.layout.kids.length ?? -1)
+    // The row keeps its id, which is the dismissed founder's. That is the whole
+    // safety argument for doing this on a dismiss and never on a death: no
+    // stray pane is left carrying the row's id, so `paneGroups` has nothing to
+    // collide with.
+    expect(groups[0].id).toBe('aaa')
+  })
+
+  it('renormalises the row it leaves behind, so the tab still describes a whole tab', () => {
+    const state: WorkspaceState = {
+      ...deadFounder,
+      panes: [tab('aaa'), tab('bbb'), tab('ccc')],
+      tabs: [ratioRow('aaa', ['aaa', 'bbb', 'ccc'], [0.5, 0.25, 0.25])],
+      dead: { aaa: 0 },
+    }
+    const row = workspaceReducer(state, { type: 'dismissed', id: 'aaa' }).tabs[0]
+    expect(row.layout.ratio).toHaveLength(2)
+    expect(row.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+    // The survivors keep their proportion to each other — they were equal, and
+    // they stay equal. What they must NOT do is keep 0.25 each and leave the
+    // row summing to 0.5, which is what dropping the share without
+    // renormalising would give.
+    expect(row.layout.ratio[0]).toBeCloseTo(0.5)
+    expect(row.layout.ratio[1]).toBeCloseTo(0.5)
+  })
+
+  it('leaves a dead pane in its tab’s kids, at its share', () => {
+    // The direction the design REJECTS, pinned so nobody "simplifies" the two
+    // cases into one. A pane removed from `kids` while still in `state.panes`
+    // is a stray, and a dead FOUNDER's stray carries its own row's id — which
+    // `paneGroups` skips the second time it meets, unmounting every live
+    // terminal in the tab. That is plan 2b's Critical, and `died` is the one
+    // action that can produce it.
+    const next = workspaceReducer(
+      { ...deadFounder, dead: {} },
+      { type: 'died', id: 'aaa', code: 0 },
+    )
+    const row = next.tabs.find((candidate) => candidate.id === 'aaa')
+    expect(row?.layout.kids).toEqual(['aaa', 'bbb'])
+    expect(row?.layout.ratio).toEqual([0.5, 0.5])
+  })
+
+  it('takes a removed pane out of its tab’s kids the same way', () => {
+    // `removed` is dispatched by nothing today (see its own doc comment) and is
+    // pinned anyway: the two cases share this rule, and a future caller that
+    // reaches for it must not reintroduce the leak.
+    const next = workspaceReducer(deadFounder, { type: 'removed', id: 'aaa' })
+    expect(next.tabs.find((candidate) => candidate.id === 'aaa')?.layout.kids).toEqual(['bbb'])
   })
 
   it('does not invent a kid for a pane that was never in the row', () => {

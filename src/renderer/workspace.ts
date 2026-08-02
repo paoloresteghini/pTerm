@@ -801,6 +801,50 @@ function removeTab(state: WorkspaceState, id: string): WorkspaceState {
   )
 }
 
+/**
+ * Every row with `id` taken out of its kids, and what is left renormalised.
+ *
+ * Called from exactly the two actions that take a pane out of `state.panes` —
+ * `dismissed` and `removed` — and **never from `died`.** That distinction is
+ * the whole safety argument. A pane dropped from `kids` while it is still in
+ * `state.panes` is a stray, `paneGroups` keys a stray by its own id, and a
+ * dead FOUNDER's id is its row's id: the two collide in `seen`, and whichever
+ * is walked second is skipped, unmounting every live terminal in the tab. A
+ * dismissed pane leaves `state.panes` in this same reducer step, so there is
+ * no stray to collide with — even for a founder, whose row keeps its id.
+ *
+ * Renormalised rather than left with a hole: `boxesOfRow` already divides the
+ * survivors' shares by their own total for the screen, so a row summing to
+ * less than 1 would make `state.tabs` disagree with what is drawn — and
+ * `commitLayout` sends this row to main as whole-tab fractions. This is the
+ * same projection `sharesAroundClaims` and `boxesOfRow` do, not a rescale
+ * covering a gap: the pane is gone, and the survivors divide the tab.
+ *
+ * A row that keeps no kid at all is left alone rather than emptied. That state
+ * is unreachable from `dismissed` — the pane being dismissed is dead, and a
+ * tab whose every pane is dead has already lost its row through `closedPane` —
+ * and an empty row is a container with nothing in it, which `paneGroups`
+ * drops. Leaving it whole is the answer that changes nothing.
+ */
+function withoutKid(state: WorkspaceState, id: string): WorkspaceState {
+  const row = state.tabs.find((candidate) => candidate.layout.kids.includes(id))
+  if (!row) return state
+  const kept = row.layout.kids
+    .map((kid, index) => ({ kid, share: row.layout.ratio[index] ?? 0 }))
+    .filter((entry) => entry.kid !== id)
+  if (kept.length === 0) return state
+  const total = kept.reduce((sum, entry) => sum + entry.share, 0)
+  const next: TabRow = {
+    ...row,
+    layout: {
+      ...row.layout,
+      kids: kept.map((entry) => entry.kid),
+      ratio: kept.map((entry) => (total > 0 ? entry.share / total : 1 / kept.length)),
+    },
+  }
+  return { ...state, tabs: state.tabs.map((candidate) => (candidate.id === row.id ? next : candidate)) }
+}
+
 export function workspaceReducer(
   state: WorkspaceState,
   action: WorkspaceAction,
@@ -859,7 +903,7 @@ export function workspaceReducer(
     case 'removed': {
       const { [action.id]: _dropped, ...status } = state.status
       const { [action.id]: _tombstone, ...dead } = state.dead
-      return { ...removeTab(state, action.id), status, dead }
+      return { ...withoutKid(removeTab(state, action.id), action.id), status, dead }
     }
 
     case 'movedTab': {
@@ -914,8 +958,10 @@ export function workspaceReducer(
     case 'dismissed': {
       const { [action.id]: _dropped, ...dead } = state.dead
       // Same selection move a close makes, so dismissing the tab you are
-      // looking at does not leave the pane showing nothing.
-      return { ...removeTab(state, action.id), dead }
+      // looking at does not leave the pane showing nothing — and the tab's row
+      // stops naming a pane that is no longer there, which is what kept every
+      // divider in that tab from being grabbable (see `withoutKid`).
+      return { ...withoutKid(removeTab(state, action.id), action.id), dead }
     }
 
     case 'split':
