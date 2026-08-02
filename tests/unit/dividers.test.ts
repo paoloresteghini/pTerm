@@ -13,11 +13,27 @@ import { describe, it, expect } from 'vitest'
  * — though not the arithmetic in `App.tsx` that decides what to hand them, which
  * is declared below rather than covered. What is left over is *that the gesture
  * is wired to it*, *that the strip takes no space in the layout it exists to
- * adjust*, and *that the box the divider is positioned against is the box the
- * panes are laid out in*.
+ * adjust*, *that the box the divider is positioned against is the box the
+ * panes are laid out in*, and, since the "a drag is written to disk once it
+ * ends" describe below was added, *that the gesture's end reaches
+ * `window.prcli.setLayout` at all* — deleting that call, or unwiring
+ * `PaneDivider`'s `onCommit`, used to leave the whole suite (508 unit, 255
+ * integration, at the time this was measured) green; now each fails exactly
+ * one assertion in this file, and only that one.
  *
  * **What this does NOT cover, stated so it is not mistaken for coverage:**
  *
+ * - **that main actually persists what this handler sends.** `setLayout`'s
+ *   own length guard (`register.ts`) drops a ratio silently whenever it
+ *   disagrees in length with the saved row — and that is not a rare race.
+ *   Any tab holding a tombstone, or a pane that died and was restarted but
+ *   has not yet been rebuilt into a saved row by a split or a close, has a
+ *   renderer-side `kids` that is a PERMANENT strict superset of the saved
+ *   one, so every drag on such a tab fails the guard and is silently not
+ *   persisted — reachable in ordinary use, and this file cannot see it: it
+ *   only reaches as far as the IPC call being made, never what main does
+ *   with it once it arrives. `register.ts`'s own doc comment on
+ *   `CHANNELS.setLayout` names this the same way;
  * - that a pointerdown starts a drag at all, or that a pointerup ends one;
  * - that the cursor changes, or that a 7px strip is comfortable to hit;
  * - that React actually calls the effect's cleanup — the assertion below reads
@@ -27,7 +43,7 @@ import { describe, it, expect } from 'vitest'
  * - **`grabPane`'s refusal guards** — the length check and the two identity
  *   checks that stop a box index being taken for a kid index. That is the
  *   subtlest logic in this whole change and nothing anywhere executes it:
- *   measured, deleting all three leaves this file nine of nine green. It is not
+ *   measured, deleting all three leaves this file eleven of eleven green. It is not
  *   pinned by a text assertion either, deliberately — one would catch a deletion
  *   while saying nothing about the far likelier regression, a guard that is
  *   present and wrong, and would leave this bullet reading like coverage;
@@ -65,8 +81,8 @@ import { describe, it, expect } from 'vitest'
  * divider drawn one seam early, the first of them flush against the tab's
  * leading edge. And replacing the `${offset * 100}%` the strip is placed at
  * with a constant `0%`: every divider in the app stacked at that same leading
- * edge. Nine of nine green both times. If you are changing either, the running
- * app is the only thing that will tell you.
+ * edge. Eleven of eleven green both times. If you are changing either, the
+ * running app is the only thing that will tell you.
  *
  * Worth knowing about one that *does* fail, because it fails for the wrong
  * reason: changing the render gate from `index > 0` to `index >= 0` — which
@@ -200,5 +216,31 @@ describe('the gesture reaches the arithmetic', () => {
     expect(app).toMatch(/<PaneDivider/)
     expect(app).toMatch(/group\.panes\.map\(\(box, index\)/)
     expect(app).toMatch(/index > 0 \?[( ]*<PaneDivider/)
+  })
+})
+
+describe('a drag is written to disk once it ends', () => {
+  // Until this describe existed, nothing anywhere asserted the commit call:
+  // `grep -rn "setLayout\|onCommit\|commitLayout" tests/` returned nothing,
+  // and deleting `window.prcli.setLayout(...)` from `commitLayout`, or
+  // unwiring `onCommit` from `PaneDivider`, both left the full suite — 508
+  // unit, 255 integration, at the time this was measured — green. Neither
+  // mutation touches `resizeKids` or `state.tabs`, which is why the gesture
+  // itself staying correct on screen hid the write to disk going missing.
+
+  it('commitLayout writes the row through window.prcli.setLayout', () => {
+    // Measured: deleting the `window.prcli.setLayout(tabId, row.layout.ratio)`
+    // line from `commitLayout` fails only this assertion — nothing else in
+    // this file or `workspace.test.ts` reaches main's IPC boundary at all.
+    expect(app).toMatch(/window\.prcli\.setLayout\(/)
+  })
+
+  it('wires PaneDivider\'s onCommit to commitLayout, not to a no-op', () => {
+    // Measured: replacing `onCommit={() => commitLayout(group.id)}` with
+    // `onCommit={() => {}}`, or dropping the prop outright, fails only this
+    // assertion — `PaneDivider` calls `onCommit` unconditionally on release
+    // (see the listener test above), so an unwired prop is silently a no-op
+    // and every other assertion here is indifferent to it.
+    expect(app).toMatch(/onCommit=\{\(\) => commitLayout\(/)
   })
 })

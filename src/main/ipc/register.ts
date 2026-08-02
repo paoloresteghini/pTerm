@@ -160,6 +160,88 @@ export function carveRatio(params: {
   )
 }
 
+/**
+ * What a pane's death is worth, as a fraction of the WHOLE tab — never of
+ * what the row already reads it as, which after any earlier death in the same
+ * tab is smaller than the pane's true share. Exported and pure, mirroring
+ * `carveRatio` and `sharesAroundClaims` — this file's established shape for
+ * main-side arithmetic that has no business needing a real tmux session to
+ * test, and the reason this was pulled out of `forgetTab`'s closure.
+ *
+ * `store.read()` rescales every ratio by its own total on the way in, and a
+ * dead pane's kid entry is dropped on the way in too — so after one death the
+ * row describes the tab AS IF that pane does not exist, and its shares are
+ * fractions of `1 - that pane's claim`, not of the whole tab. Measured, three
+ * panes at 0.5/0.3/0.2: kill the 0.2 and the row reads 0.625/0.375, so the
+ * pane that truly holds 0.3 of the tab would be recorded at 0.375 and come
+ * back a quarter wider than it died, out of panes the user never touched.
+ * Silent, too — the vector still sums to 1.
+ *
+ * Scaling by the room the other claims have already taken converts back:
+ * 0.375 x (1 - 0.2) = 0.3, exactly what it died at. A claim is defined as a
+ * fraction of the whole tab (see `sharesAroundClaims`), and this is what
+ * makes the recorded value one — for a SECOND death, once the first one's
+ * claim is still unspent. The two-death case is what `taken` exists for.
+ *
+ * **`taken` here and `sharesAroundClaims`'s `held` are NOT the same set, and
+ * that is a known, open gap — this is not a claim that the two agree.**
+ * `taken` sums every unspent claim recorded for `tabId`, full stop: a pane
+ * that is STILL a tombstone counts, because nothing has rebuilt the row since
+ * it died. `held`, over in `sharesAroundClaims`, only ever sees the claims
+ * `carveRatio`/`tabRowFor` actually hand it — the claims of panes that are
+ * LIVE siblings at the moment a split or a close rebuilds the row. A pane
+ * that is still dead when the row rebuilds is not a live sibling, so its
+ * claim is never offered to `sharesAroundClaims` as an entry at all. Concrete
+ * case: tab A/B/C dies in order B then C, B never restarted, C restarted
+ * before the next split. This function correctly discounts B's claim out of
+ * C's (see the two-death test in `claimForDeath.test.ts`) — but the row a later
+ * split rebuilds has no entry for B whatsoever, because B is not live, so the
+ * room `sharesAroundClaims` divides among A/C/the new pane never has B's
+ * share held back from it. The renderer, independently, reserves B's
+ * tombstone share a second time in `withKeptPanes` — see `restore.ts`'s
+ * comment above `sharesAroundClaims` for the traced case where that visibly
+ * moves a pane nobody touched. Nothing here corrects that; it is a real,
+ * open issue, and fixing it needs a plan of its own — see the branch
+ * review's deferred Importants — not a third revision of this arithmetic
+ * squeezed into this wave.
+ *
+ * `!kids.includes` skips a claim that has been SPENT: once a split or a close
+ * has written a restarted pane back into the row, the row accounts for it
+ * again and `sharesAroundClaims` never reads its claim.
+ *
+ * Guarded, but not because the arithmetic proves the guard can never fire —
+ * that argument does not hold. Each claim is `share x (1 - taken)` with
+ * `share <= 1`; after `n` claims the cumulative total is
+ * `1 - product(1 - share_i)`, which reaches exactly 1, not merely approaches
+ * it, the moment any single `share_i` is exactly 1 — the sole survivor of its
+ * row dying. What actually keeps a LATER read safe is not this function: it
+ * is `sharesAroundClaims`'s own `room > 0` guard, which falls back to
+ * renormalising the lot whenever the claims it is handed already reach 1, so
+ * every share it returns stays positive and the row it builds still sums to
+ * 1. The `room <= 0` branch below is the same fallback, for the same reason:
+ * there is no whole tab left to take a fraction of, so recording the row's
+ * own share is the honest answer.
+ */
+export function claimForDeath(params: {
+  /** The dying pane's own share, as the row it died in describes it. */
+  share: number
+  /** The tab id `share` was recorded against — `row.id` at the call site. */
+  tabId: string
+  /** The row's current kids, so a spent claim is excluded from `taken`. */
+  kids: string[]
+  /** Every claim recorded so far, across every tab. */
+  shareWhenItDied: ReadonlyMap<string, { tabId: string; share: number }>
+}): number {
+  const { share, tabId, kids, shareWhenItDied } = params
+  const taken = [...shareWhenItDied].reduce(
+    (sum, [paneId, held]) =>
+      held.tabId === tabId && !kids.includes(paneId) ? sum + held.share : sum,
+    0,
+  )
+  const room = 1 - taken
+  return room > 0 ? share * room : share
+}
+
 export function registerIpc(
   manager: SessionManager,
   getWindow: () => BrowserWindow | null,
@@ -223,49 +305,18 @@ export function registerIpc(
       const at = row ? row.layout.kids.indexOf(id) : -1
       const share = row && at !== -1 ? row.layout.ratio[at] : undefined
       if (row && share !== undefined) {
-        // **The row's share is not a share of the tab once anything else in
-        // this tab has died.** `store.read()` rescales every ratio by its own
-        // total on the way in, and a dead pane's kid entry is dropped on the
-        // way in too — so after one death the row describes the tab AS IF that
-        // pane does not exist, and its shares are fractions of `1 - that
-        // pane's claim`, not of the whole tab. Measured, three panes at
-        // 0.5/0.3/0.2: kill the 0.2 and the row reads 0.625/0.375, so the pane
-        // that truly holds 0.3 of the tab would be recorded at 0.375 and come
-        // back a quarter wider than it died, out of panes the user never
-        // touched. Silent, too — the vector still sums to 1.
+        // `claimForDeath` owns the taken/room/claim arithmetic — see its own
+        // doc for what `taken` actually is, the known gap between it and
+        // `sharesAroundClaims`'s `held`, and why the `room <= 0` fallback is
+        // not provable unreachable by induction.
         //
-        // Scaling by the room the other claims have already taken converts
-        // back: 0.375 x (1 - 0.2) = 0.3, exactly what it died at. A claim is
-        // defined as a fraction of the whole tab (see `sharesAroundClaims`),
-        // and this is what makes the recorded value one.
-        //
-        // `!kids.includes` skips a claim that has been SPENT: once a split or
-        // a close has written a restarted pane back into the row, the row
-        // accounts for it again, `sharesAroundClaims` never reads its claim,
-        // and it is holding no room for anyone. That makes this set exactly
-        // the set that will count towards `held` — the two definitions have to
-        // agree or the conversion is against the wrong denominator.
-        //
-        // It also excludes this pane's own entry from an earlier death, which
-        // the `set` below is about to replace, and it does so without a
-        // `paneId !== id` of its own: `row` was FOUND by `kids.includes(id)`,
-        // so that test is always false for `id`. A second condition there
-        // would read like a guard and never decide anything.
-        const taken = [...shareWhenItDied].reduce(
-          (sum, [paneId, held]) =>
-            held.tabId === row.id && !row.layout.kids.includes(paneId) ? sum + held.share : sum,
-          0,
-        )
-        // Guarded, though the arithmetic says it cannot bite: each claim is
-        // `share x (1 - taken)` with `share <= 1`, so the claims of one tab sum
-        // to `1 - (1 - share)(1 - taken) < 1` by induction from an empty map.
-        // A saved file cannot break it either — `normaliseLayout` makes every
-        // share it returns positive and one row's shares sum to 1. If it ever
-        // does bite, recording the row's own share is the honest answer: there
-        // is no whole tab left to take a fraction of, and
-        // `sharesAroundClaims`'s own `room <= 0` guard is what handles it.
-        const room = 1 - taken
-        const claim = room > 0 ? share * room : share
+        // This call excludes `id`'s own entry from an earlier death — which
+        // the `set` below is about to replace — without a `paneId !== id` of
+        // its own: `row` was FOUND by `row.layout.kids.includes(id)`, so `id`
+        // is always a member of `kids` here, and `claimForDeath`'s own
+        // `!kids.includes` skips it for free. A second condition here would
+        // read like a guard and never decide anything.
+        const claim = claimForDeath({ share, tabId: row.id, kids: row.layout.kids, shareWhenItDied })
         // Positive, always — `normaliseLayout` refuses any share that is not,
         // and `sharesAroundClaims` reads a claim of 0 as a claim, not as an
         // absence, which would be a 0%-wide box. Asserted here, at the only
@@ -638,12 +689,31 @@ export function registerIpc(
    * into existence from a ratio alone would be inventing membership, which is
    * exactly the thing `withTabRow` exists to never do implicitly.
    *
-   * The length guard is the same shape of race: a ratio captured at
+   * The length guard's dominant trigger is NOT a race, and saying so overstates
+   * how rarely this fires. A race is real but rare: a ratio captured at
    * `grabPane` describes the row as it stood at pointerdown, and a split or a
-   * close that lands mid-drag changes `kids` under it. A ratio of the wrong
-   * length pairs shares with the wrong kids, and the renderer's own next
-   * frame — drawn from the reducer's reply to whichever request won — is
-   * already correct, so this drops the stale write rather than repair it.
+   * close landing mid-drag changes `kids` under it before this handler runs —
+   * that costs one gesture, once.
+   *
+   * The common case is structural. Any tab holding a tombstone, or a pane that
+   * died and was restarted but has not yet been rebuilt into a saved row by a
+   * split or a close, has a renderer-side `layout.kids` that is a PERMANENT
+   * strict superset of `saved.layout.kids` on disk: `forgetTab` drops the dead
+   * pane's row entry and `normaliseLayout` then drops its kid, but the
+   * renderer's reducer never removes a dead kid from `state.tabs` on its own
+   * (`died` only writes `state.dead`; `removeTab` filters `state.panes` and
+   * leaves `kids` alone). Every ratio this handler is sent for such a tab
+   * fails the length check, every single time, for as long as the tab holds
+   * that pane — which can be indefinitely, since only a split or a close
+   * rebuilds the row and closes the gap.
+   *
+   * Silent in both cases, and the consequence is the same either way: the
+   * drag is not persisted. The user sees the dragged ratio on screen — that
+   * came from the reducer dispatching `resized`, not from disk — but the
+   * write to `config.tabs` is dropped here, so the next launch reverts to the
+   * ratio before the drag, and so does the next split or close: both rebuild
+   * the row from `saved.layout.ratio`, i.e. from whatever this handler last
+   * actually managed to write, as if the drag had never happened.
    *
    * Writes `config.tabs` and nothing else. Layout, never existence: a ratio
    * has no business touching `config.panes`, and the "leaves the panes alone"

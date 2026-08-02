@@ -178,12 +178,37 @@ async function withoutSharedWindows(
  * 0.231. "The user can drag it back" is the argument this plan's Ruling 2
  * already rejected for the split path; it is no better here.
  *
- * **This is the renderer's own rule, not a second one.** `withKeptPanes` in
- * `src/renderer/workspace.ts` solves exactly this problem for a tombstone on
- * screen, with the same `held`/`room` and the same two guards. Main and the
- * renderer agreeing about what a remembered share means is the point; two
- * different answers is how the two sides drift and the pane visibly resizes
- * the moment main's reply lands.
+ * **The renderer's own rule for the arithmetic — and only the arithmetic.**
+ * `withKeptPanes` in `src/renderer/workspace.ts` solves this exact problem
+ * for a tombstone on screen, with the same `held`/`room` shape and the same
+ * two guards, and given the SAME claims the two agree: a remembered share is
+ * scaled in, never renormalised away. What they are not given is the same
+ * claims, and that is where the two sides are known to disagree rather than
+ * agree.
+ *
+ * This function only ever sees a claim for a pane that is a LIVE sibling at
+ * the moment `carveRatio`/`tabRowFor` rebuilds the row — `register.ts`'s
+ * `splitPane`/`closePane` build `siblings`/`ids` from what tmux and the saved
+ * row currently show, and a pane that is still a tombstone is neither.
+ * `withKeptPanes` sees a claim for every pane still in the renderer's
+ * `state.dead`, live sibling or not. A pane that died and has not been
+ * restarted is therefore a claim on the renderer's side and no claim at all
+ * here — `register.ts`'s `claimForDeath` names this the same open gap from
+ * main's side; see its doc.
+ *
+ * Traced, not hypothetical. Tab `A .5 / C .3 / B .2`. B dies and is never
+ * restarted. C dies and IS restarted before the next split. The user splits
+ * A. Main rebuilds the row over `siblings = [A, C]` — B is not live, so its
+ * claim never reaches this function, and A/C/the new pane divide the WHOLE
+ * tab among themselves: A 0.35, new 0.35, C 0.30 (C's claim correctly
+ * recovered at exactly what it died at — the two-death case `claimForDeath`
+ * gets right). The renderer, independently, still lists B in `state.dead` and
+ * `withKeptPanes` reserves its 0.2 on top of that already-whole vector,
+ * scaling everything else down to make room a second time: measured, C ends
+ * up drawn at 0.24, not 0.30, though nobody touched it. That is the drift a
+ * "not a second rule" claim would paper over — the arithmetic is one rule,
+ * agreed on both sides; the INPUT to it is not, and fixing that needs a death
+ * ordinal or an equivalent, which is deliberately not attempted in this wave.
  *
  * **With no claim among the entries this is arithmetically today's code.**
  * `held` is 0, `room` is 1, and every base is divided by the total of the

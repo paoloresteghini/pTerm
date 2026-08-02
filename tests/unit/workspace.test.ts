@@ -1249,9 +1249,14 @@ describe('workspaceReducer', () => {
   })
 
   describe('resized', () => {
+    // A second, untouched row alongside the one being dragged — without it,
+    // an implementation that rebuilt `tabs` as a single-element array
+    // (dropping every other tab's layout on any drag) would still pass this
+    // describe, since there would be nothing else in `tabs` for it to lose.
+    const untouched = ratioRow('ccc', ['ccc'], [1])
     const state: WorkspaceState = {
       ...three,
-      tabs: [ratioRow('aaa', ['aaa', 'bbb'], [0.5, 0.5])],
+      tabs: [ratioRow('aaa', ['aaa', 'bbb'], [0.5, 0.5]), untouched],
     }
 
     it('replaces the tab’s ratios and nothing else', () => {
@@ -1260,6 +1265,9 @@ describe('workspaceReducer', () => {
       expect(row?.layout.ratio).toEqual([0.7, 0.3])
       expect(row?.layout.kids).toEqual(['aaa', 'bbb'])
       expect(next.panes).toBe(state.panes)
+      // Identity, not just equality: the other row must be the very same
+      // object the reducer was given, not a copy that merely looks the same.
+      expect(next.tabs.find((candidate) => candidate.id === 'ccc')).toBe(untouched)
     })
 
     it('ignores a resize naming an unknown tab', () => {
