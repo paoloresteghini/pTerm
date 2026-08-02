@@ -133,6 +133,18 @@ interface Entry {
    * against a session nothing is waiting for any more. See `awaitWindowId`.
    */
   abandoned?: boolean
+  /**
+   * Whether a `resize-window` for this pane is already in flight, and whether
+   * a newer size arrived while it was.
+   *
+   * A drag emits sizes faster than tmux answers them. Spawning one `execFile`
+   * per frame is the subprocess storm this milestone has now met twice; the
+   * loop below sends the CURRENT size once the in-flight call settles, so at
+   * most one tmux process exists per pane at a time and the last frame is
+   * always the one that lands.
+   */
+  resizing?: boolean
+  resizeDirty?: boolean
 }
 
 const DEFAULT_COLS = 80
@@ -1315,22 +1327,44 @@ export class SessionManager {
   /**
    * Push a pane's size onto the tmux window its process lives in.
    *
-   * Ordered against itself rather than against the clock: a drag emits resizes
-   * faster than tmux answers them, so the size is re-checked against the
-   * entry's current one before the call lands. Without that, a slow early
-   * resize could arrive last and leave the window at a size the renderer has
-   * already moved on from — the same "last writer wins by accident" that the
-   * geometry rule exists to remove.
+   * At most one `resize-window` is in flight for a pane at a time. A drag
+   * emits resizes faster than tmux answers any of them — roughly 120 a second
+   * through `ResizeObserver` — and spawning one `execFile` per frame is the
+   * subprocess storm this milestone has now met twice. So a call that finds
+   * one already in flight does not spawn a second: it sets `entry.resizeDirty`
+   * and returns, and the loop below picks the newer size up itself once the
+   * in-flight call settles, spawning nothing until then.
    *
-   * Both halves of that staleness are checked, and they are not the same
-   * check. The size guard catches a resize the renderer has superseded; the
-   * identity guard catches an entry the MANAGER has superseded — a pane
-   * detached and reopened (which `moveTabToProject` does on every move) has a
-   * new entry with new geometry, while this one's `cols`/`rows` are exactly as
-   * they were and sail through the size guard. Same identity comparison
-   * `session.onExit` makes, and for the same reason.
+   * Staleness used to be handled by comparison: `if (entry.cols !== cols ||
+   * entry.rows !== rows) return` dropped a call whose `cols`/`rows` arguments
+   * the renderer had since superseded, so a slow early resize could not land
+   * last. That guard cannot simply stay — the loop makes it not merely
+   * redundant but wrong. Every pass sends `entry.cols`/`entry.rows`, not the
+   * `cols`/`rows` this call started with, and `entry.cols`/`entry.rows` are
+   * kept current by `resize` — so they are the newest size by definition, on
+   * every pass, with nothing left to compare them against. Reinstating the
+   * old guard would compare the newest size to itself and always pass, or,
+   * worse, compare it to the stale arguments a superseded call woke the loop
+   * with and drop the very call carrying the final frame — staleness handled
+   * by construction rather than by a check that no longer has anything to
+   * check.
+   *
+   * The identity guard is a different check and stays, re-checked on every
+   * pass rather than once: it catches an entry the MANAGER has superseded — a
+   * pane detached and reopened (`moveTabToProject` does this on every move)
+   * gets a new entry with new geometry, and this loop, closed over the OLD
+   * one, would otherwise keep sending that old entry's `cols`/`rows` to a
+   * window nothing renders into any more. Same identity comparison
+   * `session.onExit` makes, and for the same reason: a loop that outlives its
+   * entry must not go on issuing tmux calls on its behalf.
+   *
+   * `cols`/`rows` are unused for exactly the reason above — the loop reads
+   * `entry.cols`/`entry.rows` instead — and are kept, underscored, rather than
+   * dropped: this task is `resizeWindow`'s internals only, and both call
+   * sites (`resize`, `sizeWindowOnAttach`) still have a size in hand and
+   * passing it costs nothing.
    */
-  private async resizeWindow(entry: Entry, cols: number, rows: number): Promise<void> {
+  private async resizeWindow(entry: Entry, _cols: number, _rows: number): Promise<void> {
     let windowId = entry.windowId
     if (!windowId) {
       // Already asked, and already told no. A drag would otherwise put a
@@ -1351,8 +1385,26 @@ export class SessionManager {
       windowId = found
     }
     if (this.entries.get(entry.record.id) !== entry) return
-    if (entry.cols !== cols || entry.rows !== rows) return
-    await this.adapter.resizeWindow(windowId, cols, rows)
+    // Already sending. Record that a newer size exists and let the in-flight
+    // call pick it up when it settles — the loop below always reads the
+    // entry's CURRENT size, so the newest frame wins without a timer and
+    // without a queue.
+    if (entry.resizing) {
+      entry.resizeDirty = true
+      return
+    }
+    entry.resizing = true
+    try {
+      do {
+        entry.resizeDirty = false
+        // Re-checked every pass, not once: `moveTabToProject` disposes an
+        // entry and makes a new one, and this loop can outlive that.
+        if (this.entries.get(entry.record.id) !== entry) return
+        await this.adapter.resizeWindow(windowId, entry.cols, entry.rows)
+      } while (entry.resizeDirty)
+    } finally {
+      entry.resizing = false
+    }
   }
 
   /** Detach the client. The tmux session keeps running. */

@@ -243,6 +243,41 @@ describe('SessionManager.open', () => {
     await expect.poll(() => windowSize(tab.tmuxSession), { timeout: 8000 }).toBe('120x40')
     manager.detachAll()
   })
+
+  // A drag emits resizes faster than tmux answers them — measured at ~120 a
+  // second through `ResizeObserver`. Spawning one `execFile` per frame is the
+  // subprocess storm this milestone has now met twice; this pins that at most
+  // one `resize-window` is in flight per pane at a time, and that the size it
+  // lands with is the LAST frame, not whichever one happened to be in flight
+  // when the burst ended.
+  it('collapses a burst of resizes into one tmux call per settled size', async () => {
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    const resizes = vi.spyOn(adapter, 'resizeWindow')
+    const manager = new SessionManager(adapter)
+    const tab = manager.open({
+      projectSlug: 'lumio', cwd: tmpdir(), cols: 100, rows: 30,
+    })
+    await expect.poll(() => clients(tab.tmuxSession), { timeout: 8000 }).toHaveLength(1)
+    await expect.poll(() => resizes.mock.calls.length, { timeout: 8000 }).toBeGreaterThan(0)
+    const afterAttach = resizes.mock.calls.length
+
+    // A drag: twenty frames, faster than tmux can answer any of them.
+    for (let width = 101; width <= 120; width += 1) manager.resize(tab.id, width, 30)
+
+    // Settle, then assert plainly. `expect.poll` returns on its first match and
+    // so cannot assert that something did NOT keep happening.
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+
+    // Far fewer calls than frames, and the LAST size is the one that landed —
+    // coalescing that dropped the final frame would be worse than not
+    // coalescing at all.
+    const spent = resizes.mock.calls.length - afterAttach
+    expect(spent).toBeGreaterThan(0)
+    expect(spent).toBeLessThan(20)
+    const last = resizes.mock.calls[resizes.mock.calls.length - 1]
+    expect(last?.[1]).toBe(120)
+    manager.detachAll()
+  })
 })
 
 describe('SessionManager.write', () => {
