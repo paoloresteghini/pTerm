@@ -8,8 +8,9 @@
  * through macOS `activate` reattaches rather than replacing, leaving exactly
  * one `prcli-` session on the socket; and a fourth that opens no tmux session
  * at all — it reads the four `PRCLI_*` env vars back out of the launched
- * app's own `process.env` and asserts each equals the temp path this file
- * made for it, not merely that it is set to something.
+ * app's own `process.env` and asserts each equals the exact value this file
+ * handed it (three temp paths made in `beforeEach`, plus the `SOCKET` const),
+ * not merely that it is set to something.
  *
  * **Measured, 2026-08-02, this file run alone** (`npx playwright test
  * tests/e2e/launch.spec.ts`), against the three tests that existed at the
@@ -25,14 +26,22 @@
  * and expected, since it is checking something else entirely.
  *
  * **What this file does NOT see** — read off this file's own text unless a
- * line says measured:
+ * line says measured or names another file:
  *
  * - **anything past one pane in one tab.** Every tab is opened with `+`, the
- *   seeded config's `tabs` is always `[]`, and nothing here presses ⌘D. With
- *   one pane per tab, `paneGroups` only ever takes its single-box branch
- *   (one box at `share: 1`), `boxesOfRow` is never reached, and the dividers
- *   overlay renders empty — `PaneDivider` is constructed only for
- *   `index > 0`. Nothing in this file can see a divider, a share, or a drag;
+ *   seeded config's `tabs` is always `[]`, and nothing here presses ⌘D, so
+ *   every tab has exactly one pane and every group renders exactly one box,
+ *   whose share renormalises to 1. `PaneDivider` is constructed only for
+ *   `index > 0` (`src/renderer/App.tsx:806-807`, read 2026-08-02), so not one
+ *   is ever constructed: no divider is on screen in any test here, and nothing
+ *   in this file can see a divider, a share, or a drag. Stated as what renders
+ *   rather than as which branch runs, because the branch reading was wrong:
+ *   an earlier version of this line said `boxesOfRow` is never reached, and
+ *   **measured, 2026-08-02** — `boxesOfRow` mutated to `throw` on entry — this
+ *   file went 2 failed, 2 passed. The two relaunch tests redden, because
+ *   restore builds one tab row per live pane (`src/main/ipc/restore.ts:427`),
+ *   so every pane has a row from the second launch on. It is reached; it is
+ *   just only ever reached with a single kid;
  * - `DeadPane`. No test here kills a session behind the app's back, and no
  *   test in this suite asserts on `dead-`, `pane-dot-`, `pane-restart-` or
  *   `pane-dismiss-` at all. Measured in `status.spec.ts`, the one file that
@@ -227,8 +236,20 @@ test('reattaches the same session after closing and reopening the window', async
 // four PRCLI_* vars — but a var pointing at the wrong path satisfies that
 // check just as well as a var pointing at the right one. Only a runtime read
 // from inside the launched app can tell the difference, which is what this
-// test does. It opens no tab and clicks nothing, so it opens no tmux session
-// and costs no pty.
+// test does.
+//
+// It opens no tmux session and costs no pty — but not because it clicks
+// nothing. A launch against a NON-empty socket adopts every `prcli-` session
+// it finds there with no click at all (`tabs.spec.ts`'s `adopts a session the
+// app has never seen`). What makes this test free is the pair either side of
+// it: `beforeEach` seeds a fresh config whose `tabs` is `[]`, and `afterEach`
+// runs `killServer`, so the socket this launch meets is empty.
+//
+// What it does NOT check is whether the paths it compares against are
+// themselves safe. It asserts main received what this file intended; a
+// `beforeEach` that set `claudeSettingsPath` to `join(homedir(), '.claude',
+// 'settings.json')` would satisfy both this test and `e2eSafety.test.ts`'s
+// token check. That the temp paths are temp is read off `beforeEach` by eye.
 test('runs against overridden paths, never the developer’s own', async () => {
   const app = await launch()
   const seen = await app.evaluate(() => ({

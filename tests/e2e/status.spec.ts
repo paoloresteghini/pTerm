@@ -23,7 +23,7 @@
  * socket and never depend on an install having happened.
  *
  * **What this file does NOT see** — read off this file's own text unless a
- * line says measured:
+ * line says measured or names another file:
  *
  * - **`DeadPane`, measured.** This is the only spec in the suite that kills a
  *   pane's session, so it is the only one that could see the dead-pane
@@ -31,14 +31,21 @@
  *   this file 10 of 10 green (2026-08-02). `a dead tab lingers, then restarts`
  *   drives `TabBar`'s `restart-<id>`, not the pane overlay's
  *   `pane-restart-<id>`; nothing in this suite references `dead-`,
- *   `pane-restart-` or `pane-dismiss-` at all. The overlay's dot, its Restart
- *   and its Dismiss are unwitnessed here;
+ *   `pane-dot-`, `pane-restart-` or `pane-dismiss-` at all. The overlay's dot,
+ *   its Restart and its Dismiss are unwitnessed here;
  * - **anything past one pane in one tab.** Every tab is opened through the UI
- *   with `tabs: []` seeded and nothing presses ⌘D, so `paneGroups` only ever
- *   takes its single-box branch, `boxesOfRow` is never reached, and the
- *   dividers overlay renders with no strips — `PaneDivider` is constructed
- *   only for `index > 0`. A dead *pane* beside a live one, which is the case
- *   the overlay exists for, cannot occur here;
+ *   with `tabs: []` seeded and nothing presses ⌘D, so every tab has exactly
+ *   one pane and every group renders exactly one box, whose share renormalises
+ *   to 1. `PaneDivider` is constructed only for `index > 0`
+ *   (`src/renderer/App.tsx:806-807`, read 2026-08-02), so not one is ever
+ *   constructed and the dividers overlay renders with no strips. A dead *pane*
+ *   beside a live one, which is the case the overlay exists for, cannot occur
+ *   here. Stated as what renders rather than as which branch runs: an earlier
+ *   version of this line said `boxesOfRow` is never reached, and it is —
+ *   restore builds one tab row per live pane, so the spool test's relaunch
+ *   goes through it. Measured in `launch.spec.ts` (2026-08-02, `boxesOfRow`
+ *   mutated to throw: 2 failed, 2 passed). It is only ever reached with a
+ *   single kid;
  * - **the installed hook script actually running.** `injectHook` opens the
  *   socket and writes a line itself; `formatHookLine` keeps that honest as to
  *   wire format, but nothing here executes the script the install writes, and

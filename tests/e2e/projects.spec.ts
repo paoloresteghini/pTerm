@@ -31,13 +31,20 @@
  * is named for.
  *
  * **What this file does NOT see** — read off this file's own text unless a
- * line says measured:
+ * line says measured or names another file:
  *
  * - **anything past one pane in one tab.** Nothing here presses ⌘D and every
- *   seeded config carries `tabs: []`, so each tab has exactly one pane.
- *   `paneGroups` only ever takes its single-box branch, `boxesOfRow` is never
- *   reached, and the dividers overlay renders with no strips —
- *   `PaneDivider` is constructed only for `index > 0`;
+ *   seeded config carries `tabs: []`, so each tab has exactly one pane and
+ *   each group renders exactly one box, whose share renormalises to 1.
+ *   `PaneDivider` is constructed only for `index > 0`
+ *   (`src/renderer/App.tsx:806-807`, read 2026-08-02), so not one is ever
+ *   constructed and the dividers overlay renders with no strips. Stated as
+ *   what renders rather than as which branch runs: an earlier version of this
+ *   line said `boxesOfRow` is never reached, and it is — restore builds one
+ *   tab row per live pane, so the relaunch test here goes through it.
+ *   Measured in `launch.spec.ts` (2026-08-02, `boxesOfRow` mutated to throw:
+ *   2 failed, 2 passed). It is only ever reached with a single kid, which is
+ *   why no divider follows;
  * - `DeadPane`. No test here kills a session behind the app's back, and no
  *   test in this suite asserts on `dead-`, `pane-dot-`, `pane-restart-` or
  *   `pane-dismiss-` at all. Measured in `status.spec.ts`, which does kill a

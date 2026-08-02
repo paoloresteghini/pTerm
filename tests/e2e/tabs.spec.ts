@@ -29,15 +29,24 @@
  * failures, not one.
  *
  * **What this file does NOT see** — read off this file's own text unless a
- * line says measured:
+ * line says measured or names another file:
  *
  * - **anything past one pane in one tab.** Nothing here presses ⌘D and the
- *   seeded config's `tabs` is always `[]`, so every tab has exactly one pane.
- *   `paneGroups` only ever takes its single-box branch, `boxesOfRow` is never
- *   reached, and the dividers overlay renders with no strips in it —
- *   `PaneDivider` is constructed only for `index > 0`. A tab here is a pane
- *   wearing a tab's name, and the split behaviour the tab bar is shared with
- *   is invisible to this file;
+ *   seeded config's `tabs` is always `[]`, so every tab has exactly one pane
+ *   and every group renders exactly one box, whose share renormalises to 1.
+ *   `PaneDivider` is constructed only for `index > 0`
+ *   (`src/renderer/App.tsx:806-807`, read 2026-08-02), so not one is ever
+ *   constructed and the dividers overlay renders with no strips in it. A tab
+ *   here is a pane wearing a tab's name, and the split behaviour the tab bar
+ *   is shared with is invisible to this file. Stated as what renders rather
+ *   than as which branch runs: an earlier version of this line said
+ *   `boxesOfRow` is never reached, and it is — restore builds one tab row per
+ *   live pane, adopted sessions included, so every pane a relaunch or an
+ *   adoption brings back has a row (only a pane opened with `+` during a
+ *   launch is rowless, and only until the next one). Measured in
+ *   `launch.spec.ts` (2026-08-02, `boxesOfRow` mutated to throw: 2 failed, 2
+ *   passed). Reaching it is not coverage of it, which is the point of this
+ *   line — it is only ever reached with a single kid;
  * - `DeadPane`. No test here kills a session behind the app's back — the
  *   detach test kills a *client*, not a session — and no test in this suite
  *   asserts on `dead-`, `pane-dot-`, `pane-restart-` or `pane-dismiss-` at
