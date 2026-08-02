@@ -564,3 +564,30 @@ None of these is an agent's to settle.
    measured cases?** A property test over generated orderings would be the first in this
    repo and would need a decision about whether that is a shape this project wants. Four
    named cases with A/Bs is the house idiom and is what I would default to.
+
+## Rulings on the open questions (2026-08-02)
+
+Paolo ruled 1 and 2; the controller settled 3-6 under standing authority.
+
+1. **Main gets a tombstone concept. Take the full recommendation — D + B + the
+   `dismissed`/`removed` half of A.** Accepted with the cost stated: main will model a pane
+   it does not have, against the standing "main owns existence" shape. That rule is not
+   abandoned — main still never *creates* a pane from this record, and the record is
+   process-lifetime and unpersisted, so it cannot become a second authority on existence.
+2. **`setLayout` becomes `(tabId, shares: Record<paneId, number>)`.** Misalignment becomes
+   unrepresentable rather than guarded, which is what CT-1 actually needs; the length guard
+   stops being the only check a positional wire can support.
+3. **When the two sides disagree about a tombstone's share, the renderer wins** — it is what
+   the user is looking at and what they just dragged. Main's stored claim is corrected by
+   every `setLayout` commit rather than defended against one.
+4. **No new UI for a refused grab.** Ruling 1 makes `grabPane`'s guards unreachable in
+   ordinary use, which is the right outcome for a guard; adding an affordance for a state
+   that should no longer occur would be building the workaround instead of the fix. The
+   guards stay — they still guard a box index taken for a kid index.
+5. **One plan, not two.** CT-1 and CT-2 share a root cause and the wire change serves both;
+   splitting them would put the same rewrite in two plans.
+6. **Named cases, plus the composition test.** All four death orderings as named cases —
+   including the fourth, untraced one where a just-restarted pane returns at 0.14 of a tab
+   it died holding 0.20 of. Plus a pure `withKeptPanes` ∘ `sharesAroundClaims` test, which
+   is the structural blind spot CT-2 lived in and which needs no DOM and no ptys. A property
+   test is welcome on top, not instead.
