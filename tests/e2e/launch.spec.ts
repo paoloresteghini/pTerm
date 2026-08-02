@@ -1,3 +1,54 @@
+/**
+ * The app starting, drawing a terminal, and finding its session again.
+ *
+ * Three tests, each against the packaged build (`npm run package` in
+ * `beforeAll`) and a real tmux server on the `prcli-e2e` socket: typed input
+ * reaches the shell and its output comes back; a quit and relaunch reattaches
+ * the same session with its scrollback; and closing the window and reopening
+ * it through macOS `activate` reattaches rather than replacing, leaving
+ * exactly one `prcli-` session on the socket.
+ *
+ * **Measured, 2026-08-02, this file run alone** (`npx playwright test
+ * tests/e2e/launch.spec.ts`): renaming `data-testid="terminal"` to
+ * `terminal-box` in `src/renderer/Terminal.tsx` fails all three — 3 failed,
+ * 0 passed, reproduced on a second independent run. So the file is
+ * load-bearing for a terminal being on screen at all. It is also the bluntest
+ * of the four mutations Task 1 measured: everything here waits on that one
+ * testid, so a failure in this file says "no terminal", not which of the
+ * three behaviours broke. This file therefore has no recorded edit that it
+ * survives: the one mutation measured against it took all three tests with
+ * it, so there is nothing here of the "passes anyway" kind the other three
+ * headers record.
+ *
+ * **What this file does NOT see** — read off this file's own text unless a
+ * line says measured:
+ *
+ * - **anything past one pane in one tab.** Every tab is opened with `+`, the
+ *   seeded config's `tabs` is always `[]`, and nothing here presses ⌘D. With
+ *   one pane per tab, `paneGroups` only ever takes its single-box branch
+ *   (one box at `share: 1`), `boxesOfRow` is never reached, and the dividers
+ *   overlay renders empty — `PaneDivider` is constructed only for
+ *   `index > 0`. Nothing in this file can see a divider, a share, or a drag;
+ * - `DeadPane`. No test here kills a session behind the app's back, and no
+ *   test in this suite asserts on `dead-`, `pane-dot-`, `pane-restart-` or
+ *   `pane-dismiss-` at all. Measured in `status.spec.ts`, the one file that
+ *   does kill a session: making `DeadPane` render `null` left it 10 of 10
+ *   green;
+ * - **the keyboard.** ⌘T, ⌘W, ⌘D and ⌥⌘1–9 are never pressed here; the only
+ *   keys this file sends are typed into the terminal itself. Untested rather
+ *   than measured — no mutation of `App.tsx`'s keydown handler was run
+ *   against this file;
+ * - **the tab bar as a list.** One tab exists at a time, so nothing here
+ *   distinguishes the active tab from another, and no `tab-` testid is
+ *   asserted on. That is `tabs.spec.ts`'s ground;
+ * - **hook events, status dots and project switching** — `status.spec.ts` and
+ *   `projects.spec.ts` respectively. This file seeds exactly one project and
+ *   touches nothing but `new-tab`, `terminal` and `.xterm-rows` — the
+ *   sidebar, the settings pane and the add-project dialog are never clicked;
+ * - **what the shell actually printed**, beyond one marker string appearing in
+ *   `.xterm-rows`. Rendering fidelity, wrapping, colour and resize behaviour
+ *   are all outside it.
+ */
 import { test, expect, _electron as electron, type ElectronApplication } from '@playwright/test'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'

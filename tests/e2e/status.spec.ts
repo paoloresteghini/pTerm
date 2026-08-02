@@ -1,3 +1,66 @@
+/**
+ * The status board: hook events arriving over the socket, the dots they draw,
+ * and the hook install that is supposed to produce them.
+ *
+ * Ten tests on the `prcli-e2e-status` socket: an injected event moves a tab's
+ * dot; a `claude` tab starts hollow rather than silent; a project row takes
+ * the worst of its tabs; Needs You lists a waiting tab and clicking it moves
+ * both the selected project and the selected tab; the board survives a
+ * renderer reload, because the registry lives in main; a spooled line replays
+ * across a relaunch and is drained, not copied; a tab whose session is killed
+ * lingers with a real state and a working Restart; a tab whose own command
+ * exits non-zero goes red and strands no session; an event naming a tab id
+ * nothing knows about does not inflate the dock badge; and install/uninstall
+ * leave an unrelated hook untouched.
+ *
+ * **Measured, 2026-08-02, this file run alone** (`npx playwright test
+ * tests/e2e/status.spec.ts`): making `CHANNELS.installHooks` resolve without
+ * writing — `ipcMain.handle(CHANNELS.installHooks, () => readHooksState())`
+ * in `src/main/ipc/register.ts` — fails one test, `install and uninstall
+ * leave an unrelated hook untouched`, and the other nine pass. 1 failed, 9
+ * passed, reproduced on a second independent run. Nine tests passing under a
+ * dead install is not a gap in them: they inject hook lines straight onto the
+ * socket and never depend on an install having happened.
+ *
+ * **What this file does NOT see** — read off this file's own text unless a
+ * line says measured:
+ *
+ * - **`DeadPane`, measured.** This is the only spec in the suite that kills a
+ *   pane's session, so it is the only one that could see the dead-pane
+ *   chrome — and it does not. Making `DeadPane` return `null` outright left
+ *   this file 10 of 10 green (2026-08-02). `a dead tab lingers, then restarts`
+ *   drives `TabBar`'s `restart-<id>`, not the pane overlay's
+ *   `pane-restart-<id>`; nothing in this suite references `dead-`,
+ *   `pane-restart-` or `pane-dismiss-` at all. The overlay's dot, its Restart
+ *   and its Dismiss are unwitnessed here;
+ * - **anything past one pane in one tab.** Every tab is opened through the UI
+ *   with `tabs: []` seeded and nothing presses ⌘D, so `paneGroups` only ever
+ *   takes its single-box branch, `boxesOfRow` is never reached, and the
+ *   dividers overlay renders with no strips — `PaneDivider` is constructed
+ *   only for `index > 0`. A dead *pane* beside a live one, which is the case
+ *   the overlay exists for, cannot occur here;
+ * - **the installed hook script actually running.** `injectHook` opens the
+ *   socket and writes a line itself; `formatHookLine` keeps that honest as to
+ *   wire format, but nothing here executes the script the install writes, and
+ *   no real Claude process is involved. That the file Claude reads causes
+ *   Claude to call it is untested at this level;
+ * - **the real `~/.claude/settings.json`.** `PRCLI_CLAUDE_SETTINGS` points at
+ *   a temp file in every test in this file, including the ones that never
+ *   open the settings pane. The install is measured against a fixture;
+ * - **`crashed` from a killed session.** See the long note on `a dead tab
+ *   lingers, then restarts`: the attaching client exits 0 whatever killed the
+ *   session, so that test asserts `ended` deliberately. The red dot is
+ *   covered only by the separate `exit 3` test, which reads tmux's own
+ *   `pane_dead_status`;
+ * - **notification delivery.** `DEFAULT_NOTIFICATIONS` is seeded and the dock
+ *   badge is read, but no test here asserts that a sound played, that a system
+ *   notification was posted, or that muting a project suppresses one;
+ * - **tab and project mechanics** — `tabs.spec.ts` and `projects.spec.ts`.
+ *   One relaunch happens here, in the spool test, and it asserts only that a
+ *   spooled line replayed onto that tab's dot; which tabs come back, in what
+ *   order, and which project and tab a launch lands on are asserted nowhere in
+ *   this file. Neither is a rename, a removal, or a second instance.
+ */
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'

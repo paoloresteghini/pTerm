@@ -1,3 +1,61 @@
+/**
+ * Projects: discovering them, switching between them, renaming and removing
+ * them, and what happens to their sessions when any of that occurs.
+ *
+ * Ten tests on the `prcli-e2e-projects` socket: an empty workspace opens no
+ * session; a scanned candidate can be added and a tab opened under its slug;
+ * the tab bar shows only the active project's tabs; ⌘1/⌘2 switch project while
+ * ⌥⌘1 switches tab; a repository-declared preset launches its command; a
+ * relaunch restores the active project and each project's active tab; an
+ * Unsorted stray is filed by *renaming* its session, not recreating it; a ⌘
+ * shortcut typed into the rename field does not reach the tab handler, while
+ * ⌘W with a terminal focused still closes its tab; a rename keeps the slug and
+ * honours Escape, blur and a blank name; and removing a project leaves its
+ * session alive under Unsorted.
+ *
+ * **Measured, 2026-08-02, this file run alone** (`npx playwright test
+ * tests/e2e/projects.spec.ts`): deleting the `if (event.altKey)` branch from
+ * the `Digit` handler in `App.tsx` — so ⌥⌘1 falls through to project
+ * switching — fails one test, `⌘1 and ⌘2 switch project; ⌥⌘1 and ⌥⌘2 switch
+ * tab`, and the other nine pass. 1 failed, 9 passed, reproduced on a second
+ * independent run. The two halves of that test's name are not equally pinned
+ * by it: the failure lands on the ⌥⌘1 assertion, which means the ⌘1 and ⌘2
+ * assertions ahead of it passed under the mutation. Only the half the
+ * mutation was aimed at moved.
+ *
+ * **Also measured** the same day: changing `event.code === 'KeyW'` to
+ * `'KeyQ'` in the same handler fails `a shortcut typed into the rename field
+ * does not reach the tab handler` here — at its last assertion, the one that
+ * checks ⌘W still closes a tab with a terminal focused — and nothing else in
+ * this file. So that test really does bite on ⌘W and not only on the guard it
+ * is named for.
+ *
+ * **What this file does NOT see** — read off this file's own text unless a
+ * line says measured:
+ *
+ * - **anything past one pane in one tab.** Nothing here presses ⌘D and every
+ *   seeded config carries `tabs: []`, so each tab has exactly one pane.
+ *   `paneGroups` only ever takes its single-box branch, `boxesOfRow` is never
+ *   reached, and the dividers overlay renders with no strips —
+ *   `PaneDivider` is constructed only for `index > 0`;
+ * - `DeadPane`. No test here kills a session behind the app's back, and no
+ *   test in this suite asserts on `dead-`, `pane-dot-`, `pane-restart-` or
+ *   `pane-dismiss-` at all. Measured in `status.spec.ts`, which does kill a
+ *   session: making `DeadPane` render `null` left it 10 of 10 green;
+ * - **the native folder picker.** `choose-folder` opens a dialog Playwright
+ *   cannot touch, so the add path exercised here is the scanned-candidate
+ *   list only, and every other project is seeded straight into `config.json`;
+ * - **the real scan root.** `PRCLI_PROJECTS_ROOT` points at a temp directory
+ *   in every test, so discovery is measured against fixtures, never against
+ *   `~/Code`. What a scan of a large real tree costs or finds is untested;
+ * - **status dots, hook events and the dock badge** — `status.spec.ts`. No
+ *   test here injects an event or asserts on a `dot-` or `pdot-` testid;
+ * - **project reordering and mute**, and anything in the settings pane: no
+ *   test here opens it;
+ * - **the OS accelerator layer.** ⌘1/⌥⌘1/⌘W are dispatched into the window by
+ *   Playwright; that the physical keystroke reaches the window at all is
+ *   outside this file.
+ */
 import { test, expect, _electron as electron, type ElectronApplication } from '@playwright/test'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
