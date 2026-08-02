@@ -204,7 +204,7 @@ export function carveRatio(params: {
  * for B whatsoever, because B is not live, so the room `sharesAroundClaims`
  * divides among A/C/the new pane never has B's share held back from it. The
  * renderer, independently, reserves B's tombstone share a second time in
- * `withKeptPanes` — see `restore.ts`'s comment above `sharesAroundClaims` for
+ * `withKeptPanes` — see `shares.ts`'s comment above `sharesAroundClaims` for
  * the traced case where that visibly moves a pane nobody touched. Sharing the
  * predicate is what this task does, so the two readers cannot drift into
  * disagreeing about WHICH claims are unspent; making `carveRatio`/`tabRowFor`
