@@ -519,8 +519,8 @@ describe('the whole-tab property, exhaustively', () => {
    * **What this does NOT show, and cannot: `inLiveFrame`.** The property is
    * asserted off `paneGroups` — what is actually drawn — and `inLiveFrame` is
    * exactly one positive scalar over every live share: `withKeptPanes`
-   * divides by the incoming sum (`src/renderer/workspace.ts:757`) and
-   * `boxesOfRow` divides by the kept total (`src/renderer/workspace.ts:559`),
+   * divides by the incoming sum (`src/renderer/workspace.ts:763`) and
+   * `boxesOfRow` divides by the kept total (`src/renderer/workspace.ts:567`),
    * so a uniform rescale of main's row is invisible to both. A mutation that
    * broke only `inLiveFrame` would leave every case here green — not because
    * this property is weak, but because `inLiveFrame` is a wire-frame
