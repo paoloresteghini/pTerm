@@ -272,34 +272,10 @@ export function App() {
   /**
    * Take hold of the divider before box `index` of `tabId`, or refuse to.
    *
-   * `boxes` are what is on screen; `row.layout.ratio` is what is stored, and
-   * the two are not always the same list. `boxesOfRow` drops kids whose panes
-   * are absent — or named twice — and renormalises what is left, so a box index
-   * is not a kid index and an on-screen share is not a stored one. Applying a
-   * delta measured against the screen to un-renormalised stored ratios, at an
-   * index that has slid, is the shape of plan 2b's Critical: a pane nobody
-   * touched changing size.
-   *
-   * So the whole question is settled here, once, and in the screen's own units.
-   * Equal lengths mean nothing was dropped, which makes the boxes the kids in
-   * kids order — checked by identity at the pair being dragged rather than
-   * inferred, so the coupling to `boxesOfRow` is stated instead of assumed. The
-   * ratio then taken is the boxes' own shares, which sum to 1 by construction,
-   * so the delta, the floor and the stored ratio are all fractions of the same
-   * axis. Anything else about the row and this refuses, leaving `grabbed` null,
-   * and the drag does nothing at all.
-   *
-   * The floor is computed here rather than in the divider because this is where
-   * the cell size is reachable: `paneGrid` reports a mounted terminal's grid,
-   * and the box's own share says what fraction of the axis that grid covers, so
-   * the axis total falls out without measuring the DOM. Either adjacent pane
-   * can supply it — every terminal is built with the same font — so the low
-   * side is taken, and the choice is noted here so nobody has to wonder whether
-   * it mattered. Captured once, at the grab, rather than recomputed per frame:
-   * the share moves as the drag runs but the grid only catches up when tmux
-   * does, so a per-frame reading would divide a fresh share by a stale grid and
-   * make the floor jitter mid-drag. The window is not being resized while a
-   * divider is being held.
+   * The pair resolution, the three refusal guards and the floor derivation all
+   * live in `grabFor` (`workspace.ts`) now — see its doc comment for why any of
+   * that is needed. This is only the lookup of `tabId`'s row and the write into
+   * `grabbed`.
    */
   const grabPane = useCallback(
     (tabId: string, index: number, boxes: PaneBox[]) => {
