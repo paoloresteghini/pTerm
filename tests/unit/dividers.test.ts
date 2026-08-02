@@ -36,20 +36,23 @@ import { describe, it, expect } from 'vitest'
  *   the text `window.removeEventListener`, nothing more;
  * - that a pane follows the cursor 1:1 over a long drag, that it stops at the
  *   floor, or that the tmux session reflows behind it;
- * - **`grabPane`'s refusal guards** — the length check and the two identity
- *   checks that stop a box index being taken for a kid index. That is the
- *   subtlest logic in this whole change and nothing anywhere executes it:
- *   measured, deleting all three leaves this file eleven of eleven green. It is not
- *   pinned by a text assertion either, deliberately — one would catch a deletion
- *   while saying nothing about the far likelier regression, a guard that is
- *   present and wrong, and would leave this bullet reading like coverage;
- * - **the floor derivation** — `axisCells = grid.cols / low.share`, and the
- *   `minRatioFor` call it feeds. New arithmetic, living in `App.tsx`, with no
- *   unit test here or in workspace.test.ts. The `minRatioFor(` assertion below
- *   is a bare token and was measured to be one: swapping its two arguments
- *   passes, and so does turning that `/` into a `*`. The way to close this is to
- *   move the derivation into `workspace.ts` and test it as a function, not to
- *   add a cleverer grep;
+ * - **`grabPane`'s refusal guards were here** — the length check and the two
+ *   identity checks that stop a box index being taken for a kid index. This
+ *   file could not see them: measured, deleting all three left it eleven of
+ *   eleven green. They are now covered by `workspace.test.ts`'s `grabFor`
+ *   describe, which moved the guards out of `App.tsx` and exercises each by
+ *   name — `refuses when the boxes are the same length but not the same
+ *   panes` fails the moment the two identity guards are deleted;
+ * - **the floor derivation was here too** — `axisCells = grid.cols / low.share`,
+ *   and the `minRatioFor` call it fed. It was new arithmetic living in
+ *   `App.tsx` with no unit test anywhere, and the `minRatioFor(` token this
+ *   file used to assert on was measured to be a bare one: swapping its two
+ *   arguments passed, and so did turning that `/` into a `*`. Both moved into
+ *   `grabFor` in `workspace.ts` and are now pinned as arithmetic, not text:
+ *   `measures a col tab down the other axis, against the other floor` fails
+ *   under either mutation — under the argument swap because the wrong floor
+ *   is measured against the wrong axis, and under `*` because the result
+ *   comes out as 1/3 instead of 5/60;
  * - **where the divider lands.** `offset` is a cumulative sum computed in
  *   `App.tsx` and turned into a percentage at runtime. A wrong sum draws the
  *   strip over the wrong seam — or at the tab's leading edge — and every
@@ -187,7 +190,7 @@ describe('the gesture reaches the arithmetic', () => {
 
   it('App clamps through resizeKids and dispatches resized', () => {
     expect(app).toMatch(/resizeKids\(/)
-    expect(app).toMatch(/minRatioFor\(/)
+    expect(app).toMatch(/grabFor\(/)
     expect(app).toMatch(/type: 'resized'/)
   })
 

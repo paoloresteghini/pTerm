@@ -17,7 +17,9 @@ import {
   tabOfPane,
   minRatioFor,
   resizeKids,
+  grabFor,
   type WorkspaceState,
+  type PaneBox,
 } from '../../src/renderer/workspace'
 import {
   UNSORTED_ID,
@@ -1683,5 +1685,69 @@ describe('resizeKids', () => {
   it('returns the ratios unchanged when the index names no pair', () => {
     expect(resizeKids([0.5, 0.5], 1, 0.1, 0.1, 0.1)).toEqual([0.5, 0.5])
     expect(resizeKids([0.5, 0.5], -1, 0.1, 0.1, 0.1)).toEqual([0.5, 0.5])
+  })
+})
+
+describe('grabFor', () => {
+  const boxes = (shares: number[], ids: string[]): PaneBox[] =>
+    shares.map((share, index) => ({
+      pane: tab(ids[index]),
+      share,
+      style: { flexBasis: `${share * 100}%` },
+      dead: false,
+    }))
+  const grid = () => ({ cols: 100, rows: 30 })
+  const floors = { cols: 20, rows: 5 }
+
+  it('takes the pair, the shares on screen, and a floor in the axis being dragged', () => {
+    // The low box covers half a `row` tab and is 100 columns wide, so the tab's
+    // axis is 200 columns and a 20-column floor is a tenth of it.
+    const held = grabFor(ratioRow('aaa', ['aaa', 'bbb'], [0.5, 0.5]), boxes([0.5, 0.5], ['aaa', 'bbb']), 1, grid, floors)
+    expect(held).not.toBeNull()
+    expect(held?.at).toBe(0)
+    expect(held?.ratio).toEqual([0.5, 0.5])
+    expect(held?.min).toBeCloseTo(0.1)
+  })
+
+  it('measures a col tab down the other axis, against the other floor', () => {
+    // The pairing that a bare `minRatioFor(` grep cannot see: 30 rows over half
+    // the axis is 60 rows, and a 5-row floor is 1/12 of it. Swapping the two
+    // arguments gives 12; multiplying instead of dividing gives 1/3.
+    const held = grabFor(ratioRow('aaa', ['aaa', 'bbb'], [0.5, 0.5], 'col'), boxes([0.5, 0.5], ['aaa', 'bbb']), 1, grid, floors)
+    expect(held?.min).toBeCloseTo(5 / 60)
+  })
+
+  it('takes the shares from the boxes, not from the row', () => {
+    // `boxesOfRow` renormalises what it draws, so the screen's shares and the
+    // stored ones are not the same list. A delta measured against the screen
+    // has to be applied to the screen's own numbers.
+    const held = grabFor(ratioRow('aaa', ['aaa', 'bbb'], [2, 2]), boxes([0.5, 0.5], ['aaa', 'bbb']), 1, grid, floors)
+    expect(held?.ratio).toEqual([0.5, 0.5])
+  })
+
+  it('refuses when the boxes and the kids are not the same list', () => {
+    // A kid whose pane is missing: the box index and the kid index have slid
+    // apart, and applying the drag at the box index would resize a pane nobody
+    // touched. This is the state a dismiss used to leave behind for good.
+    const row = ratioRow('aaa', ['aaa', 'gone', 'bbb'], [0.4, 0.2, 0.4])
+    expect(grabFor(row, boxes([0.5, 0.5], ['aaa', 'bbb']), 1, grid, floors)).toBeNull()
+  })
+
+  it('refuses when the boxes are the same length but not the same panes', () => {
+    const row = ratioRow('aaa', ['aaa', 'zzz'], [0.5, 0.5])
+    expect(grabFor(row, boxes([0.5, 0.5], ['aaa', 'bbb']), 1, grid, floors)).toBeNull()
+  })
+
+  it('refuses at either edge and for an index naming no pair', () => {
+    const row = ratioRow('aaa', ['aaa', 'bbb'], [0.5, 0.5])
+    const pair = boxes([0.5, 0.5], ['aaa', 'bbb'])
+    expect(grabFor(row, pair, 0, grid, floors)).toBeNull()
+    expect(grabFor(row, pair, 2, grid, floors)).toBeNull()
+  })
+
+  it('refuses when the low pane has no mounted terminal to measure, or no width', () => {
+    const row = ratioRow('aaa', ['aaa', 'bbb'], [0.5, 0.5])
+    expect(grabFor(row, boxes([0.5, 0.5], ['aaa', 'bbb']), 1, () => undefined, floors)).toBeNull()
+    expect(grabFor(row, boxes([0, 1], ['aaa', 'bbb']), 1, grid, floors)).toBeNull()
   })
 })

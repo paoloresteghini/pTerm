@@ -12,7 +12,7 @@ import {
   INITIAL_WORKSPACE_STATE,
   activeProject,
   activeTabId,
-  minRatioFor,
+  grabFor,
   needsYou,
   paneGroups,
   paneInDirection,
@@ -303,24 +303,11 @@ export function App() {
    */
   const grabPane = useCallback(
     (tabId: string, index: number, boxes: PaneBox[]) => {
-      grabbed.current = null
       const row = state.tabs.find((candidate) => candidate.id === tabId)
-      const low = boxes[index - 1]
-      const high = boxes[index]
-      if (!row || !low || !high) return
-      if (boxes.length !== row.layout.kids.length) return
-      if (row.layout.kids[index - 1] !== low.pane.id) return
-      if (row.layout.kids[index] !== high.pane.id) return
-      const grid = paneGrid(low.pane.id)
-      if (!grid || low.share <= 0) return
-      const axisCells = (row.layout.dir === 'row' ? grid.cols : grid.rows) / low.share
-      const floor = row.layout.dir === 'row' ? MIN_PANE_COLS : MIN_PANE_ROWS
-      grabbed.current = {
-        tabId,
-        at: index - 1,
-        ratio: boxes.map((box) => box.share),
-        min: minRatioFor(floor, axisCells),
-      }
+      const held = row
+        ? grabFor(row, boxes, index, paneGrid, { cols: MIN_PANE_COLS, rows: MIN_PANE_ROWS })
+        : null
+      grabbed.current = held ? { tabId, ...held } : null
     },
     [state.tabs],
   )

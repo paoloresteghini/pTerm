@@ -373,6 +373,73 @@ export function resizeKids(
   return next
 }
 
+/**
+ * Take hold of the divider before box `index` of `row`, or refuse to.
+ *
+ * `boxes` are what is on screen; `row.layout.ratio` is what is stored, and the
+ * two are not always the same list. `boxesOfRow` drops kids whose panes are
+ * absent — or named twice — and renormalises what is left, so a box index is
+ * not a kid index and an on-screen share is not a stored one. Applying a
+ * delta measured against the screen to un-renormalised stored ratios, at an
+ * index that has slid, is the shape of plan 2b's Critical: a pane nobody
+ * touched changing size.
+ *
+ * So the whole question is settled here, once, and in the screen's own units.
+ * Equal lengths mean nothing was dropped, which makes the boxes the kids in
+ * kids order — checked by identity at the pair being dragged rather than
+ * inferred, so the coupling to `boxesOfRow` is stated instead of assumed. The
+ * ratio then taken is the boxes' own shares, which sum to 1 by construction,
+ * so the delta, the floor and the stored ratio are all fractions of the same
+ * axis. Anything else about the row and this refuses, leaving the caller with
+ * null, and the drag does nothing at all.
+ *
+ * The floor is computed here rather than in the divider because this is where
+ * the cell size is reachable: `gridOf` reports a mounted terminal's grid, and
+ * the box's own share says what fraction of the axis that grid covers, so the
+ * axis total falls out without measuring the DOM. Either adjacent pane can
+ * supply it — every terminal is built with the same font — so the low side is
+ * taken, and the choice is noted here so nobody has to wonder whether it
+ * mattered. Captured once, at the grab, rather than recomputed per frame: the
+ * share moves as the drag runs but the grid only catches up when tmux does, so
+ * a per-frame reading would divide a fresh share by a stale grid and make the
+ * floor jitter mid-drag. The window is not being resized while a divider is
+ * being held.
+ *
+ * Lives here, and not in `App.tsx` where it was written, because it is
+ * arithmetic and `App.tsx` had the only copy of it: nothing outside a running
+ * app ever executed it, and `dividers.test.ts`'s own header records a static
+ * source check measured unable to see any of the three things that could go
+ * wrong in it — the identity guards being deleted, `minRatioFor`'s two
+ * arguments being swapped, and the `/` in the axis derivation becoming a `*`.
+ * `gridOf` is taken as a callback rather than importing `paneGrid` directly so
+ * this file stays DOM-free — `Terminal.tsx`, where `paneGrid` lives, is not,
+ * and this unit suite has no DOM to mount a terminal in.
+ */
+export function grabFor(
+  row: TabRow,
+  boxes: readonly PaneBox[],
+  index: number,
+  // `| null` alongside `| undefined`: `Terminal.tsx`'s `paneGrid` — the
+  // production caller — reports an unmounted terminal as `null`, and the test
+  // double above reports it as `undefined`. `!grid` below treats them alike,
+  // so the wider union costs nothing and lets `App.tsx` pass `paneGrid`
+  // straight through rather than wrapping it to paper over the mismatch.
+  gridOf: (paneId: string) => { cols: number; rows: number } | null | undefined,
+  floors: { cols: number; rows: number },
+): { at: number; ratio: number[]; min: number } | null {
+  const low = boxes[index - 1]
+  const high = boxes[index]
+  if (!low || !high) return null
+  if (boxes.length !== row.layout.kids.length) return null
+  if (row.layout.kids[index - 1] !== low.pane.id) return null
+  if (row.layout.kids[index] !== high.pane.id) return null
+  const grid = gridOf(low.pane.id)
+  if (!grid || low.share <= 0) return null
+  const axisCells = (row.layout.dir === 'row' ? grid.cols : grid.rows) / low.share
+  const floor = row.layout.dir === 'row' ? floors.cols : floors.rows
+  return { at: index - 1, ratio: boxes.map((box) => box.share), min: minRatioFor(floor, axisCells) }
+}
+
 /** A pane and the share of its tab's axis it takes. */
 export interface PaneBox {
   pane: TabDescriptor
