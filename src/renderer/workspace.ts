@@ -83,6 +83,13 @@ export type WorkspaceAction =
    */
   | { type: 'closedPane'; paneId: string; shape: TabShape }
   | { type: 'activatedPane'; tabId: string; paneId: string }
+  /**
+   * A drag in progress. Ratios only — a drag never changes membership, and the
+   * reducer is where they live during the gesture so `paneGroups` reflows the
+   * panes and `Terminal.tsx`'s ResizeObserver drives tmux with no second push
+   * path. Persistence waits for the pointer to come up; see `CHANNELS.setLayout`.
+   */
+  | { type: 'resized'; tabId: string; ratio: number[] }
 
 export const INITIAL_WORKSPACE_STATE: WorkspaceState = {
   projects: [],
@@ -975,6 +982,24 @@ export function workspaceReducer(
         ...state,
         tabs: state.tabs.map((row) =>
           row.id === action.tabId ? { ...row, activePaneId: action.paneId } : row,
+        ),
+      }
+    }
+
+    case 'resized': {
+      const row = state.tabs.find((candidate) => candidate.id === action.tabId)
+      if (!row) return state
+      // A gesture that raced a split or a close carries a ratio for a row that
+      // no longer has that many kids. Pairing them by position would mis-size
+      // every pane in the tab, and the drag's own next frame corrects it — so
+      // dropping the stale frame costs nothing and guessing costs the layout.
+      if (action.ratio.length !== row.layout.kids.length) return state
+      return {
+        ...state,
+        tabs: state.tabs.map((candidate) =>
+          candidate.id === action.tabId
+            ? { ...candidate, layout: { ...candidate.layout, ratio: action.ratio } }
+            : candidate,
         ),
       }
     }

@@ -1247,6 +1247,33 @@ describe('workspaceReducer', () => {
       expect(next).toEqual(state)
     })
   })
+
+  describe('resized', () => {
+    const state: WorkspaceState = {
+      ...three,
+      tabs: [ratioRow('aaa', ['aaa', 'bbb'], [0.5, 0.5])],
+    }
+
+    it('replaces the tab’s ratios and nothing else', () => {
+      const next = workspaceReducer(state, { type: 'resized', tabId: 'aaa', ratio: [0.7, 0.3] })
+      const row = next.tabs.find((candidate) => candidate.id === 'aaa')
+      expect(row?.layout.ratio).toEqual([0.7, 0.3])
+      expect(row?.layout.kids).toEqual(['aaa', 'bbb'])
+      expect(next.panes).toBe(state.panes)
+    })
+
+    it('ignores a resize naming an unknown tab', () => {
+      const next = workspaceReducer(state, { type: 'resized', tabId: 'nope', ratio: [0.7, 0.3] })
+      expect(next).toBe(state)
+    })
+
+    it('ignores a ratio of the wrong length', () => {
+      // A gesture that raced a split or a close. Applying it would pair shares
+      // with the wrong kids and silently mis-size every pane in the tab.
+      const next = workspaceReducer(state, { type: 'resized', tabId: 'aaa', ratio: [0.3, 0.3, 0.4] })
+      expect(next).toBe(state)
+    })
+  })
 })
 
 /**
