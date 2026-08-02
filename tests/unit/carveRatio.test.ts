@@ -13,6 +13,7 @@ describe('carveRatio', () => {
     // No saved row at all: `savedKids` falls back to `[paneId]` at the call
     // site, and `savedRatio` to `[]` — the first-split case.
     const ratio = carveRatio({
+      tabId: 'tab',
       kids: ['a', 'b'],
       sourcePaneId: 'a',
       newPaneId: 'b',
@@ -28,6 +29,7 @@ describe('carveRatio', () => {
     // keeps half its own share, the new pane gets the other half, A is
     // untouched.
     const ratio = carveRatio({
+      tabId: 'tab',
       kids: ['a', 'b', 'new'],
       sourcePaneId: 'b',
       newPaneId: 'new',
@@ -46,6 +48,7 @@ describe('carveRatio', () => {
     // must land wherever `kids` actually puts it rather than at the source
     // pane's old position.
     const ratio = carveRatio({
+      tabId: 'tab',
       kids: ['a', 'new', 'b'],
       sourcePaneId: 'a',
       newPaneId: 'new',
@@ -96,6 +99,7 @@ describe('carveRatio', () => {
   // reason.
   it('dilutes every known share evenly when an unclaimed sibling reclaims one, and preserves their relative sizes', () => {
     const ratio = carveRatio({
+      tabId: 'tab',
       kids: ['a', 'new', 'c', 'b'],
       sourcePaneId: 'a',
       newPaneId: 'new',
@@ -132,6 +136,7 @@ describe('carveRatio', () => {
   // exactly rather than as "positive".
   it('gives a remembered sibling the share it died at, and scales the rest into the rest', () => {
     const ratio = carveRatio({
+      tabId: 'tab',
       kids: ['a', 'new', 'b'],
       sourcePaneId: 'a',
       newPaneId: 'new',
@@ -140,7 +145,7 @@ describe('carveRatio', () => {
       // row, so `a` was rescaled to the whole tab on the way back in.
       savedKids: ['a'],
       savedRatio: [1],
-      remembered: new Map([['b', { share: 0.3 }]]),
+      tombstones: new Map([['b', { tabId: 'tab', share: 0.3 }]]),
     })
     expect(ratio[0]).toBeCloseTo(0.35) // a: half of 1, scaled into the 0.7 left
     expect(ratio[1]).toBeCloseTo(0.35) // new: the other half
@@ -158,13 +163,14 @@ describe('carveRatio', () => {
   // replaced.
   it('halves a remembered pane between it and the pane split out of it', () => {
     const ratio = carveRatio({
+      tabId: 'tab',
       kids: ['a', 'b', 'new'],
       sourcePaneId: 'b',
       newPaneId: 'new',
       siblings: ['a', 'b'],
       savedKids: ['a'],
       savedRatio: [1],
-      remembered: new Map([['b', { share: 0.3 }]]),
+      tombstones: new Map([['b', { tabId: 'tab', share: 0.3 }]]),
     })
     expect(ratio[0]).toBeCloseTo(0.7) // a: all of what the claim leaves
     expect(ratio[1]).toBeCloseTo(0.15) // b: half its own remembered share
@@ -172,20 +178,63 @@ describe('carveRatio', () => {
     expect(ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
   })
 
-  // Half of the no-op property: passing `remembered` changes nothing when it
-  // names no kid of this row. That is worth pinning and it is all this
-  // asserts — an implementation that ignored the map outright would satisfy it
-  // too, so it is NOT evidence that the arithmetic still matches what it was
-  // before any of this existed.
+  // CT-2 on the split path, in the ordering the review traced: `b` is a
+  // tombstone at 0.2, `c` died and came back claiming 0.3, the saved row knows
+  // only `a`, and `a` is split.
   //
-  // The evidence for that is the pre-existing expectations, in this file and in
-  // the two integration files, none of which moved by a digit: with no claim
-  // `held` is 0, `room` is 1, and every share is divided by the total of the
-  // bases, which is the `share / total` rescale this replaced. Asserted here as
-  // an exact equality between two calls rather than against pinned numbers, so
-  // it stays true of whatever the shared helper does next.
-  it('is unchanged by a remembered map that names none of the kids', () => {
+  // Whole tab: a 0.25, new 0.25, c 0.30, b 0.20. The three live kids hold 0.80
+  // between them, so the row main writes divides that 0.80 among them —
+  // 0.3125 / 0.3125 / 0.375. Before this task main emitted 0.35 / 0.35 / 0.30,
+  // which the renderer then scaled by the 0.8 it reserves for `b`, drawing
+  // `c` at 0.24 when nobody had touched it.
+  it('holds back a tombstone’s share and emits what the live kids hold', () => {
+    const ratio = carveRatio({
+      tabId: 'tab',
+      kids: ['a', 'new', 'c'],
+      sourcePaneId: 'a',
+      newPaneId: 'new',
+      siblings: ['a', 'c'],
+      savedKids: ['a'],
+      savedRatio: [1],
+      tombstones: new Map([
+        ['b', { tabId: 'tab', share: 0.2 }],
+        ['c', { tabId: 'tab', share: 0.3 }],
+      ]),
+    })
+    expect(ratio[0]).toBeCloseTo(0.3125)
+    expect(ratio[1]).toBeCloseTo(0.3125)
+    expect(ratio[2]).toBeCloseTo(0.375)
+    expect(ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+  })
+
+  // The mirror: `c` is the tombstone at 0.3 and `b` is the pane that came back
+  // claiming 0.2. Whole tab: a 0.25, new 0.25, b 0.20, c 0.30; the live kids
+  // hold 0.70, so 5/14, 5/14, 2/7. Both orderings are here because the
+  // reviewer's rejected candidate was exact in one and inert in the other, and
+  // one case cannot tell those apart.
+  it('holds back a tombstone’s share when the restarted pane is the other one', () => {
+    const ratio = carveRatio({
+      tabId: 'tab',
+      kids: ['a', 'new', 'b'],
+      sourcePaneId: 'a',
+      newPaneId: 'new',
+      siblings: ['a', 'b'],
+      savedKids: ['a'],
+      savedRatio: [1],
+      tombstones: new Map([
+        ['b', { tabId: 'tab', share: 0.2 }],
+        ['c', { tabId: 'tab', share: 0.3 }],
+      ]),
+    })
+    expect(ratio[0]).toBeCloseTo(5 / 14)
+    expect(ratio[1]).toBeCloseTo(5 / 14)
+    expect(ratio[2]).toBeCloseTo(2 / 7)
+    expect(ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+  })
+
+  it('is unchanged by claims recorded against another tab', () => {
     const args = {
+      tabId: 'tab',
       kids: ['a', 'new', 'c', 'b'],
       sourcePaneId: 'a',
       newPaneId: 'new',
@@ -195,7 +244,8 @@ describe('carveRatio', () => {
     }
     const without = carveRatio(args)
     expect(without).toHaveLength(4)
-    expect(carveRatio({ ...args, remembered: new Map() })).toEqual(without)
-    expect(carveRatio({ ...args, remembered: new Map([['elsewhere', { share: 0.9 }]]) })).toEqual(without)
+    expect(
+      carveRatio({ ...args, tombstones: new Map([['far', { tabId: 'other', share: 0.9 }]]) }),
+    ).toEqual(without)
   })
 })

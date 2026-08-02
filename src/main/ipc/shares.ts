@@ -93,29 +93,43 @@ export function tombstonesOf(
  * claims, and that is where the two sides are known to disagree rather than
  * agree.
  *
- * This function only ever sees a claim for a pane that is a LIVE sibling at
- * the moment `carveRatio`/`tabRowFor` rebuilds the row — `register.ts`'s
- * `splitPane`/`closePane` build `siblings`/`ids` from what tmux and the saved
- * row currently show, and a pane that is still a tombstone is neither.
- * `withKeptPanes` sees a claim for every pane still in the renderer's
- * `state.dead`, live sibling or not. A pane that died and has not been
- * restarted is therefore a claim on the renderer's side and no claim at all
- * here — `register.ts`'s `claimForDeath` names this the same open gap from
- * main's side; see its doc.
+ * Before this task, this function only ever saw a claim for a pane that was a
+ * LIVE sibling at the moment `carveRatio`/`tabRowFor` rebuilt the row —
+ * `register.ts`'s `splitPane`/`closePane` built `siblings`/`ids` from what
+ * tmux and the saved row currently show, and a pane that was still a
+ * tombstone was neither. It now sees a claim for every unspent claim of the
+ * tab, live sibling or not: both row builders call `tombstonesOf` themselves
+ * before ever calling this, and append an entry for every tombstone it names
+ * to the ones `kids` supplies — see `inLiveFrame`, which is what then strips
+ * those appended entries back out before the row is written. `withKeptPanes`
+ * sees a claim for every pane still in the renderer's `state.dead`, live
+ * sibling or not, which was already true of it and remains true — the
+ * paragraph above is where the two sides still differ.
  *
- * Traced, not hypothetical. Tab `A .5 / C .3 / B .2`. B dies and is never
- * restarted. C dies and IS restarted before the next split. The user splits
- * A. Main rebuilds the row over `siblings = [A, C]` — B is not live, so its
- * claim never reaches this function, and A/C/the new pane divide the WHOLE
- * tab among themselves: A 0.35, new 0.35, C 0.30 (C's claim correctly
- * recovered at exactly what it died at — the two-death case `claimForDeath`
- * gets right). The renderer, independently, still lists B in `state.dead` and
- * `withKeptPanes` reserves its 0.2 on top of that already-whole vector,
- * scaling everything else down to make room a second time: measured, C ends
- * up drawn at 0.24, not 0.30, though nobody touched it. That is the drift a
- * "not a second rule" claim would paper over — the arithmetic is one rule,
- * agreed on both sides; the INPUT to it is not, and fixing that needs a death
- * ordinal or an equivalent, which is deliberately not attempted in this wave.
+ * Traced, not hypothetical — and now a description of a FIXED defect, not of
+ * current behaviour; kept because the numbers are the evidence that
+ * `inLiveFrame` (below) is what closed it. Tab `A .5 / C .3 / B .2`. B dies
+ * and is never restarted. C dies and IS restarted before the next split. The
+ * user splits A. Before this task, main rebuilt the row over
+ * `siblings = [A, C]` — B was not live, so its claim never reached this
+ * function, and A/C/the new pane divided the WHOLE tab among themselves: A
+ * 0.35, new 0.35, C 0.30 (C's claim correctly recovered at exactly what it
+ * died at — the two-death case `claimForDeath` gets right). The renderer,
+ * independently, still listed B in `state.dead`, and `withKeptPanes` reserved
+ * its 0.2 on top of that already-whole vector, scaling everything else down
+ * to make room a second time: measured, C ended up drawn at 0.24, not 0.30,
+ * though nobody had touched it.
+ *
+ * `carveRatio`/`tabRowFor` now call `tombstonesOf` themselves and hand this
+ * function B's claim alongside A/C/new's, so the vector THIS function returns
+ * already holds B's 0.2 back — A 0.25, new 0.25, C 0.3, B 0.2 — and
+ * `inLiveFrame` re-expresses A/new/C's shares of the remaining 0.8 before the
+ * row is written: 0.3125 / 0.3125 / 0.375. The renderer then scales that
+ * already-live-remainder vector by the SAME 0.2 it reserves for B, which is
+ * one reservation, not two, so C is drawn at 0.375 x 0.8 = 0.3 again. That is
+ * the drift a "not a second rule" claim would have papered over — the
+ * arithmetic was always one rule, agreed on both sides; the INPUT to it was
+ * not, and this task is what made it be.
  *
  * **With no claim among the entries this is arithmetically today's code.**
  * `held` is 0, `room` is 1, and every base is divided by the total of the
@@ -152,4 +166,51 @@ export function sharesAroundClaims(
   const shares = entries.map((entry) => entry.claim ?? entry.base)
   const total = held + bases
   return total > 0 ? shares.map((share) => share / total) : entries.map(() => 1 / entries.length)
+}
+
+/**
+ * The `live` ids' shares, re-expressed as shares of what they hold between
+ * them — selected out of a whole-tab vector by pane id, not by position.
+ *
+ * **A projection onto a smaller basis, not a renormalisation.** `whole` sums
+ * to 1 by construction — `sharesAroundClaims` guarantees it — so the total
+ * divided by here is exactly `1 - (what the tombstones hold)`. Both readings
+ * are true and only one of them is the reason: the reason is that the row
+ * being written describes the panes it names and nothing else, and the
+ * tombstone total is the CHECK. Written as one division so nobody later
+ * replaces it with `share / sum(share)` on the live ids alone, which agrees
+ * numerically and stops being a projection the moment the vector it is given
+ * does not sum to 1.
+ *
+ * `config.tabs` has always been in this frame: `normaliseLayout` rescales
+ * every saved row over the panes that exist, and a dead pane's kid is dropped
+ * on the way in. Emitting a whole-tab vector into it — which is what both row
+ * builders did before this — is what made the renderer reserve a tombstone's
+ * share a second time.
+ *
+ * The guard is not provably unreachable and is not written as though it were,
+ * for the same reason `sharesAroundClaims`'s `room > 0` note gives: the live
+ * ids hold nothing only when the tombstones hold the whole tab, which
+ * `sharesAroundClaims`'s own fallback makes very hard to reach and neither
+ * function proves impossible. An even split is the only division that needs
+ * no data, and a zero share would be a 0%-wide box, which fits to tmux's 2x1
+ * floor — the geometry defect wearing different numbers.
+ *
+ * A prefix slice — taking `whole`'s first `live.length` entries — was
+ * rejected even though both call sites build `whole` as the kids' entries
+ * followed by the tombstones' entries today: that would make this function
+ * depend on the tombstone entries being appended last, a contract nothing
+ * states and nothing tests, in a change whose whole point is that a share
+ * travels with the pane it belongs to, not with a position in an array.
+ */
+export function inLiveFrame(
+  whole: readonly number[],
+  ids: readonly string[],
+  live: readonly string[],
+): number[] {
+  const shareOf = new Map(ids.map((id, index) => [id, whole[index] ?? 0]))
+  const held = live.reduce((sum, id) => sum + (shareOf.get(id) ?? 0), 0)
+  return held > 0
+    ? live.map((id) => (shareOf.get(id) ?? 0) / held)
+    : live.map(() => 1 / live.length)
 }

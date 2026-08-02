@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { sharesAroundClaims, claimFor, tombstonesOf } from '../../src/main/ipc/shares'
+import { sharesAroundClaims, claimFor, tombstonesOf, inLiveFrame } from '../../src/main/ipc/shares'
 import { tabRowFor } from '../../src/main/ipc/restore'
 import type { TabRow } from '../../src/main/state/store'
 
@@ -20,6 +20,39 @@ const row = (kids: string[], ratio: number[]): TabRow => ({
   groupId: 'tab',
   activePaneId: kids[0],
   layout: { dir: 'row', ratio, kids },
+})
+
+describe('inLiveFrame', () => {
+  it('re-expresses the live kids’ shares as shares of what they hold', () => {
+    // Half of a whole-tab vector belongs to a pane this row will not name, so
+    // the two that are named hold 0.5 between them and take 0.5 each of it.
+    expect(inLiveFrame([0.25, 0.25, 0.5], ['a', 'b', 'c'], ['a', 'b'])).toEqual([0.5, 0.5])
+  })
+
+  it('is the identity when the live kids hold the whole tab', () => {
+    // The control that stops this being satisfied by an implementation that
+    // ignores its inputs: with no tombstone the conversion changes nothing,
+    // which is what makes this change a strict superset of today's behaviour.
+    expect(
+      inLiveFrame([0.25, 0.25, 0.3, 0.2], ['a', 'b', 'c', 'd'], ['a', 'b', 'c', 'd']),
+    ).toEqual([0.25, 0.25, 0.3, 0.2])
+  })
+
+  it('splits evenly when the live kids hold nothing at all', () => {
+    expect(inLiveFrame([0, 0, 1], ['a', 'b', 'c'], ['a', 'b'])).toEqual([0.5, 0.5])
+  })
+
+  // The ruling this file's addendum settled: selection is by id, not by
+  // position, so the function depends on no contract about where the live
+  // ids sit inside `whole`.
+  it('selects the live kids by id, not by position', () => {
+    // The tombstone is FIRST here, so a prefix slice would take `dead`'s 0.3
+    // and `a`'s 0.5 and call them the live pair. Selecting by id takes `a` and
+    // `b` — 0.5 and 0.2 of the whole tab, 0.7 between them — wherever they sit.
+    // Nothing in production appends a tombstone first today; this test is what
+    // stops that being a silent contract instead of an argument.
+    expect(inLiveFrame([0.3, 0.5, 0.2], ['dead', 'a', 'b'], ['a', 'b'])).toEqual([0.5 / 0.7, 0.2 / 0.7])
+  })
 })
 
 describe('tabRowFor with a remembered pane', () => {
@@ -87,6 +120,41 @@ describe('tabRowFor with a remembered pane', () => {
     expect(built.layout.ratio[0]).toBeCloseTo(2 / 3)
     expect(built.layout.ratio[1]).toBeCloseTo(1 / 3)
     expect(built.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+  })
+
+  // CT-2 on the close path. `a` is the only kid the saved row still knows, `b`
+  // died and came back, and `c` died and is still on screen as a tombstone —
+  // so `c`'s 0.3 must be held back from the row main writes even though `c`
+  // is not in it, and what is left must be expressed as shares of the 0.7 the
+  // live kids hold.
+  it('holds back a tombstone’s share and emits what the live kids hold', () => {
+    const built = tabRowFor(
+      { id: 'tab', groupId: 'tab' },
+      ['a', 'b'],
+      row(['a'], [1]),
+      new Map([
+        ['b', { tabId: 'tab', share: 0.2 }],
+        ['c', { tabId: 'tab', share: 0.3 }],
+      ]),
+    )
+    expect(built.layout.kids).toEqual(['a', 'b'])
+    // Whole-tab: a 0.5, b 0.2, c 0.3. The live pair hold 0.7 between them.
+    expect(built.layout.ratio[0]).toBeCloseTo(0.5 / 0.7)
+    expect(built.layout.ratio[1]).toBeCloseTo(0.2 / 0.7)
+    expect(built.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+  })
+
+  it('ignores a claim recorded against another tab', () => {
+    const built = tabRowFor(
+      { id: 'tab', groupId: 'tab' },
+      ['a', 'b'],
+      row(['a'], [1]),
+      new Map([['elsewhere', { tabId: 'other', share: 0.5 }]]),
+    )
+    // Unchanged from the no-tombstone case: `b` is neither saved nor claimed
+    // here, so it takes an even raw share and the two come out 2/3 and 1/3.
+    expect(built.layout.ratio[0]).toBeCloseTo(2 / 3)
+    expect(built.layout.ratio[1]).toBeCloseTo(1 / 3)
   })
 })
 

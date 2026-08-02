@@ -25,7 +25,7 @@ import {
   tabRowFor,
   withUnsorted,
 } from './restore'
-import { sharesAroundClaims, tombstonesOf, type Claim } from './shares'
+import { sharesAroundClaims, tombstonesOf, claimFor, inLiveFrame, type Claim } from './shares'
 import { isDirectory } from '../fsutil'
 import { scanCandidates } from '../projects/discovery'
 import { hookPaths, installHooks, readHooksState, uninstallHooks } from '../hooks/install'
@@ -54,10 +54,11 @@ import {
  * pane that died and was restarted, whose row entry `forgetTab` dropped at
  * its death and nothing has put back (`shareOf`'s `at === -1` branch, below,
  * is where that is felt). Such a pane comes with a share only when main
- * REMEMBERS the one it died at — `remembered`, which is `register.ts`'s
- * `tombstones`. Then that share is a `claim` on the whole tab and every
- * saved-derived share scales into what is left, so nothing is invented and
- * the pane comes back the size it was.
+ * REMEMBERS the one it died at — this function's own `tombstones` parameter,
+ * which both call sites hand this file's outer map of the same name. Then
+ * that share is a `claim` on the whole tab and every saved-derived share
+ * scales into what is left, so nothing is invented and the pane comes back
+ * the size it was.
  *
  * Remembered is not guaranteed, though: the map is process-lifetime, so a
  * pane adopted from a previous run, or one whose entry a dismiss dropped,
@@ -98,19 +99,25 @@ import {
  * that is answered by the floor, which makes `splitActive` refuse such a
  * split before it is sent.
  *
- * The `remembered` half of that is Paolo's ruling, and it lands on `shareOf`'s
+ * The `tombstones` half of that is Paolo's ruling, and it lands on `shareOf`'s
  * `at === -1` branch — the fallback is made correct, not removed, which is why
  * the unremembered paragraph above still describes real behaviour. With a
- * remembered kid in play the vector returned sums to 1 by construction rather
- * than by a rescale: `sharesAroundClaims` divides the bases among themselves
- * and scales them into `1 - held`. Not in every case, though — when the claims
- * themselves reach 1 that function falls back to normalising the lot, and
- * there the normalisation is load-bearing again. Whether `forgetTab`'s own
- * arithmetic keeps one tab's claims strictly below 1 is not proved anywhere in
- * this file — see `claimForDeath`'s own doc for where that induction breaks,
- * at the step where a share is exactly 1, the sole survivor of its row dying.
- * The guard is what makes this function safe regardless, without depending on
- * that bound.
+ * remembered kid in play the WHOLE-TAB vector this builds sums to 1 by
+ * construction rather than by a rescale: `sharesAroundClaims` divides the
+ * bases among themselves and scales them into `1 - held`. Not in every case,
+ * though — when the claims themselves reach 1 that function falls back to
+ * normalising the lot, and there the normalisation is load-bearing again.
+ * Whether `forgetTab`'s own arithmetic keeps one tab's claims strictly below 1
+ * is not proved anywhere in this file — see `claimForDeath`'s own doc for
+ * where that induction breaks, at the step where a share is exactly 1, the
+ * sole survivor of its row dying. The guard is what makes this function safe
+ * regardless, without depending on that bound.
+ *
+ * That whole-tab vector is not what this function returns, though not for the
+ * reason a first read suggests: `kids` here is the row about to be WRITTEN,
+ * which may hold back a tombstone this carve does not name at all — see
+ * `inLiveFrame`, which projects the vector above onto the panes `kids` names
+ * before it comes back.
  *
  * Exported and pure — no `store`, no `manager`, nothing captured from
  * `registerIpc`'s closure — so the case above can be pinned in
@@ -119,6 +126,8 @@ import {
  * unclaimed" detection cannot afford to for every case.
  */
 export function carveRatio(params: {
+  /** The tab this carve is happening in — what a claim is a fraction OF. */
+  tabId: string
   kids: string[]
   sourcePaneId: string
   newPaneId: string
@@ -126,15 +135,16 @@ export function carveRatio(params: {
   savedKids: string[]
   savedRatio: number[]
   /**
-   * The share a pane held when it died, as a fraction of the whole tab, by
-   * pane id. Only ever consulted for a sibling the saved row does not know —
-   * which, per the paragraphs above, is exactly a pane that died and was
-   * restarted. Only `share` is read; `register.ts`'s `tombstones` carries
-   * a tab id on the same entry, which is that map's own business.
+   * Every claim recorded so far, across every tab — this file's outer
+   * `tombstones` map, read here through `claimFor` (for a sibling the saved
+   * row does not know) and `tombstonesOf` (for a pane of THIS tab that `kids`
+   * does not name at all, a tombstone still on screen). Both filter on
+   * `tabId` before ever reading `share` — see `shares.ts`'s `Claim`.
    */
-  remembered?: ReadonlyMap<string, { share: number }>
+  tombstones?: ReadonlyMap<string, Claim>
 }): number[] {
-  const { kids, sourcePaneId, newPaneId, siblings, savedKids, savedRatio, remembered } = params
+  const { tabId, kids, sourcePaneId, newPaneId, siblings, savedKids, savedRatio, tombstones } = params
+  const claims = tombstones ?? new Map()
   const sourceAt = siblings.indexOf(sourcePaneId)
   // A `base` is a share relative to the other saved-derived shares; a `claim`
   // is a share of the whole tab. `sharesAroundClaims` is what makes the
@@ -143,7 +153,7 @@ export function carveRatio(params: {
   const shareOf = (id: string): { claim?: number; base: number } => {
     const at = savedKids.indexOf(id)
     if (at !== -1) return { base: savedRatio[at] ?? 1 / siblings.length }
-    const claim = remembered?.get(id)?.share
+    const claim = claimFor(tabId, id, claims)
     return claim === undefined ? { base: 1 / siblings.length } : { claim, base: claim }
   }
   const source = sourceAt === -1 ? { base: 1 / kids.length } : shareOf(sourcePaneId)
@@ -158,9 +168,17 @@ export function carveRatio(params: {
     claim: source.claim === undefined ? undefined : source.claim / 2,
     base: source.base / 2,
   }
-  return sharesAroundClaims(
-    kids.map((kid) => (kid === newPaneId || kid === sourcePaneId ? halved : shareOf(kid))),
-  )
+  // The whole tab: the kids this row will name, plus every pane of this tab
+  // that a claim is still owed to and that this row does NOT name. The second
+  // group is what `sharesAroundClaims` was never given before, which is why
+  // the vector it produced described a tab larger than the row it went into.
+  const dead = tombstonesOf(tabId, kids, claims)
+  const whole = sharesAroundClaims([
+    ...kids.map((kid) => (kid === newPaneId || kid === sourcePaneId ? halved : shareOf(kid))),
+    ...dead.map((entry) => ({ claim: entry.share, base: entry.share })),
+  ])
+  // Appended above, selected by id here: see `inLiveFrame`.
+  return inLiveFrame(whole, [...kids, ...dead.map((entry) => entry.id)], kids)
 }
 
 /**
@@ -186,32 +204,28 @@ export function carveRatio(params: {
  * makes the recorded value one — for a SECOND death, once the first one's
  * claim is still unspent. The two-death case is what `taken` exists for.
  *
- * **`taken` here and `sharesAroundClaims`'s `held` now read the same
- * PREDICATE — `tombstonesOf` — but not yet the same INPUT, and closing that
- * remaining gap is not this task.** Both ask which claims recorded for a tab
- * are unspent, given a row: `taken` asks it of `kids`, the row as it stood the
+ * **`taken` here and `sharesAroundClaims`'s `held`, as `carveRatio`/`tabRowFor`
+ * now feed it, read the same PREDICATE — `tombstonesOf` — and, as of this
+ * task, the same INPUT too.** Both ask which claims recorded for a tab are
+ * unspent, given a row: `taken` asks it of `kids`, the row as it stood the
  * instant this pane died, so a pane that is STILL a tombstone counts, because
- * nothing has rebuilt the row since it died. `held`, over in
- * `sharesAroundClaims`, only ever sees the claims `carveRatio`/`tabRowFor`
- * actually hand it — the claims of panes that are LIVE siblings at the moment
- * a split or a close rebuilds the row, because neither row builder calls
- * `tombstonesOf` itself. A pane that is still dead when the row rebuilds is
- * not a live sibling, so its claim is never offered to `sharesAroundClaims` as
- * an entry at all. Concrete case: tab A/B/C dies in order B then C, B never
- * restarted, C restarted before the next split. This function correctly
- * discounts B's claim out of C's (see the two-death test in
- * `claimForDeath.test.ts`) — but the row a later split rebuilds has no entry
- * for B whatsoever, because B is not live, so the room `sharesAroundClaims`
- * divides among A/C/the new pane never has B's share held back from it. The
- * renderer, independently, reserves B's tombstone share a second time in
- * `withKeptPanes` — see `shares.ts`'s comment above `sharesAroundClaims` for
- * the traced case where that visibly moves a pane nobody touched. Sharing the
- * predicate is what this task does, so the two readers cannot drift into
- * disagreeing about WHICH claims are unspent; making `carveRatio`/`tabRowFor`
- * actually call it for a tombstone — closing the gap itself — is Task 3 of
- * this plan, "Both row builders emit in the live-remainder frame", landing
- * two commits from here, not a third revision of this arithmetic squeezed
- * into this one.
+ * nothing has rebuilt the row since it died. `held` is asked the same
+ * question of the row a split or a close is about to WRITE — a different
+ * moment, but no longer a different question, because `carveRatio`/`tabRowFor`
+ * now call `tombstonesOf` themselves before they ever call `sharesAroundClaims`,
+ * and append an entry for every tombstone it names to the row's own kids.
+ * Concrete case: tab A/B/C dies in order B then C, B never restarted, C
+ * restarted before the next split. This function correctly discounts B's
+ * claim out of C's (see the two-death test in `claimForDeath.test.ts`), and
+ * the row a later split rebuilds now holds B's share back too, rather than
+ * dividing the WHOLE tab among A/C/the new pane and leaving B's share for
+ * nobody to reserve — see `inLiveFrame` in `shares.ts` for the conversion
+ * that makes the row actually WRITTEN describe only the panes it names. The
+ * renderer's own `withKeptPanes` still reserves a tombstone's share
+ * independently of this file — the two sides are known to agree on the
+ * arithmetic and not yet on the input they give it (see `sharesAroundClaims`'s
+ * doc in `shares.ts`) — but that is the renderer's half of a gap this task
+ * closes only on main's side, between this function and the two row builders.
  *
  * `!kids.includes` skips a claim that has been SPENT: once a split or a close
  * has written a restarted pane back into the row, the row accounts for it
@@ -1066,16 +1080,18 @@ export function registerIpc(
           // not preserve — in particular, for the "dilutes every known share
           // evenly" case an unclaimed sibling produces, which is not a bug.
           ratio: carveRatio({
+            tabId,
             kids,
             sourcePaneId: paneId,
             newPaneId: record.id,
             siblings,
             savedKids,
             savedRatio: saved?.layout.ratio ?? [],
-            // What an unclaimed sibling is owed, when main saw it die. The
-            // same map `closePane` hands `tabRowFor`, so the two rebuilds of a
-            // tab's row agree about what a remembered share means.
-            remembered: tombstones,
+            // What an unclaimed sibling is owed, when main saw it die, and
+            // what any OTHER pane of this tab is still owed while it stays a
+            // tombstone. The same map `closePane` hands `tabRowFor`, so the
+            // two rebuilds of a tab's row agree about what a claim means.
+            tombstones,
           }),
           kids,
         },
@@ -1155,10 +1171,14 @@ export function registerIpc(
       // a kid the saved row knew keeps its own share, a kid it does not know
       // but that `tombstones` remembers claims the share it died at, and
       // anything else takes an even one — with the saved-derived shares scaled
-      // into whatever the claims leave, so the row describes a whole tab.
-      // This handler had its own copy of that, converged on it line for line —
-      // and the rescale is exactly the part that can rot unnoticed in one copy,
-      // since `store.read()` rescales again on the way back in and repairs the
+      // into whatever the claims leave, AND with any other pane of this tab
+      // `tombstones` still owes something to held back from `kids` too, so the
+      // row actually written describes only the panes it names, in the
+      // live-remainder frame `config.tabs` has always been in (see
+      // `inLiveFrame` in `shares.ts`). This handler had its own copy of the
+      // saved-share-or-even part, converged on it line for line — and the
+      // rescale is exactly the part that can rot unnoticed in one copy, since
+      // `store.read()` rescales again on the way back in and repairs the
       // evidence.
       //
       // `tombstones` is passed here and nowhere in `restoreWorkspace`,

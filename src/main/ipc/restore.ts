@@ -3,7 +3,7 @@ import type { SessionManager, PaneRecord } from '../sessions/manager'
 import type { ConfigStore, ProjectRecord, TabRow } from '../state/store'
 import { readManifest, mergePresets } from '../projects/manifest'
 import { isDirectory } from '../fsutil'
-import { sharesAroundClaims } from './shares'
+import { sharesAroundClaims, claimFor, tombstonesOf, inLiveFrame, type Claim } from './shares'
 // One definition, shared with the renderer — `TabDescriptor` and `PaneRecord`
 // are the same shape, and duplicating the types here would let them drift.
 import {
@@ -191,13 +191,14 @@ export function tabRowFor(
   ids: string[],
   saved: TabRow | undefined,
   /**
-   * The share a pane held when it died, as a fraction of the whole tab, by
-   * pane id — for kids the saved row does not know, whose row entry went with
-   * them. Absent for restore, which prunes dead panes at launch and so never
-   * meets one. Only `share` is read; see `register.ts`'s `tombstones` and
-   * `shares.ts`'s `Claim`.
+   * Every claim recorded so far, across every tab — `register.ts`'s
+   * `tombstones`, read here through `claimFor` (for a kid the saved row does
+   * not know) and `tombstonesOf` (for a pane of THIS tab that `ids` does not
+   * name at all — a tombstone still on screen). Both filter on `tab.id`
+   * before ever reading `share`; see `shares.ts`'s `Claim`. Absent for
+   * restore, which prunes dead panes at launch and so never meets one.
    */
-  remembered?: ReadonlyMap<string, { share: number }>,
+  tombstones?: ReadonlyMap<string, Claim>,
 ): TabRow {
   const savedKids = saved?.layout.kids ?? []
   const kids = [
@@ -213,21 +214,29 @@ export function tabRowFor(
   // is the same reader `register.ts`'s `tombstones` is captured through, so
   // both inputs here are shares of a whole tab.
   //
-  // The rescale that used to live here is `sharesAroundClaims`'s job now, and
-  // it is not optional: dropping a kid leaves the survivors summing to less
-  // than 1, and appending one leaves them summing to more. A layout that does
-  // not describe a whole tab renders every pane in it at the wrong size — and
+  // The rescale that used to live here is `sharesAroundClaims`'s job, and it
+  // is not optional: dropping a kid leaves the survivors summing to less than
+  // 1, and appending one leaves them summing to more. A layout that does not
+  // describe a whole tab renders every pane in it at the wrong size — and
   // `store.read()` would quietly rescale it on the way back in, so nothing
   // downstream would ever report the loss.
   const even = 1 / kids.length
-  const shares = sharesAroundClaims(
-    kids.map((kid) => {
+  const claims = tombstones ?? new Map()
+  // The whole tab: `kids` — the row about to be WRITTEN — plus every pane of
+  // this tab a claim is still owed to that `kids` does NOT name: a tombstone
+  // still on screen. See `carveRatio`'s matching comment in `register.ts`.
+  const dead = tombstonesOf(tab.id, kids, claims)
+  const whole = sharesAroundClaims([
+    ...kids.map((kid) => {
       const at = savedKids.indexOf(kid)
       if (at !== -1 && saved) return { base: saved.layout.ratio[at] }
-      const claim = remembered?.get(kid)?.share
+      const claim = claimFor(tab.id, kid, claims)
       return claim === undefined ? { base: even } : { claim, base: claim }
     }),
-  )
+    ...dead.map((entry) => ({ claim: entry.share, base: entry.share })),
+  ])
+  // Appended above, selected by id here: see `inLiveFrame`.
+  const shares = inLiveFrame(whole, [...kids, ...dead.map((entry) => entry.id)], kids)
 
   // The saved selection only if that pane is still one of this tab's, else the
   // first one — which is what a null `activePaneId` means anyway, said outright
