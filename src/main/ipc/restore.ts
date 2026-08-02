@@ -191,12 +191,22 @@ async function withoutSharedWindows(
  * to do inline. That is why no existing expectation moves, and it is a
  * property worth knowing rather than assuming.
  *
- * Both guards are `withKeptPanes`'s, for its reasons. Claims summing to 1 or
- * more leave no room, and bases summing to nothing leave nothing to scale;
- * either way the entries are rescaled together as they stand, and an all-zero
- * set falls back to an even split. A zero share would otherwise be a 0%-wide
- * box, which fits to tmux's floor of 2x1 — the geometry defect wearing
- * different numbers.
+ * The two guard CONDITIONS are `withKeptPanes`'s, for its reasons: claims
+ * summing to 1 or more leave no room, and bases summing to nothing leave
+ * nothing to scale. What is done about them is not the same, and this is the
+ * better half of the pair — `withKeptPanes` falls back to an even split, which
+ * by its own admission resizes every tombstone, while this renormalises the
+ * entries in the proportions they came in with, which preserves them. Only an
+ * all-zero set, where there are no proportions to preserve, falls back to an
+ * even split here. A zero share would otherwise be a 0%-wide box, which fits
+ * to tmux's floor of 2x1 — the geometry defect wearing different numbers.
+ *
+ * A claim of exactly 0 would slip both guards and produce that 0%-wide box, so
+ * it is refused at the writer instead: `normaliseLayout` returns only shares
+ * greater than 0, and `register.ts`'s `forgetTab` — the only producer of a
+ * claim — records nothing otherwise. Cited here rather than defended a second
+ * time, because a zero claim is a caller error and there is no non-arbitrary
+ * share for this function to invent in its place.
  */
 export function sharesAroundClaims(
   entries: readonly { claim?: number; base: number }[],
@@ -242,11 +252,12 @@ export function tabRowFor(
   ids: string[],
   saved: TabRow | undefined,
   /**
-   * The share a pane held when it died, by pane id — for kids the saved row
-   * does not know, whose row entry went with them. Absent for restore, which
-   * prunes dead panes at launch and so never meets one.
+   * The share a pane held when it died, as a fraction of the whole tab, by
+   * pane id — for kids the saved row does not know, whose row entry went with
+   * them. Absent for restore, which prunes dead panes at launch and so never
+   * meets one. Only `share` is read; see `register.ts`'s `shareWhenItDied`.
    */
-  remembered?: ReadonlyMap<string, number>,
+  remembered?: ReadonlyMap<string, { share: number }>,
 ): TabRow {
   const savedKids = saved?.layout.kids ?? []
   const kids = [
@@ -273,7 +284,7 @@ export function tabRowFor(
     kids.map((kid) => {
       const at = savedKids.indexOf(kid)
       if (at !== -1 && saved) return { base: saved.layout.ratio[at] }
-      const claim = remembered?.get(kid)
+      const claim = remembered?.get(kid)?.share
       return claim === undefined ? { base: even } : { claim, base: claim }
     }),
   )

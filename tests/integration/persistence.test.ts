@@ -1839,6 +1839,116 @@ describe('splitPane and closePane', () => {
     expect(at(founder.id)).toBeCloseTo(0.8)
     expect(row.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
   })
+
+  /**
+   * The second death in one tab, which is where a share recorded straight off
+   * the row is no longer a share of the tab.
+   *
+   * `forgetTab` reads through `store.read()`, and that reader has ALREADY
+   * rescaled the row over the survivors of every earlier death — the same
+   * rescale the two tests above depend on to turn `[0.7, 0.3]` into `[1]`. So
+   * the first death records a true whole-tab share and every later one records
+   * a share of what the earlier deaths left, which is bigger. Here C really
+   * dies at 0.3 of the tab and the row says 0.375, because B's 0.2 has already
+   * been redistributed into it.
+   *
+   * Recording the 0.375 is silent and it is wrong in the direction that hurts:
+   * C comes back a quarter wider than it died, out of panes the user never
+   * touched, and `withKeptPanes` has been holding C on screen at 0.3 the whole
+   * time — the renderer's reinsertion scales nothing — so the pane visibly
+   * jumps the moment main's row names it. That is the symptom this whole task
+   * exists to kill, arriving one death later.
+   *
+   * `× (1 - the claims already held for that tab)` converts it back, and the
+   * reasoning is in `forgetTab`: once B is gone the row describes the tab as
+   * if B does not exist, so its shares are fractions of `1 - claimB`.
+   * Measured: 0.375 × 0.8 = 0.3, exactly what C died at.
+   *
+   * B is never restarted, deliberately — its claim only has to exist for the
+   * correction to need it, and one fewer session is one fewer pty in the
+   * file that spends the most of them.
+   */
+  it('records a share of the whole tab when a second pane dies in it', async () => {
+    const { founder, second } = await splitOnce() // A, B — kids [A, B]
+    const split2 = await invoke<TabShape>(CHANNELS.splitPane, {
+      paneId: founder.id, dir: 'row', cols: 100, rows: 30,
+    })
+    expect(split2.panes).toHaveLength(3)
+    const third = split2.panes[1] // C, inserted after A: kids [A, C, B]
+    await waitForPrompt(third.id)
+    expect(split2.tabs[0].layout.kids).toEqual([founder.id, third.id, second.id])
+
+    // A 0.5, C 0.3, B 0.2 — chosen so that C's true share and the share the
+    // row will claim for it after B's death (0.375) are far apart.
+    ipc.listeners.get(CHANNELS.setLayout)?.(
+      null as never,
+      founder.id as never,
+      [0.5, 0.3, 0.2] as never,
+    )
+    await settle(200)
+
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    /** A real death, staged the way the death hook stages one. */
+    const kill = async (pane: TabDescriptor): Promise<void> => {
+      const window = await adapter.windowIdOf(pane.tmuxSession)
+      expect(window).toMatch(/^@\d+$/)
+      const exited = waitForExitEvent(pane.id)
+      await run('tmux', [
+        '-L', SOCKET,
+        'kill-session', '-t', `=${pane.tmuxSession}`, ';', 'kill-window', '-t', window,
+      ])
+      await exited
+      await expect(adapter.hasSession(pane.tmuxSession)).resolves.toBe(false)
+    }
+
+    await kill(second) // B, at a true 0.2
+    await expect
+      .poll(async () => (await written()).panes.length, { timeout: 8000 })
+      .toBe(2)
+
+    // Asserted between the two deaths, because this is the state that makes
+    // the second capture wrong — and it is the one assertion in this file that
+    // deliberately reads through `store.read()` rather than `written()`. The
+    // raw file still names B as a kid: `forgetTab` writes back the config it
+    // read, and B's pane row was still there when it read. The rescale that
+    // inflates C happens in the READER, on the way into the next pass — which
+    // is `forgetTab`'s own next call. So `store.read()` is not a repair being
+    // hidden here, it is exactly what the code under test is about to see.
+    const between = await store.read()
+    const betweenRow = between.tabs.find((candidate) => candidate.id === founder.id)
+    expect(betweenRow).toBeDefined()
+    expect(betweenRow?.layout.kids).toEqual([founder.id, third.id])
+    expect(betweenRow?.layout.ratio[1]).toBeCloseTo(0.375)
+
+    await kill(third) // C, at a true 0.3 that the row calls 0.375
+    const restarted = await invoke<TabDescriptor>(CHANNELS.restartTab, {
+      tab: third, cols: 100, rows: 30,
+    })
+    await expect.poll(() => adapter.hasSession(restarted.tmuxSession), { timeout: 8000 }).toBe(true)
+
+    const before = await written()
+    const beforeRow = before.tabs.find((candidate) => candidate.id === founder.id)
+    expect(beforeRow).toBeDefined()
+    expect(beforeRow?.layout.kids).toEqual([founder.id])
+
+    const shape = await invoke<TabShape>(CHANNELS.splitPane, {
+      paneId: founder.id, dir: 'row', cols: 40, rows: 20,
+    })
+    expect(shape.panes).toHaveLength(3)
+    const fourth = shape.panes[1]
+    await waitForPrompt(fourth.id)
+
+    const row = shape.tabs[0]
+    expect(row.layout.kids).toEqual([founder.id, fourth.id, third.id])
+    const at = (id: string): number => row.layout.ratio[row.layout.kids.indexOf(id)]
+    // The share C really died at. Recorded straight off the row it is 0.375,
+    // and the founder and the new pane pay for the difference — 0.3125 each
+    // instead of 0.35 — so all three assertions bite, in both directions.
+    expect(at(third.id)).toBeCloseTo(0.3)
+    expect(at(founder.id)).toBeCloseTo(0.35)
+    expect(at(fourth.id)).toBeCloseTo(0.35)
+    expect(row.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+  })
 })
 
 describe('project channels', () => {

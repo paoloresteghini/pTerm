@@ -140,7 +140,7 @@ describe('carveRatio', () => {
       // row, so `a` was rescaled to the whole tab on the way back in.
       savedKids: ['a'],
       savedRatio: [1],
-      remembered: new Map([['b', 0.3]]),
+      remembered: new Map([['b', { share: 0.3 }]]),
     })
     expect(ratio[0]).toBeCloseTo(0.35) // a: half of 1, scaled into the 0.7 left
     expect(ratio[1]).toBeCloseTo(0.35) // new: the other half
@@ -164,7 +164,7 @@ describe('carveRatio', () => {
       siblings: ['a', 'b'],
       savedKids: ['a'],
       savedRatio: [1],
-      remembered: new Map([['b', 0.3]]),
+      remembered: new Map([['b', { share: 0.3 }]]),
     })
     expect(ratio[0]).toBeCloseTo(0.7) // a: all of what the claim leaves
     expect(ratio[1]).toBeCloseTo(0.15) // b: half its own remembered share
@@ -172,11 +172,17 @@ describe('carveRatio', () => {
     expect(ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
   })
 
-  // The no-op property, asserted rather than assumed: with no remembered kid
-  // among these kids, the arithmetic is identical to what it was before any of
-  // this existed. `held` is 0, so `room` is 1, and every share is divided by
-  // the total of the shares — the same rescale, to the last bit. Asserted as an
-  // exact equality between the two calls rather than against pinned numbers, so
+  // Half of the no-op property: passing `remembered` changes nothing when it
+  // names no kid of this row. That is worth pinning and it is all this
+  // asserts — an implementation that ignored the map outright would satisfy it
+  // too, so it is NOT evidence that the arithmetic still matches what it was
+  // before any of this existed.
+  //
+  // The evidence for that is the pre-existing expectations, in this file and in
+  // the two integration files, none of which moved by a digit: with no claim
+  // `held` is 0, `room` is 1, and every share is divided by the total of the
+  // bases, which is the `share / total` rescale this replaced. Asserted here as
+  // an exact equality between two calls rather than against pinned numbers, so
   // it stays true of whatever the shared helper does next.
   it('is unchanged by a remembered map that names none of the kids', () => {
     const args = {
@@ -190,6 +196,6 @@ describe('carveRatio', () => {
     const without = carveRatio(args)
     expect(without).toHaveLength(4)
     expect(carveRatio({ ...args, remembered: new Map() })).toEqual(without)
-    expect(carveRatio({ ...args, remembered: new Map([['elsewhere', 0.9]]) })).toEqual(without)
+    expect(carveRatio({ ...args, remembered: new Map([['elsewhere', { share: 0.9 }]]) })).toEqual(without)
   })
 })

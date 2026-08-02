@@ -100,10 +100,14 @@ import {
  *
  * The `remembered` half of that is Paolo's ruling, and it lands on `shareOf`'s
  * `at === -1` branch — the fallback is made correct, not removed, which is why
- * the unremembered paragraph above still describes real behaviour. Whenever a
- * remembered kid IS in play the vector returned sums to 1 by construction and
- * no normalisation is load-bearing: `sharesAroundClaims` divides the bases
- * among themselves and scales them into `1 - held`.
+ * the unremembered paragraph above still describes real behaviour. With a
+ * remembered kid in play the vector returned sums to 1 by construction rather
+ * than by a rescale: `sharesAroundClaims` divides the bases among themselves
+ * and scales them into `1 - held`. Not in every case, though — when the claims
+ * themselves reach 1 that function falls back to normalising the lot, and
+ * there the normalisation is load-bearing again. `forgetTab`'s own arithmetic
+ * is what keeps one tab's claims below 1; the guard is what makes this
+ * function safe without depending on it.
  *
  * Exported and pure — no `store`, no `manager`, nothing captured from
  * `registerIpc`'s closure — so the case above can be pinned in
@@ -119,11 +123,13 @@ export function carveRatio(params: {
   savedKids: string[]
   savedRatio: number[]
   /**
-   * The share a pane held when it died, by pane id. Only ever consulted for a
-   * sibling the saved row does not know — which, per the paragraphs above, is
-   * exactly a pane that died and was restarted.
+   * The share a pane held when it died, as a fraction of the whole tab, by
+   * pane id. Only ever consulted for a sibling the saved row does not know —
+   * which, per the paragraphs above, is exactly a pane that died and was
+   * restarted. Only `share` is read; `register.ts`'s `shareWhenItDied` carries
+   * a tab id on the same entry, which is that map's own business.
    */
-  remembered?: ReadonlyMap<string, number>
+  remembered?: ReadonlyMap<string, { share: number }>
 }): number[] {
   const { kids, sourcePaneId, newPaneId, siblings, savedKids, savedRatio, remembered } = params
   const sourceAt = siblings.indexOf(sourcePaneId)
@@ -134,7 +140,7 @@ export function carveRatio(params: {
   const shareOf = (id: string): { claim?: number; base: number } => {
     const at = savedKids.indexOf(id)
     if (at !== -1) return { base: savedRatio[at] ?? 1 / siblings.length }
-    const claim = remembered?.get(id)
+    const claim = remembered?.get(id)?.share
     return claim === undefined ? { base: 1 / siblings.length } : { claim, base: claim }
   }
   const source = sourceAt === -1 ? { base: 1 / kids.length } : shareOf(sourcePaneId)
@@ -209,17 +215,63 @@ export function registerIpc(
       const config = await store.read()
       // Captured here, before the row goes and inside this same pass, so there
       // is no window in which the share is gone but unrecorded — and no second
-      // read, since this one is already open. `store.read()` has rescaled the
-      // row's shares to a whole tab on the way in, so what is recorded is a
-      // share OF THE TAB, which is what `sharesAroundClaims` takes a claim to
-      // be. The kid is still in the row at this moment: `normaliseLayout`
-      // drops a kid only once its pane row has gone, and this pane's row is
-      // still in the config that was just read — the `filter` below is what
-      // takes it out.
+      // read, since this one is already open. The kid is still in the row at
+      // this moment: `normaliseLayout` drops a kid only once its pane row has
+      // gone, and this pane's row is still in the config that was just read —
+      // the `filter` below is what takes it out.
       const row = config.tabs.find((candidate) => candidate.layout.kids.includes(id))
-      const at = row?.layout.kids.indexOf(id) ?? -1
-      const share = at === -1 ? undefined : row?.layout.ratio[at]
-      if (share !== undefined) shareWhenItDied.set(id, share)
+      const at = row ? row.layout.kids.indexOf(id) : -1
+      const share = row && at !== -1 ? row.layout.ratio[at] : undefined
+      if (row && share !== undefined) {
+        // **The row's share is not a share of the tab once anything else in
+        // this tab has died.** `store.read()` rescales every ratio by its own
+        // total on the way in, and a dead pane's kid entry is dropped on the
+        // way in too — so after one death the row describes the tab AS IF that
+        // pane does not exist, and its shares are fractions of `1 - that
+        // pane's claim`, not of the whole tab. Measured, three panes at
+        // 0.5/0.3/0.2: kill the 0.2 and the row reads 0.625/0.375, so the pane
+        // that truly holds 0.3 of the tab would be recorded at 0.375 and come
+        // back a quarter wider than it died, out of panes the user never
+        // touched. Silent, too — the vector still sums to 1.
+        //
+        // Scaling by the room the other claims have already taken converts
+        // back: 0.375 x (1 - 0.2) = 0.3, exactly what it died at. A claim is
+        // defined as a fraction of the whole tab (see `sharesAroundClaims`),
+        // and this is what makes the recorded value one.
+        //
+        // `!kids.includes` skips a claim that has been SPENT: once a split or
+        // a close has written a restarted pane back into the row, the row
+        // accounts for it again, `sharesAroundClaims` never reads its claim,
+        // and it is holding no room for anyone. That makes this set exactly
+        // the set that will count towards `held` — the two definitions have to
+        // agree or the conversion is against the wrong denominator.
+        //
+        // It also excludes this pane's own entry from an earlier death, which
+        // the `set` below is about to replace, and it does so without a
+        // `paneId !== id` of its own: `row` was FOUND by `kids.includes(id)`,
+        // so that test is always false for `id`. A second condition there
+        // would read like a guard and never decide anything.
+        const taken = [...shareWhenItDied].reduce(
+          (sum, [paneId, held]) =>
+            held.tabId === row.id && !row.layout.kids.includes(paneId) ? sum + held.share : sum,
+          0,
+        )
+        // Guarded, though the arithmetic says it cannot bite: each claim is
+        // `share x (1 - taken)` with `share <= 1`, so the claims of one tab sum
+        // to `1 - (1 - share)(1 - taken) < 1` by induction from an empty map.
+        // A saved file cannot break it either — `normaliseLayout` makes every
+        // share it returns positive and one row's shares sum to 1. If it ever
+        // does bite, recording the row's own share is the honest answer: there
+        // is no whole tab left to take a fraction of, and
+        // `sharesAroundClaims`'s own `room <= 0` guard is what handles it.
+        const room = 1 - taken
+        const claim = room > 0 ? share * room : share
+        // Positive, always — `normaliseLayout` refuses any share that is not,
+        // and `sharesAroundClaims` reads a claim of 0 as a claim, not as an
+        // absence, which would be a 0%-wide box. Asserted here, at the only
+        // writer, rather than defended for a second time at the reader.
+        if (claim > 0) shareWhenItDied.set(id, { tabId: row.id, share: claim })
+      }
       // The pane row, not the tab row. Removing the tab row instead would
       // leave the pane on disk for good — and would type-check, because a
       // `TabRow` has an `id` too. Any layout entry left pointing at this pane
@@ -313,7 +365,11 @@ export function registerIpc(
   const lastGeometry = new Map<string, { cols: number; rows: number }>()
 
   /**
-   * The share each pane held when it died, by pane id.
+   * The share each pane held when it died, as a fraction of the WHOLE tab,
+   * with the tab it died in.
+   *
+   * The tab id is not bookkeeping: it is what makes the share a whole-tab
+   * fraction in the first place. See `forgetTab`, which is the only writer.
    *
    * The third map of a shape that is already here twice —
    * `SessionManager.tabWasIn` and `lastGeometry` above are both
@@ -338,7 +394,7 @@ export function registerIpc(
    * at restart — a stale entry cannot outvote a live row, and deleting it there
    * would break the contract the two maps above keep.
    */
-  const shareWhenItDied = new Map<string, number>()
+  const shareWhenItDied = new Map<string, { tabId: string; share: number }>()
 
   registry.onTransition(({ tabId, to }) => {
     const payload: StatusEvent = { tabId, state: to }

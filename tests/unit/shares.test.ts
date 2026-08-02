@@ -1,0 +1,138 @@
+import { describe, it, expect } from 'vitest'
+import { sharesAroundClaims, tabRowFor } from '../../src/main/ipc/restore'
+import type { TabRow } from '../../src/main/state/store'
+
+/**
+ * The other half of the ruling's arithmetic, pinned without a tmux session.
+ *
+ * `carveRatio.test.ts` owns the split path. This owns the close path —
+ * `tabRowFor`, which `register.ts`'s `closePane` rebuilds a tab's row through —
+ * and the shared helper both of them scale their shares with.
+ *
+ * `tests/integration/persistence.test.ts` proves the WIRING: that a pane which
+ * really died is really detected as unclaimed, and that the map really reaches
+ * both call sites. Neither file stands in for the other, and this one costs no
+ * ptys, which is why the cases that are only about numbers live here.
+ */
+const row = (kids: string[], ratio: number[]): TabRow => ({
+  id: 'tab',
+  groupId: 'tab',
+  activePaneId: kids[0],
+  layout: { dir: 'row', ratio, kids },
+})
+
+describe('tabRowFor with a remembered pane', () => {
+  // The close path's own form of the ruling, and the case
+  // `persistence.test.ts` measures on a real tab: A alone in the row at 1.0
+  // after C's close, B live and claimed by nothing, remembered at 0.2.
+  it('gives a remembered kid the share it died at and scales the saved kids into the rest', () => {
+    const built = tabRowFor(
+      { id: 'tab', groupId: 'tab' },
+      ['a', 'b'],
+      row(['a'], [1]),
+      new Map([['b', { tabId: 'tab', share: 0.2 }]]),
+    )
+    expect(built.layout.kids).toEqual(['a', 'b'])
+    expect(built.layout.ratio[0]).toBeCloseTo(0.8)
+    expect(built.layout.ratio[1]).toBeCloseTo(0.2)
+    expect(built.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+  })
+
+  // Two remembered kids at once — the state two deaths in one tab leave, and
+  // the reason `forgetTab` has to record a whole-tab fraction rather than the
+  // row's own number. Both claims are honoured in full and the saved kid takes
+  // what is left, rather than all three being renormalised together.
+  it('honours every remembered kid and leaves the saved kids the remainder', () => {
+    const built = tabRowFor(
+      { id: 'tab', groupId: 'tab' },
+      ['a', 'b', 'c'],
+      row(['a'], [1]),
+      new Map([
+        ['b', { tabId: 'tab', share: 0.2 }],
+        ['c', { tabId: 'tab', share: 0.3 }],
+      ]),
+    )
+    const at = (id: string): number => built.layout.ratio[built.layout.kids.indexOf(id)]
+    expect(built.layout.kids).toHaveLength(3)
+    expect(at('b')).toBeCloseTo(0.2)
+    expect(at('c')).toBeCloseTo(0.3)
+    expect(at('a')).toBeCloseTo(0.5)
+    expect(built.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+  })
+
+  // The saved row outranks the map. Once a split or a close has written a
+  // restarted pane back into the row, the row is the authority and the stale
+  // claim is never read — which is why nothing deletes the entry at restart.
+  it('prefers the saved row over a remembered share for a kid it knows', () => {
+    const built = tabRowFor(
+      { id: 'tab', groupId: 'tab' },
+      ['a', 'b'],
+      row(['a', 'b'], [0.6, 0.4]),
+      new Map([['b', { tabId: 'tab', share: 0.9 }]]),
+    )
+    expect(built.layout.ratio[0]).toBeCloseTo(0.6)
+    expect(built.layout.ratio[1]).toBeCloseTo(0.4)
+  })
+
+  // The no-op, on this side: restore calls this with three arguments, and a
+  // kid no saved row knows takes an even share as its RAW one, which is then
+  // rescaled alongside the saved kid's. Those are not the same thing and the
+  // difference is the whole of this test — `a` keeps 1 and `b` gets 0.5, so
+  // they come out 2/3 and 1/3, not half each. Pinned because it is the
+  // behaviour that existed before this task and must not have moved: the
+  // restore tests all assert through it.
+  it('rescales a kid that is neither saved nor remembered against the saved ones', () => {
+    const built = tabRowFor({ id: 'tab', groupId: 'tab' }, ['a', 'b'], row(['a'], [1]))
+    expect(built.layout.ratio[0]).toBeCloseTo(2 / 3)
+    expect(built.layout.ratio[1]).toBeCloseTo(1 / 3)
+    expect(built.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+  })
+})
+
+describe('sharesAroundClaims', () => {
+  it('scales the bases into what the claims leave', () => {
+    expect(sharesAroundClaims([{ base: 0.5 }, { base: 0.5 }, { claim: 0.3, base: 0.3 }])).toEqual([
+      0.35, 0.35, 0.3,
+    ])
+  })
+
+  // Neither guard is reachable from `forgetTab` today — one tab's claims sum
+  // to less than 1 by induction, and both call sites give every unclaimed kid
+  // a positive base. They are pinned anyway, because "unreachable" is a
+  // property of two other files that a future caller can take away without
+  // ever reading this one.
+
+  // `room <= 0`: the claims have taken the whole tab. Renormalising the
+  // entries together is what keeps every pane positive — the claims shrink in
+  // proportion and the base still gets a share, rather than a 0%-wide box.
+  it('renormalises everything when the claims leave no room', () => {
+    const shares = sharesAroundClaims([{ claim: 0.8, base: 0.8 }, { claim: 0.4, base: 0.4 }, { base: 0.8 }])
+    expect(shares.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+    expect(shares.every((share) => share > 0)).toBe(true)
+    expect(shares[0]).toBeCloseTo(0.4)
+    expect(shares[1]).toBeCloseTo(0.2)
+    expect(shares[2]).toBeCloseTo(0.4)
+  })
+
+  // `bases === 0`: every kid is a claim, so there is nothing to scale into the
+  // room. The claims are renormalised among themselves — 0.2 and 0.6 come back
+  // at a quarter and three quarters, keeping their proportion to each other.
+  it('renormalises the claims when there are no bases to scale', () => {
+    const shares = sharesAroundClaims([{ claim: 0.2, base: 0.2 }, { claim: 0.6, base: 0.6 }])
+    expect(shares[0]).toBeCloseTo(0.25)
+    expect(shares[1]).toBeCloseTo(0.75)
+    expect(shares.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+  })
+
+  // Nothing to go on at all. An even split is the only division that needs no
+  // data, and it is the only case where this function invents a proportion.
+  it('splits evenly when every share is zero', () => {
+    expect(sharesAroundClaims([{ base: 0 }, { base: 0 }, { base: 0 }])).toEqual([1 / 3, 1 / 3, 1 / 3])
+  })
+
+  // The no-op property in its purest form: with no claim, this IS the
+  // `share / total` rescale it replaced at both call sites.
+  it('is a plain rescale when nothing is claimed', () => {
+    expect(sharesAroundClaims([{ base: 3 }, { base: 1 }])).toEqual([0.75, 0.25])
+  })
+})

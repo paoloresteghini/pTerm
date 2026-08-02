@@ -650,8 +650,8 @@ export function paneGroups(state: WorkspaceState): PaneGroup[] {
  * citing a file this never sees.** Neither row here has been through it:
  * `prior` is renderer state — a previous reply, possibly already re-merged by
  * this very function — and `next` is main's reply, written either by
- * `splitPane`'s `kids.map(() => 1 / kids.length)`, which `store.read()` is not
- * upstream of at all, or by `tabRowFor`, where it is two hops away. What
+ * `splitPane`, which reaches `store.read()` only for the row it carves FROM,
+ * or by `tabRowFor`, where it is two hops away. What
  * actually keeps every share positive is those two writers plus this
  * function's own output, which is positive in both branches — an invariant
  * that is partly self-referential, and worth saying so rather than borrowing
