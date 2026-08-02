@@ -2113,6 +2113,109 @@ describe('splitPane and closePane', () => {
     expect(at(founder.id)).toBeCloseTo(1 / 3)
     expect(row.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
   })
+
+  // `CHANNELS.dismissTab`'s handler follows a dismiss with
+  // `rescaledClaims(held.tabId, held.share, tombstones)` rather than leaving
+  // every OTHER tombstone at the share it died at — the same rescale a
+  // dismiss on screen already applies to the renderer's own row (`workspace.
+  // ts`'s `withoutKid`). Nothing before this test drove `registerIpc` at all,
+  // so nothing has ever caught main disagreeing with that.
+  it('widens a surviving tombstone when its sibling is dismissed, not just when it dies', async () => {
+    // A, C, B at 0.5/0.3/0.2. Both C and B die and stay dead. B is then
+    // DISMISSED — gone for good, never restarted — which must grow C's claim
+    // by the same fraction the renderer's own renormalisation already applies
+    // on screen. C is restarted after that, and a live pane is split: the
+    // first row rebuild since the restart, and the only place a widened claim
+    // becomes visible at all.
+    const { founder, second } = await splitOnce()
+    const split2 = await invoke<TabShape>(CHANNELS.splitPane, {
+      paneId: founder.id, dir: 'row', cols: 100, rows: 30,
+    })
+    const third = split2.panes[1]
+    await waitForPrompt(third.id)
+    expect(split2.tabs[0].layout.kids).toEqual([founder.id, third.id, second.id])
+    ipc.listeners.get(CHANNELS.setLayout)?.(
+      null as never,
+      founder.id as never,
+      { [founder.id]: 0.5, [third.id]: 0.3, [second.id]: 0.2 } as never,
+    )
+    await settle(200)
+
+    const adapter = new TmuxAdapter({ socket: SOCKET })
+    // The same two-command death every other test in this file stages.
+    const kill = async (pane: TabDescriptor): Promise<void> => {
+      const window = await adapter.windowIdOf(pane.tmuxSession)
+      expect(window).toMatch(/^@\d+$/)
+      const exited = waitForExitEvent(pane.id)
+      await run('tmux', [
+        '-L', SOCKET,
+        'kill-session', '-t', `=${pane.tmuxSession}`, ';', 'kill-window', '-t', window,
+      ])
+      await exited
+      await expect(adapter.hasSession(pane.tmuxSession)).resolves.toBe(false)
+    }
+
+    // C dies first and stays dead — the tombstone the dismiss below has to
+    // widen.
+    await kill(third)
+    await expect
+      .poll(async () => (await written()).panes.length, { timeout: 8000 })
+      .toBe(2)
+
+    // B dies second and ALSO stays dead, rather than being restarted straight
+    // away — it is B the dismiss below acts on.
+    await kill(second)
+    await expect
+      .poll(async () => (await written()).panes.length, { timeout: 8000 })
+      .toBe(1)
+
+    // The precondition, asserted rather than assumed: the row names only the
+    // founder, and both C and B are dead tombstones. `store.read()`, not
+    // `written()`: B died last and nothing has rewritten `config.tabs` since —
+    // `forgetTab` only ever writes `config.panes` and leaves the stale kid for
+    // the next reader to drop — so the raw file still names B here. See the
+    // same trade in the neighbouring "records a share of the whole tab" test.
+    const before = await store.read()
+    const beforeRow = before.tabs.find((candidate) => candidate.id === founder.id)
+    expect(beforeRow).toBeDefined()
+    expect(beforeRow?.layout.kids).toEqual([founder.id])
+
+    // B is dismissed — gone for good. `held.share` is what B died at, 0.2, so
+    // C's claim should grow from 0.3 to 0.3 / (1 - 0.2) = 0.375.
+    ipc.listeners.get(CHANNELS.dismissTab)?.(null as never, second.id as never)
+    await settle(100)
+
+    // C — the surviving tombstone — is restarted at its now-widened claim.
+    const restarted = await invoke<TabDescriptor>(CHANNELS.restartTab, {
+      tab: third, cols: 100, rows: 30,
+    })
+    expect(restarted.id).toBe(third.id)
+    await expect
+      .poll(() => adapter.hasSession(restarted.tmuxSession), { timeout: 8000 })
+      .toBe(true)
+    await waitForPrompt(restarted.id)
+
+    const shape = await invoke<TabShape>(CHANNELS.splitPane, {
+      paneId: founder.id, dir: 'row', cols: 100, rows: 30,
+    })
+    expect(shape.panes.length).toBeGreaterThan(0)
+    const newPane = shape.panes.find(
+      (pane) => pane.id !== founder.id && pane.id !== restarted.id,
+    )
+    expect(newPane).toBeDefined()
+    await waitForPrompt(newPane!.id)
+
+    const row = shape.tabs[0]
+    const at = (id: string): number => row.layout.ratio[row.layout.kids.indexOf(id)]
+    // Measured against the real code: without the rescale, C comes back owed
+    // the 0.3 it died at — founder and the new pane split what is left, 0.35
+    // each. With it, C is owed 0.375, and founder/new split the remaining
+    // 0.625 between them, 0.3125 each.
+    expect(at(restarted.id)).toBeCloseTo(0.375)
+    expect(at(founder.id)).toBeCloseTo(0.3125)
+    expect(at(newPane!.id)).toBeCloseTo(0.3125)
+    expect(row.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+  })
 })
 
 describe('project channels', () => {
