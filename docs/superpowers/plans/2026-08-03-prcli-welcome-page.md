@@ -403,14 +403,14 @@ Expected: exactly one hit, a prose comment at `tests/unit/workspace.test.ts:870-
 with:
 
 ```ts
-  // Filing the last stray empties Unsorted, so the reply omits it — and the
+  // Filing the last stray empties Unsorted, so the reply omits it, and the
   // selection pointing at it would leave a blank pane, an empty tab bar and no
   // project highlighted in the sidebar. The welcome page would come up over
   // that and say "select a project to start", which is true and useless: there
   // is one project and the user has just filed a session into it.
 ```
 
-The em dash in the first line is pre-existing prose in this repo; leave it as it is rather than reflowing a line you are only partly changing.
+Note the em dash in the original first line is gone: the no-em-dash constraint binds every line you write, including one you are only partly rewriting.
 
 - [ ] **Step 7: Typecheck and run the unit suite**
 
