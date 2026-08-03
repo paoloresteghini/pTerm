@@ -879,12 +879,12 @@ export function registerIpc(
           : row,
       )
       await store.write({ ...config, panes })
-      // The saved rows, not `manager.list()`: `manager.list()` only holds
-      // live sessions (an exited pane's entry is deleted the moment its
-      // process exits), so a dead tab would drop out of the reply and out of
-      // the tab bar until the next relaunch. `panes` already carries the
-      // title just written, and `PaneRecord`'s shape is `TabDescriptor`'s, so
-      // no `attachTitles` is needed on this path.
+      // The saved rows, not `manager.list()`: `panes` is the state that was
+      // just persisted, rather than a second, separate derivation of it, and
+      // it already carries the title just written, so no `attachTitles` call
+      // is needed on this path. (What keeps a dead tab's entry on the bar
+      // through a rename is the `renamedTab` reducer's own merge by id, not
+      // a property of this reply.)
       return panes
     }),
   )
