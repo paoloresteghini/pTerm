@@ -96,7 +96,27 @@ export async function launchApp(opts: {
   assertUnderTmp('claudeSettings', opts.claudeSettings)
   assertUnderTmp('userDataDir', opts.userDataDir)
   return electron.launch({
-    args: ['.vite/build/main.js', `--user-data-dir=${opts.userDataDir}`],
+    args: [
+      '.vite/build/main.js',
+      `--user-data-dir=${opts.userDataDir}`,
+      // Mitigation, not a fix, for the `firstWindow` flake documented at
+      // `projects.spec.ts`'s `launch` const: macOS occasionally blocks an
+      // Electron launch in the "reopen windows?" alert before `ready` fires.
+      // This pair lands in NSUserDefaults' *argument domain*, which outranks
+      // every other domain and applies to this one process only — no global
+      // `defaults write` against a bundle id shared with every other Electron
+      // tool on the machine, and nothing left behind afterwards. Window
+      // restoration is meaningless for a throwaway test profile in any case.
+      //
+      // **Whether it actually suppresses that alert is UNVERIFIED.** The
+      // dialog could not be reproduced on demand (~1 launch in 1,000), so what
+      // is confirmed is only that the app still launches and reaches `ready`
+      // normally with these arguments present. If a run stalls in
+      // `firstWindow` anyway, that is not evidence the cause lies elsewhere —
+      // it may simply mean AppKit ignores the argument domain for this prompt.
+      '-ApplePersistenceIgnoreState',
+      'YES',
+    ],
     env: {
       ...process.env,
       // Keep the app's config out of the real ~/.prcli during tests.

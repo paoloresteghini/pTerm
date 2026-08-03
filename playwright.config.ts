@@ -18,8 +18,11 @@ export default defineConfig({
   workers: 1,
   fullyParallel: false,
   // No retries. A flaky E2E test that passes on retry is a test that has
-  // stopped saying anything — see projects.spec.ts for this suite's one
-  // known pre-existing flake, which retries would only paper over.
+  // stopped saying anything — see projects.spec.ts for this suite's one known
+  // pre-existing flake, which retries would only paper over. It is not an app
+  // defect: macOS blocks the Electron launch in the "reopen windows?" alert
+  // before any PRCLI code runs, 2 in 43 full-suite runs on an idle machine and
+  // higher when two suites run at once.
   retries: 0,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {

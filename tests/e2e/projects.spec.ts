@@ -65,11 +65,12 @@
  * - **the OS accelerator layer.** ⌘1/⌥⌘1/⌘W are dispatched into the window by
  *   Playwright; that the physical keystroke reaches the window at all is
  *   outside this file;
- * - **whether a launch reaches `createWindow()` at all.** Roughly one
- *   full-suite run in three dies before it does — a known pre-existing flake,
- *   measured and accounted for in full at the `launch` const below. Nothing
- *   here asserts on startup reliability: when it bites, the run reports a
- *   timeout instead of reporting anything about projects.
+ * - **whether a launch reaches `createWindow()` at all.** About one full-suite
+ *   run in twenty dies before it does — a known pre-existing flake, and macOS
+ *   rather than this app; the mechanism and its measured rate are at the
+ *   `launch` const below. Nothing here asserts on startup reliability: when it
+ *   bites, the run reports a timeout instead of reporting anything about
+ *   projects.
  */
 import { test, expect, type ElectronApplication } from '@playwright/test'
 import { execFile } from 'node:child_process'
@@ -93,15 +94,32 @@ let claudeSettingsPath: string
 // block that could drift apart — which is how three of the four specs came to
 // be missing PRCLI_CLAUDE_SETTINGS.
 //
-// Known pre-existing flake, roughly 1 in 3 full-suite runs (measured
-// 2026-08-02): a test here throws `electronApplication.firstWindow: Timeout
-// 30000ms exceeded` from `app.firstWindow()` below, plus a worker teardown
-// timeout. It hangs before `createWindow()` runs (`src/main/index.ts:361`),
-// i.e. inside `adapter.version()` or `hookServer.start()`, and reproduces on
-// untouched `master` — it predates every change this suite has made and is
-// not a regression. Re-running just this file immediately after has gone
-// 10/10 green in 11.8s. `retries: 0` (`playwright.config.ts`) does not retry
-// it; that is deliberate, not an oversight — see that file's comment.
+// Known pre-existing flake, measured 2026-08-03 at **2 failures in 43
+// full-suite runs** on an idle machine (~4.7% of runs, ~1 in 1,000 launches):
+// a test here throws `electronApplication.firstWindow: Timeout 30000ms
+// exceeded` from `app.firstWindow()` below, plus a worker teardown timeout.
+//
+// It is macOS, not this app. AppKit blocks the launch in `-[NSAlert runModal]`
+// under `promptToIgnorePersistentStateWithCrashHistory:` — the "reopen
+// windows?" panel, with nobody there to click it — which suppresses
+// `finishLaunching`, so Electron's `ready` never fires and no window is ever
+// created. Confirmed by `sample(1)` on a live stalled process. **No PRCLI code
+// has run when it hangs**: `ready` → window took ≤141ms across 1,654
+// instrumented launches, so `adapter.version()` (≤10ms) and
+// `hookServer.start()` (≤3ms) — which this comment used to name as the suspect
+// region — are excluded by three orders of magnitude. Do not go looking in
+// `src/main`.
+//
+// The alert's state is keyed on the shared Electron bundle id, not on the
+// per-test `--user-data-dir`, so **concurrent E2E runs raise the rate** — the
+// "roughly 1 in 3" this comment used to claim was measured with three agents
+// plus a controller running this suite at once. `harness.ts` passes
+// `-ApplePersistenceIgnoreState` at every launch as a mitigation; see the
+// comment there for what that is and is not known to do. Raising the
+// `firstWindow` timeout is the one clearly wrong fix: the stall ends when
+// Playwright tears the process down, not on its own, so a bigger number buys a
+// longer hang. `retries: 0` (`playwright.config.ts`) does not retry it; that is
+// deliberate, not an oversight — see that file's comment.
 const launch = (): Promise<ElectronApplication> =>
   launchApp({ socket: SOCKET, configDir, projectsRoot, claudeSettings: claudeSettingsPath, userDataDir })
 
