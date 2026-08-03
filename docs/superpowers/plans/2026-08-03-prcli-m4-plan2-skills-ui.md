@@ -807,6 +807,21 @@ import { launchApp, killServer } from './harness'
 
 const SOCKET = 'prcli-e2e-skills'
 
+/**
+ * What the pane's shell prints if `/browse` is ever actually submitted.
+ *
+ * `/browse` is a path, not a command name, so a shell reports it as missing
+ * rather than as "command not found". zsh says
+ * `zsh: no such file or directory: /browse` and bash says
+ * `bash: /browse: No such file or directory`, which is why this matches
+ * case-insensitively on the shared phrase rather than on either wording.
+ *
+ * Derived by running Mutation B and reading the pane, not guessed: if the
+ * shell on this machine prints something else, that output is what belongs
+ * here, and the mutation is what tells you.
+ */
+const SUBMITTED = /no such file or directory/i
+
 let app: ElectronApplication
 let page: Page
 let userDataDir: string
@@ -849,7 +864,9 @@ test.beforeAll(async () => {
     join(configDir, 'config.json'),
     JSON.stringify({
       version: 5,
-      projects: [{ id: 'p1', name: 'demo', cwd: projectCwd, presets: [] }],
+      // `slug` is required: `isProject` (src/main/state/store.ts:94) drops a
+      // project row without one, silently, and the panel then never fetches.
+      projects: [{ id: 'p1', name: 'demo', slug: 'demo', cwd: projectCwd, presets: [] }],
       tabs: [],
       activeProjectId: 'p1',
       activeTabId: null,
@@ -879,7 +896,10 @@ test('the panel lists the project\'s skills and commands in name order', async (
   const rows = page.locator('[data-testid^="skill-"]')
   await expect(rows).toHaveCount(4)
   // Non-empty asserted by the count above, before anything reads the contents.
-  expect(await rows.allInnerTexts()).toEqual(['browse', 'gsd:stats', 'shipit', 'zebra'])
+  // The name span, not the row: a row also renders the `repo` tag, so reading
+  // the whole row would compare against 'shipit repo'.
+  const names = page.locator('[data-testid^="skill-"] > span:first-child')
+  expect(await names.allInnerTexts()).toEqual(['browse', 'gsd:stats', 'shipit', 'zebra'])
 })
 
 test('a project\'s own command is tagged repo and the others are not', async () => {
@@ -906,7 +926,12 @@ test('clicking a skill types its invocation and does NOT submit it', async () =>
   // A negative claim. `expect.poll` and `toHaveCount` return on their first
   // match and cannot express "and then nothing else happened", so this settles
   // first and reads the pane afterwards.
-  await page.getByTestId('preset-default-claude').click()
+  //
+  // A plain shell, NOT `preset-default-claude`. A `claude` pane in a directory
+  // claude has never seen opens its first-run trust prompt, which consumes the
+  // keystrokes and answers nothing either way, so the assertion below could
+  // not fail. `launch.spec.ts` shows a `new-tab` shell echoing real input.
+  await page.getByTestId('new-tab').click()
   const pane = page.getByTestId('terminal').first()
   await expect(pane).toBeVisible()
 
@@ -919,8 +944,9 @@ test('clicking a skill types its invocation and does NOT submit it', async () =>
   const text = await page.locator('.xterm-rows').first().innerText()
   expect(text).toContain('/browse')
   // If it had submitted, the shell would have answered. This is the assertion
-  // the settle above exists for.
-  expect(text).not.toContain('command not found')
+  // the settle above exists for, and `SUBMITTED` is derived from what the
+  // shell actually prints under Mutation B rather than guessed at.
+  expect(text).not.toMatch(SUBMITTED)
 })
 ```
 
@@ -956,6 +982,18 @@ Run the spec.
 Expected: **"clicking a skill types its invocation and does NOT submit it"
 fails.** This is the mutation that matters: it proves the negative claim is
 actually pinned rather than passing because nothing was checked.
+
+**Run this mutation before trusting `SUBMITTED`.** Capture the pane text it
+produces and confirm the regex matches it. If the shell on this machine words
+the error differently, replace `SUBMITTED` with what it actually prints and say
+so in your report. The mutation is the measurement; the constant is only a
+first guess at its result.
+
+An earlier version of this test drove `preset-default-claude` instead of a
+plain shell, and this mutation reddened nothing: a `claude` pane in an unseen
+directory opens a first-run trust prompt that swallows the keystrokes, so
+neither submitting nor not submitting changed anything observable. That is the
+control-that-cancels-itself-out shape, and it is why this test uses a shell.
 
 ```bash
 cp /tmp/panel.bak src/renderer/RightPanel.tsx && rm /tmp/panel.bak
