@@ -25,6 +25,16 @@ const EXTERNAL_RUNTIME_DEPS = ['node-pty', 'node-addon-api'];
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
+    /**
+     * Extensionless by design: Electron Packager appends the extension each
+     * platform wants, `.icns` here. `src/images/icon.icns` is generated from
+     * `icon.jpg` with `sips` and `iconutil`, and both are committed so a
+     * packaged build needs no image tooling.
+     *
+     * Only the packaged app reads this. `electron-forge start` shows the
+     * default Electron icon in the dock, which is a dev-only cosmetic.
+     */
+    icon: 'src/images/icon',
   },
   rebuildConfig: {},
   hooks: {
