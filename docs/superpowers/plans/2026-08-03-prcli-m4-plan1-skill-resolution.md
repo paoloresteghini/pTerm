@@ -701,6 +701,22 @@ describe('listSkills', () => {
     expect(entries.map((entry) => entry.name)).toContain('reapply-patches')
   })
 
+  it('falls back to the filename when a file declares an empty name', async () => {
+    // A different case from the one above, and the only one that pins the
+    // `||`. With `name:` ABSENT, `frontmatter` returns no `name` key at all,
+    // so `fields.name` is `undefined` with or without the guard — which is
+    // why the missing-name test cannot catch its removal. With `name:`
+    // PRESENT and empty, `frontmatter` returns `name: ''`, `??` would keep
+    // the empty string, and the panel would draw a blank, unclickable row.
+    //
+    // No file on this machine has this today (0 of 109). It is kept because
+    // two reachable shapes produce it — `name: ""`, and a `name: >` fold with
+    // no body — and because a blank row is a worse failure than a wrong one.
+    await write(join(home, 'commands', 'gsd', 'blank-name.md'), '---\nname:\ndescription: Blank.\n---\n')
+    const entries = await listSkills(project)
+    expect(entries.map((entry) => entry.name)).toContain('blank-name')
+  })
+
   it('survives a plugin install with no skills directory', async () => {
     // `bare` is enabled and resolves to a real installPath with no `skills/`
     // inside it — 12 of the 25 real installs are like this. The premise is
@@ -893,10 +909,15 @@ cp src/main/skills/scan.ts /tmp/scan.bak
 
 Mutation A — in `parse`, change `fields.name || undefined` to `fields.name`.
 Run the file.
-Expected: **"falls back to the filename when a file declares no name" fails**
-with a name of `undefined` or `''`. (`||` rather than `??` is deliberate: a
-present-but-empty `name:` must also fall back, and `??` would keep the empty
-string.)
+Expected: **"falls back to the filename when a file declares an empty name"
+fails**, and **"falls back to the filename when a file declares no name" still
+passes**.
+
+Both halves matter. The missing-`name:` case cannot catch this mutation —
+`frontmatter` returns no `name` key at all for `reapply-patches.md`, so
+`fields.name` is `undefined` either way. Only the present-but-empty case
+distinguishes `||` from `??`. If the empty-name test does not go red, stop:
+the guard is unpinned again.
 
 ```bash
 cp /tmp/scan.bak src/main/skills/scan.ts
