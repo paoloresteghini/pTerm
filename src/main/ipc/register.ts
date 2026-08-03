@@ -879,10 +879,13 @@ export function registerIpc(
           : row,
       )
       await store.write({ ...config, panes })
-      // `manager.list()` is synchronous and returns `PaneRecord[]`, whose
-      // shape `TabDescriptor` is a subset of; `CHANNELS.list`'s own handler
-      // above already returns it as descriptors.
-      return attachTitles(manager.list(), panes)
+      // The saved rows, not `manager.list()`: `manager.list()` only holds
+      // live sessions (an exited pane's entry is deleted the moment its
+      // process exits), so a dead tab would drop out of the reply and out of
+      // the tab bar until the next relaunch. `panes` already carries the
+      // title just written, and `PaneRecord`'s shape is `TabDescriptor`'s, so
+      // no `attachTitles` is needed on this path.
+      return panes
     }),
   )
 

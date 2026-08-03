@@ -1908,10 +1908,9 @@ describe('labelOfPane', () => {
 })
 
 describe('renamedTab', () => {
-  // Replacing the array wholesale is the same discipline `movedTab` follows:
-  // main answers with the whole list, so a mutation and a relaunch cannot
-  // disagree about what is on screen.
-  it('replaces the pane list and leaves tabs and layout alone', () => {
+  // Updates the named panes and leaves tabs and layout alone: a name changes
+  // no tab's membership, order or selection.
+  it('replaces the named panes and leaves tabs and layout alone', () => {
     const before: WorkspaceState = {
       ...INITIAL_WORKSPACE_STATE,
       projects: [project('p1', 'lumio')],
@@ -1926,5 +1925,30 @@ describe('renamedTab', () => {
     expect(next.panes.map((pane) => pane.title)).toEqual(['payments api', undefined])
     expect(next.tabs).toEqual(before.tabs)
     expect(next.activeProjectId).toBe('p1')
+  })
+
+  // Merged by id rather than replaced outright: main's reply to a rename
+  // comes from the saved rows, which excludes any pane whose session has
+  // since exited (`SessionManager` drops an entry on exit). A pane the reply
+  // is silent about — here, a tab that died before the rename — must keep the
+  // entry it already had, not vanish from the bar until the next relaunch.
+  it('keeps a pane the reply omits, rather than dropping it', () => {
+    const before: WorkspaceState = {
+      ...INITIAL_WORKSPACE_STATE,
+      projects: [project('p1', 'lumio')],
+      panes: [tab('aaa', 'lumio'), tab('bbb', 'lumio')],
+      tabs: [tabRow('aaa', ['aaa']), tabRow('bbb', ['bbb'])],
+      activeProjectId: 'p1',
+      dead: { bbb: 0 },
+    }
+    const next = workspaceReducer(before, {
+      type: 'renamedTab',
+      // 'bbb' has exited, so main's reply — built from the saved rows —
+      // names only 'aaa'.
+      panes: [{ ...tab('aaa', 'lumio'), title: 'payments api' }],
+    })
+    expect(next.panes.map((pane) => pane.id)).toEqual(['aaa', 'bbb'])
+    expect(next.panes.find((pane) => pane.id === 'bbb')).toEqual(before.panes[1])
+    expect(next.dead).toEqual({ bbb: 0 })
   })
 })

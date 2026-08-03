@@ -1063,11 +1063,16 @@ export function workspaceReducer(
       }
     }
 
-    case 'renamedTab':
-      // Only the panes: a name changes no tab's layout, order or selection,
-      // and main's reply carries the whole list for the same reason
-      // `movedTab`'s does.
-      return { ...state, panes: action.panes }
+    case 'renamedTab': {
+      // Merged by id, like `movedTab`, rather than replacing `state.panes`
+      // outright: main's own reply already excludes any pane whose session
+      // has exited (`SessionManager` drops an entry the moment its process
+      // dies), so a wholesale replace would make every currently-dead tab
+      // disappear from the bar the moment any OTHER tab was renamed. Merging
+      // means a pane the reply is silent about keeps the entry it already had.
+      const named = new Map(action.panes.map((pane) => [pane.id, pane]))
+      return { ...state, panes: state.panes.map((pane) => named.get(pane.id) ?? pane) }
+    }
 
     case 'statusSnapshot':
       return { ...state, status: action.status }
