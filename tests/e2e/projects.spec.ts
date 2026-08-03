@@ -84,6 +84,16 @@ let claudeSettingsPath: string
 // overrides are set by construction rather than by four copies of one env
 // block that could drift apart — which is how three of the four specs came to
 // be missing PRCLI_CLAUDE_SETTINGS.
+//
+// Known pre-existing flake, roughly 1 in 3 full-suite runs (measured
+// 2026-08-02): a test here throws `electronApplication.firstWindow: Timeout
+// 30000ms exceeded` from `app.firstWindow()` below, plus a worker teardown
+// timeout. It hangs before `createWindow()` runs (`src/main/index.ts:361`),
+// i.e. inside `adapter.version()` or `hookServer.start()`, and reproduces on
+// untouched `master` — it predates every change this suite has made and is
+// not a regression. Re-running just this file immediately after has gone
+// 10/10 green in 11.8s. `retries: 0` (`playwright.config.ts`) does not retry
+// it; that is deliberate, not an oversight — see that file's comment.
 const launch = (): Promise<ElectronApplication> =>
   launchApp({ socket: SOCKET, configDir, projectsRoot, claudeSettings: claudeSettingsPath, userDataDir })
 
