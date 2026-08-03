@@ -99,6 +99,12 @@ describe('App.tsx terminal area', () => {
     // scrollback with it — breaks both of these.
     expect(app).toMatch(/\{ ?groups\.map\(/)
     expect(app).toMatch(/\{ ?group\.panes\.map\(/)
+    // `groups` is hoisted above the JSX, so the filter this test is named for
+    // could just as easily land on its assignment as on the `.map(` that reads
+    // it. Pinning the assignment closes that second door: a `.filter(...)`
+    // spliced onto `paneGroups(state)` here changes what `groups.map(` above
+    // ever sees, without touching either matched `.map(` line.
+    expect(app).toMatch(/const groups = paneGroups\(state\) /)
   })
 
   it('mounts its one Terminal unconditionally', () => {
