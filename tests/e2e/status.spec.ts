@@ -68,13 +68,14 @@
  *   order, and which project and tab a launch lands on are asserted nowhere in
  *   this file. Neither is a rename, a removal, or a second instance.
  */
-import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
+import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { mkdtemp, rm, writeFile, mkdir, appendFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { connect } from 'node:net'
+import { launchApp, killServer, sessionNames } from './harness'
 import { formatHookLine } from '../../src/main/hooks/protocol'
 import { HOOK_EVENTS, type HookEvent } from '../../src/main/status/machine'
 import { DEFAULT_NOTIFICATIONS } from '../../src/main/state/store'
@@ -88,42 +89,12 @@ let projectsRoot: string
 let claudeSettingsDir: string
 let claudeSettingsPath: string
 
-async function launch(): Promise<ElectronApplication> {
-  return electron.launch({
-    args: ['.vite/build/main.js', `--user-data-dir=${userDataDir}`],
-    env: {
-      ...process.env,
-      PRCLI_CONFIG_DIR: configDir,
-      PRCLI_TMUX_SOCKET: SOCKET,
-      // Nothing here opens the add-project dialog, so nothing should scan —
-      // but the default root is the developer's real ~/Code, and defending a
-      // directory that must not be touched costs one line.
-      PRCLI_PROJECTS_ROOT: projectsRoot,
-      // Read by every live Claude session on this machine. Set in every test
-      // here, including the ones that never open the settings pane — the
-      // same rule PRCLI_PROJECTS_ROOT got after 2b, for a file with far more
-      // riding on it.
-      PRCLI_CLAUDE_SETTINGS: claudeSettingsPath,
-    },
-  })
-}
-
-async function killServer(): Promise<void> {
-  try {
-    await run('tmux', ['-L', SOCKET, 'kill-server'])
-  } catch {
-    // No server running.
-  }
-}
-
-async function sessionNames(): Promise<string[]> {
-  try {
-    const { stdout } = await run('tmux', ['-L', SOCKET, 'list-sessions', '-F', '#{session_name}'])
-    return stdout.split('\n').map((line) => line.trim()).filter(Boolean)
-  } catch {
-    return []
-  }
-}
+// Every launch in this file goes through the shared harness, so all four
+// overrides are set by construction rather than by four copies of one env
+// block that could drift apart — which is how three of the four specs came to
+// be missing PRCLI_CLAUDE_SETTINGS.
+const launch = (): Promise<ElectronApplication> =>
+  launchApp({ socket: SOCKET, configDir, projectsRoot, claudeSettings: claudeSettingsPath, userDataDir })
 
 /** A directory under the scan root that discovery will offer as a candidate. */
 async function candidate(name: string, manifest?: object): Promise<string> {
@@ -182,12 +153,8 @@ async function openTab(window: Page): Promise<string> {
   return id
 }
 
-test.beforeAll(async () => {
-  await run('npm', ['run', 'package'])
-})
-
 test.beforeEach(async () => {
-  await killServer()
+  await killServer(SOCKET)
   userDataDir = await mkdtemp(join(tmpdir(), 'prcli-status-user-'))
   configDir = await mkdtemp(join(tmpdir(), 'prcli-status-config-'))
   projectsRoot = await mkdtemp(join(tmpdir(), 'prcli-status-root-'))
@@ -196,7 +163,7 @@ test.beforeEach(async () => {
 })
 
 test.afterEach(async () => {
-  await killServer()
+  await killServer(SOCKET)
   for (const dir of [userDataDir, configDir, projectsRoot, claudeSettingsDir]) {
     await rm(dir, { recursive: true, force: true })
   }
@@ -347,7 +314,7 @@ test('the spool replays across a relaunch', async () => {
   const firstWindow = await first.firstWindow()
 
   const id = await openTab(firstWindow)
-  await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(1)
+  await expect.poll(async () => (await sessionNames(SOCKET)).length, { timeout: 20_000 }).toBe(1)
   await first.close()
 
   // Exactly what the hook script does when the socket write fails because
@@ -385,7 +352,7 @@ test('a dead tab lingers, then restarts', async () => {
 
   const id = await openTab(window)
   const name = `prcli-alpha-${id}`
-  await expect.poll(async () => (await sessionNames()).includes(name), { timeout: 20_000 }).toBe(true)
+  await expect.poll(async () => (await sessionNames(SOCKET)).includes(name), { timeout: 20_000 }).toBe(true)
 
   // Exactly what a crash outside the app leaves behind: the client is gone
   // and so is the session, with nothing routed through manager.kill().
@@ -418,7 +385,7 @@ test('a dead tab lingers, then restarts', async () => {
 
   await window.getByTestId(`restart-${id}`).click()
   await expect
-    .poll(async () => (await sessionNames()).includes(name), { timeout: 20_000 })
+    .poll(async () => (await sessionNames(SOCKET)).includes(name), { timeout: 20_000 })
     .toBe(true)
 
   await app.close()
@@ -440,7 +407,7 @@ test('a tab whose command crashes goes red, stays put, and strands no session', 
 
   const id = await openTab(window)
   const name = `prcli-alpha-${id}`
-  await expect.poll(async () => (await sessionNames()).includes(name), { timeout: 20_000 }).toBe(true)
+  await expect.poll(async () => (await sessionNames(SOCKET)).includes(name), { timeout: 20_000 }).toBe(true)
 
   // Typed into the tab's own shell, so the status comes from the pane's
   // command rather than from anything the app did.
@@ -457,7 +424,7 @@ test('a tab whose command crashes goes red, stays put, and strands no session', 
   // reaping the session. If the hook's own `kill-session` ever stopped firing,
   // every crash would leave a stray behind.
   await expect
-    .poll(async () => (await sessionNames()).includes(name), { timeout: 20_000 })
+    .poll(async () => (await sessionNames(SOCKET)).includes(name), { timeout: 20_000 })
     .toBe(false)
 
   await app.close()
