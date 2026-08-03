@@ -1,8 +1,13 @@
-import { join } from 'node:path'
 import type { SkillOrigin } from '../../shared/ipc'
 
-export interface SkillSource {
-  dir: string
+export interface PluginRoot {
+  /**
+   * The plugin's install root, NOT its `skills/` directory. A plugin
+   * contributes both `skills/` and `commands/`; the caller joins whichever it
+   * is reading. Returning the subdirectory is what made plugin commands
+   * unreachable: six files across five enabled plugins on the target machine.
+   */
+  base: string
   source: SkillOrigin
 }
 
@@ -13,7 +18,7 @@ interface Install {
 }
 
 /**
- * The `skills/` directories the enabled plugins contribute to one project.
+ * The install roots the enabled plugins contribute to one project.
  *
  * Pure: it is handed the two parsed files rather than reading them, for the
  * same reason `notify/rules.ts` is handed its own clock — every rule that can
@@ -21,18 +26,18 @@ interface Install {
  *
  * Stale cached versions and the `.cursor/skills` and `.windsurf/skills`
  * directories that other tools leave under `plugins/marketplaces/` are
- * excluded **by construction**: this only ever builds a path from an
- * `installPath` the registry names, and none of those is one. There is
- * deliberately no filter for them.
+ * excluded **by construction**: this only ever returns an `installPath` the
+ * registry names, and none of those is one. There is deliberately no filter
+ * for them.
  */
-export function pluginSkillDirs(
+export function pluginRoots(
   enabled: unknown,
   registry: unknown,
   projectCwd: string,
-): SkillSource[] {
+): PluginRoot[] {
   const flags = asRecord(enabled)
   const plugins = asRecord(asRecord(registry).plugins)
-  const dirs: SkillSource[] = []
+  const roots: PluginRoot[] = []
 
   for (const [key, value] of Object.entries(flags)) {
     // `=== true`, not truthiness and not key-presence: this map carries
@@ -43,12 +48,12 @@ export function pluginSkillDirs(
     if (!Array.isArray(installs)) continue
     const install = pick(installs, projectCwd)
     if (!install) continue
-    dirs.push({
-      dir: join(install.installPath, 'skills'),
+    roots.push({
+      base: install.installPath,
       source: { kind: 'plugin', plugin: key.split('@')[0] ?? key },
     })
   }
-  return dirs
+  return roots
 }
 
 /**

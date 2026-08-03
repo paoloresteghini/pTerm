@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { pluginSkillDirs } from '../../src/main/skills/resolve'
+import { pluginRoots } from '../../src/main/skills/resolve'
 
 const LUMIO = '/Users/paolo/Code/Lumio'
 const OTHER = '/Users/paolo/Code/PRCLI'
@@ -29,39 +29,50 @@ const enabled = {
   'security-guidance@claude-plugins-official': false,
 }
 
-describe('pluginSkillDirs', () => {
+describe('pluginRoots', () => {
+  it('returns the install root itself, not a subdirectory of it', () => {
+    // The root, because a plugin contributes BOTH `skills/` and `commands/`
+    // and the caller joins whichever it is reading. Returning
+    // `<installPath>/skills` is what made plugin commands unreachable.
+    const roots = pluginRoots(enabled, registry, OTHER)
+    expect(roots.length).toBeGreaterThan(0)
+    expect(roots.map((entry) => entry.base)).toContain('/cache/superpowers/6.2.0')
+    for (const entry of roots) {
+      expect(entry.base.endsWith('/skills')).toBe(false)
+    }
+  })
+
   it('takes the project-scoped install when the project matches', () => {
-    const dirs = pluginSkillDirs(enabled, registry, LUMIO)
-    expect(dirs.length).toBeGreaterThan(0)
-    expect(dirs.map((entry) => entry.dir)).toContain('/cache/superpowers/6.1.1/skills')
-    expect(dirs.map((entry) => entry.dir)).not.toContain('/cache/superpowers/6.2.0/skills')
+    const roots = pluginRoots(enabled, registry, LUMIO)
+    expect(roots.length).toBeGreaterThan(0)
+    expect(roots.map((entry) => entry.base)).toContain('/cache/superpowers/6.1.1')
+    expect(roots.map((entry) => entry.base)).not.toContain('/cache/superpowers/6.2.0')
   })
 
   it('falls back to the user-scoped install for any other project', () => {
-    const dirs = pluginSkillDirs(enabled, registry, OTHER)
-    expect(dirs.length).toBeGreaterThan(0)
-    expect(dirs.map((entry) => entry.dir)).toContain('/cache/superpowers/6.2.0/skills')
-    expect(dirs.map((entry) => entry.dir)).not.toContain('/cache/superpowers/6.1.1/skills')
+    const roots = pluginRoots(enabled, registry, OTHER)
+    expect(roots.length).toBeGreaterThan(0)
+    expect(roots.map((entry) => entry.base)).toContain('/cache/superpowers/6.2.0')
+    expect(roots.map((entry) => entry.base)).not.toContain('/cache/superpowers/6.1.1')
   })
 
   it('omits a plugin whose flag is false rather than merely absent', () => {
-    const dirs = pluginSkillDirs(enabled, registry, OTHER)
-    expect(dirs.length).toBeGreaterThan(0)
-    for (const entry of dirs) {
-      expect(entry.dir).not.toContain('security-guidance')
+    const roots = pluginRoots(enabled, registry, OTHER)
+    expect(roots.length).toBeGreaterThan(0)
+    for (const entry of roots) {
+      expect(entry.base).not.toContain('security-guidance')
     }
   })
 
   it('names the plugin without its marketplace suffix', () => {
-    const dirs = pluginSkillDirs(enabled, registry, OTHER)
-    const found = dirs.find((entry) => entry.dir.includes('frontend-design'))
+    const roots = pluginRoots(enabled, registry, OTHER)
+    const found = roots.find((entry) => entry.base.includes('frontend-design'))
     expect(found).toBeDefined()
     expect(found?.source).toEqual({ kind: 'plugin', plugin: 'frontend-design' })
   })
 
   it('omits an enabled plugin the registry does not list', () => {
-    const dirs = pluginSkillDirs({ 'ghost@nowhere': true }, registry, OTHER)
-    expect(dirs).toEqual([])
+    expect(pluginRoots({ 'ghost@nowhere': true }, registry, OTHER)).toEqual([])
   })
 
   it('omits a plugin with no install this project can use', () => {
@@ -71,12 +82,12 @@ describe('pluginSkillDirs', () => {
         'scoped@m': [{ scope: 'project', projectPath: LUMIO, installPath: '/cache/scoped' }],
       },
     }
-    expect(pluginSkillDirs({ 'scoped@m': true }, onlyOtherProject, OTHER)).toEqual([])
+    expect(pluginRoots({ 'scoped@m': true }, onlyOtherProject, OTHER)).toEqual([])
   })
 
   it('contributes nothing when either input is the wrong shape', () => {
-    expect(pluginSkillDirs(null, registry, OTHER)).toEqual([])
-    expect(pluginSkillDirs(enabled, 'not an object', OTHER)).toEqual([])
-    expect(pluginSkillDirs(enabled, { plugins: 'wrong' }, OTHER)).toEqual([])
+    expect(pluginRoots(null, registry, OTHER)).toEqual([])
+    expect(pluginRoots(enabled, 'not an object', OTHER)).toEqual([])
+    expect(pluginRoots(enabled, { plugins: 'wrong' }, OTHER)).toEqual([])
   })
 })
