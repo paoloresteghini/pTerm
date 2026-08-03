@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { launchApp, killServer } from '../e2e/harness'
+import { launchApp, killServer, sessionNames } from '../e2e/harness'
 
 // `launchApp`'s job is to start Electron and `killServer`'s is to run tmux, so
 // the only way to test what they do *before* that — which is the entire subject
@@ -47,8 +47,10 @@ vi.mock('node:child_process', () => ({
  *    a caller that goes through `launchApp` inherits all four by construction
  *    and needs no token check, while one reaching for `electron.launch` has
  *    stepped around the harness — which is exactly the fifth-spec hazard the
- *    original guard existed to catch. Every `.ts` file in the directory is
- *    enumerated except `harness.ts` itself, not only the `.spec.ts` ones: until
+ *    original guard existed to catch. Every `.ts` file in the directory *and
+ *    any subdirectory of it* is enumerated except `harness.ts` itself — see
+ *    `e2eFiles` for why the recursion is load-bearing — and not only the
+ *    `.spec.ts` ones: until
  *    2026-08-02 all launch code did live in `.spec.ts` files, so a `.spec.ts`
  *    filter was complete — but this suite now keeps its launch code in a
  *    non-spec helper, and under that filter a *second* helper (`dragHarness.ts`,
@@ -109,15 +111,38 @@ function readCode(path: URL): string {
     .replace(/\/\/[^\n]*/g, ' ')
 }
 
+/** The one file allowed to say `electron.launch`, as a path relative to `E2E_DIR`. */
+const ALLOWED_LAUNCH_SITE = 'harness.ts'
+
 /**
- * Every `.ts` file under `tests/e2e/` except the harness itself, enumerated
- * rather than named, so a fifth spec — or a second helper — is covered the day
- * it lands. `harness.ts` is the one file allowed to say `electron.launch`;
- * that exclusion is by name so adding a second launch site cannot be done
- * quietly.
+ * Every `.ts` file under `tests/e2e/`, at any depth, except the harness itself.
+ *
+ * **Recursive**, and that is not tidiness. Playwright's discovery under
+ * `testDir: './tests/e2e'` descends into subdirectories — measured 2026-08-02 by
+ * planting `tests/e2e/helpers/probe.spec.ts` and running `npx playwright test
+ * --list`, which reported `helpers/probe.spec.ts:2:5` and `Total: 36 tests in 5
+ * files`. So a flat read would leave `tests/e2e/helpers/dragHarness.ts` free to
+ * call `electron.launch` with no overrides, run as part of the suite, and be
+ * invisible here — the same hole this file closed on 2026-08-02, one directory
+ * deeper. Measured the same way: with that file planted, a flat read left this
+ * file at 13 passed.
+ *
+ * Names are returned relative to `E2E_DIR` (`helpers/dragHarness.ts`), which is
+ * both what `new URL(name, E2E_DIR)` wants and what makes the exclusion below an
+ * exact path rather than a basename: a `helpers/harness.ts` is *not* the allowed
+ * launch site and is checked like anything else.
  */
-function e2eFiles(): string[] {
-  return readdirSync(E2E_DIR).filter((name) => name.endsWith('.ts') && name !== 'harness.ts')
+function e2eFiles(dir: URL = E2E_DIR, prefix = ''): string[] {
+  const found: string[] = []
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const relative = `${prefix}${entry.name}`
+    if (entry.isDirectory()) {
+      found.push(...e2eFiles(new URL(`${entry.name}/`, dir), `${relative}/`))
+    } else if (relative.endsWith('.ts') && relative !== ALLOWED_LAUNCH_SITE) {
+      found.push(relative)
+    }
+  }
+  return found
 }
 
 describe('the E2E suite keeps its hands off the developer\'s real state', () => {
@@ -225,5 +250,30 @@ describe('the harness rejects a real socket or a real path before it launches an
   it('kills a prcli-e2e socket, passing -L through', async () => {
     await expect(killServer('prcli-e2e-unit')).resolves.toBeUndefined()
     expect(execFileSpy).toHaveBeenCalledWith('tmux', ['-L', 'prcli-e2e-unit', 'kill-server'])
+  })
+
+  // `sessionNames` is the defence-in-depth case, and it is pinned because an
+  // unpinned assertion is one that can be deleted in silence: when the seven
+  // `assert*` call sites were mutated out on 2026-08-02, this one produced no
+  // failure at all while the other six produced nine. Listing cannot destroy
+  // anything — the harm it avoids is a test being answered about the
+  // developer's real sessions instead of its own, which arrives as a passing or
+  // failing assertion rather than as damage. The check sits outside the
+  // function's `try`, so it rejects rather than being swallowed into the `[]`
+  // that "no server running" returns.
+  it.each([[''], ['default']])('refuses to list sessions on socket "%s"', async (socket) => {
+    await expect(sessionNames(socket)).rejects.toThrow(/E2E socket must start with "prcli-e2e"/)
+    expect(execFileSpy).not.toHaveBeenCalled()
+  })
+
+  it('lists sessions on a prcli-e2e socket, passing -L through', async () => {
+    await expect(sessionNames('prcli-e2e-unit')).resolves.toEqual([])
+    expect(execFileSpy).toHaveBeenCalledWith('tmux', [
+      '-L',
+      'prcli-e2e-unit',
+      'list-sessions',
+      '-F',
+      '#{session_name}',
+    ])
   })
 })
