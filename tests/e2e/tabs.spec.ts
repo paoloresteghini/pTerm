@@ -48,10 +48,12 @@
  *   passed). Reaching it is not coverage of it, which is the point of this
  *   line — it is only ever reached with a single kid;
  * - `DeadPane`. No test here kills a session behind the app's back — the
- *   detach test kills a *client*, not a session — and no test in this suite
+ *   detach test kills a *client*, not a session — and no test in this file
  *   asserts on `dead-`, `pane-dot-`, `pane-restart-` or `pane-dismiss-` at
  *   all. Measured in `status.spec.ts`, which does kill one: making `DeadPane`
- *   render `null` left it 10 of 10 green;
+ *   render `null` left it 10 of 10 green. `splits.spec.ts` is where the
+ *   overlay is actually witnessed — it kills one pane of a split and reddens
+ *   under that mutation — so the claim above is this file's, not the suite's;
  * - **the OS accelerator layer.** ⌘T/⌘W/⌥⌘1 are dispatched into the window by
  *   Playwright and the menu items are clicked from inside the main process
  *   (see `clickMenuItem`). That nothing between the physical keyboard and the

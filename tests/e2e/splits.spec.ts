@@ -34,14 +34,26 @@
  *   axis only, so `MIN_PANE_ROWS` and the `'rows'` half of the message are
  *   never the branch taken;
  * - **closing one pane of a split, and restoring a split across a relaunch.**
- *   Nothing here closes a pane or relaunches the app, so `closedPane` and the
- *   restore path are both unreached — and with them `withKeptPanes`, which is
- *   called from exactly those two places plus the `split` reply
- *   (`workspace.ts:830`, `workspace.ts:1071`, read 2026-08-02). The tombstone
- *   test does NOT reach it: `died` is one line that writes `state.dead` and
- *   leaves the row alone, and restart dispatches `opened`, which rewrites
- *   `state.panes` and never `state.tabs`. The order this file asserts after a
- *   death is `boxesOfRow` walking the row the split already wrote;
+ *   Nothing here closes a pane or relaunches the app, so `closedPane` is
+ *   unreached and no restore ever hands this file a row it did not just make;
+ * - **`withKeptPanes`' merge, though not the function.** It has exactly two
+ *   call sites — `applyTabShape` (`workspace.ts:830`), whose own doc says
+ *   "Only `split` uses this", and the `closedPane` case (`workspace.ts:1071`).
+ *   Restore is not one of them: it dispatches `restored`, which builds no row
+ *   through here. So this file DOES enter the function, on the ⌘D reply —
+ *   **measured 2026-08-02, `withKeptPanes` mutated to throw on entry: 2
+ *   failed, 1 passed**, the passing one being the refusal test, whose ⌘D is
+ *   turned away before any IPC call and so never produces a shape to fold in.
+ *   But every entry is with `prior === undefined`, because a tab has no row
+ *   until its first split (`tabs: []` is seeded and `opened` adds none), so it
+ *   returns `next` at its first line and not one line of the successor-anchored
+ *   merge below that runs — **measured the same day, a throw placed after
+ *   `if (!prior) return next`: 3 passed**. The tombstone test reaches even less
+ *   of it: `died` is one line that writes `state.dead` and leaves the row
+ *   alone, and restart dispatches `opened`, which rewrites `state.panes` and
+ *   never `state.tabs`. The order asserted after a death is therefore
+ *   `boxesOfRow` walking the row the split already wrote, untouched by any
+ *   merge;
  * - **most of the dead-pane overlay.** The tombstone test renders `DeadPane`
  *   and clicks `pane-restart-<id>`, which is the whole of what is witnessed
  *   here. `pane-dismiss-<id>` is never clicked, `pane-dot-<id>`'s colour is
@@ -342,6 +354,16 @@ test('a killed pane leaves a tombstone where it was, and its tab keeps the other
   // The box stays where it was and the overlay draws over it. A pane that
   // vanished — or that reappeared at the end of the row — is the regression
   // this pins, so the ORDER is asserted, not just the count.
+  //
+  // What it pins EXACTLY, since the expected value is read off the screen
+  // before the kill rather than written down here: the death did not move the
+  // box. It is blind by construction to any reordering that does not depend on
+  // deadness, because such a reordering moves the before-reading too. Measured
+  // 2026-08-02, both halves: `boxesOfRow` walking `row.layout.kids` in reverse
+  // leaves this GREEN (it reddens the ⌘D test's active-pane assertion instead),
+  // while sorting tombstoned entries ahead of live ones fails exactly this line
+  // with `[right, left]`. The second is the mutation this assertion answers;
+  // the first is a different claim, and this line does not make it.
   await expect(window.getByTestId(`dead-${right}`)).toBeVisible({ timeout: 20_000 })
   expect(await paneIds(window)).toEqual([left, right])
   await expect(window.getByTestId(`pane-${left}`)).toBeVisible()
@@ -356,6 +378,12 @@ test('a killed pane leaves a tombstone where it was, and its tab keeps the other
   await expect.poll(async () => (await sessionNames(SOCKET)).length, { timeout: 20_000 }).toBe(2)
   // And the session that came back is the dead pane's own, under the same
   // name: two sessions could otherwise be the survivor plus something else.
+  //
+  // UNMEASURED, said rather than implied: it is not true by construction and
+  // is worth keeping, but no mutation run against this file has failed it on
+  // its own — unwiring `onRestart` reddens the poll above first and this line
+  // is never reached. What would reach it is a restart that makes a session
+  // under some other name, which nothing here forces.
   expect(await sessionNames(SOCKET)).toContain(victim)
 
   await app.close()

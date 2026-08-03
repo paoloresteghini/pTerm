@@ -46,9 +46,12 @@
  *   2 failed, 2 passed). It is only ever reached with a single kid, which is
  *   why no divider follows;
  * - `DeadPane`. No test here kills a session behind the app's back, and no
- *   test in this suite asserts on `dead-`, `pane-dot-`, `pane-restart-` or
+ *   test in this file asserts on `dead-`, `pane-dot-`, `pane-restart-` or
  *   `pane-dismiss-` at all. Measured in `status.spec.ts`, which does kill a
- *   session: making `DeadPane` render `null` left it 10 of 10 green;
+ *   session: making `DeadPane` render `null` left it 10 of 10 green. The
+ *   overlay is witnessed in `splits.spec.ts`, which kills one pane of a split
+ *   and reddens under that same mutation — but nothing of it is witnessed
+ *   here;
  * - **the native folder picker.** `choose-folder` opens a dialog Playwright
  *   cannot touch, so the add path exercised here is the scanned-candidate
  *   list only, and every other project is seeded straight into `config.json`;
