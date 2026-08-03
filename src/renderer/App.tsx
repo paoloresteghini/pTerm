@@ -7,6 +7,7 @@ import { Sidebar } from './Sidebar'
 import { RightPanel } from './RightPanel'
 import { AddProjectDialog } from './AddProjectDialog'
 import { SettingsPane } from './SettingsPane'
+import { Welcome } from './Welcome'
 import { cn } from './lib/cn'
 import {
   INITIAL_WORKSPACE_STATE,
@@ -22,6 +23,7 @@ import {
   stateOfProject,
   tabOfPane,
   tabsOfProject,
+  welcomeHint,
   workspaceReducer,
   type PaneBox,
   type PaneDirection,
@@ -67,6 +69,12 @@ export function App() {
   const project = activeProject(state)
   const currentTabId = activeTabId(state)
   const currentTabs = state.activeProjectId ? tabsOfProject(state, state.activeProjectId) : []
+  // Hoisted out of the JSX below because the welcome page's condition is read
+  // off it. "No visible group" is the literal statement of an empty pane area,
+  // and it is not the same as "no tabs": a tab whose kids were all boxed by an
+  // earlier row emits no group at all (`workspace.ts:667`).
+  const groups = paneGroups(state)
+  const showWelcome = !groups.some((group) => group.visible)
   // Unsorted has no directory of its own, and a project whose folder has gone
   // cannot host a new terminal.
   const canOpen = Boolean(project) && project?.id !== UNSORTED_ID && project?.available === true
@@ -677,17 +685,13 @@ export function App() {
           </pre>
         ) : null}
         <div className="relative min-h-0 flex-1">
-          {state.projects.length === 0 ? (
-            <p data-testid="empty-state" className="p-4 font-mono text-[12px] text-muted">
-              No projects yet. Add one to open a terminal.
-            </p>
-          ) : null}
+          {showWelcome ? <Welcome hint={welcomeHint(state)} /> : null}
           {/* Every terminal stays mounted, across every project and every tab:
               both maps below are unconditional, and neither list is filtered
               down to what is on screen. Unmounting would dispose an xterm and
               lose its scrollback on each switch. `paneGroups` decides the
               arrangement; see its tests for the arithmetic. */}
-          {paneGroups(state).map((group) => (
+          {groups.map((group) => (
             <div
               key={group.id}
               data-testid={group.visible ? 'terminal-active' : `terminal-${group.id}`}

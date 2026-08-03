@@ -160,7 +160,10 @@ test.afterEach(async () => {
 test('starts with no projects and opens no session', async () => {
   const app = await launch()
   const window = await app.firstWindow()
-  await expect(window.getByTestId('empty-state')).toBeVisible()
+  await expect(window.getByTestId('welcome')).toBeVisible()
+  await expect(window.getByTestId('welcome-hint')).toContainText(
+    'select a working directory to start',
+  )
   expect(await sessionNames(SOCKET)).toEqual([])
   await app.close()
 })

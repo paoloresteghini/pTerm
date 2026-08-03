@@ -868,9 +868,11 @@ describe('workspaceReducer', () => {
     expect(next.panes.map((t) => t.projectSlug)).toEqual(['lumio', 'lumio', 'scratch'])
   })
 
-  // Filing the last stray empties Unsorted, so the reply omits it — and the
+  // Filing the last stray empties Unsorted, so the reply omits it, and the
   // selection pointing at it would leave a blank pane, an empty tab bar and no
-  // empty-state to explain it.
+  // project highlighted in the sidebar. The welcome page would come up over
+  // that and say "select a project to start", which is true and useless: there
+  // is one project and the user has just filed a session into it.
   it('follows the tab when the move empties the project it was selected in', () => {
     const state: WorkspaceState = {
       projects: [project('p1', 'lumio'), project(UNSORTED_ID, UNSORTED_ID, 'aaa')],

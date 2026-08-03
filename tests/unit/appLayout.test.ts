@@ -97,7 +97,7 @@ describe('App.tsx terminal area', () => {
     // Adjacent `.map(`, so inserting a `.filter(...)` for the current tab —
     // the change that would unmount a hidden tab's xterm and take its
     // scrollback with it — breaks both of these.
-    expect(app).toMatch(/\{ ?paneGroups\(state\)\.map\(/)
+    expect(app).toMatch(/\{ ?groups\.map\(/)
     expect(app).toMatch(/\{ ?group\.panes\.map\(/)
   })
 
