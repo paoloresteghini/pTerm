@@ -13,12 +13,12 @@ import { pluginSkillDirs, type SkillSource } from './resolve'
  * `claudeSettingsPath()`, so the app has exactly one answer for where that
  * file is. Two overrides naming one file is how they drift apart.
  *
- * `tests/integration/skills.test.ts` sets both. **`harness.ts` does not yet
- * pass `PRCLI_CLAUDE_HOME`**, so an E2E-launched app still falls back to the
- * real `~/.claude` here — read-only, but it makes assertions depend on
- * whatever happens to be installed that week. Task 5 of this plan adds it as
- * a sixth required launch option and enumerates it in `e2eSafety.test.ts`'s
- * `GUARDED_VARS`; nothing launches the app against this module before then.
+ * Both are required overrides in tests: `tests/integration/skills.test.ts`
+ * sets them directly, and `tests/e2e/harness.ts` takes `claudeHome` as a
+ * required launch option, asserts it sits under the temp root before any
+ * spawn, and passes it as `PRCLI_CLAUDE_HOME`. `e2eSafety.test.ts`'s
+ * `GUARDED_VARS` enumerates it, so a launch site that drops it fails the
+ * guard rather than silently reading the developer's real `~/.claude`.
  */
 export function claudeHome(): string {
   return process.env.PRCLI_CLAUDE_HOME ?? join(homedir(), '.claude')

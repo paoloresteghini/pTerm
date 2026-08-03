@@ -328,7 +328,17 @@ export interface ResolvedPreset {
  */
 export type SkillOrigin = { kind: 'user' } | { kind: 'repo' } | { kind: 'plugin'; plugin: string }
 
-/** One row of the skills panel, and one action row of the command palette. */
+/**
+ * One row of the skills panel, and one action row of the command palette.
+ *
+ * **`name` is not unique.** A skill's declared frontmatter `name` beats its
+ * directory name, so two directories can produce one name — measured on the
+ * author's machine, `gstack` comes from both `_gstack-command/` and
+ * `gstack/`, and `open-gstack-browser` from both `connect-chrome/` and
+ * `open-gstack-browser/`. Nothing here deduplicates: which of two same-named
+ * skills should win is a product question, not a scanning one. A consumer
+ * keying rows or dispatching actions by `name` alone will collide.
+ */
 export interface SkillEntry {
   /** What gets typed into a pane, without the leading slash. */
   name: string

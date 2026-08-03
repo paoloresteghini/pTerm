@@ -1,8 +1,6 @@
 import { join } from 'node:path'
 import type { SkillOrigin } from '../../shared/ipc'
 
-export type { SkillOrigin }
-
 export interface SkillSource {
   dir: string
   source: SkillOrigin

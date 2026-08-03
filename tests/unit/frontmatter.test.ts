@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest'
 import { frontmatter } from '../../src/main/skills/frontmatter'
 
 /**
- * The four shapes that actually occur, counted across the 73 skills and 36
- * commands on the target machine rather than imagined: 57 plain values, 14
- * quoted, 2 folded block scalars, and one file with no `name:` at all.
+ * The four shapes that actually occur, counted on the target machine rather
+ * than imagined. Across the 73 skills: 57 plain values, 14 quoted, 2 folded
+ * block scalars. Across the 36 commands: one file with no `name:` at all.
  */
 describe('frontmatter', () => {
   it('reads a plain scalar', () => {

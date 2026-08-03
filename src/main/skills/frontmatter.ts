@@ -7,11 +7,11 @@
  * until the postinstall repairs it. So this reads what the panel needs and
  * ignores the rest.
  *
- * The shapes handled were counted, not guessed, across the 73 skills and 36
- * commands on the target machine: 57 plain values, 14 quoted, 2 folded block
- * scalars (`brand-voice-enforcement` and `ogilvy-copywriting`), and one
- * command file carrying no `name:` at all. Anything else contributes nothing
- * rather than throwing — see the module rule in `scan.ts`.
+ * The shapes handled were counted, not guessed. Across the 73 skills on the
+ * target machine: 57 plain values, 14 quoted, 2 folded block scalars
+ * (`brand-voice-enforcement` and `ogilvy-copywriting`). Across the 36
+ * commands: one file carrying no `name:` at all. Anything else contributes
+ * nothing rather than throwing — see the module rule in `scan.ts`.
  */
 export function frontmatter(text: string): Record<string, string> {
   if (!text.startsWith('---')) return {}
