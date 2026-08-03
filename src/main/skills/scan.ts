@@ -1,10 +1,10 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { basename, join } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import type { SkillEntry, SkillOrigin } from '../../shared/ipc'
 import { claudeSettingsPath } from '../hooks/install'
 import { frontmatter } from './frontmatter'
-import { pluginSkillDirs, type SkillSource } from './resolve'
+import { pluginRoots, type PluginRoot } from './resolve'
 
 /**
  * The directory holding skills, commands and the plugin registry.
@@ -41,70 +41,75 @@ export async function listSkills(projectCwd: string): Promise<SkillEntry[]> {
   const enabled = (await readJson(claudeSettingsPath())) as { enabledPlugins?: unknown } | null
   const registry = await readJson(join(home, 'plugins', 'installed_plugins.json'))
 
-  const sources: SkillSource[] = [
-    ...pluginSkillDirs(enabled?.enabledPlugins, registry, projectCwd),
-  ]
+  const roots: PluginRoot[] = pluginRoots(enabled?.enabledPlugins, registry, projectCwd)
 
   const entries: SkillEntry[] = []
   entries.push(...(await skillsIn(join(home, 'skills'), { kind: 'user' })))
   entries.push(...(await commandsIn(join(home, 'commands'), { kind: 'user' })))
   entries.push(...(await commandsIn(join(projectCwd, '.claude', 'commands'), { kind: 'repo' })))
-  for (const source of sources) {
-    entries.push(...(await skillsIn(source.dir, source.source)))
-  }
-  return entries
-}
-
-/** `<dir>/<name>/SKILL.md`, which is the only layout a skill directory has. */
-async function skillsIn(dir: string, source: SkillOrigin): Promise<SkillEntry[]> {
-  const names = await listDir(dir)
-  const entries: SkillEntry[] = []
-  for (const name of names) {
-    const parsed = await parse(join(dir, name, 'SKILL.md'))
-    if (!parsed) continue
-    entries.push({
-      name: parsed.name ?? name,
-      description: parsed.description ?? '',
-      kind: 'skill',
-      source,
-    })
+  for (const root of roots) {
+    entries.push(...(await skillsIn(join(root.base, 'skills'), root.source)))
+    entries.push(...(await commandsIn(join(root.base, 'commands'), root.source)))
   }
   return entries
 }
 
 /**
- * Every `.md` under `dir`, at any depth.
+ * The string a user would type, derived from where the entry lives.
  *
- * Depth matters: the real tree is `commands/gsd/*.md`. The command's own
- * `name:` is already namespaced (`gsd:stats`), so nothing here derives a name
- * from the path — the file says what it is called, and the filename is only
- * the fallback for the one file that does not.
+ * `rel` is the entry's path below the root it was found in: a skill's
+ * directory name, or a command's path with `.md` stripped. Separators become
+ * `:`, and anything a plugin contributed carries its plugin as a prefix.
+ *
+ * This is what Claude Code itself offers, measured rather than assumed:
+ * `superpowers:brainstorming` rather than bare, `gsd:reapply-patches` for the
+ * one command file declaring no name, and the directory name for all three
+ * skills whose `name:` disagrees with it.
+ */
+function entryName(rel: string, source: SkillOrigin): string {
+  const local = rel.split(sep).join(':')
+  return source.kind === 'plugin' ? `${source.plugin}:${local}` : local
+}
+
+/** `<dir>/<name>/SKILL.md`, which is the only layout a skill directory has. */
+async function skillsIn(dir: string, source: SkillOrigin): Promise<SkillEntry[]> {
+  const entries: SkillEntry[] = []
+  for (const name of await listDir(dir)) {
+    const description = await readDescription(join(dir, name, 'SKILL.md'))
+    if (description === null) continue
+    entries.push({ name: entryName(name, source), description, kind: 'skill', source })
+  }
+  return entries
+}
+
+/**
+ * Every `.md` under `dir`, at any depth, named after its path below `dir`.
+ *
+ * Depth matters and is where the name comes from: `commands/gsd/stats.md` is
+ * `gsd:stats`. The file's own `name:` is not consulted: it agrees in almost
+ * every case, and where it disagrees Claude Code uses the path.
  */
 async function commandsIn(dir: string, source: SkillOrigin): Promise<SkillEntry[]> {
   const entries: SkillEntry[] = []
   for (const path of await walk(dir)) {
     if (!path.endsWith('.md')) continue
-    const parsed = await parse(path)
-    if (!parsed) continue
-    entries.push({
-      name: parsed.name ?? basename(path, '.md'),
-      description: parsed.description ?? '',
-      kind: 'command',
-      source,
-    })
+    const description = await readDescription(path)
+    if (description === null) continue
+    const rel = relative(dir, path).slice(0, -'.md'.length)
+    entries.push({ name: entryName(rel, source), description, kind: 'command', source })
   }
   return entries
 }
 
-async function parse(path: string): Promise<{ name?: string; description?: string } | null> {
+/** The file's declared description, or null when it cannot be read at all. */
+async function readDescription(path: string): Promise<string | null> {
   let text: string
   try {
     text = await readFile(path, 'utf8')
   } catch {
     return null
   }
-  const fields = frontmatter(text)
-  return { name: fields.name || undefined, description: fields.description ?? '' }
+  return frontmatter(text).description ?? ''
 }
 
 async function walk(dir: string): Promise<string[]> {

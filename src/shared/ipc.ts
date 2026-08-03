@@ -331,13 +331,16 @@ export type SkillOrigin = { kind: 'user' } | { kind: 'repo' } | { kind: 'plugin'
 /**
  * One row of the skills panel, and one action row of the command palette.
  *
- * **`name` is not unique.** A skill's declared frontmatter `name` beats its
- * directory name, so two directories can produce one name — measured on the
- * author's machine, `gstack` comes from both `_gstack-command/` and
- * `gstack/`, and `open-gstack-browser` from both `connect-chrome/` and
- * `open-gstack-browser/`. Nothing here deduplicates: which of two same-named
- * skills should win is a product question, not a scanning one. A consumer
- * keying rows or dispatching actions by `name` alone will collide.
+ * `name` is the string a user would type, derived from where the entry lives
+ * rather than from anything the file declares: a skill's directory name, a
+ * command's path below its root with separators as `:`, and a `plugin:` prefix
+ * on anything a plugin contributed. That is what Claude Code itself offers:
+ * measured three ways, including `superpowers:brainstorming` rather than bare
+ * and `gsd:reapply-patches` for a file declaring no name at all.
+ *
+ * A file's own `name:` is deliberately ignored: three skills on the author's
+ * machine declare one that differs from their directory, and in every case
+ * Claude Code uses the directory.
  */
 export interface SkillEntry {
   /** What gets typed into a pane, without the leading slash. */
