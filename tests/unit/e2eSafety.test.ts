@@ -102,6 +102,87 @@ const GUARDED_VARS = [
 /** Ways of launching Electron that go around `launchApp` and its env block. */
 const DIRECT_LAUNCH = ['electron.launch', '_electron']
 
+/**
+ * The identifiers a `tmux -L` in this tree is allowed to name.
+ *
+ * `SOCKET` is the module const every spec declares; `socket` is the parameter
+ * `harness.ts` takes and checks. Both are indirections a human has to look
+ * through, and looking through them is what the two tests below make
+ * unnecessary — a `-L` whose next argument is a string literal is rejected on
+ * sight, whatever the literal says.
+ */
+const SOCKET_IDENTIFIERS = ['SOCKET', 'socket']
+
+/** What must follow a `'-L'` in the argument array: `, SOCKET` or `, socket`. */
+const TAKES_SOCKET = new RegExp(`^\\s*,\\s*(?:${SOCKET_IDENTIFIERS.join('|')})\\s*[,\\]]`)
+
+/** A bare `'-L'` string literal, in any of the three quote styles. */
+const MINUS_L = /(['"`])-L\1/g
+
+/**
+ * `tmux -Lname`, the glued spelling — a string literal beginning `-L` and
+ * carrying the socket name inside it, so the check above has no next argument
+ * to look at. tmux accepts it. Nothing here uses it, and it is rejected rather
+ * than parsed: a form this file cannot see into is a form that should not be
+ * the one a copy reaches for.
+ */
+const GLUED_MINUS_L = /(['"`])-L[^'"`]+\1/g
+
+/** `const SOCKET = '…'` — the module const a `-L` is allowed to name. */
+const SOCKET_CONST = /\b(?:const|let|var)\s+(?:SOCKET|socket)\s*=\s*(['"`])([^'"`]*)\1/g
+
+/**
+ * A `'tmux'` literal followed by its argument array — `run('tmux', [ … ])`,
+ * `execFile('tmux', [ … ])`, whatever the wrapper is called.
+ *
+ * The checks above look at a `-L` and ask what follows it. This one looks at a
+ * tmux invocation and asks whether there is a `-L` in it AT ALL, which is a
+ * different question with a worse answer when it is missing: `tmux
+ * kill-server` with no socket flag is not a broken command, it is a working
+ * command aimed at `/tmp/tmux-$UID/default`.
+ */
+const TMUX_CALL = /(['"`])tmux\1\s*,\s*/g
+
+/** A `-L` anywhere in an argument array. */
+const HAS_MINUS_L = /(['"`])-L\1/
+
+/**
+ * `-S`, which names the socket by PATH rather than by name and so reaches the
+ * same server `-L default` does, spelled differently. Case-sensitive on
+ * purpose: `-s` is `new-session`'s name flag and two specs pass it.
+ */
+const HAS_MINUS_S = /(['"`])-S\1/
+
+/**
+ * The argument array beginning at `from`, or `null` when what is there is not
+ * a literal array.
+ *
+ * Bracket depth rather than "up to the first `]`", so a nested array cannot
+ * end the slice early and hide everything after it. `null` — a tmux call whose
+ * arguments are built somewhere this check cannot read — is a violation rather
+ * than a pass, because the whole point is that an unreadable socket is an
+ * unchecked one.
+ */
+function argArray(source: string, from: number): string | null {
+  if (source[from] !== '[') return null
+  let depth = 0
+  for (let i = from; i < source.length; i += 1) {
+    if (source[i] === '[') depth += 1
+    else if (source[i] === ']') {
+      depth -= 1
+      if (depth === 0) return source.slice(from, i + 1)
+    }
+  }
+  return null
+}
+
+/**
+ * The prefix a socket literal must carry, duplicated from `harness.ts`'s own
+ * `SOCKET_PREFIX` on purpose: importing it would make this test agree with the
+ * harness by construction even if both were changed to `default` together.
+ */
+const SOCKET_PREFIX = 'prcli-e2e'
+
 const E2E_DIR = new URL('../e2e/', import.meta.url)
 const HARNESS = new URL('harness.ts', E2E_DIR)
 
@@ -145,6 +226,29 @@ function e2eFiles(dir: URL = E2E_DIR, prefix = ''): string[] {
   return found
 }
 
+/**
+ * Every `.ts` under `tests/e2e/` **including `harness.ts`**.
+ *
+ * The launch check excludes the harness because the harness is the one place
+ * allowed to say `electron.launch`. There is no such exemption for `-L`: the
+ * harness's own two `-L` sites pass the check below today (`['-L', socket, …]`,
+ * the parameter `assertTestSocket` has already vetted), and including it costs
+ * nothing while catching a harness that ever started writing the socket in.
+ */
+function allE2eFiles(): string[] {
+  return [...e2eFiles(), ALLOWED_LAUNCH_SITE]
+}
+
+/**
+ * Comments out, then whitespace flattened, so a `-L` and the argument after it
+ * read the same whether they sit on one line or four. The two token checks
+ * above read the unflattened form because a bare `includes` does not care;
+ * these two look at what FOLLOWS a token, and do.
+ */
+function readFlat(path: URL): string {
+  return readCode(path).replace(/\s+/g, ' ')
+}
+
 describe('the E2E suite keeps its hands off the developer\'s real state', () => {
   it('sets all four env vars in the one place the app is launched from', () => {
     const source = readCode(HARNESS)
@@ -175,6 +279,172 @@ describe('the E2E suite keeps its hands off the developer\'s real state', () => 
         }
       }
     }
+    expect(violations).toEqual([])
+  })
+
+  /**
+   * `launchApp`, `killServer` and `sessionNames` are checked at runtime by
+   * `harness.ts`. Four specs also run `tmux` directly, around the harness
+   * entirely — `splits.spec.ts`'s `windowCols` and `panePid`,
+   * `status.spec.ts`'s kill-session and send-keys, `tabs.spec.ts`'s three,
+   * `projects.spec.ts`'s new-session — and nothing checked those at all.
+   *
+   * Today every one of them passes `SOCKET`, a fixed module const, so today
+   * this test finds nothing. It is here because of what landed on 2026-08-02:
+   * `splits.spec.ts` introduced the first `kill` in the E2E tree, `run('kill',
+   * ['-9', await panePid(victim)])`, and `panePid` derives that pid from a
+   * `tmux -L` listing. The pattern is now in the tree to be copied, and a copy
+   * that reached for `'default'` instead of `SOCKET` would not fail an
+   * assertion — it would signal the developer's own running work on the tmux
+   * server carrying all of it. That is not a class of mistake worth catching
+   * once it has happened.
+   *
+   * **What this does NOT catch**, stated rather than implied:
+   *
+   * - a `-L` inside a shell string handed to `execFile('sh', ['-c', …])`. The
+   *   check reads argument arrays, not strings that a shell will re-split;
+   * - `tmux` invoked from outside `tests/e2e/` entirely;
+   * - the value behind the identifier, which is what the SOCKET-const test
+   *   below covers, and only to the extent stated there.
+   *
+   * A `tmux` call carrying NO socket flag used to be on this list, attributed
+   * to inheriting `$TMUX`. That was the wrong mechanism for the dangerous
+   * case and is now caught outright — see the third test below.
+   */
+  it('names a checked socket at every -L in the tree, never a literal', () => {
+    const files = allE2eFiles()
+    expect(files.length).toBeGreaterThan(0)
+    const violations: string[] = []
+    let sites = 0
+    for (const name of files) {
+      const source = readFlat(new URL(name, E2E_DIR))
+      for (const match of source.matchAll(MINUS_L)) {
+        sites += 1
+        const after = source.slice(match.index + match[0].length)
+        if (!TAKES_SOCKET.test(after)) {
+          violations.push(
+            `${name}: -L is followed by ${JSON.stringify(after.slice(0, 24))}, not one of ` +
+              `${SOCKET_IDENTIFIERS.join('/')}`,
+          )
+        }
+      }
+      for (const match of source.matchAll(GLUED_MINUS_L)) {
+        violations.push(`${name}: ${match[0]} hides the socket inside the flag`)
+      }
+    }
+    // The non-vacuity pin, and the whole reason this assertion is not
+    // self-satisfying: with no `-L` anywhere the loop above finds nothing and
+    // `violations` is `[]` for the wrong reason. A rename of the flag, a
+    // move of every tmux call behind a helper, or a broken `MINUS_L` would
+    // each empty this silently. There are 10 sites across five files as this
+    // is written; the bound is left loose so that adding a tmux call is not a
+    // test edit, and tightening it to a count would only move the silence.
+    expect(sites).toBeGreaterThan(0)
+    expect(violations).toEqual([])
+  })
+
+  /**
+   * The check above proves a `-L` names `SOCKET`; this one narrows what
+   * `SOCKET` may be declared as.
+   *
+   * Without it, that check is satisfied by `const SOCKET = 'default'` plus
+   * every `-L` naming it faithfully, which is a worse outcome than the
+   * hardcoded literal it was written to catch — the same damage with an
+   * indirection in front of it.
+   *
+   * **The two do not add up to completeness, and an earlier draft of this
+   * comment said they did.** Both of these pass all three static checks:
+   *
+   * - a socket built by CONCATENATION — `const SOCKET = base + 'default'`, or
+   *   a template with a hole in it. `SOCKET_CONST` requires a quote directly
+   *   after the `=`, so it counts no declaration at all and the `-L` half sees
+   *   only a well-behaved identifier;
+   * - a `SOCKET` IMPORTED from outside `tests/e2e/`. Nothing outside that
+   *   directory is scanned, so the declaration is never read.
+   *
+   * What actually closes both is not static: each spec hands `SOCKET` to
+   * `killServer` and `launchApp`, which call `assertTestSocket` and throw in
+   * `beforeEach`, before anything is launched or killed. So the residual hole
+   * is a spec that runs tmux directly and calls NEITHER — which is a narrow
+   * shape, and a stated one, rather than a shape these tests can rule out.
+   */
+  it('declares no SOCKET outside the suite\'s own namespace', () => {
+    const files = allE2eFiles()
+    const violations: string[] = []
+    let declarations = 0
+    for (const name of files) {
+      for (const match of readFlat(new URL(name, E2E_DIR)).matchAll(SOCKET_CONST)) {
+        declarations += 1
+        if (!match[2].startsWith(SOCKET_PREFIX)) {
+          violations.push(`${name}: SOCKET = ${JSON.stringify(match[2])}`)
+        }
+      }
+    }
+    // Same pin, same reason: five specs declare one each today, and a regex
+    // that matched none of them would otherwise report an empty violation
+    // list as a pass.
+    expect(declarations).toBeGreaterThan(0)
+    expect(violations).toEqual([])
+  })
+
+  /**
+   * The gap both checks above leave wide open: a `tmux` call with no socket
+   * flag at all.
+   *
+   * `MINUS_L` only inspects invocations that already have a `-L`, so
+   * `run('tmux', ['kill-server'])` is not a violation to it — there is nothing
+   * for it to look at. And that command is not inert. tmux with no `-L` and no
+   * `-S` falls back to `/tmp/tmux-$UID/default`, the developer's real server,
+   * the one carrying every session they have open. `$TMUX` does not enter into
+   * it: a spec launched from a plain shell has no `$TMUX` set and still lands
+   * on `default`. It is the single command this project forbids outright, and
+   * the guard written to enforce socket scoping did not catch it.
+   *
+   * `-S` is the same server reached by path — `['-S', '/tmp/tmux-501/default']`
+   * — and is rejected rather than inspected. Nothing in the tree uses it
+   * (verified 2026-08-03 across all five files), so rejecting outright costs
+   * nothing and there is no second spelling of "which server" to keep correct.
+   *
+   * A tmux call whose arguments are not a readable literal array —
+   * `run('tmux', buildArgs())` — is a violation too, for the reason the first
+   * check could only declare: arguments this file cannot read are arguments it
+   * cannot vouch for, and passing them would be a guess.
+   *
+   * **What this still does not catch:** tmux reached through a shell string
+   * (`execFile('sh', ['-c', 'tmux kill-server'])`), a binary other than the
+   * literal `'tmux'` (an absolute path, or a variable holding the name), and
+   * anything outside `tests/e2e/`.
+   */
+  it('runs no tmux without -L, and never names the socket by path', () => {
+    const files = allE2eFiles()
+    expect(files.length).toBeGreaterThan(0)
+    const violations: string[] = []
+    let calls = 0
+    for (const name of files) {
+      const source = readFlat(new URL(name, E2E_DIR))
+      for (const match of source.matchAll(TMUX_CALL)) {
+        calls += 1
+        const args = argArray(source, match.index + match[0].length)
+        if (args === null) {
+          violations.push(`${name}: tmux arguments are not a literal array, so the socket is unreadable`)
+          continue
+        }
+        if (!HAS_MINUS_L.test(args)) {
+          violations.push(
+            `${name}: tmux with no -L reaches the developer's default server: ${args.slice(0, 40)}`,
+          )
+        }
+        if (HAS_MINUS_S.test(args)) {
+          violations.push(`${name}: tmux -S names the socket by path: ${args.slice(0, 40)}`)
+        }
+      }
+    }
+    // The same pin as the two above, and it does more work here than in
+    // either: this check finds its subjects by the string `'tmux'`, so a
+    // wrapper that stopped spelling the binary out would leave every call
+    // uninspected and this list empty. 10 calls across five files as this is
+    // written, all of them `-L SOCKET`.
+    expect(calls).toBeGreaterThan(0)
     expect(violations).toEqual([])
   })
 })

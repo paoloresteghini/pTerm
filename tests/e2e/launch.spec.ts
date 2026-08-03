@@ -44,10 +44,12 @@
  *   so every pane has a row from the second launch on. It is reached; it is
  *   just only ever reached with a single kid;
  * - `DeadPane`. No test here kills a session behind the app's back, and no
- *   test in this suite asserts on `dead-`, `pane-dot-`, `pane-restart-` or
- *   `pane-dismiss-` at all. Measured in `status.spec.ts`, the one file that
- *   does kill a session: making `DeadPane` render `null` left it 10 of 10
- *   green;
+ *   test in this file asserts on `dead-`, `pane-dot-`, `pane-restart-` or
+ *   `pane-dismiss-` at all. Measured in `status.spec.ts`, which kills a
+ *   session: making `DeadPane` render `null` left it 10 of 10 green. That
+ *   mutation is no longer suite-wide silent — `splits.spec.ts` kills one pane
+ *   of a split and asserts on `dead-` and `pane-restart-`, and the same
+ *   mutation reddens it — but it is still silent here;
  * - **the keyboard.** ⌘T, ⌘W, ⌘D and ⌥⌘1–9 are never pressed here; the only
  *   keys this file sends are typed into the terminal itself. Untested rather
  *   than measured — no mutation of `App.tsx`'s keydown handler was run
