@@ -101,10 +101,15 @@ describe('App.tsx terminal area', () => {
     expect(app).toMatch(/\{ ?group\.panes\.map\(/)
     // `groups` is hoisted above the JSX, so the filter this test is named for
     // could just as easily land on its assignment as on the `.map(` that reads
-    // it. Pinning the assignment closes that second door: a `.filter(...)`
-    // spliced onto `paneGroups(state)` here changes what `groups.map(` above
-    // ever sees, without touching either matched `.map(` line.
-    expect(app).toMatch(/const groups = paneGroups\(state\) /)
+    // it. Anchored on the statement that follows rather than on
+    // `paneGroups(state)` alone: `readCode` flattens every whitespace run,
+    // including a newline, to one space, and `toMatch` only asks whether the
+    // pattern occurs, not whether it is followed by nothing else. A bare
+    // `paneGroups\(state\) ` anchor stays present, unbroken, whether a
+    // `.filter(...)` is chained onto the same line or a wrapped next one.
+    // Requiring `const showWelcome` immediately after, with the flattener's
+    // one space and no more, closes both.
+    expect(app).toMatch(/const groups = paneGroups\(state\) const showWelcome\b/)
   })
 
   it('mounts its one Terminal unconditionally', () => {
