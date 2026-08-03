@@ -1,16 +1,17 @@
 /**
  * The app starting, drawing a terminal, and finding its session again.
  *
- * Four tests, each against the packaged build (`npm run package` in
- * `beforeAll`) and a real tmux server on the `prcli-e2e` socket: typed input
- * reaches the shell and its output comes back; a quit and relaunch reattaches
- * the same session with its scrollback; closing the window and reopening it
- * through macOS `activate` reattaches rather than replacing, leaving exactly
- * one `prcli-` session on the socket; and a fourth that opens no tmux session
- * at all — it reads the four `PRCLI_*` env vars back out of the launched
- * app's own `process.env` and asserts each equals the exact value this file
- * handed it (three temp paths made in `beforeEach`, plus the `SOCKET` const),
- * not merely that it is set to something.
+ * Four tests, each against the packaged build (`npm run package`, run once for
+ * the whole suite by `tests/e2e/global-setup.ts`) and a real tmux server on
+ * the `prcli-e2e` socket: typed input reaches the shell and its output comes
+ * back; a quit and relaunch reattaches the same session with its scrollback;
+ * closing the window and reopening it through macOS `activate` reattaches
+ * rather than replacing, leaving exactly one `prcli-` session on the socket;
+ * and a fourth that opens no tmux session at all — it reads the four `PRCLI_*`
+ * env vars back out of the launched app's own `process.env` and asserts each
+ * equals the exact value this file handed `launchApp` (three temp paths made
+ * in `beforeEach`, plus the `SOCKET` const), not merely that it is set to
+ * something.
  *
  * **Measured, 2026-08-02, this file run alone** (`npx playwright test
  * tests/e2e/launch.spec.ts`), against the three tests that existed at the
@@ -62,14 +63,11 @@
  *   `.xterm-rows`. Rendering fidelity, wrapping, colour and resize behaviour
  *   are all outside it.
  */
-import { test, expect, _electron as electron, type ElectronApplication } from '@playwright/test'
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
+import { test, expect, type ElectronApplication } from '@playwright/test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-
-const run = promisify(execFile)
+import { launchApp, killServer, sessionNames } from './harness'
 
 // The app runs against its own tmux server here. Nothing these tests create
 // is visible on the user's default socket, and nothing they clean up can
@@ -83,26 +81,12 @@ let projectCwd: string
 let claudeSettingsDir: string
 let claudeSettingsPath: string
 
-async function launch(): Promise<ElectronApplication> {
-  return electron.launch({
-    args: ['.vite/build/main.js', `--user-data-dir=${userDataDir}`],
-    env: {
-      ...process.env,
-      // Keep the app's config out of the real ~/.prcli during tests.
-      PRCLI_CONFIG_DIR: configDir,
-      PRCLI_TMUX_SOCKET: SOCKET,
-      // Nothing here opens the add-project dialog, so nothing should scan —
-      // but the default root is the developer's real ~/Code, and defending a
-      // directory that must not be touched costs one line.
-      PRCLI_PROJECTS_ROOT: projectsRoot,
-      // Read by every live Claude session on this machine. Set in every test
-      // here, including the ones that never open the settings pane — the
-      // same rule PRCLI_PROJECTS_ROOT got after 2b, for a file with far more
-      // riding on it.
-      PRCLI_CLAUDE_SETTINGS: claudeSettingsPath,
-    },
-  })
-}
+// Every launch in this file goes through the shared harness, so all four
+// overrides are set by construction rather than by four copies of one env
+// block that could drift apart — which is how three of the four specs came to
+// be missing PRCLI_CLAUDE_SETTINGS.
+const launch = (): Promise<ElectronApplication> =>
+  launchApp({ socket: SOCKET, configDir, projectsRoot, claudeSettings: claudeSettingsPath, userDataDir })
 
 /**
  * Write a config holding one project, selected.
@@ -127,15 +111,6 @@ async function seedProject(slug: string, name: string): Promise<string> {
   return cwd
 }
 
-/** Destroy the test tmux server, taking every session this file created with it. */
-async function killServer(): Promise<void> {
-  await run('tmux', ['-L', SOCKET, 'kill-server']).catch(() => undefined)
-}
-
-test.beforeAll(async () => {
-  await run('npm', ['run', 'package'])
-})
-
 // A config dir per test: the launches within a test share it, which is what
 // proves reattachment, while the tests stay independent of one another.
 test.beforeEach(async () => {
@@ -148,7 +123,9 @@ test.beforeEach(async () => {
 })
 
 test.afterEach(async () => {
-  await killServer()
+  // Destroys the test tmux server, taking every session this file created
+  // with it — and only those, because of the `-L`.
+  await killServer(SOCKET)
   for (const dir of [userDataDir, configDir, projectsRoot, projectCwd, claudeSettingsDir]) {
     await rm(dir, { recursive: true, force: true })
   }
@@ -225,18 +202,18 @@ test('reattaches the same session after closing and reopening the window', async
 
   // One session, not two: a replacement rather than a reattach would leave the
   // original running and invisible.
-  const { stdout } = await run('tmux', ['-L', SOCKET, 'list-sessions', '-F', '#{session_name}'])
-  const sessions = stdout.split('\n').map((line) => line.trim()).filter(Boolean)
+  const sessions = await sessionNames(SOCKET)
   expect(sessions.filter((name) => name.startsWith('prcli-'))).toHaveLength(1)
 
   await app.close()
 })
 
-// tests/unit/e2eSafety.test.ts checks that every spec's source text sets all
-// four PRCLI_* vars — but a var pointing at the wrong path satisfies that
-// check just as well as a var pointing at the right one. Only a runtime read
-// from inside the launched app can tell the difference, which is what this
-// test does.
+// tests/unit/e2eSafety.test.ts checks that `harness.ts`'s source text sets all
+// four PRCLI_* vars, and that no spec launches Electron around it — but a var
+// pointing at the wrong path satisfies that check just as well as a var
+// pointing at the right one, and neither half of it can see what this file
+// passes to `launchApp`. Only a runtime read from inside the launched app can
+// tell the difference, which is what this test does.
 //
 // It opens no tmux session and costs no pty — but not because it clicks
 // nothing. A launch against a NON-empty socket adopts every `prcli-` session

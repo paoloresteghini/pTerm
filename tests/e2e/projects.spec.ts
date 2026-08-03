@@ -61,14 +61,20 @@
  *   test here opens it;
  * - **the OS accelerator layer.** ⌘1/⌥⌘1/⌘W are dispatched into the window by
  *   Playwright; that the physical keystroke reaches the window at all is
- *   outside this file.
+ *   outside this file;
+ * - **whether a launch reaches `createWindow()` at all.** Roughly one
+ *   full-suite run in three dies before it does — a known pre-existing flake,
+ *   measured and accounted for in full at the `launch` const below. Nothing
+ *   here asserts on startup reliability: when it bites, the run reports a
+ *   timeout instead of reporting anything about projects.
  */
-import { test, expect, _electron as electron, type ElectronApplication } from '@playwright/test'
+import { test, expect, type ElectronApplication } from '@playwright/test'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { launchApp, killServer, sessionNames } from './harness'
 
 const run = promisify(execFile)
 const SOCKET = 'prcli-e2e-projects'
@@ -79,40 +85,22 @@ let projectsRoot: string
 let claudeSettingsDir: string
 let claudeSettingsPath: string
 
-async function launch(): Promise<ElectronApplication> {
-  return electron.launch({
-    args: ['.vite/build/main.js', `--user-data-dir=${userDataDir}`],
-    env: {
-      ...process.env,
-      PRCLI_CONFIG_DIR: configDir,
-      PRCLI_TMUX_SOCKET: SOCKET,
-      // Never scan the developer's real ~/Code.
-      PRCLI_PROJECTS_ROOT: projectsRoot,
-      // Read by every live Claude session on this machine. Set in every test
-      // here, including the ones that never open the settings pane — the
-      // same rule PRCLI_PROJECTS_ROOT got after 2b, for a file with far more
-      // riding on it.
-      PRCLI_CLAUDE_SETTINGS: claudeSettingsPath,
-    },
-  })
-}
-
-async function killServer(): Promise<void> {
-  try {
-    await run('tmux', ['-L', SOCKET, 'kill-server'])
-  } catch {
-    // No server running.
-  }
-}
-
-async function sessionNames(): Promise<string[]> {
-  try {
-    const { stdout } = await run('tmux', ['-L', SOCKET, 'list-sessions', '-F', '#{session_name}'])
-    return stdout.split('\n').map((line) => line.trim()).filter(Boolean)
-  } catch {
-    return []
-  }
-}
+// Every launch in this file goes through the shared harness, so all four
+// overrides are set by construction rather than by four copies of one env
+// block that could drift apart — which is how three of the four specs came to
+// be missing PRCLI_CLAUDE_SETTINGS.
+//
+// Known pre-existing flake, roughly 1 in 3 full-suite runs (measured
+// 2026-08-02): a test here throws `electronApplication.firstWindow: Timeout
+// 30000ms exceeded` from `app.firstWindow()` below, plus a worker teardown
+// timeout. It hangs before `createWindow()` runs (`src/main/index.ts:361`),
+// i.e. inside `adapter.version()` or `hookServer.start()`, and reproduces on
+// untouched `master` — it predates every change this suite has made and is
+// not a regression. Re-running just this file immediately after has gone
+// 10/10 green in 11.8s. `retries: 0` (`playwright.config.ts`) does not retry
+// it; that is deliberate, not an oversight — see that file's comment.
+const launch = (): Promise<ElectronApplication> =>
+  launchApp({ socket: SOCKET, configDir, projectsRoot, claudeSettings: claudeSettingsPath, userDataDir })
 
 /** A directory under the scan root that discovery will offer as a candidate. */
 async function candidate(name: string, manifest?: object): Promise<string> {
@@ -130,12 +118,8 @@ async function seed(projects: object[], activeProjectId: string | null): Promise
   )
 }
 
-test.beforeAll(async () => {
-  await run('npm', ['run', 'package'])
-})
-
 test.beforeEach(async () => {
-  await killServer()
+  await killServer(SOCKET)
   userDataDir = await mkdtemp(join(tmpdir(), 'prcli-proj-user-'))
   configDir = await mkdtemp(join(tmpdir(), 'prcli-proj-config-'))
   projectsRoot = await mkdtemp(join(tmpdir(), 'prcli-proj-root-'))
@@ -144,7 +128,7 @@ test.beforeEach(async () => {
 })
 
 test.afterEach(async () => {
-  await killServer()
+  await killServer(SOCKET)
   for (const dir of [userDataDir, configDir, projectsRoot, claudeSettingsDir]) {
     await rm(dir, { recursive: true, force: true })
   }
@@ -154,7 +138,7 @@ test('starts with no projects and opens no session', async () => {
   const app = await launch()
   const window = await app.firstWindow()
   await expect(window.getByTestId('empty-state')).toBeVisible()
-  expect(await sessionNames()).toEqual([])
+  expect(await sessionNames(SOCKET)).toEqual([])
   await app.close()
 })
 
@@ -173,7 +157,7 @@ test('adds a scanned candidate and opens a tab in it', async () => {
   await window.getByTestId('new-tab').click()
   await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
   await expect
-    .poll(async () => (await sessionNames()).filter((n) => n.startsWith('prcli-alpha-')).length, {
+    .poll(async () => (await sessionNames(SOCKET)).filter((n) => n.startsWith('prcli-alpha-')).length, {
       timeout: 20_000,
     })
     .toBe(1)
@@ -202,7 +186,7 @@ test('the tab bar shows only the active project\'s tabs', async () => {
   // Beta has no tabs yet, so the bar empties rather than showing Alpha's.
   await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(0)
   await window.getByTestId('new-tab').click()
-  await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(2)
+  await expect.poll(async () => (await sessionNames(SOCKET)).length, { timeout: 20_000 }).toBe(2)
   await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(1)
 
   await app.close()
@@ -311,12 +295,12 @@ test('an Unsorted tab can be filed into a project, keeping its session', async (
   await window.getByTestId('smove-abcdef0123456789').selectOption('id-alpha')
 
   await expect
-    .poll(async () => (await sessionNames()).includes('prcli-alpha-abcdef0123456789'), {
+    .poll(async () => (await sessionNames(SOCKET)).includes('prcli-alpha-abcdef0123456789'), {
       timeout: 20_000,
     })
     .toBe(true)
   // Renamed, not recreated: exactly one session, and the old name is gone.
-  expect(await sessionNames()).toEqual(['prcli-alpha-abcdef0123456789'])
+  expect(await sessionNames(SOCKET)).toEqual(['prcli-alpha-abcdef0123456789'])
   // The point of filing a stray is to be able to see it afterwards. Unsorted is
   // empty now, so the window has to follow the tab into Alpha rather than stay
   // pointed at a row that no longer exists.
@@ -339,7 +323,7 @@ test('a shortcut typed into the rename field does not reach the tab handler', as
   const window = await app.firstWindow()
   await window.getByTestId('new-tab').click()
   await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
-  await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(1)
+  await expect.poll(async () => (await sessionNames(SOCKET)).length, { timeout: 20_000 }).toBe(1)
 
   await window.getByTestId('pmenu-id-alpha').click()
   await window.getByTestId('prename-id-alpha').click()
@@ -350,7 +334,7 @@ test('a shortcut typed into the rename field does not reach the tab handler', as
 
   // The tab is still there, its session with it, and the edit is still open.
   await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(1)
-  await expect.poll(async () => (await sessionNames()).length, { timeout: 5_000 }).toBe(1)
+  await expect.poll(async () => (await sessionNames(SOCKET)).length, { timeout: 5_000 }).toBe(1)
   await expect(renaming).toBeVisible()
   await expect(renaming).toHaveValue('Half typed')
 
@@ -424,7 +408,7 @@ test('a project can be renamed in place, keeping its slug', async () => {
   await window.getByTestId('new-tab').click()
   await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
   await expect
-    .poll(async () => (await sessionNames()).map((name) => name.replace(/-[0-9a-f]{16}$/, '')), {
+    .poll(async () => (await sessionNames(SOCKET)).map((name) => name.replace(/-[0-9a-f]{16}$/, '')), {
       timeout: 20_000,
     })
     .toEqual(['prcli-alpha'])
@@ -448,8 +432,8 @@ test('a session whose project was removed shows under Unsorted, still alive', as
   // visible terminal does not yet mean a listable session, and reading the list
   // straight away sees an empty one. Every other session count here polls for
   // the same reason.
-  await expect.poll(async () => (await sessionNames()).length, { timeout: 20_000 }).toBe(1)
-  const before = await sessionNames()
+  await expect.poll(async () => (await sessionNames(SOCKET)).length, { timeout: 20_000 }).toBe(1)
+  const before = await sessionNames(SOCKET)
   expect(before).toHaveLength(1)
 
   await window.getByTestId('pmenu-id-alpha').click()
@@ -457,7 +441,7 @@ test('a session whose project was removed shows under Unsorted, still alive', as
 
   await expect(window.getByTestId('project-unsorted')).toBeVisible()
   // Removing a project destroys nothing: the session is still running.
-  expect(await sessionNames()).toEqual(before)
+  expect(await sessionNames(SOCKET)).toEqual(before)
 
   await app.close()
 })
