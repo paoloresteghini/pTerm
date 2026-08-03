@@ -18,6 +18,7 @@ import {
   minRatioFor,
   resizeKids,
   grabFor,
+  welcomeHint,
   type WorkspaceState,
   type PaneBox,
 } from '../../src/renderer/workspace'
@@ -1796,5 +1797,56 @@ describe('grabFor', () => {
 
     const colDir = ratioRow('aaa', ['aaa', 'bbb'], [0.5, 0.5], 'col')
     expect(grabFor(colDir, boxes([0.5, 0.5], ['aaa', 'bbb']), 1, () => ({ cols: 100, rows: 0 }), floors)).toBeNull()
+  })
+})
+
+describe('welcomeHint', () => {
+  // The zero-projects case is checked before the pick-a-project case, and this
+  // state is why: with no projects there is also no active project, so both
+  // branches match and only the order decides which sentence a first launch
+  // gets. The useless one would be "select a project to start".
+  it('asks for a working directory when there are no projects', () => {
+    expect(welcomeHint(INITIAL_WORKSPACE_STATE)).toBe('select a working directory to start')
+  })
+
+  it('names the keystroke when a launchable project is active', () => {
+    const state: WorkspaceState = {
+      ...INITIAL_WORKSPACE_STATE,
+      projects: [project('id-alpha', 'alpha')],
+      activeProjectId: 'id-alpha',
+    }
+    expect(welcomeHint(state)).toBe('press Cmd+T to start a session')
+  })
+
+  it('asks for a project when one exists but none is active', () => {
+    const state: WorkspaceState = {
+      ...INITIAL_WORKSPACE_STATE,
+      projects: [project('id-alpha', 'alpha')],
+      activeProjectId: null,
+    }
+    expect(welcomeHint(state)).toBe('select a project to start')
+  })
+
+  // Unsorted is not a directory and cannot launch anything, so the only move
+  // from it is to pick a real project: it shares the line above rather than
+  // getting one of its own.
+  it('asks for a project when Unsorted is active', () => {
+    const state: WorkspaceState = {
+      ...INITIAL_WORKSPACE_STATE,
+      projects: [project('id-alpha', 'alpha'), project(UNSORTED_ID, 'unsorted')],
+      activeProjectId: UNSORTED_ID,
+    }
+    expect(welcomeHint(state)).toBe('select a project to start')
+  })
+
+  // Same wording as the sidebar's `!` marker (`Sidebar.tsx:130`). Two
+  // sentences for one condition would read as two conditions.
+  it('names the missing directory when the active project cwd is gone', () => {
+    const state: WorkspaceState = {
+      ...INITIAL_WORKSPACE_STATE,
+      projects: [{ ...project('id-alpha', 'alpha'), cwd: '/tmp/gone', available: false }],
+      activeProjectId: 'id-alpha',
+    }
+    expect(welcomeHint(state)).toBe('/tmp/gone is missing')
   })
 })

@@ -930,6 +930,31 @@ function withoutKid(state: WorkspaceState, id: string): WorkspaceState {
   return { ...state, tabs: state.tabs.map((candidate) => (candidate.id === row.id ? next : candidate)) }
 }
 
+/**
+ * What the welcome page's last line says.
+ *
+ * The sentence form of `canOpen` in `App.tsx`
+ * (`Boolean(project) && project?.id !== UNSORTED_ID && project?.available === true`),
+ * naming whichever of the three parts is missing. One predicate, two
+ * renderings: a hint that disagreed with whether Cmd+T works would be worse than
+ * no hint.
+ *
+ * Here rather than in `Welcome.tsx` so it can be exercised against a
+ * `WorkspaceState` with no DOM, which is how every other derivation in this
+ * file is tested.
+ */
+export function welcomeHint(state: WorkspaceState): string {
+  // Before the no-active-project case below, which would otherwise claim a
+  // first launch too: with no projects there is no active project either.
+  if (state.projects.length === 0) return 'select a working directory to start'
+  const project = activeProject(state)
+  // Unsorted shares this line because it is not a directory and cannot launch;
+  // the move out of it is the same move, pick a real project.
+  if (!project || project.id === UNSORTED_ID) return 'select a project to start'
+  if (!project.available) return `${project.cwd} is missing`
+  return 'press Cmd+T to start a session'
+}
+
 export function workspaceReducer(
   state: WorkspaceState,
   action: WorkspaceAction,
