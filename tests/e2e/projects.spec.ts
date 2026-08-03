@@ -2,7 +2,7 @@
  * Projects: discovering them, switching between them, renaming and removing
  * them, and what happens to their sessions when any of that occurs.
  *
- * Eleven tests on the `prcli-e2e-projects` socket: an empty workspace opens no
+ * Twelve tests on the `prcli-e2e-projects` socket: an empty workspace opens no
  * session; a scanned candidate can be added and a tab opened under its slug;
  * the tab bar shows only the active project's tabs; ⌘1/⌘2 switch project while
  * ⌥⌘1 switches tab; a repository-declared preset launches its command; a
@@ -10,19 +10,20 @@
  * Unsorted stray is filed by *renaming* its session, not recreating it; a ⌘
  * shortcut typed into the rename field does not reach the tab handler, while
  * ⌘W with a terminal focused still closes its tab; a rename keeps the slug and
- * honours Escape, blur and a blank name; and removing a project leaves its
- * session alive under Unsorted; and the welcome page is up when a selected
- * project has no session and returns when its last pane closes.
+ * honours Escape, blur and a blank name; removing a project leaves its
+ * session alive under Unsorted; the welcome page is up when a selected
+ * project has no session and returns when its last pane closes; and it names
+ * the missing directory when the active project's cwd is gone.
  *
  * **Measured, 2026-08-02, this file run alone** (`npx playwright test
  * tests/e2e/projects.spec.ts`): deleting the `if (event.altKey)` branch from
  * the `Digit` handler in `App.tsx` — so ⌥⌘1 falls through to project
  * switching — fails one test, `⌘1 and ⌘2 switch project; ⌥⌘1 and ⌥⌘2 switch
- * tab`, and the other nine pass. 1 failed, 9 passed, reproduced on a second
- * independent run. The two halves of that test's name are not equally pinned
- * by it: the failure lands on the ⌥⌘1 assertion, which means the ⌘1 and ⌘2
- * assertions ahead of it passed under the mutation. Only the half the
- * mutation was aimed at moved.
+ * tab`, and the other nine pass: 1 failed, 9 passed of the ten tests the file
+ * held that day, reproduced on a second independent run. The two halves of
+ * that test's name are not equally pinned by it: the failure lands on the
+ * ⌥⌘1 assertion, which means the ⌘1 and ⌘2 assertions ahead of it passed
+ * under the mutation. Only the half the mutation was aimed at moved.
  *
  * **Also measured** the same day: changing `event.code === 'KeyW'` to
  * `'KeyQ'` in the same handler fails `a shortcut typed into the rename field
@@ -32,13 +33,18 @@
  * is named for.
  *
  * **Measured, 2026-08-03, this file run alone**: pinning `showWelcome`
- * in `App.tsx` to `false` fails `the welcome page goes when a session opens
- * and returns when it closes` at its first assertion, catching a broken
- * must-show direction; pinning it to `true` fails the same test at its
- * `toBeHidden()`, catching a broken must-hide direction. Since `showWelcome`
- * is one value recomputed identically at every point in the test, that also
- * bounds the closing reappearance assertion, though neither mutation run
- * reaches it directly: each dies on its own earlier failure first.
+ * in `App.tsx` to `true` fails `the welcome page goes when a session opens
+ * and returns when it closes` at its `toBeHidden()`, catching a broken
+ * must-hide direction: 1 failed, 10 passed of the eleven tests the file held
+ * that day. Pinning it to `false` catches the broken must-show direction the
+ * same way, but at more than the one test this note used to name: it also
+ * fails `starts with no projects and opens no session`, since that test
+ * asserts on `getByTestId('welcome')` too. 2 failed, 9 passed of the same
+ * eleven, derived by reading both tests rather than re-running the mutation.
+ * Since `showWelcome` is one value recomputed identically at every point in
+ * the test, that also bounds the closing reappearance assertion, though
+ * neither mutation run reaches it directly: each dies on its own earlier
+ * failure first.
  *
  * **What this file does NOT see** — read off this file's own text unless a
  * line says measured or names another file:
@@ -47,7 +53,7 @@
  *   seeded config carries `tabs: []`, so each tab has exactly one pane and
  *   each group renders exactly one box, whose share renormalises to 1.
  *   `PaneDivider` is constructed only for `index > 0`
- *   (`src/renderer/App.tsx:806-807`, read 2026-08-02), so not one is ever
+ *   (`src/renderer/App.tsx:812-813`, read 2026-08-03), so not one is ever
  *   constructed and the dividers overlay renders with no strips. Stated as
  *   what renders rather than as which branch runs: an earlier version of this
  *   line said `boxesOfRow` is never reached, and it is — restore builds one
@@ -495,6 +501,16 @@ test('the welcome page goes when a session opens and returns when it closes', as
   // sentence this page replaced could not describe: it only appeared when
   // there were no projects at all, so this launch used to show a blank box.
   await expect(window.getByTestId('welcome')).toBeVisible()
+  // The wordmark and the shortcut copy: nothing else in this file asserts on
+  // them, so without this `pTerm` could silently become `PRCLI` with the
+  // suite green.
+  await expect(window.getByTestId('welcome')).toContainText('pTerm')
+  await expect(window.getByTestId('welcome')).toContainText(
+    'Manage Claude Code sessions across clients and departments.',
+  )
+  await expect(window.getByTestId('welcome')).toContainText('Cmd+T')
+  await expect(window.getByTestId('welcome')).toContainText('Cmd+D')
+  await expect(window.getByTestId('welcome')).toContainText('Cmd+Shift+D')
   await expect(window.getByTestId('welcome-hint')).toContainText('press Cmd+T to start a session')
 
   await window.getByTestId('new-tab').click()
@@ -508,6 +524,24 @@ test('the welcome page goes when a session opens and returns when it closes', as
   await window.keyboard.press('Meta+w')
   await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(0)
   await expect(window.getByTestId('welcome')).toBeVisible()
+
+  await app.close()
+})
+
+test('names the missing directory when the active project cwd is gone', async () => {
+  // Not created through `candidate()`: the point is a cwd that is not there,
+  // so main's `isDirectory` check (`src/main/ipc/restore.ts`) sets
+  // `available: false` and drives the hint's fourth branch.
+  const gone = join(projectsRoot, 'ghost')
+  await seed(
+    [{ id: 'id-alpha', name: 'Alpha', slug: 'alpha', cwd: gone, presets: [], activeTabId: null }],
+    'id-alpha',
+  )
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  await expect(window.getByTestId('welcome')).toBeVisible()
+  await expect(window.getByTestId('welcome-hint')).toContainText(`${gone} is missing`)
 
   await app.close()
 })
