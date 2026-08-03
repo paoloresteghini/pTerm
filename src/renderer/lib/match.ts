@@ -43,7 +43,7 @@ const MAX_GAP_PENALTY = 4
  * The walk is greedy, taking the earliest candidate for each query character
  * rather than searching for the best overall alignment. That is not optimal
  * scoring, and it is deliberate: it is linear, it is deterministic, and the
- * alternative buys nothing a user of a 161-row list would notice.
+ * alternative buys nothing a user of a list this size would notice.
  */
 export function scoreEntry(query: string, name: string): number | null {
   const needle = query.toLowerCase()
