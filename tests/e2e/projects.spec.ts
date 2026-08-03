@@ -33,9 +33,12 @@
  *
  * **Measured, 2026-08-03, this file run alone**: pinning `showWelcome`
  * in `App.tsx` to `false` fails `the welcome page goes when a session opens
- * and returns when it closes` at its first assertion; pinning it to `true`
- * fails the same test at its `toBeHidden()`. Both directions of the round
- * trip are held by that one test.
+ * and returns when it closes` at its first assertion, catching a broken
+ * must-show direction; pinning it to `true` fails the same test at its
+ * `toBeHidden()`, catching a broken must-hide direction. Since `showWelcome`
+ * is one value recomputed identically at every point in the test, that also
+ * bounds the closing reappearance assertion, though neither mutation run
+ * reaches it directly: each dies on its own earlier failure first.
  *
  * **What this file does NOT see** — read off this file's own text unless a
  * line says measured or names another file:
@@ -495,6 +498,7 @@ test('the welcome page goes when a session opens and returns when it closes', as
   await expect(window.getByTestId('welcome-hint')).toContainText('press Cmd+T to start a session')
 
   await window.getByTestId('new-tab').click()
+  await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
   await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(1)
   await expect(window.getByTestId('welcome')).toBeHidden()
 
