@@ -25,24 +25,37 @@
  * ⌥⌘1 assertion, which means the ⌘1 and ⌘2 assertions ahead of it passed
  * under the mutation. Only the half the mutation was aimed at moved.
  *
- * **Also measured** the same day: changing `event.code === 'KeyW'` to
- * `'KeyQ'` in the same handler fails `a shortcut typed into the rename field
- * does not reach the tab handler` here — at its last assertion, the one that
- * checks ⌘W still closes a tab with a terminal focused — and nothing else in
- * this file. So that test really does bite on ⌘W and not only on the guard it
- * is named for.
+ * **Also measured, 2026-08-02**: changing `event.code === 'KeyW'` to
+ * `'KeyQ'` in the same handler failed `a shortcut typed into the rename
+ * field does not reach the tab handler` here, at its last assertion, the
+ * one that checks ⌘W still closes a tab with a terminal focused, and
+ * nothing else in the ten tests the file held that day. That test really
+ * does bite on ⌘W and not only on the guard it is named for. Since then
+ * this file gained `the welcome page goes when a session opens and returns
+ * when it closes`, whose last assertion also presses `Meta+w` with a
+ * terminal focused and expects the tab count to drop to zero: that test
+ * would fail under the same mutation too, though this has not been
+ * re-measured.
  *
  * **Measured, 2026-08-03, this file run alone**: pinning `showWelcome`
  * in `App.tsx` to `true` fails `the welcome page goes when a session opens
  * and returns when it closes` at its `toBeHidden()`, catching a broken
- * must-hide direction: 1 failed, 10 passed of the eleven tests the file held
- * that day. Pinning it to `false` catches the broken must-show direction the
- * same way, but at more than the one test this note used to name: it also
- * fails `starts with no projects and opens no session`, since that test
- * asserts on `getByTestId('welcome')` too. 2 failed, 9 passed of the same
- * eleven, derived by reading both tests rather than re-running the mutation.
- * Since `showWelcome` is one value recomputed identically at every point in
- * the test, that also bounds the closing reappearance assertion, though
+ * must-hide direction. Pinning it to `false` catches the broken must-show
+ * direction the same way.
+ *
+ * **Derived, 2026-08-03**, by reading which tests assert on
+ * `getByTestId('welcome')` rather than by re-running either mutation:
+ * three tests here do, `starts with no projects and opens no session`,
+ * `the welcome page goes when a session opens and returns when it closes`,
+ * and `names the missing directory when the active project cwd is gone`.
+ * Pinning `showWelcome` to `false` fails all three, since each expects
+ * `welcome` visible at some point: 3 failed, 9 passed of the twelve tests
+ * this file now holds. Pinning it to `true` fails only the `toBeHidden()`
+ * assertion above, since the other two tests already expect `welcome`
+ * visible and pinning it visible does not disturb them: 1 failed, 11
+ * passed of the same twelve. Since `showWelcome` is one value recomputed
+ * identically at every point in the test, that also bounds the closing
+ * reappearance assertion in `the welcome page goes...` test, though
  * neither mutation run reaches it directly: each dies on its own earlier
  * failure first.
  *
