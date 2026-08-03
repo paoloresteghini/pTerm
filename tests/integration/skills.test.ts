@@ -12,6 +12,7 @@ const saved = {
 let root = ''
 let home = ''
 let project = ''
+let browseDescription = ''
 
 async function write(path: string, body: string): Promise<void> {
   await mkdir(join(path, '..'), { recursive: true })
@@ -24,8 +25,11 @@ beforeEach(async () => {
   project = join(root, 'project')
 
   await write(join(home, 'skills', 'browse', 'SKILL.md'), '---\nname: browse\ndescription: Fast browser.\n---\n')
+  browseDescription =
+    /description: (.+)/.exec(await readFile(join(home, 'skills', 'browse', 'SKILL.md'), 'utf8'))?.[1] ?? ''
   await write(join(home, 'commands', 'gsd', 'stats.md'), '---\nname: gsd:stats\ndescription: Show stats.\n---\n')
-  // The one real command file with no `name:` — the fallback's case.
+  // Declares no name: nothing to fall back from, so the path is the only
+  // source of the name.
   await write(join(home, 'commands', 'gsd', 'reapply-patches.md'), '---\ndescription: Reapply.\n---\n')
   await write(join(project, '.claude', 'commands', 'ship.md'), '---\nname: ship\ndescription: Ship it.\n---\n')
 
@@ -51,6 +55,11 @@ beforeEach(async () => {
     JSON.stringify({ enabledPlugins: { 'superpowers@m': true, 'bare@m': true } }),
   )
 
+  // A plugin shipping BOTH skills and commands. Five enabled plugins on the
+  // real machine ship commands, and none of them were scanned before.
+  await write(join(install, 'commands', 'ship-it.md'), '---\ndescription: Ship.\n---\n')
+  await write(join(install, 'commands', 'nested', 'deep.md'), '---\ndescription: Deep.\n---\n')
+
   process.env.PRCLI_CLAUDE_HOME = home
   process.env.PRCLI_CLAUDE_SETTINGS = join(home, 'settings.json')
 })
@@ -71,7 +80,49 @@ describe('listSkills', () => {
     expect(names).toContain('browse')
     expect(names).toContain('gsd:stats')
     expect(names).toContain('ship')
-    expect(names).toContain('brainstorming')
+    expect(names).toContain('superpowers:brainstorming')
+  })
+
+  it('namespaces a plugin skill with its plugin', async () => {
+    // The defect this task exists for: `brainstorming` is not a string anyone
+    // can type. `superpowers:brainstorming` is.
+    const entries = await listSkills(project)
+    expect(entries.length).toBeGreaterThan(0)
+    const names = entries.map((entry) => entry.name)
+    expect(names).not.toContain('brainstorming')
+    expect(names).toContain('superpowers:brainstorming')
+  })
+
+  it('scans the commands a plugin ships, at any depth', async () => {
+    const entries = await listSkills(project)
+    expect(entries.length).toBeGreaterThan(0)
+    const names = entries.map((entry) => entry.name)
+    expect(names).toContain('superpowers:ship-it')
+    expect(names).toContain('superpowers:nested:deep')
+  })
+
+  it('names a command after its path below the root, not its own declaration', async () => {
+    // `commands/gsd/stats.md` declares `gsd:stats` and happens to agree.
+    // `reapply-patches.md`, which declares no name at all, is what proves the
+    // path is the source: it must come back namespaced, not as a bare
+    // filename.
+    const entries = await listSkills(project)
+    expect(entries.length).toBeGreaterThan(0)
+    expect(entries.map((entry) => entry.name)).toContain('gsd:reapply-patches')
+  })
+
+  it('ignores a declared name that differs from the directory', async () => {
+    // Three skills on the author's machine do this, and Claude Code uses the
+    // directory in all three cases.
+    await write(
+      join(home, 'skills', 'actual-dir', 'SKILL.md'),
+      '---\nname: declared-something-else\ndescription: D.\n---\n',
+    )
+    const entries = await listSkills(project)
+    expect(entries.length).toBeGreaterThan(0)
+    const names = entries.map((entry) => entry.name)
+    expect(names).toContain('actual-dir')
+    expect(names).not.toContain('declared-something-else')
   })
 
   it('tags each entry with where it came from', async () => {
@@ -80,7 +131,7 @@ describe('listSkills', () => {
     const of = (name: string) => entries.find((entry) => entry.name === name)
     expect(of('browse')?.source).toEqual({ kind: 'user' })
     expect(of('ship')?.source).toEqual({ kind: 'repo' })
-    expect(of('brainstorming')?.source).toEqual({ kind: 'plugin', plugin: 'superpowers' })
+    expect(of('superpowers:brainstorming')?.source).toEqual({ kind: 'plugin', plugin: 'superpowers' })
   })
 
   it('distinguishes a skill from a command', async () => {
@@ -89,27 +140,7 @@ describe('listSkills', () => {
     const of = (name: string) => entries.find((entry) => entry.name === name)
     expect(of('browse')?.kind).toBe('skill')
     expect(of('gsd:stats')?.kind).toBe('command')
-  })
-
-  it('falls back to the filename when a file declares no name', async () => {
-    const entries = await listSkills(project)
-    expect(entries.map((entry) => entry.name)).toContain('reapply-patches')
-  })
-
-  it('falls back to the filename when a file declares an empty name', async () => {
-    // A different case from the one above, and the only one that pins the
-    // `||`. With `name:` ABSENT, `frontmatter` returns no `name` key at all,
-    // so `fields.name` is `undefined` with or without the guard — which is
-    // why the missing-name test cannot catch its removal. With `name:`
-    // PRESENT and empty, `frontmatter` returns `name: ''`, `??` would keep
-    // the empty string, and the panel would draw a blank, unclickable row.
-    //
-    // No file on this machine has this today (0 of 109). It is kept because
-    // two reachable shapes produce it — `name: ""`, and a `name: >` fold with
-    // no body — and because a blank row is a worse failure than a wrong one.
-    await write(join(home, 'commands', 'gsd', 'blank-name.md'), '---\nname:\ndescription: Blank.\n---\n')
-    const entries = await listSkills(project)
-    expect(entries.map((entry) => entry.name)).toContain('blank-name')
+    expect(of('browse')?.description).toBe(browseDescription)
   })
 
   it('survives a plugin install with no skills directory', async () => {
@@ -125,7 +156,7 @@ describe('listSkills', () => {
     // that cancels itself out. Not throwing is the whole observable.
     await expect(listSkills(project)).resolves.toBeInstanceOf(Array)
     const entries = await listSkills(project)
-    expect(entries.map((entry) => entry.name)).toContain('brainstorming')
+    expect(entries.map((entry) => entry.name)).toContain('superpowers:brainstorming')
   })
 
   it('returns entries rather than throwing when settings.json is damaged', async () => {
