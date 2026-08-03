@@ -1,3 +1,70 @@
+/**
+ * Tabs, and the tmux sessions behind them, across every way a window can come
+ * and go.
+ *
+ * Eleven tests on the `prcli-e2e-tabs` socket: a second instance exits rather
+ * than opening its own session; several tabs each keep their own scrollback;
+ * a relaunch restores every tab and the one that was active; a restored
+ * background tab keeps its tmux window size instead of settling to 80×24; a
+ * relaunch lands on the tab that closing another one activated, and the saved
+ * `activeTabId` agrees; a session the app never opened is adopted; a renderer
+ * reload reattaches what is open without stranding or duplicating; a `⌃b d`
+ * detach from inside a pane leaves the tab and its session alone; ⌘T, ⌥⌘1 and
+ * ⌘W drive the renderer's own handler; the File and View menu items do what
+ * their accelerators do; and a close button destroys exactly that session.
+ *
+ * **Measured, 2026-08-02, this file run alone** (`npx playwright test
+ * tests/e2e/tabs.spec.ts`): changing `event.code === 'KeyW'` to `'KeyQ'` in
+ * `App.tsx`'s window keydown handler fails one test here — `the keyboard
+ * opens, switches and closes tabs` — and the other ten pass. 1 failed, 10
+ * passed, reproduced on a second independent run. Ten tests passing under it
+ * is the point of recording it: the blast radius inside this file is one
+ * test, so a failure of that test names the ⌘W binding rather than saying the
+ * app broke.
+ *
+ * **One test in THIS FILE, not one in the suite.** Measured separately the
+ * same day: the same `KeyW`→`KeyQ` edit also fails `projects.spec.ts`'s
+ * `a shortcut typed into the rename field does not reach the tab handler`,
+ * which presses ⌘W with a terminal focused. Suite-wide that mutation is two
+ * failures, not one.
+ *
+ * **What this file does NOT see** — read off this file's own text unless a
+ * line says measured or names another file:
+ *
+ * - **anything past one pane in one tab.** Nothing here presses ⌘D and the
+ *   seeded config's `tabs` is always `[]`, so every tab has exactly one pane
+ *   and every group renders exactly one box, whose share renormalises to 1.
+ *   `PaneDivider` is constructed only for `index > 0`
+ *   (`src/renderer/App.tsx:806-807`, read 2026-08-02), so not one is ever
+ *   constructed and the dividers overlay renders with no strips in it. A tab
+ *   here is a pane wearing a tab's name, and the split behaviour the tab bar
+ *   is shared with is invisible to this file. Stated as what renders rather
+ *   than as which branch runs: an earlier version of this line said
+ *   `boxesOfRow` is never reached, and it is — restore builds one tab row per
+ *   live pane, adopted sessions included, so every pane a relaunch or an
+ *   adoption brings back has a row (only a pane opened with `+` during a
+ *   launch is rowless, and only until the next one). Measured in
+ *   `launch.spec.ts` (2026-08-02, `boxesOfRow` mutated to throw: 2 failed, 2
+ *   passed). Reaching it is not coverage of it, which is the point of this
+ *   line — it is only ever reached with a single kid;
+ * - `DeadPane`. No test here kills a session behind the app's back — the
+ *   detach test kills a *client*, not a session — and no test in this suite
+ *   asserts on `dead-`, `pane-dot-`, `pane-restart-` or `pane-dismiss-` at
+ *   all. Measured in `status.spec.ts`, which does kill one: making `DeadPane`
+ *   render `null` left it 10 of 10 green;
+ * - **the OS accelerator layer.** ⌘T/⌘W/⌥⌘1 are dispatched into the window by
+ *   Playwright and the menu items are clicked from inside the main process
+ *   (see `clickMenuItem`). That nothing between the physical keyboard and the
+ *   `window` listener eats a keystroke, and that macOS draws the menu at all,
+ *   are both outside this file;
+ * - **status dots, hooks and the dock badge** — `status.spec.ts`. No test here
+ *   injects a hook event or reads a `dot-` testid, so a tab's colour is never
+ *   asserted on;
+ * - **more than one project.** One project is seeded and it stays selected;
+ *   the sidebar, ⌘1–9 project switching, rename and remove are
+ *   `projects.spec.ts`'s;
+ * - **what a pane's shell printed**, beyond marker strings echoed into it.
+ */
 import { test, expect, _electron as electron, type ElectronApplication } from '@playwright/test'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
