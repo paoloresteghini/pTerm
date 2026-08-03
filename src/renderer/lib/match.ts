@@ -17,13 +17,19 @@ const SEGMENT_BONUS = 8
 /**
  * The most one query character can be charged for the distance it had to skip.
  *
- * **This cap is load-bearing and must stay below `SEGMENT_BONUS`.** Uncapped,
+ * **This cap is load-bearing and must not exceed `SEGMENT_BONUS`.** Uncapped,
  * the skip cost grows with position without limit while the segment bonus is
  * fixed, so a segment start late in a long name loses to a buried match in a
  * short one: `b` in `superpowers:brainstorming` scored -4 against `b` in
- * `aaab` at -3. With the cap, a single-character boundary match scores at
- * least `SEGMENT_BONUS - MAX_GAP_PENALTY` and a buried one at most zero, so
- * the boundary always wins. Raising this to 8 or beyond reintroduces the bug.
+ * `aaab` at -3.
+ *
+ * The invariant, derived rather than guessed at: a buried single-character
+ * match cannot skip fewer than one character (skipping zero would put it at
+ * a boundary instead), so it scores at most `-1`. A boundary match at or
+ * beyond the cap's distance scores at least `SEGMENT_BONUS - MAX_GAP_PENALTY`.
+ * For the boundary to always win, `SEGMENT_BONUS - MAX_GAP_PENALTY` must
+ * exceed `-1`, which holds exactly when `MAX_GAP_PENALTY` does not exceed
+ * `SEGMENT_BONUS`. Raising it past `SEGMENT_BONUS` reintroduces the bug.
  */
 const MAX_GAP_PENALTY = 4
 
@@ -51,7 +57,10 @@ export function scoreEntry(query: string, name: string): number | null {
     const found = haystack.indexOf(character, previous + 1)
     if (found === -1) return null
 
-    // Adjacent to the previous match: `brow` in `browse` beats `b...r...o...w`.
+    // `previous` starts at -1, so this also fires for the first query
+    // character when it matches at index 0: `brow` in `browse` beats
+    // `b...r...o...w`, and it is also why two names that both start with the
+    // query tie on this bonus.
     if (found === previous + 1) score += ADJACENT_BONUS
     // Starts a segment, or starts the name.
     if (found === 0 || BOUNDARY.has(haystack[found - 1] ?? '')) score += SEGMENT_BONUS

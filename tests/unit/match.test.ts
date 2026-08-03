@@ -90,7 +90,12 @@ describe('byName', () => {
   })
 
   it('is a total order: equal lowercase names fall back to the raw name', () => {
-    const sorted = [{ name: 'Ship' }, { name: 'ship' }].sort(byName)
+    // The fixture starts in the wrong order on purpose. `[Ship, ship]` is
+    // already the order the raw-name fallback produces, and `Array.prototype.sort`
+    // has been stable since ES2019, so a no-op fallback would leave that input
+    // unchanged too and this test would pass either way. Starting from
+    // `[ship, Ship]` means only the real fallback can put `Ship` first.
+    const sorted = [{ name: 'ship' }, { name: 'Ship' }].sort(byName)
     expect(sorted.map((entry) => entry.name)).toEqual(['Ship', 'ship'])
   })
 })
@@ -127,10 +132,14 @@ describe('filterEntries', () => {
   })
 
   it('orders by score, not by name, once a query is present', () => {
-    const result = filterEntries('s', entries)
+    // Name order alone would put `a-ship` first. Score puts `ship` first: it
+    // starts with the whole query, so it gets the segment bonus and three
+    // adjacency bonuses that `a-ship` only gets two of, plus a shorter skip
+    // to the first match. `ship` scores 48 against `a-ship`'s 36. The two
+    // orders disagree, which is what lets this test tell them apart.
+    const result = filterEntries('ship', [{ name: 'a-ship' }, { name: 'ship' }])
     expect(result.length).toBeGreaterThan(0)
-    // `ship` and `stats` start a segment; `brainstorming`'s `s` is buried.
-    expect(result[0]?.name).not.toBe('superpowers:brainstorming')
+    expect(result[0]?.name).toBe('ship')
   })
 
   it('breaks a score tie by name, so the order never depends on input order', () => {
@@ -169,11 +178,21 @@ describe('rankSessions', () => {
   })
 
   it('still lets a better score beat a worse state', () => {
-    // Severity is a tie-break, not an override: someone who typed `alpha`
-    // asked for alpha.
-    const result = rankSessions('alpha', sessions)
+    // Severity is a tie-break, not an override: someone who typed `p` asked
+    // for `p`. Neither name matches at index 0, so this pair does not touch
+    // the adjacency bonus at all (it only ever fires on a first-character
+    // match); the score gap is from the segment bonus and skip cost alone.
+    // `x-ping` scores 6, `p` starts a segment right after the hyphen.
+    // `xxxxp` scores -4, its `p` is buried four characters in. Severity runs
+    // the other way: `xxxxp` is crashed (0), `x-ping` is merely idle (4). If
+    // severity were checked before score, the crashed one would win instead.
+    const candidates = [
+      { name: 'x-ping · aaaaaa', severity: 4 },
+      { name: 'xxxxp · bbbbbb', severity: 0 },
+    ]
+    const result = rankSessions('p', candidates)
     expect(result.length).toBeGreaterThan(0)
-    expect(result[0]?.name).toBe('alpha · aaaaaa')
+    expect(result[0]?.name).toBe('x-ping · aaaaaa')
   })
 
   it('drops non-matches like filterEntries does', () => {
