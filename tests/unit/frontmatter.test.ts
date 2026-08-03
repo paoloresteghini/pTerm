@@ -28,8 +28,11 @@ describe('frontmatter', () => {
   })
 
   it('keeps reading keys after a block scalar', () => {
-    const text = '---\ndescription: |\n  folded\nname: kept\n---\n'
-    expect(frontmatter(text).name).toBe('kept')
+    // Asserts the folded value AND the key after it, because asserting only
+    // the later key passes with the fold branch deleted — the indentation
+    // guard skips the continuation lines either way.
+    const text = '---\ndescription: |\n  one\n  two\nname: kept\n---\n'
+    expect(frontmatter(text)).toEqual({ description: 'one two', name: 'kept' })
   })
 
   it('returns nothing for a file with no frontmatter', () => {
