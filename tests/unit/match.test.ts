@@ -8,7 +8,7 @@ describe('scoreEntry', () => {
 
   it('matches characters out of adjacency but in order', () => {
     // `bsm` is a subsequence of `brainstorming`. This is the whole point of a
-    // fuzzy filter: nobody types the middle of a 24-character plugin name.
+    // fuzzy filter: nobody types the middle of a long plugin name.
     expect(scoreEntry('bsm', 'brainstorming')).not.toBeNull()
   })
 
@@ -126,8 +126,8 @@ describe('filterEntries', () => {
   })
 
   it('returns an empty array when nothing matches, rather than everything', () => {
-    // 161 entries means the user will type something that matches nothing.
-    // Falling back to "show all" would be worse than showing none.
+    // A list this size means the user will type something that matches
+    // nothing. Falling back to "show all" would be worse than showing none.
     expect(filterEntries('zzzz', entries)).toEqual([])
   })
 
