@@ -94,13 +94,14 @@ let projectsRoot: string
 let projectCwd: string
 let claudeSettingsDir: string
 let claudeSettingsPath: string
+let claudeHome: string
 
-// Every launch in this file goes through the shared harness, so all four
+// Every launch in this file goes through the shared harness, so all five
 // overrides are set by construction rather than by four copies of one env
 // block that could drift apart — which is how three of the four specs came to
 // be missing PRCLI_CLAUDE_SETTINGS.
 const launch = (): Promise<ElectronApplication> =>
-  launchApp({ socket: SOCKET, configDir, projectsRoot, claudeSettings: claudeSettingsPath, userDataDir })
+  launchApp({ socket: SOCKET, configDir, projectsRoot, claudeSettings: claudeSettingsPath, claudeHome, userDataDir })
 
 /**
  * Write a config holding one project, selected.
@@ -168,11 +169,12 @@ test.beforeEach(async () => {
   projectCwd = await seedProject('scratch', 'Scratch')
   claudeSettingsDir = await mkdtemp(join(tmpdir(), 'prcli-tabs-settings-'))
   claudeSettingsPath = join(claudeSettingsDir, 'settings.json')
+  claudeHome = await mkdtemp(join(tmpdir(), 'prcli-tabs-claude-'))
 })
 
 test.afterEach(async () => {
   await killServer(SOCKET)
-  for (const dir of [userDataDir, configDir, projectsRoot, projectCwd, claudeSettingsDir]) {
+  for (const dir of [userDataDir, configDir, projectsRoot, projectCwd, claudeSettingsDir, claudeHome]) {
     await rm(dir, { recursive: true, force: true })
   }
 })

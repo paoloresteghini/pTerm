@@ -26,14 +26,15 @@ vi.mock('node:child_process', () => ({
 }))
 
 /**
- * Every E2E spec launches the real app, and four env vars are what keep that
+ * Every E2E spec launches the real app, and five env vars are what keep that
  * launch off the developer's actual machine state rather than a directory
  * `rm -rf`'d at the end of the test: `PRCLI_CONFIG_DIR` (the real `~/.prcli`),
  * `PRCLI_PROJECTS_ROOT` (the real `~/Code`), `PRCLI_TMUX_SOCKET` (the
- * developer's default tmux socket), and `PRCLI_CLAUDE_SETTINGS` — read by
- * every live Claude session on the machine, and the one of the four that a
- * spec can omit and still pass every assertion it has, because nothing in
- * the suite ever inspects the real file it would otherwise fall back to.
+ * developer's default tmux socket), `PRCLI_CLAUDE_SETTINGS`, and
+ * `PRCLI_CLAUDE_HOME` — the latter two read by every live Claude session on
+ * the machine, and the two of the five that a spec can omit and still pass
+ * every assertion it has, because nothing in the suite ever inspects the
+ * real files they would otherwise fall back to.
  *
  * Until 2026-08-02 that env block was copy-pasted into all four specs and this
  * guard asked "does every spec set all four?" — three of the four had drifted
@@ -41,10 +42,10 @@ vi.mock('node:child_process', () => ({
  * `tests/e2e/harness.ts`, so the question that keeps the property is a
  * different one, in two halves:
  *
- * 1. **`harness.ts` sets all four.** One place, one assertion.
+ * 1. **`harness.ts` sets all five.** One place, one assertion.
  * 2. **Nothing else under `tests/e2e/` launches Electron on its own.** This is
  *    what replaces the old per-spec token check, and it is the stronger claim:
- *    a caller that goes through `launchApp` inherits all four by construction
+ *    a caller that goes through `launchApp` inherits all five by construction
  *    and needs no token check, while one reaching for `electron.launch` has
  *    stepped around the harness — which is exactly the fifth-spec hazard the
  *    original guard existed to catch. Every `.ts` file in the directory *and
@@ -59,7 +60,7 @@ vi.mock('node:child_process', () => ({
  *    before the filter was widened, 1 failed after. Enumerated rather than
  *    named, so a fifth spec or a new helper is covered the day it lands.
  *
- * A third property needs no test here: `launchApp`'s five options are
+ * A third property needs no test here: `launchApp`'s six options are
  * required, not optional-with-defaults, so `tsc --noEmit` rejects a caller
  * that omits one. A default would restore the hole with better manners.
  *
@@ -89,7 +90,7 @@ vi.mock('node:child_process', () => ({
  * - what the launched app actually receives. The harness assertions read the
  *   arguments, not the main process. That is covered at runtime instead, by
  *   `launch.spec.ts`'s `runs against overridden paths, never the developer's
- *   own`, which reads the four vars back out of the launched main process and
+ *   own`, which reads the five vars back out of the launched main process and
  *   compares them to the temp paths it made.
  */
 const GUARDED_VARS = [
@@ -97,6 +98,7 @@ const GUARDED_VARS = [
   'PRCLI_PROJECTS_ROOT',
   'PRCLI_TMUX_SOCKET',
   'PRCLI_CLAUDE_SETTINGS',
+  'PRCLI_CLAUDE_HOME',
 ]
 
 /** Ways of launching Electron that go around `launchApp` and its env block. */
@@ -250,14 +252,24 @@ function readFlat(path: URL): string {
 }
 
 describe('the E2E suite keeps its hands off the developer\'s real state', () => {
-  it('sets all four env vars in the one place the app is launched from', () => {
+  it('sets all five env vars in the one place the app is launched from', () => {
     const source = readCode(HARNESS)
     // Non-empty first, both of them: a missing or emptied harness.ts, or a
     // GUARDED_VARS somebody trimmed to nothing, would otherwise leave the
     // filter below with nothing to find and pass on an empty array.
     expect(source.trim().length).toBeGreaterThan(0)
-    expect(GUARDED_VARS.length).toBe(4)
+    expect(GUARDED_VARS.length).toBe(5)
     expect(GUARDED_VARS.filter((envVar) => !source.includes(`${envVar}:`))).toEqual([])
+  })
+
+  it('places PRCLI_CLAUDE_HOME under the temp root at the one launch site', () => {
+    // ~/.claude holds 73 skills, 36 commands and the plugin registry that
+    // every live Claude session on this machine reads. The app only ever
+    // reads it, so the failure this prevents is not destruction — it is a
+    // suite whose assertions depend on whatever was installed that week.
+    const harness = readCode(HARNESS)
+    expect(harness).toContain('PRCLI_CLAUDE_HOME: opts.claudeHome')
+    expect(harness).toContain("assertUnderTmp('claudeHome', opts.claudeHome)")
   })
 
   it('launches every E2E file through that harness, never Electron directly', () => {
@@ -457,6 +469,7 @@ const safeOpts = (): LaunchOpts => ({
   configDir: join(tmpdir(), 'prcli-unit-config'),
   projectsRoot: join(tmpdir(), 'prcli-unit-root'),
   claudeSettings: join(tmpdir(), 'prcli-unit-settings', 'settings.json'),
+  claudeHome: join(tmpdir(), 'prcli-unit-claude-home'),
   userDataDir: join(tmpdir(), 'prcli-unit-user'),
 })
 
@@ -465,6 +478,7 @@ const safeOpts = (): LaunchOpts => ({
 const REAL_CONFIG_DIR = join(homedir(), '.prcli')
 const REAL_PROJECTS_ROOT = join(homedir(), 'Code')
 const REAL_CLAUDE_SETTINGS = join(homedir(), '.claude', 'settings.json')
+const REAL_CLAUDE_HOME = join(homedir(), '.claude')
 
 const launchMock = vi.mocked(electron.launch)
 
@@ -477,7 +491,7 @@ describe('the harness rejects a real socket or a real path before it launches an
   // The control. Without it every assertion below would also pass if the
   // harness had been made to reject everything, valid arguments included —
   // which would be a broken harness reported as a safe one.
-  it('launches when the socket and all four paths are throwaway ones', async () => {
+  it('launches when the socket and all five paths are throwaway ones', async () => {
     await launchApp(safeOpts())
     expect(launchMock).toHaveBeenCalledTimes(1)
   })
@@ -499,6 +513,7 @@ describe('the harness rejects a real socket or a real path before it launches an
     ['configDir', { ...safeOpts(), configDir: REAL_CONFIG_DIR }, 'configDir'],
     ['projectsRoot', { ...safeOpts(), projectsRoot: REAL_PROJECTS_ROOT }, 'projectsRoot'],
     ['claudeSettings', { ...safeOpts(), claudeSettings: REAL_CLAUDE_SETTINGS }, 'claudeSettings'],
+    ['claudeHome', { ...safeOpts(), claudeHome: REAL_CLAUDE_HOME }, 'claudeHome'],
     ['userDataDir', { ...safeOpts(), userDataDir: homedir() }, 'userDataDir'],
   ])('refuses a %s outside the temp root', async (_label, opts, named) => {
     await expect(launchApp(opts)).rejects.toThrow(`E2E ${named} must be under`)

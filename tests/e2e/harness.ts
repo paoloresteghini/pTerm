@@ -45,7 +45,7 @@ function assertTestSocket(socket: string): void {
 const TMP_ROOTS = [...new Set([tmpdir(), realpathSync(tmpdir())])]
 
 /**
- * The four path overrides must be throwaway paths, not real ones.
+ * The five path overrides must be throwaway paths, not real ones.
  *
  * The token guard in `tests/unit/e2eSafety.test.ts` proves the vars are *set*;
  * it cannot see what they are set *to*, and a `claudeSettings` pointed at the
@@ -68,14 +68,14 @@ function assertUnderTmp(label: string, value: string): void {
 /**
  * The one place the app is launched from.
  *
- * Every one of the four overrides is REQUIRED, not optional-with-a-default.
+ * Every one of the five overrides is REQUIRED, not optional-with-a-default.
  * Three of the four spec files went without `PRCLI_CLAUDE_SETTINGS` until
  * 2026-08-02, which meant a single added click on `hooks-install` would have
  * rewritten the developer's real ~/.claude/settings.json. A required
  * parameter is the fix; a default would restore the hole with better manners.
  *
  * `tests/unit/e2eSafety.test.ts` guards both halves of that: that this
- * function's `env` names all four vars, and that nothing else under
+ * function's `env` names all five vars, and that nothing else under
  * `tests/e2e/` reaches around it to `electron.launch` on its own.
  *
  * Every override is also checked for *value*, not just presence, before the
@@ -88,12 +88,14 @@ export async function launchApp(opts: {
   configDir: string
   projectsRoot: string
   claudeSettings: string
+  claudeHome: string
   userDataDir: string
 }): Promise<ElectronApplication> {
   assertTestSocket(opts.socket)
   assertUnderTmp('configDir', opts.configDir)
   assertUnderTmp('projectsRoot', opts.projectsRoot)
   assertUnderTmp('claudeSettings', opts.claudeSettings)
+  assertUnderTmp('claudeHome', opts.claudeHome)
   assertUnderTmp('userDataDir', opts.userDataDir)
   return electron.launch({
     args: [
@@ -126,9 +128,14 @@ export async function launchApp(opts: {
       // never open the add-project dialog set it: defending a directory that
       // must not be scanned costs one line.
       PRCLI_PROJECTS_ROOT: opts.projectsRoot,
-      // Read by every live Claude session on this machine, and the one of the
-      // four a spec could omit and still pass every assertion it has.
+      // Read by every live Claude session on this machine, and one of the two
+      // a spec could omit and still pass every assertion it has.
       PRCLI_CLAUDE_SETTINGS: opts.claudeSettings,
+      // Holds 73 skills, 36 commands and the plugin registry that every live
+      // Claude session on this machine reads. Read-only from the app's side,
+      // but a suite resolving against the real one asserts against whatever
+      // was installed that week.
+      PRCLI_CLAUDE_HOME: opts.claudeHome,
     },
   })
 }

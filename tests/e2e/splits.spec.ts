@@ -177,12 +177,13 @@ let projectsRoot: string
 let projectCwd: string
 let claudeSettingsDir: string
 let claudeSettingsPath: string
+let claudeHome: string
 
-// Every launch in this file goes through the shared harness, so all four
+// Every launch in this file goes through the shared harness, so all five
 // overrides are set by construction rather than by another copy of one env
 // block that could drift away from the other specs'.
 const launch = (): Promise<ElectronApplication> =>
-  launchApp({ socket: SOCKET, configDir, projectsRoot, claudeSettings: claudeSettingsPath, userDataDir })
+  launchApp({ socket: SOCKET, configDir, projectsRoot, claudeSettings: claudeSettingsPath, claudeHome, userDataDir })
 
 /**
  * Write a config holding one project, selected.
@@ -369,11 +370,12 @@ test.beforeEach(async () => {
   projectCwd = await seedProject('scratch', 'Scratch')
   claudeSettingsDir = await mkdtemp(join(tmpdir(), 'prcli-splits-settings-'))
   claudeSettingsPath = join(claudeSettingsDir, 'settings.json')
+  claudeHome = await mkdtemp(join(tmpdir(), 'prcli-splits-claude-'))
 })
 
 test.afterEach(async () => {
   await killServer(SOCKET)
-  for (const dir of [userDataDir, configDir, projectsRoot, projectCwd, claudeSettingsDir]) {
+  for (const dir of [userDataDir, configDir, projectsRoot, projectCwd, claudeSettingsDir, claudeHome]) {
     await rm(dir, { recursive: true, force: true })
   }
 })
@@ -443,10 +445,10 @@ test('⌘D on a pane too narrow to halve is refused, and says why', async () => 
   // unique to this file: `launch.spec.ts`'s `runs against overridden paths,
   // never the developer's own` reads `process.env` in the main process the
   // same way. A `launchApp` window-size option was the alternative and is
-  // worse: all five of its options are required rather than
+  // worse: all six of its options are required rather than
   // optional-with-a-default on purpose, and `tests/unit/e2eSafety.test.ts`
   // rests on that — its `refuses a %s outside the temp root` cases feed each of
-  // the four paths, and its socket cases the fifth, a real value one at a time
+  // the five paths, and its socket cases the sixth, a real value one at a time
   // and require the throw to beat the launch. Adding an optional option is a
   // step back towards the defaults that argument exists to keep out.
   //

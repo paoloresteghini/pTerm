@@ -7,9 +7,9 @@
  * back; a quit and relaunch reattaches the same session with its scrollback;
  * closing the window and reopening it through macOS `activate` reattaches
  * rather than replacing, leaving exactly one `prcli-` session on the socket;
- * and a fourth that opens no tmux session at all — it reads the four `PRCLI_*`
+ * and a fourth that opens no tmux session at all — it reads the five `PRCLI_*`
  * env vars back out of the launched app's own `process.env` and asserts each
- * equals the exact value this file handed `launchApp` (three temp paths made
+ * equals the exact value this file handed `launchApp` (four temp paths made
  * in `beforeEach`, plus the `SOCKET` const), not merely that it is set to
  * something.
  *
@@ -82,13 +82,14 @@ let projectsRoot: string
 let projectCwd: string
 let claudeSettingsDir: string
 let claudeSettingsPath: string
+let claudeHome: string
 
-// Every launch in this file goes through the shared harness, so all four
+// Every launch in this file goes through the shared harness, so all five
 // overrides are set by construction rather than by four copies of one env
 // block that could drift apart — which is how three of the four specs came to
 // be missing PRCLI_CLAUDE_SETTINGS.
 const launch = (): Promise<ElectronApplication> =>
-  launchApp({ socket: SOCKET, configDir, projectsRoot, claudeSettings: claudeSettingsPath, userDataDir })
+  launchApp({ socket: SOCKET, configDir, projectsRoot, claudeSettings: claudeSettingsPath, claudeHome, userDataDir })
 
 /**
  * Write a config holding one project, selected.
@@ -122,13 +123,14 @@ test.beforeEach(async () => {
   projectCwd = await seedProject('scratch', 'Scratch')
   claudeSettingsDir = await mkdtemp(join(tmpdir(), 'prcli-e2e-settings-'))
   claudeSettingsPath = join(claudeSettingsDir, 'settings.json')
+  claudeHome = await mkdtemp(join(tmpdir(), 'prcli-e2e-claude-'))
 })
 
 test.afterEach(async () => {
   // Destroys the test tmux server, taking every session this file created
   // with it — and only those, because of the `-L`.
   await killServer(SOCKET)
-  for (const dir of [userDataDir, configDir, projectsRoot, projectCwd, claudeSettingsDir]) {
+  for (const dir of [userDataDir, configDir, projectsRoot, projectCwd, claudeSettingsDir, claudeHome]) {
     await rm(dir, { recursive: true, force: true })
   }
 })
@@ -211,7 +213,7 @@ test('reattaches the same session after closing and reopening the window', async
 })
 
 // tests/unit/e2eSafety.test.ts checks that `harness.ts`'s source text sets all
-// four PRCLI_* vars, and that no spec launches Electron around it — but a var
+// five PRCLI_* vars, and that no spec launches Electron around it — but a var
 // pointing at the wrong path satisfies that check just as well as a var
 // pointing at the right one, and neither half of it can see what this file
 // passes to `launchApp`. Only a runtime read from inside the launched app can
@@ -235,6 +237,7 @@ test('runs against overridden paths, never the developer’s own', async () => {
     config: process.env.PRCLI_CONFIG_DIR,
     projects: process.env.PRCLI_PROJECTS_ROOT,
     settings: process.env.PRCLI_CLAUDE_SETTINGS,
+    claudeHome: process.env.PRCLI_CLAUDE_HOME,
     socket: process.env.PRCLI_TMUX_SOCKET,
   }))
   // Asserted as "is the temp path we made", not as "is set": an override
@@ -242,6 +245,7 @@ test('runs against overridden paths, never the developer’s own', async () => {
   expect(seen.config).toBe(configDir)
   expect(seen.projects).toBe(projectsRoot)
   expect(seen.settings).toBe(claudeSettingsPath)
+  expect(seen.claudeHome).toBe(claudeHome)
   expect(seen.socket).toBe(SOCKET)
   await app.close()
 })

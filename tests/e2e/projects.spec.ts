@@ -88,8 +88,9 @@ let configDir: string
 let projectsRoot: string
 let claudeSettingsDir: string
 let claudeSettingsPath: string
+let claudeHome: string
 
-// Every launch in this file goes through the shared harness, so all four
+// Every launch in this file goes through the shared harness, so all five
 // overrides are set by construction rather than by four copies of one env
 // block that could drift apart — which is how three of the four specs came to
 // be missing PRCLI_CLAUDE_SETTINGS.
@@ -121,7 +122,7 @@ let claudeSettingsPath: string
 // longer hang. `retries: 0` (`playwright.config.ts`) does not retry it; that is
 // deliberate, not an oversight — see that file's comment.
 const launch = (): Promise<ElectronApplication> =>
-  launchApp({ socket: SOCKET, configDir, projectsRoot, claudeSettings: claudeSettingsPath, userDataDir })
+  launchApp({ socket: SOCKET, configDir, projectsRoot, claudeSettings: claudeSettingsPath, claudeHome, userDataDir })
 
 /** A directory under the scan root that discovery will offer as a candidate. */
 async function candidate(name: string, manifest?: object): Promise<string> {
@@ -146,11 +147,12 @@ test.beforeEach(async () => {
   projectsRoot = await mkdtemp(join(tmpdir(), 'prcli-proj-root-'))
   claudeSettingsDir = await mkdtemp(join(tmpdir(), 'prcli-proj-settings-'))
   claudeSettingsPath = join(claudeSettingsDir, 'settings.json')
+  claudeHome = await mkdtemp(join(tmpdir(), 'prcli-proj-claude-'))
 })
 
 test.afterEach(async () => {
   await killServer(SOCKET)
-  for (const dir of [userDataDir, configDir, projectsRoot, claudeSettingsDir]) {
+  for (const dir of [userDataDir, configDir, projectsRoot, claudeSettingsDir, claudeHome]) {
     await rm(dir, { recursive: true, force: true })
   }
 })
