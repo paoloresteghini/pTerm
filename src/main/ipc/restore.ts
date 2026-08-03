@@ -446,7 +446,7 @@ export async function restoreWorkspace(
       null
 
     await store.write({
-      version: 5,
+      version: 6,
       // Only real projects are persisted; the Unsorted row is synthetic.
       // Matched by id rather than by index: `describeProjects` returns one row
       // per project today, but adding a `filter` or a `continue` to it would

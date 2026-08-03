@@ -11,7 +11,7 @@ import {
 import { DEFAULT_NOTIFICATIONS, type PrcliConfig } from '../../src/main/state/store'
 
 const EMPTY: PrcliConfig = {
-  version: 5,
+  version: 6,
   projects: [],
   activeProjectId: null,
   panes: [],
