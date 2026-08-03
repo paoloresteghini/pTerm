@@ -464,6 +464,16 @@ export function App() {
     dispatch({ type: 'dismissed', id })
   }, [])
 
+  const renameTab = useCallback(
+    (id: string, title: string) => {
+      window.prcli
+        .renameTab(id, title)
+        .then((panes) => dispatch({ type: 'renamedTab', panes }))
+        .catch(fail)
+    },
+    [fail],
+  )
+
   const muted = useCallback(
     (projectId: string) => (notifications ? projectMuted(notifications.rules, projectId) : false),
     [notifications],
@@ -682,6 +692,7 @@ export function App() {
             onRestart={restartTab}
             onDismiss={dismissTab}
             onNew={openTab}
+            onRename={renameTab}
             canOpen={canOpen}
           />
           {error ? (

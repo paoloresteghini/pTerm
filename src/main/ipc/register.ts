@@ -34,6 +34,7 @@ import {
   rescaledClaims,
   type Claim,
 } from './shares'
+import { attachTitles } from './titles'
 import { isDirectory } from '../fsutil'
 import { scanCandidates } from '../projects/discovery'
 import { hookPaths, installHooks, readHooksState, uninstallHooks } from '../hooks/install'
@@ -858,7 +859,30 @@ export function registerIpc(
       ]
       const updated: PrcliConfig = { ...config, panes }
       await store.write(updated)
-      return { projects: await described(updated), panes: moved }
+      // So a tab does not lose its name by being filed into another project:
+      // `moved` came out of `manager.moveTabToProject`, which renames tmux
+      // sessions and knows nothing of titles.
+      return { projects: await described(updated), panes: attachTitles(moved, config.panes) }
+    }),
+  )
+
+  ipcMain.handle(CHANNELS.renameTab, (_event, id: string, title: string) =>
+    serialise(async () => {
+      const config = await store.read()
+      const trimmed = title.trim()
+      const panes = config.panes.map((row) =>
+        row.id === id
+          ? // An empty name is how a title is removed, so it is stored as
+            // absent rather than as "": one representation on disk, and
+            // `labelOfPane` never has to decide between them.
+            { ...row, title: trimmed === '' ? undefined : trimmed }
+          : row,
+      )
+      await store.write({ ...config, panes })
+      // `manager.list()` is synchronous and returns `PaneRecord[]`, whose
+      // shape `TabDescriptor` is a subset of; `CHANNELS.list`'s own handler
+      // above already returns it as descriptors.
+      return attachTitles(manager.list(), panes)
     }),
   )
 

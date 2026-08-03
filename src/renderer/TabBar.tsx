@@ -24,6 +24,8 @@ export function TabBar({
   onRestart: (tab: TabDescriptor) => void
   onDismiss: (id: string) => void
   onNew: () => void
+  /** Not yet destructured or called here; wired for Task 4, which renders the edit UI. */
+  onRename: (id: string, title: string) => void
   canOpen: boolean
 }) {
   return (

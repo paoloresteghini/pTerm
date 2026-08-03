@@ -4,6 +4,7 @@ import type { ConfigStore, ProjectRecord, TabRow } from '../state/store'
 import { readManifest, mergePresets } from '../projects/manifest'
 import { isDirectory } from '../fsutil'
 import { sharesAroundClaims, claimFor, tombstonesOf, inLiveFrame, type Claim } from './shares'
+import { attachTitles } from './titles'
 // One definition, shared with the renderer — `TabDescriptor` and `PaneRecord`
 // are the same shape, and duplicating the types here would let them drift.
 import {
@@ -474,6 +475,9 @@ export async function restoreWorkspace(
     // used to be (finding I5): `store.write` above just took the same
     // `tabRows`, and a caller laying out a split needs exactly what was
     // written, not a second `store.read()` to get it back.
-    return { projects, panes, tabs: tabRows, activeProjectId }
+    //
+    // Titles are put back here because `panes` came out of `manager.open()`
+    // above, which deals in tmux and carries none.
+    return { projects, panes: attachTitles(panes, saved.panes), tabs: tabRows, activeProjectId }
   })
 }

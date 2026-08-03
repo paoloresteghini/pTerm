@@ -24,6 +24,7 @@ const api: PrcliApi = {
   pickFolder: () => ipcRenderer.invoke(CHANNELS.pickFolder),
   moveTabToProject: (tabId, projectId) =>
     ipcRenderer.invoke(CHANNELS.moveTabToProject, tabId, projectId),
+  renameTab: (id, title) => ipcRenderer.invoke(CHANNELS.renameTab, id, title),
   input: (id, data) => ipcRenderer.send(CHANNELS.input, id, data),
   resize: (id, cols, rows) => ipcRenderer.send(CHANNELS.resize, id, cols, rows),
   detach: (id) => ipcRenderer.send(CHANNELS.detach, id),

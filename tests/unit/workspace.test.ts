@@ -1906,3 +1906,25 @@ describe('labelOfPane', () => {
     expect(labelOfPane({ ...tab('a'.repeat(16), 'lumio'), title: '' })).toBe('lumio · aaaaaa')
   })
 })
+
+describe('renamedTab', () => {
+  // Replacing the array wholesale is the same discipline `movedTab` follows:
+  // main answers with the whole list, so a mutation and a relaunch cannot
+  // disagree about what is on screen.
+  it('replaces the pane list and leaves tabs and layout alone', () => {
+    const before: WorkspaceState = {
+      ...INITIAL_WORKSPACE_STATE,
+      projects: [project('p1', 'lumio')],
+      panes: [tab('aaa', 'lumio'), tab('bbb', 'lumio')],
+      tabs: [tabRow('aaa', ['aaa']), tabRow('bbb', ['bbb'])],
+      activeProjectId: 'p1',
+    }
+    const next = workspaceReducer(before, {
+      type: 'renamedTab',
+      panes: [{ ...tab('aaa', 'lumio'), title: 'payments api' }, tab('bbb', 'lumio')],
+    })
+    expect(next.panes.map((pane) => pane.title)).toEqual(['payments api', undefined])
+    expect(next.tabs).toEqual(before.tabs)
+    expect(next.activeProjectId).toBe('p1')
+  })
+})

@@ -70,6 +70,7 @@ export type WorkspaceAction =
   | { type: 'activatedTab'; id: string }
   | { type: 'activatedProject'; id: string }
   | { type: 'movedTab'; panes: TabDescriptor[]; projects: ProjectDescriptor[] }
+  | { type: 'renamedTab'; panes: TabDescriptor[] }
   | { type: 'statusSnapshot'; status: Record<string, TabState> }
   | { type: 'statusChanged'; tabId: string; state: TabState | null }
   | { type: 'died'; id: string; code: number }
@@ -1061,6 +1062,12 @@ export function workspaceReducer(
             null),
       }
     }
+
+    case 'renamedTab':
+      // Only the panes: a name changes no tab's layout, order or selection,
+      // and main's reply carries the whole list for the same reason
+      // `movedTab`'s does.
+      return { ...state, panes: action.panes }
 
     case 'statusSnapshot':
       return { ...state, status: action.status }
