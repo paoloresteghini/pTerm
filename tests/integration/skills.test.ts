@@ -28,8 +28,8 @@ beforeEach(async () => {
   browseDescription =
     /description: (.+)/.exec(await readFile(join(home, 'skills', 'browse', 'SKILL.md'), 'utf8'))?.[1] ?? ''
   await write(join(home, 'commands', 'gsd', 'stats.md'), '---\nname: gsd:stats\ndescription: Show stats.\n---\n')
-  // The one command file in this fixture that declares no name: nothing to
-  // fall back from, so the path is the only source of the name.
+  // Declares no name: nothing to fall back from, so the path is the only
+  // source of the name.
   await write(join(home, 'commands', 'gsd', 'reapply-patches.md'), '---\ndescription: Reapply.\n---\n')
   await write(join(project, '.claude', 'commands', 'ship.md'), '---\nname: ship\ndescription: Ship it.\n---\n')
 
@@ -102,9 +102,10 @@ describe('listSkills', () => {
   })
 
   it('names a command after its path below the root, not its own declaration', async () => {
-    // `commands/gsd/stats.md` declares `gsd:stats` and happens to agree. The
-    // file with no `name:` at all is what proves the path is the source: it
-    // must come back namespaced, not as a bare filename.
+    // `commands/gsd/stats.md` declares `gsd:stats` and happens to agree.
+    // `reapply-patches.md`, which declares no name at all, is what proves the
+    // path is the source: it must come back namespaced, not as a bare
+    // filename.
     const entries = await listSkills(project)
     expect(entries.length).toBeGreaterThan(0)
     expect(entries.map((entry) => entry.name)).toContain('gsd:reapply-patches')
