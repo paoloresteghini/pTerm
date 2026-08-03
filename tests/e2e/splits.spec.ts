@@ -659,9 +659,19 @@ test('dragging the divider moves the seam, reflows tmux, and is written down on 
   // poll below and nothing else in the file. `splitTab` puts `window-size
   // manual` on every pane's window and a manual window ignores its client
   // outright (see that method's own comment), so with the push gone the width
-  // freezes — and it froze at 106, the PRE-split width, exactly the too-high
-  // baseline described above. The poll then timed out on `106 > 106` rather
-  // than passing. So the failure direction is measured now, not just argued.
+  // freezes at whatever it held when the split made the window manual — a
+  // PRE-split width, which is exactly the too-high baseline described above.
+  // The poll then timed out on `106 > 106` rather than passing. So the failure
+  // direction is measured now, not just argued.
+  //
+  // 106 there against the `~104` recorded above, and the two are not the same
+  // reading: 104 is an approximate live figure taken 2026-08-02 from an
+  // unmutated run, where the client fit does reach the window, while 106 is
+  // the exact frozen value on 2026-08-03 with the push deleted. Two columns
+  // apart, and that difference is NOT explained by anything measured here — it
+  // is left stated rather than reconciled, because neither number is load
+  // bearing: the claim both serve is only that a pre-split reading is roughly
+  // twice the 52-column post-split baseline, and 104 and 106 serve it equally.
 
   await window.mouse.move(seamMiddle, seamBefore.y + seamBefore.height / 2)
   await window.mouse.down()
