@@ -132,11 +132,9 @@ describe('filterEntries', () => {
   })
 
   it('orders by score, not by name, once a query is present', () => {
-    // Name order alone would put `a-ship` first. Score puts `ship` first: it
-    // starts with the whole query, so it gets the segment bonus and three
-    // adjacency bonuses that `a-ship` only gets two of, plus a shorter skip
-    // to the first match. `ship` scores 48 against `a-ship`'s 36. The two
-    // orders disagree, which is what lets this test tell them apart.
+    // Name order alone would put `a-ship` first. `ship` scores 48 against
+    // `a-ship`'s 36, so score puts `ship` first instead: the two orders
+    // disagree, which is what lets this test tell them apart.
     const result = filterEntries('ship', [{ name: 'a-ship' }, { name: 'ship' }])
     expect(result.length).toBeGreaterThan(0)
     expect(result[0]?.name).toBe('ship')
@@ -179,13 +177,15 @@ describe('rankSessions', () => {
 
   it('still lets a better score beat a worse state', () => {
     // Severity is a tie-break, not an override: someone who typed `p` asked
-    // for `p`. Neither name matches at index 0, so this pair does not touch
-    // the adjacency bonus at all (it only ever fires on a first-character
-    // match); the score gap is from the segment bonus and skip cost alone.
-    // `x-ping` scores 6, `p` starts a segment right after the hyphen.
-    // `xxxxp` scores -4, its `p` is buried four characters in. Severity runs
-    // the other way: `xxxxp` is crashed (0), `x-ping` is merely idle (4). If
-    // severity were checked before score, the crashed one would win instead.
+    // for `p`. The query is one character, so the only adjacency it can ever
+    // claim is to the sentinel at index -1, which requires a match at index
+    // 0; neither `x-ping` nor `xxxxp` matches there, so this pair does not
+    // touch the adjacency bonus at all, and the score gap is from the
+    // segment bonus and skip cost alone. `x-ping` scores 6, `p` starts a
+    // segment right after the hyphen. `xxxxp` scores -4, its `p` is buried
+    // four characters in. Severity runs the other way: `xxxxp` is crashed
+    // (0), `x-ping` is merely idle (4). If severity were checked before
+    // score, the crashed one would win instead.
     const candidates = [
       { name: 'x-ping · aaaaaa', severity: 4 },
       { name: 'xxxxp · bbbbbb', severity: 0 },
