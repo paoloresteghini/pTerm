@@ -21,7 +21,7 @@
  * `PaneDivider.tsx` as TEXT — vitest runs `environment: 'node'`, so it has no
  * DOM and no layout — and its own header lists what that cannot see. Three of
  * those items are now here. **Measured 2026-08-02**, two mutations that leave
- * `dividers.test.ts` 11 of 11 green while visibly breaking the app: `App.tsx`'s
+ * `dividers.test.ts` 12 of 12 green while visibly breaking the app: `App.tsx`'s
  * `slice(0, index)` becoming `slice(0, index - 1)`, and `PaneDivider`'s
  * `${offset * 100}%` becoming a constant `0%`. Both fail this file, on the seam
  * placement assertion, by 423.5 pixels.
@@ -122,7 +122,7 @@
  *   gone stale;
  * - **`grabPane`'s three refusal guards, as a user gesture.** `grabFor` returns
  *   null on a missing pair, on `boxes.length !== row.layout.kids.length` and on
- *   either identity check (`workspace.ts:430-435`). All three are pinned by
+ *   either identity check (`workspace.ts:432-435`). All three are pinned by
  *   `workspace.test.ts`; nothing here drives a pointer into one. The
  *   drag-on-a-tombstone test asserts the OPPOSITE of the second — that a
  *   tombstoned kid keeps the row's length, so the guard does not fire;
@@ -585,10 +585,27 @@ test('dragging the divider moves the seam, reflows tmux, and is written down on 
   // edge: `PaneDivider` measures its travel from the clientX of the pointerdown
   // (`PaneDivider.tsx:81,92`), so a drag started on a MISPLACED strip still
   // reports the right delta and still moves the right pair. Every assertion
-  // below it would pass. Measured 2026-08-02: both `App.tsx`'s `slice(0, index)`
-  // becoming `slice(0, index - 1)` and `PaneDivider`'s `${offset * 100}%`
-  // becoming a constant `0%` fail HERE and nowhere else in this file, and
-  // `dividers.test.ts` stays 11/11 green under both.
+  // below it would pass. Measured 2026-08-02, and the two mutations do NOT
+  // behave alike — the earlier claim that both failed "here and nowhere else"
+  // was true of the first only:
+  //
+  //   - `App.tsx`'s `slice(0, index)` becoming `slice(0, index - 1)` fails HERE
+  //     and nowhere else in this file (1 failed, 6 passed). It changes `offset`
+  //     alone, so with this line removed the mutation is invisible to every
+  //     other assertion in the file;
+  //   - `PaneDivider`'s `${offset * 100}%` becoming a constant `0%` fails here
+  //     AND both three-pane tests (3 failed, 4 passed), because at three panes
+  //     it also makes the gesture grab the wrong seam. Measured: with every
+  //     strip at `0%` the two dividers report the SAME x (212.5 and 212.5,
+  //     stacked on the tab's leading edge), so `.first()` — which correctly
+  //     names the first strip — hands back coordinates that BOTH strips
+  //     occupy, and the press is hit-tested to the one painted last. Siblings
+  //     at equal `z-20` paint in DOM order, and `App.tsx` emits them in kid
+  //     order, so the second seam takes it. Measured deltas on the three-pane
+  //     conservation test: `dA +0.008`, `dB -42.3`, `dC +42.3` — the first pane
+  //     did not move at all and the `b|c` pair did.
+  //
+  // `dividers.test.ts` stays 12/12 green under both.
   //
   // 6px, derived rather than guessed and then measured: `PaneDivider`'s own
   // comment bounds the seam error at `n − 1.5` pixels — half a pixel for the two
@@ -603,6 +620,21 @@ test('dragging the divider moves the seam, reflows tmux, and is written down on 
   // reading that failed to parse would turn the reflow poll into a guaranteed
   // timeout wearing the costume of a failed assertion.
   expect(Number.isFinite(colsBefore)).toBe(true)
+  // This baseline is the POST-SPLIT width, and that is measured rather than
+  // assumed — nothing in `splitTabInto` waits for the reflow, which travels
+  // `Terminal.tsx`'s ResizeObserver -> IPC -> `resize-window -x` and is not what
+  // either of that helper's polls is waiting on. Measured 2026-08-02: 52 columns
+  // at this read and still 52 after a 3000ms settle, against ~104 for the same
+  // pane before the split and 75 after the drag below. So the reflow has already
+  // landed here, and the poll is not accidentally comparing against a pre-split
+  // reading.
+  //
+  // It is measured, not enforced, and the failure direction is why that is
+  // tolerable: a baseline that had NOT caught up would be too HIGH (the whole
+  // tab rather than half of it), and the poll below would then time out rather
+  // than pass. A lagging reflow makes this test fail loudly; it cannot make it
+  // pass silently. This is also the one assertion in the file with no A/B behind
+  // it — no mutation run here has failed the reflow poll on its own.
 
   await window.mouse.move(seamMiddle, seamBefore.y + seamBefore.height / 2)
   await window.mouse.down()
@@ -701,7 +733,8 @@ test('a drag stops at the floor, and the same gesture reversed reopens the pane'
   await window.mouse.move(seam.x + seam.width / 2, axis)
   await window.mouse.down()
   // Far past the right-hand pane's floor. `grabFor` derives that floor in CELLS
-  // — `minRatioFor(MIN_PANE_COLS, gridCells / low.share)`, `workspace.ts:446` —
+  // — `minRatioFor(MIN_PANE_COLS, gridCells / low.share)`, the `axisCells`
+  // division at `workspace.ts:446` and the call at `workspace.ts:448` —
   // so it is not a pixel fraction this test can compute, and the gesture is
   // simply shoved most of the way across the tab instead.
   await window.mouse.move(seam.x + rightBefore.width * 2, axis)
@@ -886,9 +919,17 @@ test('a drag on a tab holding a tombstone is kept, and the tombstone keeps its n
   const deadDragged = await paneBox(window, dead)
   expect(deadDragged.width).toBeGreaterThan(deadBefore.width + 60)
 
-  // And what main wrote is what is on screen, in main's own frame. Checked
-  // against the two live boxes rather than against a constant, which makes it
-  // window-size independent AND makes it fail on a drag that was discarded: the
+  // And what main wrote is what is on screen, re-projected onto the live pair.
+  //
+  // Less independent than "main's own frame" would suggest, and worth saying so:
+  // both sides are the same projection of the same renderer vector, one via
+  // `routeShares` and one via the flex basis, so this is nearer an identity than
+  // a cross-check of two separately-derived numbers. What it does discriminate
+  // is a row that is STALE or was discarded, and a routing that paired shares by
+  // index rather than by name — which is exactly what it is here for.
+  //
+  // Checked against the two live boxes rather than against a constant, which
+  // makes it window-size independent AND makes it fail on a discarded drag: the
   // pre-drag row projects to 0.5/(0.5+0.25) = 0.667, the dragged one to about
   // 0.55, and 12 pixels of drag either way moves this further than the
   // tolerance. 0.01 is a guess bounded by two real sources of error — `percent()`
