@@ -34,6 +34,7 @@ export const CHANNELS = {
   uninstallHooks: 'prcli:uninstallHooks',
   menuCommand: 'prcli:menuCommand',
   setLayout: 'prcli:setLayout',
+  skills: 'prcli:skills',
 } as const
 
 /**
@@ -464,6 +465,13 @@ export interface PrcliApi {
   installHooks(): Promise<HooksState>
   /** Removes only PRCLI's own hook groups, restoring the file it found. */
   uninstallHooks(): Promise<HooksState>
+  /**
+   * Every skill and command available to the project at `projectCwd`.
+   *
+   * Read fresh on each call rather than cached: the panel and the palette
+   * both call this on open, and a skill written a minute ago should be there.
+   */
+  skills(projectCwd: string): Promise<SkillEntry[]>
   /**
    * Persist a tab's ratios after a drag. Fire-and-forget: the renderer already
    * has the layout on screen, and a failed write costs a ratio, not a session.

@@ -38,6 +38,7 @@ import { isDirectory } from '../fsutil'
 import { scanCandidates } from '../projects/discovery'
 import { hookPaths, installHooks, readHooksState, uninstallHooks } from '../hooks/install'
 import { drainSpool } from '../hooks/spool'
+import { listSkills } from '../skills/scan'
 import {
   addProject,
   projectForSlug,
@@ -1238,4 +1239,11 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.hooksState, () => readHooksState())
   ipcMain.handle(CHANNELS.installHooks, () => installHooks())
   ipcMain.handle(CHANNELS.uninstallHooks, () => uninstallHooks())
+
+  // Deliberately not inside `serialise`: this reads `~/.claude`, never PRCLI's
+  // own config file, so it has nothing to serialise against — the same
+  // reasoning the hooks handlers just above are registered under. Going
+  // through that queue would add a deadlock risk for a panel the user is
+  // looking straight at, and buy nothing.
+  ipcMain.handle(CHANNELS.skills, (_event, projectCwd: string) => listSkills(projectCwd))
 }

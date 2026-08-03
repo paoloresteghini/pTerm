@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { listSkills } from '../../src/main/skills/scan'
@@ -140,5 +140,25 @@ describe('listSkills', () => {
   it('returns an empty list rather than throwing when nothing exists', async () => {
     await rm(home, { recursive: true, force: true })
     await expect(listSkills(join(root, 'nowhere'))).resolves.toEqual([])
+  })
+})
+
+describe('the skills handler', () => {
+  it('is registered on the channel the preload bridge invokes', async () => {
+    // `register.ts` needs an Electron `ipcMain` and a real SessionManager to
+    // import, neither of which exists under vitest's node environment. What
+    // is checkable — and what actually breaks — is that the three sides agree
+    // on one channel name and one method name. A grep is a poor test; it is
+    // better than the nothing otherwise on offer, and it is the same trade
+    // `shortcuts.test.ts` and `appLayout.test.ts` already make here.
+    const [shared, main, bridge] = await Promise.all([
+      readFile('src/shared/ipc.ts', 'utf8'),
+      readFile('src/main/ipc/register.ts', 'utf8'),
+      readFile('src/preload/index.ts', 'utf8'),
+    ])
+    expect(shared).toContain("skills: 'prcli:skills'")
+    expect(shared).toMatch(/skills\(projectCwd: string\): Promise<SkillEntry\[\]>/)
+    expect(main).toContain('ipcMain.handle(CHANNELS.skills')
+    expect(bridge).toContain('ipcRenderer.invoke(CHANNELS.skills, projectCwd)')
   })
 })
