@@ -130,7 +130,7 @@ describe('scoreEntry', () => {
 
   it('matches characters out of adjacency but in order', () => {
     // `bsm` is a subsequence of `brainstorming`. This is the whole point of a
-    // fuzzy filter: nobody types the middle of a 24-character plugin name.
+    // fuzzy filter: nobody types the middle of a long plugin name.
     expect(scoreEntry('bsm', 'brainstorming')).not.toBeNull()
   })
 
@@ -243,7 +243,7 @@ describe('filterEntries', () => {
   })
 
   it('returns an empty array when nothing matches, rather than everything', () => {
-    // 161 entries means the user will type something that matches nothing.
+    // A list this size means the user will type something that matches nothing.
     // Falling back to "show all" would be worse than showing none.
     expect(filterEntries('zzzz', entries)).toEqual([])
   })
@@ -363,7 +363,7 @@ const MAX_GAP_PENALTY = 4
  * The walk is greedy, taking the earliest candidate for each query character
  * rather than searching for the best overall alignment. That is not optimal
  * scoring, and it is deliberate: it is linear, it is deterministic, and the
- * alternative buys nothing a user of a 161-row list would notice.
+ * alternative buys nothing a user of a list this size would notice.
  */
 export function scoreEntry(query: string, name: string): number | null {
   const needle = query.toLowerCase()
@@ -659,7 +659,7 @@ export function RightPanel({
         ) : (
           matched.map((entry) => (
             // Keyed on source and kind as well as name. Name alone is unique
-            // across the 161 entries measured today, but nothing makes it so:
+            // across today's entries, but nothing makes it so:
             // a skill directory `foo/` and a command `foo.md` both yield `foo`.
             <button
               key={`${entry.kind}:${entry.source.kind}:${entry.name}`}
@@ -1096,7 +1096,7 @@ export function CommandPalette({
   }, [open, projectCwd])
 
   const matchedSessions = rankSessions(query, sessions)
-  // Empty query shows sessions only. 161 actions ahead of the twelve things
+  // Empty query shows sessions only. Every action ahead of the dozen things
   // the user switches between would bury the switcher this app is about.
   const matchedActions = query.length === 0 ? [] : filterEntries(query, skills)
 
