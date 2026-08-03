@@ -835,7 +835,16 @@ export function App() {
         </div>
 
         {panelOpen ? (
-          <RightPanel project={project} onRun={(command, type) => launch(command, type)} />
+          <RightPanel
+            project={project}
+            onRun={(command, type) => launch(command, type)}
+            // No trailing `\r`: this types the invocation and leaves the user
+            // to decide, per the spec. A submitted `/name` would run a skill
+            // nobody had finished choosing.
+            onInsert={(name) => {
+              if (activePaneId) window.prcli.input(activePaneId, `/${name}`)
+            }}
+          />
         ) : null}
 
         <AddProjectDialog
