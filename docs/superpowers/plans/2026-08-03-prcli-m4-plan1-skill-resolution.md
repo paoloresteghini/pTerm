@@ -695,10 +695,18 @@ describe('listSkills', () => {
   })
 
   it('survives a plugin install with no skills directory', async () => {
+    // `bare` is enabled and resolves to a real installPath with no `skills/`
+    // inside it — 12 of the 25 real installs are like this. The premise is
+    // load-bearing in the only way that matters here: with `listDir`'s catch
+    // removed this rejects, and with `bare` removed from the fixture there is
+    // no missing directory left to reject on.
+    //
+    // Note what is deliberately NOT asserted: that no entry carries
+    // `plugin: 'bare'`. That would be true with the handling broken, with the
+    // handling absent, and with `bare` deleted from the fixture — a control
+    // that cancels itself out. Not throwing is the whole observable.
+    await expect(listSkills(project)).resolves.toBeInstanceOf(Array)
     const entries = await listSkills(project)
-    // The assertion is that the other entries are still here, not that some
-    // internal call was skipped: `bare` contributes nothing and everything
-    // else is unaffected.
     expect(entries.map((entry) => entry.name)).toContain('brainstorming')
   })
 
