@@ -42,17 +42,23 @@ This plan was drafted against `bf65c26` and reviewed against `5ba3abf`. Four of 
 
 Ten further defects were found in the plan's own snippets. They are corrected at their tasks and indexed as **D1–D10** in the Self-review, below.
 
-## Flagged for Paolo — decided by nobody but him
+## Flagged for Paolo — RULED 2026-08-02 (night), under standing delegation
 
-Five things in this revision would have changed what the plan is *for*, so they are marked and left open rather than resolved. Each is argued in full where it lives; this is only the index.
+Paolo delegated these before sleeping: *"continue through the night making all the decisions. You are in charge."* Each is ruled below with its reasoning, so any of them can be overturned on sight rather than re-derived. Tasks 1–4 are merged (`d080555`) and needed none of these.
 
-1. **The conservation assertion — add a three-pane drag, or drop the recommendation.** Controller review item 2. As written it asserts nothing on a two-pane row and only bites at three or more panes, which this plan declines. Both options are laid out with their costs; neither is chosen. → *Controller review, item 2.*
-2. **How to shrink the window for the ⌘D-refusal test.** A main-process `setSize` reach-in through `app.evaluate`, or a `launchApp` option that touches the harness Task 3 just froze. Pick one. → *Task 6, Step 3.*
-3. **Two panes or three for the tombstone drag**, and whether a two-pane row with one tombstone presents a grabbable divider at all — untraced. → *Task 8, Step 3.*
-4. **Whether `claudeSettingsPath()` should refuse its `homedir()` fallback under a test env.** The stronger fix, and a **product change** this plan is otherwise scoped not to make. → *Controller review, item 3.*
-5. **Whether M2c 2c's CT-2 is still a live defect.** CT-1 is fixed. CT-2 I did not confirm either way, and the closing paragraph of the controller review turned on both. → *end of Controller review.*
+1. **The conservation assertion — RULED: add it, as a dedicated three-pane LIVE drag, not bolted onto Step 3.** The controller review is right that on a two-pane row it asserts nothing: two shares that normalise to 1 move equal-and-opposite by construction. At three panes it becomes the only assertion in this plan that can catch *the drag moved the wrong pair* — which is precisely CT-2's symptom, a pane nobody touched changing width. It is deliberately **not** folded into Step 3, because there the third pane is a tombstone whose share is routed through `owed` and rescaled, so conservation does not hold in the simple form and an assertion written as if it did would be wrong rather than strict. The pty budget that motivated declining a third session no longer binds: 0 orphaned shells, 63 pty fds. → *Task 8, new Step 2b.*
+2. **How to shrink the window — RULED: `app.evaluate` + `BrowserWindow.getAllWindows()[0].setSize(...)`.** Task 6 Step 3's stated objection is now false and is corrected there: "a main-process reach-in this suite does nothing else like" was true when written, and Task 2 has since landed `runs against overridden paths, never the developer's own`, which reads `process.env` in the main process through exactly this mechanism. The rejected alternative is worse than the draft knew: `launchApp`'s five options are all **required** on purpose, and two tests in `e2eSafety.test.ts` now pin that shape — adding an optional `windowSize` would reintroduce optionality into the one signature the safety argument rests on. → *Task 6, Step 3.*
+3. **Two panes or three for the tombstone drag — RULED: trace first, prefer two, fall back to three, and say which was found.** No change to the plan's own instruction, but it is now a requirement rather than a suggestion, and the trace target is named: `grabFor` refuses when `boxes.length !== row.layout.kids.length`, so the question is whether a tombstoned kid keeps the row's length through kill → render. The implementer reports what the trace showed before choosing. With ptys free, a third session is no longer a reason to prefer two. → *Task 8, Step 3.*
+4. **`claudeSettingsPath()`'s `homedir()` fallback — RULED: NO, not in this plan.** It is a `src/` change in a plan that has so far touched zero production files across four merged tasks, and that property is worth keeping to the end. The hole it targets is now closed twice over in the test layer: `launch.spec.ts`'s runtime assertion compares main's own `process.env` to what the spec passed, and `harness.ts` refuses any override path outside the temp root **before** `electron.launch`. What remains uncovered is a non-E2E caller reaching `claudeSettingsPath()` with no override set, which is a product question deserving its own decision, not a rider on a test plan. Recorded as a follow-up. → *Controller review, item 3.*
+5. **CT-2 — RULED: closed, no action.** Confirmed closed and pinned in `decisions.md`: `tombstoneFrame.test.ts` enumerates 276 cases and its A/B fails 24 of them with the exact pre-fix numbers. Do not reopen. → *end of Controller review.*
 
-Also unruled, and carried over unchanged from the draft: **Open Questions 1, 3, 4, 5 and 6.** Open Question 2 has been answered by events and is struck through with its reasoning preserved.
+**Open questions, also ruled:**
+
+1. **CI — no.** There is no CI in this repo and no git remote. The config gains the comment the question itself proposes, so nobody wires it up by accident.
+3. **Reshaping `tabs.spec.ts` — no change needed; already discharged.** Task 1's headers state that every spec drives one-pane tabs only, which is exactly the "these test a special case while reading like the general one" concern. The declaration exists; renaming the tests would add churn without adding truth.
+4. **Retries — stays `retries: 0`.** Implemented and declared in Task 4, with the known flake documented in `projects.spec.ts` where a reader meets it. Revisit only if the flake investigation fails to find a cause.
+5. **Task 8 stays in this plan.** The plan's own judgement was right: no other plan would carry it, and Tasks 1–5 without it leave the suite trustworthy but blind to M2c.
+6. **Dev-build collision — no guard.** A `globalSetup` that throws when an Electron dev process is running would false-positive against the packaged `/Applications/PRCLI.app` that runs on this machine essentially always, turning a documented annoyance into a suite that refuses to start. Task 3's documentation stands.
 
 ---
 
@@ -178,7 +184,9 @@ Write it down with the mutation that failed to move it. Do not fix it in this ta
 
 - [ ] **Step 4: Give each spec a declared-non-coverage header**
 
-Follow `tests/unit/dividers.test.ts`'s house style: what the file covers, then a **What this file does NOT see** list, then measured edits that pass anyway. Use the Step 2 and Step 3 results — this header must be measurement, not guesswork. At minimum, each header states that the file drives a **one-pane tab only**, so nothing in it exercises `paneGroups`' multi-box branch, `boxesOfRow`, the dividers overlay, or `DeadPane`.
+Follow `tests/unit/dividers.test.ts`'s house style: what the file covers, then a **What this file does NOT see** list, then measured edits that pass anyway. Use the Step 2 and Step 3 results — this header must be measurement, not guesswork. At minimum, each header states that the file drives a **one-pane tab only**, so no divider is ever rendered, no `DeadPane` overlay is ever drawn, and nothing in the file can see a share or a drag.
+
+> **CORRECTION, 2026-08-02, measured after this task shipped.** This step originally told implementers to write that "nothing exercises `paneGroups`' multi-box branch, `boxesOfRow`, the dividers overlay, or `DeadPane`". **The `boxesOfRow` half is false, and all four headers carried it before it was caught.** Mutating `boxesOfRow` to throw takes `launch.spec.ts` to **2 failed / 2 passed** — reddening exactly the two relaunch tests — because `restore.ts:422-427` builds one tab row per live pane (`groupOf.get(pane.id) ?? pane.id`), so `tabOfPane` finds a row on every relaunch and on `tabs.spec.ts`'s adoption test. `boxesOfRow` then runs with a single kid, whose share renormalises to 1, and `PaneDivider` — constructed only for `index > 0` (`App.tsx:806-807`) — is never constructed at all. **The conclusion held; the stated route did not.** The headers on `master` now assert the observable, and the rule that produced the fix is worth carrying into every later task: *an observable claim survives a refactor of a private function; a claim about the private function does not — this one did not even survive being written.*
 
 - [ ] **Step 5: A/B this task's own deliverable**
 
@@ -357,7 +365,9 @@ so the call sites in the tests do not change.
 The shape that preserves both, and the reasoning to put in its header:
 
 1. **`harness.ts` sets all four.** A single `it` reading `tests/e2e/harness.ts` and asserting each of the four `VAR:` tokens is present. One place, one assertion.
-2. **No spec launches Electron on its own.** This is what actually replaces the old per-spec check, and it is the stronger claim: enumerate `tests/e2e/*.spec.ts` as before and assert that **no** spec contains `electron.launch` or `_electron`. A spec that imports `launchApp` inherits all four vars by construction and needs no token check; a spec that reaches for `electron.launch` directly has stepped around the harness and is exactly the fifth-spec hazard the original guard existed to catch. Keep the `expect(specs.length).toBeGreaterThan(0)` assertion first, for the same `[].every(...)` reason it was written for.
+2. **No E2E file launches Electron on its own.** This is what actually replaces the old per-spec check, and it is the stronger claim: enumerate the E2E directory and assert that **no** file contains `electron.launch` or `_electron`. A file that imports `launchApp` inherits all four vars by construction and needs no token check; a file that reaches for `electron.launch` directly has stepped around the harness and is exactly the hazard the original guard existed to catch. Keep the `expect(...).toBeGreaterThan(0)` assertion first, for the same `[].every(...)` reason it was written for.
+
+> **CORRECTION, 2026-08-02, reproduced after this task shipped.** This step originally said "enumerate `tests/e2e/*.spec.ts` as before" — **and this task is itself what moves launch code out of `.spec.ts` files.** The implementer followed the step exactly, and the result was a guard with a hole the final review demonstrated by planting `tests/e2e/dragHarness.ts`: a helper calling `electron.launch` with **zero** overrides — real `~/.prcli`, real `~/Code`, real `~/.claude/settings.json`, real default tmux socket — while the guard stayed **2 passed**. Playwright's `testDir` discovery is recursive (measured: `--list` with a planted `helpers/probe.spec.ts` reports it), so the fix on `master` enumerates **every `.ts` under `tests/e2e/`, recursively**, with the `harness.ts` exemption matched as an exact relative path so a `helpers/harness.ts` cannot inherit it. Two premises in this plan have now been transcribed faithfully into defects (see also Task 1 Step 4). **The lesson is not that implementers should push back harder — it is that a plan's settled-sounding claims are the ones nobody re-checks.**
 3. **`launchApp`'s options are required, not optional.** Already true of the signature in Step 1 and enforced by `tsc`; say so in the header rather than asserting it twice.
 
 Net unit count: **846 stays 846** if the two `it`s above replace the two that are there. If you land a different number, say which and why in the commit — a count that moves silently is how a guard gets quietly weakened.
@@ -540,14 +550,22 @@ test('⌘D on a pane too narrow to halve is refused, and says why', async () => 
   // and then waits for the pane's own reported geometry rather than assuming
   // a pixel width maps to a column count.
   //
-  // JUDGEMENT CALL FOR PAOLO, flagged rather than decided: how to get the
-  // window small enough. Playwright cannot resize an Electron BrowserWindow
-  // through the page API; it has to go through `app.evaluate` and
-  // `BrowserWindow.getAllWindows()[0].setSize(...)`. That is a main-process
-  // reach-in this suite does nothing else like. The alternative is to launch
-  // this one test with a small window from the start, which needs a
-  // `launchApp` option and touches the harness Task 3 just froze. Pick one
-  // before implementing; do not do both.
+  // RULED 2026-08-02: use `app.evaluate` +
+  // `BrowserWindow.getAllWindows()[0].setSize(...)`. Playwright cannot resize
+  // an Electron BrowserWindow through the page API, so it has to be the main
+  // process either way.
+  //
+  // The draft called this "a main-process reach-in this suite does nothing
+  // else like". That was true when written and is now FALSE: Task 2 landed
+  // `runs against overridden paths, never the developer's own`, which reads
+  // `process.env` inside the main process through exactly this mechanism.
+  // `app.evaluate` is established here, not novel.
+  //
+  // The rejected alternative — a `launchApp` window-size option — is worse
+  // than the draft knew. All five of `launchApp`'s options are REQUIRED on
+  // purpose, and `e2eSafety.test.ts` now pins that shape; an optional option
+  // reintroduces optionality into the one signature the safety argument
+  // rests on.
 
   await window.keyboard.press('Meta+d')
 
@@ -782,6 +800,55 @@ test('a drag stops at the floor, and the same gesture reversed reopens the pane'
 })
 ```
 
+- [ ] **Step 2b: Conservation — the pane nobody touched does not move** *(added 2026-08-02 by ruling on flagged item 1)*
+
+Three **live** panes, drag the first seam, and assert that the untouched third pane is where it was. This is the only assertion in the plan that can catch *the drag moved the right direction on the wrong pair* — M2c 2c's CT-2 symptom exactly.
+
+**Why three and why live.** On a two-pane row, "left grew and right shrank by the same amount" is true by construction: two shares that normalise to 1 cannot do anything else, so the assertion is decorative. The third pane is what gives it teeth. And all three must be **live** — Step 3's third pane is a tombstone whose share is routed through `owed` and rescaled, so conservation does not hold there in the simple form and an assertion written as if it did would be false rather than strict.
+
+```ts
+test('dragging one seam of a three-pane row leaves the far pane where it was', async () => {
+  // ... new tab, ⌘D, ⌘D again -> three boxes in one group ...
+  const [a, b, c] = await paneIds(window)
+  expect([a, b, c].every(Boolean)).toBe(true)
+
+  const aBefore = (await window.getByTestId(`pane-${a}`).boundingBox())!
+  const bBefore = (await window.getByTestId(`pane-${b}`).boundingBox())!
+  const cBefore = (await window.getByTestId(`pane-${c}`).boundingBox())!
+
+  // The FIRST seam, explicitly — `.first()` on the overlay, and assert there
+  // are two dividers before taking it. Grabbing "a divider" out of three
+  // panes without saying which is how a test passes on the wrong gesture.
+  const dividers = window.getByTestId('terminal-active').getByTestId('pane-divider')
+  await expect(dividers).toHaveCount(2)
+  const seam = (await dividers.first().boundingBox())!
+
+  await window.mouse.move(seam.x + seam.width / 2, seam.y + seam.height / 2)
+  await window.mouse.down()
+  await window.mouse.move(seam.x + 80, seam.y + seam.height / 2)
+  await window.mouse.up()
+
+  const aAfter = (await window.getByTestId(`pane-${a}`).boundingBox())!
+  const bAfter = (await window.getByTestId(`pane-${b}`).boundingBox())!
+  const cAfter = (await window.getByTestId(`pane-${c}`).boundingBox())!
+
+  // a grew, b shrank, and they did it by the same amount.
+  expect(aAfter.width).toBeGreaterThan(aBefore.width + 40)
+  expect(bAfter.width).toBeLessThan(bBefore.width - 40)
+  expect(Math.abs((aAfter.width - aBefore.width) + (bAfter.width - bBefore.width))).toBeLessThan(12)
+
+  // And c did not move. THIS is the assertion the whole test exists for:
+  // a drag that moved the wrong pair in the right direction satisfies every
+  // line above it.
+  expect(Math.abs(cAfter.width - cBefore.width)).toBeLessThan(12)
+  expect(Math.abs(cAfter.x - cBefore.x)).toBeLessThan(12)
+
+  await app.close()
+})
+```
+
+Costs three tmux sessions. Its A/B is **(f)** in Step 5. The 12px tolerances are guesses until measured, exactly as Step 3's is — if one flakes, widen it and say so; do not convert it to a directional assertion, because "c is still wider than zero" is what a broken implementation also satisfies.
+
 - [ ] **Step 3: The drag on a tab holding a tombstone — the highest-value test in this plan**
 
 **The first draft declined this, on a premise that is now false.** It reasoned that `CHANNELS.setLayout`'s length guard (`if (ratio.length !== saved.layout.kids.length) return`) silently swallows every drag on a tombstoned tab, so an E2E test would only pin a bug. **That guard no longer exists.** At `5ba3abf` the handler is `(tabId, shares: Record<paneId, number>)` (`register.ts:742`), membership is routed by name through `layoutWrite`/`routeShares`, and a drag on a tombstoned tab now reaches `register.ts:756-758`:
@@ -850,6 +917,7 @@ test('a drag on a tab holding a tombstone is kept, and the tombstone comes back 
     The second is window-size independent and is the recommendation. Whichever is chosen, **it changes Step 1's snippet**, not just this A/B — a lower bound alone leaves (c) inert.
   (d) **Citation corrected, and the argument replaced.** The floor derivation is no longer in `App.tsx`: it moved to `grabFor`, and reads `const axisCells = gridCells / low.share` at **`src/renderer/workspace.ts:446`**. Turn that `/` into a `*` and confirm Step 2's floor assertion fails. **The draft's justification is dead** — it said the unit suite's `minRatioFor(` token assertion passes either way, which was true at `bf65c26` and is not true now: `dividers.test.ts`'s current header states that both this mutation and the argument swap are caught by `workspace.test.ts`'s `measures a col tab down the other axis, against the other floor`. So this A/B no longer demonstrates *unique* E2E coverage. Keep it anyway, for a smaller and honest reason: it confirms the E2E test is wired to the real floor arithmetic rather than to a coincidence of window size. Expect **two** suites to go red, and record that, rather than reporting a unit failure as a surprise.
   (e) In `register.ts`, delete the `store.write` inside `CHANNELS.setLayout`; confirm the `savedRatio` assertion fails. **The draft's claim that "this is the first test anywhere that reaches past the IPC call to what main does with it" is false and is cut**: `tests/integration/persistence.test.ts` drives `ipc.listeners.get(CHANNELS.setLayout)` directly at eleven call sites (1405, 1578, 1631, 1654, 1666, 1716, 1873, 1955, 2051, 2095, …) and asserts what reaches disk. The mutation is still a good A/B — it is just not novel, and expect the integration suite to go red alongside. What *is* novel here is Step 3's `owed` write, which persistence.test.ts's addendum at line 2035 names as the one place it exercises and which no test drives through a real gesture.
+  (f) **For Step 2b's conservation assertion** *(added with that step)*. In `resizeKids` (`src/renderer/workspace.ts`), move the delta onto the **wrong neighbour** — apply it to the pair after the grabbed seam instead of the pair around it, or spread it across every kid rather than the two adjacent ones. Confirm Step 2b fails on `c` having moved, **and record which of its assertions fires**: a mutation that reddens only "a grew" tells you the conservation lines are inert, which is the whole thing this step was added to prevent. If no such mutation can be made to move `c` while leaving `a` and `b` directionally correct, say so — that would mean conservation is structural after all, and the assertion should be cut rather than kept as decoration.
   Restore by `cp` after each; `git diff src/renderer/App.tsx src/renderer/workspace.ts src/renderer/PaneDivider.tsx src/main/ipc/register.ts` empty before committing.
 
 - [ ] **Step 6: Declare what this still does not cover**
