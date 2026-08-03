@@ -2,7 +2,7 @@
  * Projects: discovering them, switching between them, renaming and removing
  * them, and what happens to their sessions when any of that occurs.
  *
- * Ten tests on the `prcli-e2e-projects` socket: an empty workspace opens no
+ * Eleven tests on the `prcli-e2e-projects` socket: an empty workspace opens no
  * session; a scanned candidate can be added and a tab opened under its slug;
  * the tab bar shows only the active project's tabs; ⌘1/⌘2 switch project while
  * ⌥⌘1 switches tab; a repository-declared preset launches its command; a
@@ -11,7 +11,8 @@
  * shortcut typed into the rename field does not reach the tab handler, while
  * ⌘W with a terminal focused still closes its tab; a rename keeps the slug and
  * honours Escape, blur and a blank name; and removing a project leaves its
- * session alive under Unsorted.
+ * session alive under Unsorted; and the welcome page is up when a selected
+ * project has no session and returns when its last pane closes.
  *
  * **Measured, 2026-08-02, this file run alone** (`npx playwright test
  * tests/e2e/projects.spec.ts`): deleting the `if (event.altKey)` branch from
@@ -29,6 +30,12 @@
  * checks ⌘W still closes a tab with a terminal focused — and nothing else in
  * this file. So that test really does bite on ⌘W and not only on the guard it
  * is named for.
+ *
+ * **Measured, 2026-08-03, this file run alone**: pinning `showWelcome`
+ * in `App.tsx` to `false` fails `the welcome page goes when a session opens
+ * and returns when it closes` at its first assertion; pinning it to `true`
+ * fails the same test at its `toBeHidden()`. Both directions of the round
+ * trip are held by that one test.
  *
  * **What this file does NOT see** — read off this file's own text unless a
  * line says measured or names another file:
@@ -468,6 +475,35 @@ test('a session whose project was removed shows under Unsorted, still alive', as
   await expect(window.getByTestId('project-unsorted')).toBeVisible()
   // Removing a project destroys nothing: the session is still running.
   expect(await sessionNames(SOCKET)).toEqual(before)
+
+  await app.close()
+})
+
+test('the welcome page goes when a session opens and returns when it closes', async () => {
+  const alpha = await candidate('alpha')
+  await seed(
+    [{ id: 'id-alpha', name: 'Alpha', slug: 'alpha', cwd: alpha, presets: [], activeTabId: null }],
+    'id-alpha',
+  )
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  // A project is selected and nothing is running in it. This is the state the
+  // sentence this page replaced could not describe: it only appeared when
+  // there were no projects at all, so this launch used to show a blank box.
+  await expect(window.getByTestId('welcome')).toBeVisible()
+  await expect(window.getByTestId('welcome-hint')).toContainText('press Cmd+T to start a session')
+
+  await window.getByTestId('new-tab').click()
+  await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(1)
+  await expect(window.getByTestId('welcome')).toBeHidden()
+
+  // ⌘W with the terminal focused, the same way `a shortcut typed into the
+  // rename field does not reach the tab handler` closes its last tab.
+  await window.getByTestId('terminal-active').click()
+  await window.keyboard.press('Meta+w')
+  await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(0)
+  await expect(window.getByTestId('welcome')).toBeVisible()
 
   await app.close()
 })
