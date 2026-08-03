@@ -1,11 +1,7 @@
 import type { TabDescriptor, TabState } from '../shared/ipc'
 import { StatusDot } from './StatusDot'
 import { cn } from './lib/cn'
-
-/** The tmux id is 16 hex characters; the first six are plenty to tell tabs apart. */
-function label(tab: TabDescriptor): string {
-  return `${tab.projectSlug} · ${tab.id.slice(0, 6)}`
-}
+import { tabLabel } from './lib/tabLabel'
 
 export function TabBar({
   tabs,
@@ -50,7 +46,7 @@ export function TabBar({
           >
             <StatusDot state={status[tab.id] ?? null} testid={`dot-${tab.id}`} />
             <span className={cn(dead[tab.id] !== undefined && 'line-through opacity-60')}>
-              {label(tab)}
+              {tabLabel(tab)}
             </span>
             {dead[tab.id] !== undefined ? (
               <>
@@ -59,7 +55,7 @@ export function TabBar({
                     the same id, cwd, command and type. */}
                 <button
                   data-testid={`restart-${tab.id}`}
-                  aria-label={`Restart ${label(tab)}`}
+                  aria-label={`Restart ${tabLabel(tab)}`}
                   onClick={(event) => {
                     event.stopPropagation()
                     onRestart(tab)
@@ -70,7 +66,7 @@ export function TabBar({
                 </button>
                 <button
                   data-testid={`dismiss-${tab.id}`}
-                  aria-label={`Dismiss ${label(tab)}`}
+                  aria-label={`Dismiss ${tabLabel(tab)}`}
                   onClick={(event) => {
                     event.stopPropagation()
                     onDismiss(tab.id)
@@ -85,7 +81,7 @@ export function TabBar({
               // closing kills, and killing a dead session has nothing to do.
               <button
                 data-testid={`close-${tab.id}`}
-                aria-label={`Close ${label(tab)}`}
+                aria-label={`Close ${tabLabel(tab)}`}
                 onClick={(event) => {
                   // Without this the click also activates the tab being closed.
                   event.stopPropagation()

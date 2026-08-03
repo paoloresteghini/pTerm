@@ -9,7 +9,9 @@ import { AddProjectDialog } from './AddProjectDialog'
 import { SettingsPane } from './SettingsPane'
 import { TitleBar } from './TitleBar'
 import { Welcome } from './Welcome'
+import { CommandPalette, type PaletteSession } from './CommandPalette'
 import { cn } from './lib/cn'
+import { tabLabel } from './lib/tabLabel'
 import {
   INITIAL_WORKSPACE_STATE,
   activeProject,
@@ -32,6 +34,7 @@ import {
 } from './workspace'
 import { projectMuted, toggleProjectMute } from './mute'
 import { UNSORTED_ID, type NotificationConfig, type TabDescriptor, type TabType } from '../shared/ipc'
+import { SEVERITY } from '../shared/status'
 
 /**
  * The smallest a pane may be dragged to, in cells.
@@ -55,6 +58,7 @@ export function App() {
   const [adding, setAdding] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [panelOpen, setPanelOpen] = useState(true)
+  const [paletteOpen, setPaletteOpen] = useState(false)
   // Set once the workspace exists. Until then this window knows nothing about
   // what is selected and must not say anything about it — see the effects.
   const [ready, setReady] = useState(false)
@@ -560,6 +564,14 @@ export function App() {
         splitActive(event.shiftKey ? 'col' : 'row')
         return
       }
+      // Below the `data-shortcuts="off"` guard at the top of this handler, so
+      // it inherits that protection: ⌘K typed into the palette's own input is
+      // the palette's, not a request to reopen it.
+      if (event.code === 'KeyK' && !event.altKey) {
+        event.preventDefault()
+        setPaletteOpen((open) => !open)
+        return
+      }
       // ⌘⌥ + an arrow, on `event.code` like every other binding here. ⌥ is
       // held, which is what rewrites `key` for the letter bindings above; one
       // rule for the whole handler is one rule to get right.
@@ -608,6 +620,23 @@ export function App() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [activePaneId, currentTabs, state.projects, openTab, closePane, splitActive, focusPane])
+
+  // One row per PANE, not per tab, per the spec: a split tab holds two
+  // sessions and both are switchable. `state.panes` is the same collection
+  // `needsYou` ranks, so this list and Needs You cannot disagree about what a
+  // session is.
+  //
+  // `severity` is the index into the shared SEVERITY order, so lower is worse.
+  // An unreported pane sorts last rather than first, which is why the fallback
+  // is the array length and not zero.
+  const paletteSessions: PaletteSession[] = state.panes.map((pane) => {
+    const reported = state.status[pane.id]
+    return {
+      id: pane.id,
+      name: tabLabel(pane),
+      severity: reported ? SEVERITY.indexOf(reported) : SEVERITY.length,
+    }
+  })
 
   return (
     <div className="flex h-screen w-screen flex-col bg-bg">
@@ -846,6 +875,23 @@ export function App() {
             }}
           />
         ) : null}
+
+        <CommandPalette
+          open={paletteOpen}
+          onOpenChange={setPaletteOpen}
+          sessions={paletteSessions}
+          projectCwd={project?.cwd}
+          onSelectSession={(id) => {
+            const tab = state.panes.find((candidate) => candidate.id === id)
+            if (!tab) return
+            // The same two dispatches `onSelectNeedy` runs, in the same order.
+            dispatch({ type: 'activatedProject', id: projectIdForTab(state.projects, tab) })
+            dispatch({ type: 'activatedTab', id: tab.id })
+          }}
+          onInsert={(name) => {
+            if (activePaneId) window.prcli.input(activePaneId, `/${name}`)
+          }}
+        />
 
         <AddProjectDialog
           open={adding}
