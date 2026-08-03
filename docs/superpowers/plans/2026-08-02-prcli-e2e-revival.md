@@ -1,5 +1,17 @@
 # PRCLI E2E Revival — the suite is alive; make it trustworthy, then make it see a drag
 
+> **STATUS: COMPLETE, 2026-08-03.** All eight tasks are merged (`ddbbff2`); Task 5 was discharged without work, being conditional on Task 1 finding a survivor and Task 1 found none. **846 → 863 unit tests, 1121 unit+integration green, E2E 35 → 42 green in ~47s, and not one `src/` file changed by any task.**
+>
+> **Four of this plan's own premises were disproved by measurement while executing it.** Each is corrected where it lives rather than silently amended, because the pattern matters more than any one of them: every single one was written in a settled, authoritative voice, and three of the four were transcribed faithfully into the code before anyone checked. In order of appearance —
+> 1. **Task 1 Step 4** told every spec header to state that `boxesOfRow` is never reached. It is reached on every relaunch.
+> 2. **Task 3 Step 4** told the safety guard to enumerate `tests/e2e/*.spec.ts`, in the task that moves launch code out of `.spec.ts` files. The hole was reproduced by planting a helper that launched against the developer's real home directory while the guard stayed green.
+> 3. **Task 8 Step 3's ranking** — "the single highest-value addition available to this plan" — rested on the `owed` write being unwitnessed and witnessable from the renderer. It is neither.
+> 4. **"A human with the app open is the only thing that sees any of those"** (below) was made false by Task 8, and the file it quotes said so until this plan corrected it.
+>
+> The rule that would have caught all four, and that is now the house style: **assert the observable, not the mechanism.** "No divider is ever rendered" survives a refactor. "`boxesOfRow` is never reached" did not survive being written.
+>
+> **Still owed and NOT discharged by any of this:** watching a drag in a real window — the `col` axis, the seam, the floor, tmux reflow, and a drag on a tab holding a tombstone — and ⌘D on a pane too narrow to halve, watched rather than asserted. Task 8 Step 6 says so in the file itself.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Turn the Playwright suite from a thing nobody runs into the one mechanism in this repo that can watch a human use the app — and then point it at the M2c surface no test anywhere can currently see: splits, tombstones, and the drag gesture.
@@ -97,6 +109,12 @@ So this is not a repair plan. It is an audit-and-extend plan, and the tasks are 
 Two further items on that list are also uncovered — *"that the cursor changes, or that a 7px strip is comfortable to hit"* and *"that React actually calls the effect's cleanup"* — and this plan covers neither of them either. They are named here so the list is not read as exhaustive of what E2E buys.
 
 The header closes: *"A human with the app open is the only thing that sees any of those."* That is still true of the three items above, and it does not have to stay true. A working E2E suite is the only mechanism in this repo that could ever cover a single one of them. It exists, it is green, and it costs 47 seconds and no ptys.
+
+> **NO LONGER TRUE, as of 2026-08-03 — and this plan is what made it false.** All three items above are covered by `tests/e2e/splits.spec.ts`: that a pointerdown starts a drag and a pointerup ends one, **where the divider lands**, and that a pane follows the cursor, stops at the floor and reflows tmux behind it. Both mutations this section rests on — `slice(0, index)` → `slice(0, index - 1)` and `${offset * 100}%` → `0%` — now fail by **423.5px** against a 6px tolerance, at 1F/6P and 3F/4P respectively, while `dividers.test.ts` stays 12/12 green under each.
+>
+> `dividers.test.ts`'s own header has been corrected in the same breath, and the reason is worth keeping: left as it was, it told a future author that no test can see placement — which is **permission to dismiss a real red `splits.spec.ts` as noise.** A stale non-coverage claim is not merely untidy; in the one moment it gets read, it argues for the wrong conclusion.
+>
+> Two items on that list remain genuinely uncovered and are still owed to a human: **that the cursor changes**, and **that React actually calls the effect's cleanup**. So is the `col` axis, on every item. See Task 8 Step 6.
 
 **Is three items still worth Task 8?** Yes, and the reason is the second bullet rather than the count. Divider *placement* — where the seam is drawn, whether the pane follows the cursor, whether it stops — is the part of this gesture that no test can be written for without a real layout engine, and it is the part where two measured mutations pass a green suite while visibly breaking the app. The other three items were covered by moving arithmetic somewhere it could be tested; placement cannot be moved anywhere, because it *is* the rendering. That is the whole argument, at its real size.
 
@@ -860,6 +878,14 @@ for (const entry of routed.owed) {
 ```
 
 That `owed` write is declared **unwitnessed** in main's own notes. It is the one path where the renderer wins on a tombstone's share, it is reachable by a user in about four seconds, and nothing anywhere executes it. Task 7 already builds the tombstone; this adds a drag and a restart to it. **This is the single highest-value addition available to this plan** — it is why the drag-on-a-tombstone bullet has been removed from *Deliberately not in this plan* and from Open Question 2.
+
+> **CORRECTION, 2026-08-03, measured while implementing this step. This paragraph is wrong twice, and it is the paragraph that ranked this step first.**
+>
+> **1. The `owed` write cannot be witnessed from the renderer at all.** Deleting `tombstones.set` leaves `splits.spec.ts` **7/7 green**. The chain, derived from source rather than inferred from the A/B: restart goes through `CHANNELS.restartTab` (`register.ts:878-944`), which writes `config.panes` and corrects only `groupId` on the tab row — it never rebuilds the ratio, so the claim is never spent there. The renderer's `opened` case (`workspace.ts:958-975`) rewrites `state.panes` and leaves `state.tabs` alone, so a revived pane's width comes from the **renderer's** row. And `shares.ts:131-141` records the property that settles it: the renderer only ever sees **proportions**, and a single positive scalar over every live share cannot change a proportion between two of them. A lone tombstone's claim therefore cancels. No on-screen assertion can see this write; only a test that reads what main put on disk can.
+>
+> **2. It was never "unwitnessed" — this plan misread the note it cited.** `shares.ts:283-292` says the decision "had **exactly one witness**, and it was the most pty-expensive test in the plan", and names that as the reason `layoutWrite` was extracted. `persistence.test.ts:2035-2039` names *itself*, in its own comment, as the one place the `owed` write has ever been exercised through a real death and a real restart. The plan read "one expensive witness" as "no witness".
+>
+> **What survives.** Step 3 is still worth having — it is the only test that drives a drag on a tombstoned tab through a real gesture, and its disk-vs-screen equality catches a stale or discarded row. It is simply **not** the highest-value thing here. That title belongs to Step 1's seam-placement assertion, which was not in this plan at all and without which the two mutations this whole document is built on pass the entire file. The implemented test declares this gap in `splits.spec.ts`'s header rather than claiming coverage it does not have.
 
 ```ts
 test('a drag on a tab holding a tombstone is kept, and the tombstone comes back at its new share', async () => {
