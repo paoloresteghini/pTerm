@@ -116,6 +116,8 @@ export interface TabDescriptor {
   command?: string
   tmuxSession: string
   type: TabType
+  /** What the user called this tab. Absent until they name one. */
+  title?: string
 }
 
 export interface TabLayout {

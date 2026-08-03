@@ -1,10 +1,6 @@
 import type { TabDescriptor, TabState } from '../shared/ipc'
 import { StatusDot } from './StatusDot'
-
-/** The tmux id is 16 hex characters; the first six are plenty to tell panes apart. */
-function label(pane: TabDescriptor): string {
-  return `${pane.projectSlug} · ${pane.id.slice(0, 6)}`
-}
+import { labelOfPane } from './workspace'
 
 /**
  * The chrome over a pane whose session has died: a dot, a Restart and a
@@ -54,7 +50,7 @@ export function DeadPane({
           here names a tab. */}
       <button
         data-testid={`pane-restart-${pane.id}`}
-        aria-label={`Restart ${label(pane)}`}
+        aria-label={`Restart ${labelOfPane(pane)}`}
         onClick={() => onRestart(pane)}
         className="pointer-events-auto cursor-default border-none bg-transparent p-0 text-[10px] text-muted hover:text-fg"
       >
@@ -65,7 +61,7 @@ export function DeadPane({
           it off the screen. No `onClose`: there is no session left to kill. */}
       <button
         data-testid={`pane-dismiss-${pane.id}`}
-        aria-label={`Dismiss ${label(pane)}`}
+        aria-label={`Dismiss ${labelOfPane(pane)}`}
         onClick={() => onDismiss(pane.id)}
         className="pointer-events-auto cursor-default border-none bg-transparent p-0 text-xs leading-none text-muted hover:text-fg"
       >

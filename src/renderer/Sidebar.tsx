@@ -4,6 +4,7 @@ import { cn } from './lib/cn'
 import { Button } from './ui/Button'
 import { NeedsYou } from './NeedsYou'
 import { StatusDot } from './StatusDot'
+import { labelOfPane } from './workspace'
 
 export function Sidebar({
   projects,
@@ -206,7 +207,7 @@ export function Sidebar({
                           tab.id === activeTabId ? 'text-fg' : 'text-muted hover:text-fg',
                         )}
                       >
-                        {tab.projectSlug} · {tab.id.slice(0, 6)}
+                        {labelOfPane(tab)}
                       </div>
                       {/* Rehoming: a stray must be filable, or Unsorted is a
                           place things can be seen but never leave. Renaming
