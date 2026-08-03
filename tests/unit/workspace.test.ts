@@ -1927,11 +1927,12 @@ describe('renamedTab', () => {
     expect(next.activeProjectId).toBe('p1')
   })
 
-  // Merged by id rather than replaced outright: main's reply to a rename
-  // comes from the saved rows, which excludes any pane whose session has
-  // since exited (`SessionManager` drops an entry on exit). A pane the reply
-  // is silent about — here, a tab that died before the rename — must keep the
-  // entry it already had, not vanish from the bar until the next relaunch.
+  // Merged by id rather than replaced outright: a reply that is silent about
+  // some pane, for whatever reason, must not erase the entry that pane
+  // already had. Defence in depth for the reducer itself, independent of
+  // what any particular caller's reply happens to contain today. A pane
+  // marked dead here is the case that matters most to get right: dropping it
+  // would take a tombstone off the bar until the next relaunch.
   it('keeps a pane the reply omits, rather than dropping it', () => {
     const before: WorkspaceState = {
       ...INITIAL_WORKSPACE_STATE,
@@ -1943,8 +1944,8 @@ describe('renamedTab', () => {
     }
     const next = workspaceReducer(before, {
       type: 'renamedTab',
-      // 'bbb' has exited, so main's reply — built from the saved rows —
-      // names only 'aaa'.
+      // A reply naming only 'aaa', whatever a real caller's reason for
+      // omitting 'bbb' might be.
       panes: [{ ...tab('aaa', 'lumio'), title: 'payments api' }],
     })
     expect(next.panes.map((pane) => pane.id)).toEqual(['aaa', 'bbb'])
