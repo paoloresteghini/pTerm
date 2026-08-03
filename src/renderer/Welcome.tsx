@@ -27,8 +27,11 @@ const SHORTCUTS = [
  * `absolute inset-0` to match the pane groups it sits among, so it centres
  * against the same box they fill. It only renders when none of them is
  * visible, so no z-index is needed to settle who paints on top: an invisible
- * group paints nothing and its `pointer-events-none` means it catches nothing
- * either.
+ * group's `invisible` keeps it out of hit-testing altogether (`App.tsx`'s
+ * comment on the dividers overlay), which is what actually keeps it from
+ * catching input over this page. `pointer-events-none` on that group's
+ * container is not enough by itself, since a descendant that opts back in
+ * with `pointer-events-auto` (the divider strips do) is not covered by it.
  */
 export function Welcome({ hint }: { hint: string }) {
   return (
@@ -58,7 +61,14 @@ export function Welcome({ hint }: { hint: string }) {
         ))}
       </div>
 
-      <p data-testid="welcome-hint" className="m-0 mt-2 font-mono text-[11px] text-faint">
+      {/* `max-w` and `break-words`: the missing-directory case interpolates a
+          path, and this is the one line here whose length is not fixed by its
+          own copy. Without a cap it can outgrow a narrow window; `break-words`
+          lets a long unbroken path itself give way rather than the line. */}
+      <p
+        data-testid="welcome-hint"
+        className="m-0 mt-2 max-w-[320px] break-words text-center font-mono text-[11px] text-faint"
+      >
         <span className="mr-1.5">&gt;_</span>
         {hint}
       </p>

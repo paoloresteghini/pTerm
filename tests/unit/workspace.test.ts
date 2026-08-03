@@ -18,6 +18,7 @@ import {
   minRatioFor,
   resizeKids,
   grabFor,
+  canOpenSession,
   welcomeHint,
   type WorkspaceState,
   type PaneBox,
@@ -1799,6 +1800,39 @@ describe('grabFor', () => {
 
     const colDir = ratioRow('aaa', ['aaa', 'bbb'], [0.5, 0.5], 'col')
     expect(grabFor(colDir, boxes([0.5, 0.5], ['aaa', 'bbb']), 1, () => ({ cols: 100, rows: 0 }), floors)).toBeNull()
+  })
+})
+
+describe('canOpenSession', () => {
+  it('is false with no active project', () => {
+    expect(canOpenSession(INITIAL_WORKSPACE_STATE)).toBe(false)
+  })
+
+  it('is false when Unsorted is active', () => {
+    const state: WorkspaceState = {
+      ...INITIAL_WORKSPACE_STATE,
+      projects: [project(UNSORTED_ID, 'unsorted')],
+      activeProjectId: UNSORTED_ID,
+    }
+    expect(canOpenSession(state)).toBe(false)
+  })
+
+  it('is false when the active project cwd is gone', () => {
+    const state: WorkspaceState = {
+      ...INITIAL_WORKSPACE_STATE,
+      projects: [{ ...project('id-alpha', 'alpha'), available: false }],
+      activeProjectId: 'id-alpha',
+    }
+    expect(canOpenSession(state)).toBe(false)
+  })
+
+  it('is true for an active, non-Unsorted project whose cwd is present', () => {
+    const state: WorkspaceState = {
+      ...INITIAL_WORKSPACE_STATE,
+      projects: [project('id-alpha', 'alpha')],
+      activeProjectId: 'id-alpha',
+    }
+    expect(canOpenSession(state)).toBe(true)
   })
 })
 

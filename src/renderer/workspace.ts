@@ -135,6 +135,24 @@ export function activeTabId(state: WorkspaceState): string | null {
 }
 
 /**
+ * Whether `Cmd+T` (and the tab bar's `+`) can open a session right now: a
+ * project is active, it is not Unsorted, and its cwd is on disk.
+ *
+ * Unsorted has no directory of its own, and a project whose folder has gone
+ * cannot host a new terminal.
+ *
+ * The one place this three-part test is written. `App.tsx`'s `launch` gates
+ * on it directly, and `welcomeHint` reads it for its "press Cmd+T" case: a
+ * fourth condition added here changes both call sites at once, rather than
+ * leaving a second copy free to drift and the welcome page free to keep
+ * saying `press Cmd+T to start a session` while the keystroke does nothing.
+ */
+export function canOpenSession(state: WorkspaceState): boolean {
+  const project = activeProject(state)
+  return Boolean(project) && project?.id !== UNSORTED_ID && project?.available === true
+}
+
+/**
  * One pane's own state. Null means "draw no dot", which is not the same as
  * `unknown`.
  *
@@ -933,11 +951,11 @@ function withoutKid(state: WorkspaceState, id: string): WorkspaceState {
 /**
  * What the welcome page's last line says.
  *
- * The sentence form of `canOpen` in `App.tsx`
- * (`Boolean(project) && project?.id !== UNSORTED_ID && project?.available === true`),
- * naming whichever of the three parts is missing. One predicate, two
- * renderings: a hint that disagreed with whether Cmd+T works would be worse than
- * no hint.
+ * The sentence form of `canOpenSession`, naming whichever of its three parts
+ * is missing. One predicate, two renderings: a hint that disagreed with
+ * whether Cmd+T works would be worse than no hint, which is why both this and
+ * `App.tsx`'s `launch` read the same function rather than each keeping their
+ * own copy of the test.
  *
  * Here rather than in `Welcome.tsx` so it can be exercised against a
  * `WorkspaceState` with no DOM, which is how every other derivation in this
@@ -951,7 +969,9 @@ export function welcomeHint(state: WorkspaceState): string {
   // Unsorted shares this line because it is not a directory and cannot launch;
   // the move out of it is the same move, pick a real project.
   if (!project || project.id === UNSORTED_ID) return 'select a project to start'
-  if (!project.available) return `${project.cwd} is missing`
+  // Reached only once a project is active and is not Unsorted, so this is
+  // exactly `canOpenSession`'s third part, `!project.available`.
+  if (!canOpenSession(state)) return `${project.cwd} is missing`
   return 'press Cmd+T to start a session'
 }
 

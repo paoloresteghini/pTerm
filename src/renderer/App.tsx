@@ -13,6 +13,7 @@ import {
   INITIAL_WORKSPACE_STATE,
   activeProject,
   activeTabId,
+  canOpenSession,
   grabFor,
   needsYou,
   paneGroups,
@@ -75,9 +76,10 @@ export function App() {
   // earlier row emits no group at all (`workspace.ts:667`).
   const groups = paneGroups(state)
   const showWelcome = !groups.some((group) => group.visible)
-  // Unsorted has no directory of its own, and a project whose folder has gone
-  // cannot host a new terminal.
-  const canOpen = Boolean(project) && project?.id !== UNSORTED_ID && project?.available === true
+  // Whether a project is active, is not Unsorted, and its cwd is on disk:
+  // see `canOpenSession` in workspace.ts, which `welcomeHint` also reads so
+  // the two cannot silently disagree.
+  const canOpen = canOpenSession(state)
 
   // `type` is a declaration of intent recorded on the tab, not inferred from
   // `command` — it decides the launch state a fresh dot starts in
