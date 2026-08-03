@@ -56,8 +56,10 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
-  process.env.PRCLI_CLAUDE_HOME = saved.home
-  process.env.PRCLI_CLAUDE_SETTINGS = saved.settings
+  if (saved.home === undefined) delete process.env.PRCLI_CLAUDE_HOME
+  else process.env.PRCLI_CLAUDE_HOME = saved.home
+  if (saved.settings === undefined) delete process.env.PRCLI_CLAUDE_SETTINGS
+  else process.env.PRCLI_CLAUDE_SETTINGS = saved.settings
   await rm(root, { recursive: true, force: true })
 })
 
