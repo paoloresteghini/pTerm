@@ -101,14 +101,12 @@ describe('App.tsx terminal area', () => {
     expect(app).toMatch(/\{ ?group\.panes\.map\(/)
     // `groups` is hoisted above the JSX, so the filter this test is named for
     // could just as easily land on its assignment as on the `.map(` that reads
-    // it. Anchored on the statement that follows rather than on
-    // `paneGroups(state)` alone: `readCode` flattens every whitespace run,
-    // including a newline, to one space, and `toMatch` only asks whether the
-    // pattern occurs, not whether it is followed by nothing else. A bare
-    // `paneGroups\(state\) ` anchor stays present, unbroken, whether a
-    // `.filter(...)` is chained onto the same line or a wrapped next one.
-    // Requiring `const showWelcome` immediately after, with the flattener's
-    // one space and no more, closes both.
+    // it. A bare `paneGroups\(state\) ` anchor caught a same-line splice
+    // (`paneGroups(state).filter(...)` leaves no space before `.filter(` for
+    // it to find) but missed one wrapped onto its own line, where `readCode`'s
+    // flattened newline supplies exactly the space that anchor wanted.
+    // Requiring `const showWelcome` immediately after closes the wrapped case
+    // too.
     expect(app).toMatch(/const groups = paneGroups\(state\) const showWelcome\b/)
   })
 
