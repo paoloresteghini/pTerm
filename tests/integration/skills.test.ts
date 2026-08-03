@@ -12,6 +12,7 @@ const saved = {
 let root = ''
 let home = ''
 let project = ''
+let browseDescription = ''
 
 async function write(path: string, body: string): Promise<void> {
   await mkdir(join(path, '..'), { recursive: true })
@@ -24,8 +25,11 @@ beforeEach(async () => {
   project = join(root, 'project')
 
   await write(join(home, 'skills', 'browse', 'SKILL.md'), '---\nname: browse\ndescription: Fast browser.\n---\n')
+  browseDescription =
+    /description: (.+)/.exec(await readFile(join(home, 'skills', 'browse', 'SKILL.md'), 'utf8'))?.[1] ?? ''
   await write(join(home, 'commands', 'gsd', 'stats.md'), '---\nname: gsd:stats\ndescription: Show stats.\n---\n')
-  // The one real command file with no `name:` — the fallback's case.
+  // The one command file in this fixture that declares no name: nothing to
+  // fall back from, so the path is the only source of the name.
   await write(join(home, 'commands', 'gsd', 'reapply-patches.md'), '---\ndescription: Reapply.\n---\n')
   await write(join(project, '.claude', 'commands', 'ship.md'), '---\nname: ship\ndescription: Ship it.\n---\n')
 
@@ -84,7 +88,9 @@ describe('listSkills', () => {
     // can type. `superpowers:brainstorming` is.
     const entries = await listSkills(project)
     expect(entries.length).toBeGreaterThan(0)
-    expect(entries.map((entry) => entry.name)).not.toContain('brainstorming')
+    const names = entries.map((entry) => entry.name)
+    expect(names).not.toContain('brainstorming')
+    expect(names).toContain('superpowers:brainstorming')
   })
 
   it('scans the commands a plugin ships, at any depth', async () => {
@@ -133,6 +139,7 @@ describe('listSkills', () => {
     const of = (name: string) => entries.find((entry) => entry.name === name)
     expect(of('browse')?.kind).toBe('skill')
     expect(of('gsd:stats')?.kind).toBe('command')
+    expect(of('browse')?.description).toBe(browseDescription)
   })
 
   it('survives a plugin install with no skills directory', async () => {

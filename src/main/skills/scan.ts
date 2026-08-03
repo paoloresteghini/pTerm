@@ -62,9 +62,9 @@ export async function listSkills(projectCwd: string): Promise<SkillEntry[]> {
  * `:`, and anything a plugin contributed carries its plugin as a prefix.
  *
  * This is what Claude Code itself offers, measured rather than assumed:
- * `superpowers:brainstorming` rather than bare, `gsd:reapply-patches` for the
- * one command file declaring no name, and the directory name for all three
- * skills whose `name:` disagrees with it.
+ * `superpowers:brainstorming` rather than bare, `gsd:reapply-patches` for a
+ * command file declaring no name at all, and the directory name for all
+ * three skills whose `name:` disagrees with it.
  */
 function entryName(rel: string, source: SkillOrigin): string {
   const local = rel.split(sep).join(':')
