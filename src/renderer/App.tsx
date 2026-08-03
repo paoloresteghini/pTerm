@@ -7,6 +7,7 @@ import { Sidebar } from './Sidebar'
 import { RightPanel } from './RightPanel'
 import { AddProjectDialog } from './AddProjectDialog'
 import { SettingsPane } from './SettingsPane'
+import { TitleBar } from './TitleBar'
 import { Welcome } from './Welcome'
 import { cn } from './lib/cn'
 import {
@@ -609,250 +610,256 @@ export function App() {
   }, [activePaneId, currentTabs, state.projects, openTab, closePane, splitActive, focusPane])
 
   return (
-    <div className="flex h-screen w-screen bg-bg">
-      <Sidebar
-        projects={state.projects}
-        activeProjectId={state.activeProjectId}
-        tabsOf={(id) => tabsOfProject(state, id)}
-        activeTabId={currentTabId}
-        status={state.status}
-        projectStateOf={(id) => stateOfProject(state, id)}
-        needsYou={needsYou(state)}
-        onSelectNeedy={(tab) => {
-          dispatch({ type: 'activatedProject', id: projectIdForTab(state.projects, tab) })
-          dispatch({ type: 'activatedTab', id: tab.id })
-        }}
-        muted={muted}
-        onToggleMute={toggleMute}
-        onSelectProject={(id) => dispatch({ type: 'activatedProject', id })}
-        onSelectTab={(id) => dispatch({ type: 'activatedTab', id })}
-        onAdd={() => setAdding(true)}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onMoveTab={(tabId, projectId) => {
-          // Renames each pane's tmux session. A pane id is the other half of
-          // the name it keeps, so every pane keeps its scrollback and
-          // everything running in it. The reply lists every pane that moved —
-          // one, until 2b lets a tab hold more.
-          window.prcli
-            .moveTabToProject(tabId, projectId)
-            .then(({ projects, panes }) => dispatch({ type: 'movedTab', panes, projects }))
-            .catch(fail)
-        }}
-        onRename={(id, name) => {
-          window.prcli
-            .updateProject(id, { name })
-            .then((projects) => dispatch({ type: 'projects', projects }))
-            .catch(fail)
-        }}
-        onMove={(id, direction) => {
-          const order = state.projects.filter((p) => p.id !== UNSORTED_ID).map((p) => p.id)
-          const from = order.indexOf(id)
-          const to = from + direction
-          if (from === -1 || to < 0 || to >= order.length) return
-          order.splice(to, 0, ...order.splice(from, 1))
-          window.prcli
-            .reorderProjects(order)
-            .then((projects) => dispatch({ type: 'projects', projects }))
-            .catch(fail)
-        }}
-        onRemove={(id) => {
-          // The sessions keep running; they reappear under Unsorted, so a
-          // relaunch is not needed to reach them again.
-          window.prcli
-            .removeProject(id)
-            .then((projects) => dispatch({ type: 'projects', projects }))
-            .catch(fail)
-        }}
-      />
+    <div className="flex h-screen w-screen flex-col bg-bg">
+      {/* Above the sidebar rather than beside it, so the strip spans the
+          window and the traffic lights get a band that belongs to them. */}
+      <TitleBar />
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <TabBar
-          tabs={currentTabs}
-          activeId={currentTabId}
+      <div className="flex min-h-0 flex-1">
+        <Sidebar
+          projects={state.projects}
+          activeProjectId={state.activeProjectId}
+          tabsOf={(id) => tabsOfProject(state, id)}
+          activeTabId={currentTabId}
           status={state.status}
-          dead={state.dead}
-          onActivate={(id) => dispatch({ type: 'activatedTab', id })}
-          onClose={closePane}
-          onRestart={restartTab}
-          onDismiss={dismissTab}
-          onNew={openTab}
-          canOpen={canOpen}
+          projectStateOf={(id) => stateOfProject(state, id)}
+          needsYou={needsYou(state)}
+          onSelectNeedy={(tab) => {
+            dispatch({ type: 'activatedProject', id: projectIdForTab(state.projects, tab) })
+            dispatch({ type: 'activatedTab', id: tab.id })
+          }}
+          muted={muted}
+          onToggleMute={toggleMute}
+          onSelectProject={(id) => dispatch({ type: 'activatedProject', id })}
+          onSelectTab={(id) => dispatch({ type: 'activatedTab', id })}
+          onAdd={() => setAdding(true)}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onMoveTab={(tabId, projectId) => {
+            // Renames each pane's tmux session. A pane id is the other half of
+            // the name it keeps, so every pane keeps its scrollback and
+            // everything running in it. The reply lists every pane that moved —
+            // one, until 2b lets a tab hold more.
+            window.prcli
+              .moveTabToProject(tabId, projectId)
+              .then(({ projects, panes }) => dispatch({ type: 'movedTab', panes, projects }))
+              .catch(fail)
+          }}
+          onRename={(id, name) => {
+            window.prcli
+              .updateProject(id, { name })
+              .then((projects) => dispatch({ type: 'projects', projects }))
+              .catch(fail)
+          }}
+          onMove={(id, direction) => {
+            const order = state.projects.filter((p) => p.id !== UNSORTED_ID).map((p) => p.id)
+            const from = order.indexOf(id)
+            const to = from + direction
+            if (from === -1 || to < 0 || to >= order.length) return
+            order.splice(to, 0, ...order.splice(from, 1))
+            window.prcli
+              .reorderProjects(order)
+              .then((projects) => dispatch({ type: 'projects', projects }))
+              .catch(fail)
+          }}
+          onRemove={(id) => {
+            // The sessions keep running; they reappear under Unsorted, so a
+            // relaunch is not needed to reach them again.
+            window.prcli
+              .removeProject(id)
+              .then((projects) => dispatch({ type: 'projects', projects }))
+              .catch(fail)
+          }}
         />
-        {error ? (
-          <pre
-            data-testid="startup-error"
-            className="m-0 whitespace-pre-wrap p-2 font-mono text-[13px] text-danger"
-          >
-            {error}
-          </pre>
-        ) : null}
-        <div className="relative min-h-0 flex-1">
-          {showWelcome ? <Welcome hint={welcomeHint(state)} /> : null}
-          {/* Every terminal stays mounted, across every project and every tab:
-              both maps below are unconditional, and neither list is filtered
-              down to what is on screen. Unmounting would dispose an xterm and
-              lose its scrollback on each switch. `paneGroups` decides the
-              arrangement; see its tests for the arithmetic. */}
-          {groups.map((group) => (
-            <div
-              key={group.id}
-              data-testid={group.visible ? 'terminal-active' : `terminal-${group.id}`}
-              className={cn(
-                // `visibility`, not `display`: a hidden tab must stay laid
-                // out so it can measure itself, or it attaches at 80×24 and
-                // tmux shrinks the real session to match.
-                // The hairline `gap` between panes is the only thing the axis
-                // spends on itself. It overflows the bases, which sum to the
-                // whole container, by one pixel; flex shrinking is weighted by
-                // base size, so that pixel comes off the panes in the same
-                // proportion as the ratios and leaves them intact.
-                'absolute inset-0 flex gap-px p-2',
-                group.visible ? 'visible z-10' : 'invisible z-0 pointer-events-none',
-              )}
-              style={group.style}
+
+        <div className="flex min-w-0 flex-1 flex-col">
+          <TabBar
+            tabs={currentTabs}
+            activeId={currentTabId}
+            status={state.status}
+            dead={state.dead}
+            onActivate={(id) => dispatch({ type: 'activatedTab', id })}
+            onClose={closePane}
+            onRestart={restartTab}
+            onDismiss={dismissTab}
+            onNew={openTab}
+            canOpen={canOpen}
+          />
+          {error ? (
+            <pre
+              data-testid="startup-error"
+              className="m-0 whitespace-pre-wrap p-2 font-mono text-[13px] text-danger"
             >
-              {group.panes.map((box) => (
-                <div
-                  key={box.pane.id}
-                  data-testid={`pane-${box.pane.id}`}
-                  data-active={box.pane.id === activePaneId ? 'true' : 'false'}
-                  // Clicking a pane makes it the one the keyboard talks to.
-                  // `onMouseDown` rather than `onClick` so the app has recorded
-                  // it before the click moves DOM focus into that pane's
-                  // textarea — and so a drag that starts a selection inside a
-                  // pane counts as choosing it too.
-                  onMouseDown={() => selectPane(box.pane.id)}
-                  className={cn(
-                    // `relative`: the dead-pane chrome below positions itself
-                    // against this box, and an overlay that escaped to the
-                    // group container would land on whichever pane happened to
-                    // be at that corner.
-                    'relative',
-                    // `min-w-0 min-h-0`: a flex item's automatic minimum size
-                    // is its content's, not zero, so an xterm canvas still
-                    // sized for the whole tab could hold this box open past its
-                    // share — and the fit that would resize that canvas
-                    // measures this box, so it would have nothing to correct
-                    // itself to.
-                    'min-h-0 min-w-0',
-                    // Which pane is listening, said out loud — but only where
-                    // there is a choice to make. An inset ring rather than a
-                    // border: it takes no space, so marking a pane cannot
-                    // resize it and set off a fit of the real tmux session.
-                    group.panes.length > 1 &&
-                      box.pane.id === activePaneId &&
-                      'shadow-[inset_0_0_0_1px_var(--color-accent)]',
-                  )}
-                  style={box.style}
-                >
-                  <Terminal
-                    tabId={box.pane.id}
-                    visible={group.visible}
-                    // Never for a tab that is off screen: taking focus into one
-                    // would move typing to a terminal the user cannot see.
-                    focused={group.visible && box.pane.id === activePaneId}
-                  />
-                  {/* Only the pane's session has died — the box, the xterm and
-                      the scrollback in it are all still here, which is why this
-                      draws over the pane instead of collapsing it. See
-                      `paneGroups`, which says why that is the opposite of what
-                      restore does with a pane whose session is gone.
-
-                      Gated on `box.dead` rather than on `state.dead[...]` read
-                      again here: `paneGroups` decides it, once, down both of
-                      its branches, and that is where it is tested. */}
-                  {box.dead ? (
-                    <DeadPane
-                      pane={box.pane}
-                      state={state.status[box.pane.id] ?? null}
-                      onRestart={restartTab}
-                      onDismiss={dismissTab}
-                    />
-                  ) : null}
-                </div>
-              ))}
-              {/* The dividers, in an overlay of their own rather than among the
-                  panes, and `inset-2` is the container's `p-2` written a second
-                  time on purpose. An absolutely positioned element resolves its
-                  percentages — and reports its parent's `offsetWidth` — against
-                  its containing block's PADDING box, while the panes lay out in
-                  the CONTENT box. As direct children of the padded container the
-                  strips missed the real seam by up to the padding and measured a
-                  drag axis two paddings too long, so every drag ran slow and
-                  crept away from the cursor. This overlay IS the content box, so
-                  both resolve against the right one. The duplication is real and
-                  is the price; `dividers.test.ts` pins the two numbers together
-                  so they cannot drift apart quietly.
-
-                  `pointer-events-none` so the overlay is invisible to the mouse
-                  everywhere the strips are not — each strip opts back in — and
-                  no `key` juggling: a divider is keyed by the pane it precedes,
-                  in a list of its own, so nothing here can disturb a pane box's
-                  key or unmount a terminal.
-
-                  That opting back in reaches further than this overlay, and it
-                  is worth knowing which guard it leans on. A hidden tab carries
-                  `pointer-events-none` on the container above, and a descendant
-                  that sets `pointer-events: auto` is not covered by it — so what
-                  actually keeps an off-screen divider from being grabbed is the
-                  `invisible` beside it: `visibility: hidden` is not hit-tested,
-                  and nothing in here sets `visibility: visible` to undo it. That
-                  class is therefore load-bearing for input as well as for what is
-                  drawn, and is not to be traded for something weaker. None of it
-                  is new with the dividers — `DeadPane`'s ↻ and × are
-                  `pointer-events-auto` inside the same hidden container and have
-                  always rested on the same thing — which is why this is written
-                  down here rather than fixed by drawing the overlay only for the
-                  visible group. */}
+              {error}
+            </pre>
+          ) : null}
+          <div className="relative min-h-0 flex-1">
+            {showWelcome ? <Welcome hint={welcomeHint(state)} /> : null}
+            {/* Every terminal stays mounted, across every project and every tab:
+                both maps below are unconditional, and neither list is filtered
+                down to what is on screen. Unmounting would dispose an xterm and
+                lose its scrollback on each switch. `paneGroups` decides the
+                arrangement; see its tests for the arithmetic. */}
+            {groups.map((group) => (
               <div
-                data-testid={`dividers-${group.id}`}
-                className="pointer-events-none absolute inset-2 z-20"
-              >
-                {group.panes.map((box, index) =>
-                  index > 0 ? (
-                    <PaneDivider
-                      key={box.pane.id}
-                      dir={group.style.flexDirection === 'column' ? 'col' : 'row'}
-                      offset={group.panes
-                        .slice(0, index)
-                        .reduce((sum, earlier) => sum + earlier.share, 0)}
-                      onGrab={() => grabPane(group.id, index, group.panes)}
-                      onDrag={dragPane}
-                      onCommit={() => commitLayout(group.id)}
-                    />
-                  ) : null,
+                key={group.id}
+                data-testid={group.visible ? 'terminal-active' : `terminal-${group.id}`}
+                className={cn(
+                  // `visibility`, not `display`: a hidden tab must stay laid
+                  // out so it can measure itself, or it attaches at 80×24 and
+                  // tmux shrinks the real session to match.
+                  // The hairline `gap` between panes is the only thing the axis
+                  // spends on itself. It overflows the bases, which sum to the
+                  // whole container, by one pixel; flex shrinking is weighted by
+                  // base size, so that pixel comes off the panes in the same
+                  // proportion as the ratios and leaves them intact.
+                  'absolute inset-0 flex gap-px p-2',
+                  group.visible ? 'visible z-10' : 'invisible z-0 pointer-events-none',
                 )}
+                style={group.style}
+              >
+                {group.panes.map((box) => (
+                  <div
+                    key={box.pane.id}
+                    data-testid={`pane-${box.pane.id}`}
+                    data-active={box.pane.id === activePaneId ? 'true' : 'false'}
+                    // Clicking a pane makes it the one the keyboard talks to.
+                    // `onMouseDown` rather than `onClick` so the app has recorded
+                    // it before the click moves DOM focus into that pane's
+                    // textarea — and so a drag that starts a selection inside a
+                    // pane counts as choosing it too.
+                    onMouseDown={() => selectPane(box.pane.id)}
+                    className={cn(
+                      // `relative`: the dead-pane chrome below positions itself
+                      // against this box, and an overlay that escaped to the
+                      // group container would land on whichever pane happened to
+                      // be at that corner.
+                      'relative',
+                      // `min-w-0 min-h-0`: a flex item's automatic minimum size
+                      // is its content's, not zero, so an xterm canvas still
+                      // sized for the whole tab could hold this box open past its
+                      // share — and the fit that would resize that canvas
+                      // measures this box, so it would have nothing to correct
+                      // itself to.
+                      'min-h-0 min-w-0',
+                      // Which pane is listening, said out loud — but only where
+                      // there is a choice to make. An inset ring rather than a
+                      // border: it takes no space, so marking a pane cannot
+                      // resize it and set off a fit of the real tmux session.
+                      group.panes.length > 1 &&
+                        box.pane.id === activePaneId &&
+                        'shadow-[inset_0_0_0_1px_var(--color-accent)]',
+                    )}
+                    style={box.style}
+                  >
+                    <Terminal
+                      tabId={box.pane.id}
+                      visible={group.visible}
+                      // Never for a tab that is off screen: taking focus into one
+                      // would move typing to a terminal the user cannot see.
+                      focused={group.visible && box.pane.id === activePaneId}
+                    />
+                    {/* Only the pane's session has died — the box, the xterm and
+                        the scrollback in it are all still here, which is why this
+                        draws over the pane instead of collapsing it. See
+                        `paneGroups`, which says why that is the opposite of what
+                        restore does with a pane whose session is gone.
+
+                        Gated on `box.dead` rather than on `state.dead[...]` read
+                        again here: `paneGroups` decides it, once, down both of
+                        its branches, and that is where it is tested. */}
+                    {box.dead ? (
+                      <DeadPane
+                        pane={box.pane}
+                        state={state.status[box.pane.id] ?? null}
+                        onRestart={restartTab}
+                        onDismiss={dismissTab}
+                      />
+                    ) : null}
+                  </div>
+                ))}
+                {/* The dividers, in an overlay of their own rather than among the
+                    panes, and `inset-2` is the container's `p-2` written a second
+                    time on purpose. An absolutely positioned element resolves its
+                    percentages — and reports its parent's `offsetWidth` — against
+                    its containing block's PADDING box, while the panes lay out in
+                    the CONTENT box. As direct children of the padded container the
+                    strips missed the real seam by up to the padding and measured a
+                    drag axis two paddings too long, so every drag ran slow and
+                    crept away from the cursor. This overlay IS the content box, so
+                    both resolve against the right one. The duplication is real and
+                    is the price; `dividers.test.ts` pins the two numbers together
+                    so they cannot drift apart quietly.
+
+                    `pointer-events-none` so the overlay is invisible to the mouse
+                    everywhere the strips are not — each strip opts back in — and
+                    no `key` juggling: a divider is keyed by the pane it precedes,
+                    in a list of its own, so nothing here can disturb a pane box's
+                    key or unmount a terminal.
+
+                    That opting back in reaches further than this overlay, and it
+                    is worth knowing which guard it leans on. A hidden tab carries
+                    `pointer-events-none` on the container above, and a descendant
+                    that sets `pointer-events: auto` is not covered by it — so what
+                    actually keeps an off-screen divider from being grabbed is the
+                    `invisible` beside it: `visibility: hidden` is not hit-tested,
+                    and nothing in here sets `visibility: visible` to undo it. That
+                    class is therefore load-bearing for input as well as for what is
+                    drawn, and is not to be traded for something weaker. None of it
+                    is new with the dividers — `DeadPane`'s ↻ and × are
+                    `pointer-events-auto` inside the same hidden container and have
+                    always rested on the same thing — which is why this is written
+                    down here rather than fixed by drawing the overlay only for the
+                    visible group. */}
+                <div
+                  data-testid={`dividers-${group.id}`}
+                  className="pointer-events-none absolute inset-2 z-20"
+                >
+                  {group.panes.map((box, index) =>
+                    index > 0 ? (
+                      <PaneDivider
+                        key={box.pane.id}
+                        dir={group.style.flexDirection === 'column' ? 'col' : 'row'}
+                        offset={group.panes
+                          .slice(0, index)
+                          .reduce((sum, earlier) => sum + earlier.share, 0)}
+                        onGrab={() => grabPane(group.id, index, group.panes)}
+                        onDrag={dragPane}
+                        onCommit={() => commitLayout(group.id)}
+                      />
+                    ) : null,
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
+
+        {panelOpen ? (
+          <RightPanel project={project} onRun={(command, type) => launch(command, type)} />
+        ) : null}
+
+        <AddProjectDialog
+          open={adding}
+          onOpenChange={setAdding}
+          onAdd={(input) => {
+            window.prcli
+              .addProject(input)
+              .then((projects) => {
+                dispatch({ type: 'projects', projects })
+                const added = projects.find((candidate) => candidate.cwd === input.cwd)
+                if (added) dispatch({ type: 'activatedProject', id: added.id })
+              })
+              .catch(fail)
+          }}
+        />
+
+        <SettingsPane
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+          notifications={notifications}
+          onNotificationsChange={setNotifications}
+        />
       </div>
-
-      {panelOpen ? (
-        <RightPanel project={project} onRun={(command, type) => launch(command, type)} />
-      ) : null}
-
-      <AddProjectDialog
-        open={adding}
-        onOpenChange={setAdding}
-        onAdd={(input) => {
-          window.prcli
-            .addProject(input)
-            .then((projects) => {
-              dispatch({ type: 'projects', projects })
-              const added = projects.find((candidate) => candidate.cwd === input.cwd)
-              if (added) dispatch({ type: 'activatedProject', id: added.id })
-            })
-            .catch(fail)
-        }}
-      />
-
-      <SettingsPane
-        open={settingsOpen}
-        onOpenChange={setSettingsOpen}
-        notifications={notifications}
-        onNotificationsChange={setNotifications}
-      />
     </div>
   )
 }

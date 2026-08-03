@@ -24,3 +24,22 @@
 html, body, #root {
   height: 100%;
 }
+
+/* What lets the user move the window. `src/main/index.ts` opens it with
+   `titleBarStyle: 'hiddenInset'`, so the OS provides no title bar to drag by
+   and Electron moves the window only for regions an app nominates itself.
+
+   Measured on Electron 43, 2026-08-03: the two spellings are aliases here.
+   Deleting the `-webkit-` line and leaving only `app-region` still leaves
+   `getComputedStyle(el).getPropertyValue('-webkit-app-region')` reading
+   `drag`, and the E2E assertion that reads it stayed green. So the second
+   line buys nothing today and is kept only against the alias going away,
+   which is a guess about future engines rather than something measured.
+   Either spelling alone would work now.
+
+   A rule here rather than an arbitrary-property class at the call site
+   because it sets the property twice, which does not read as styling. */
+.drag-region {
+  -webkit-app-region: drag;
+  app-region: drag;
+}

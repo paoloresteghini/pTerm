@@ -1,17 +1,18 @@
 /**
  * The app starting, drawing a terminal, and finding its session again.
  *
- * Four tests, each against the packaged build (`npm run package`, run once for
+ * Five tests, each against the packaged build (`npm run package`, run once for
  * the whole suite by `tests/e2e/global-setup.ts`) and a real tmux server on
  * the `prcli-e2e` socket: typed input reaches the shell and its output comes
  * back; a quit and relaunch reattaches the same session with its scrollback;
  * closing the window and reopening it through macOS `activate` reattaches
  * rather than replacing, leaving exactly one `prcli-` session on the socket;
- * and a fourth that opens no tmux session at all — it reads the five `PRCLI_*`
+ * a fourth that opens no tmux session at all — it reads the five `PRCLI_*`
  * env vars back out of the launched app's own `process.env` and asserts each
  * equals the exact value this file handed `launchApp` (four temp paths made
  * in `beforeEach`, plus the `SOCKET` const), not merely that it is set to
- * something.
+ * something; and a fifth that opens no session either, asserting the title
+ * bar computes to a draggable region and holds nothing interactive.
  *
  * **Measured, 2026-08-02, this file run alone** (`npx playwright test
  * tests/e2e/launch.spec.ts`), against the three tests that existed at the
@@ -24,7 +25,19 @@
  * behaviours broke. Unmeasured against that mutation is the fourth test added
  * after: it never opens a tab or looks at the terminal, so it would survive a
  * `terminal-box` rename intact — the one "passes anyway" case in this file,
- * and expected, since it is checking something else entirely.
+ * and expected, since it is checking something else entirely. The fifth test,
+ * added later still, is a second such case for the same reason.
+ *
+ * **Measured, 2026-08-03, this test run alone**: the draggable-region test
+ * fails under either way of breaking the region, both with the same signature,
+ * `Expected: "drag" / Received: "none"`. Dropping `drag-region` from
+ * `TitleBar.tsx`'s class list fails it, and so does leaving that class in place
+ * while deleting the `.drag-region` rule from `src/renderer/index.css`. That
+ * second shape is the point: the class can look right in the markup while the
+ * rule behind it is gone, which is a window nobody can move and no error
+ * anywhere. Also measured the same day, and recorded beside the rule: the
+ * `-webkit-` and unprefixed spellings are aliases on Electron 43, so either
+ * line alone keeps this test green.
  *
  * **What this file does NOT see** — read off this file's own text unless a
  * line says measured or names another file:
@@ -247,5 +260,33 @@ test('runs against overridden paths, never the developer’s own', async () => {
   expect(seen.settings).toBe(claudeSettingsPath)
   expect(seen.claudeHome).toBe(claudeHome)
   expect(seen.socket).toBe(SOCKET)
+  await app.close()
+})
+
+test('the title bar is a draggable region, which is the only way to move the window', async () => {
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  const titlebar = window.getByTestId('titlebar')
+  await expect(titlebar).toBeVisible()
+
+  // The computed value, not the class name. The class could be present and the
+  // rule still absent: a typo in `index.css`, a Tailwind build that drops it,
+  // or a future rename would each leave `drag-region` in the markup and the
+  // window immovable, which is exactly the bug this strip exists to fix and
+  // exactly the bug that shipped unnoticed from the first commit that set
+  // `titleBarStyle: 'hiddenInset'`. Chromium reports the `-webkit-` form.
+  const region = await titlebar.evaluate(
+    (node) => getComputedStyle(node).getPropertyValue('-webkit-app-region'),
+  )
+  expect(region).toBe('drag')
+
+  // Nothing inside may opt back out, because a draggable region swallows
+  // pointer events and the strip holds nothing that wants them. If an
+  // interactive element is ever added here it needs `no-drag`, and this
+  // assertion is where that decision gets made deliberately rather than by
+  // someone discovering a dead button.
+  await expect(titlebar.locator('button, a, input, select, textarea')).toHaveCount(0)
+
   await app.close()
 })
