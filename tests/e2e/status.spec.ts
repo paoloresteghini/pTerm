@@ -25,14 +25,16 @@
  * **What this file does NOT see** — read off this file's own text unless a
  * line says measured or names another file:
  *
- * - **`DeadPane`, measured.** This is the only spec in the suite that kills a
- *   pane's session, so it is the only one that could see the dead-pane
- *   chrome — and it does not. Making `DeadPane` return `null` outright left
- *   this file 10 of 10 green (2026-08-02). `a dead tab lingers, then restarts`
- *   drives `TabBar`'s `restart-<id>`, not the pane overlay's
- *   `pane-restart-<id>`; nothing in this suite references `dead-`,
+ * - **`DeadPane`, measured.** This spec kills a pane's session, so it could
+ *   see the dead-pane chrome — and it does not. Making `DeadPane` return
+ *   `null` outright left this file 10 of 10 green (2026-08-02). `a dead tab
+ *   lingers, then restarts` drives `TabBar`'s `restart-<id>`, not the pane
+ *   overlay's `pane-restart-<id>`; nothing in this file references `dead-`,
  *   `pane-dot-`, `pane-restart-` or `pane-dismiss-` at all. The overlay's dot,
- *   its Restart and its Dismiss are unwitnessed here;
+ *   its Restart and its Dismiss are unwitnessed here. `splits.spec.ts`'s
+ *   tombstone test is where the overlay is rendered and its Restart clicked —
+ *   which is why the suite-wide half of this bullet is now scoped to this
+ *   file;
  * - **anything past one pane in one tab.** Every tab is opened through the UI
  *   with `tabs: []` seeded and nothing presses ⌘D, so every tab has exactly
  *   one pane and every group renders exactly one box, whose share renormalises

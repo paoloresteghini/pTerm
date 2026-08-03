@@ -1,10 +1,13 @@
 /**
  * The split surface, seen by a test for the first time.
  *
- * Two tests on the `prcli-e2e-splits` socket: ⌘D turns one pane into two
+ * Three tests on the `prcli-e2e-splits` socket: ⌘D turns one pane into two
  * inside a single tab, backed by two tmux sessions, with the new pane taking
- * the selection and ⌥⌘← giving it back; and a ⌘D on a pane too narrow to halve
- * is refused, with the reason on screen and no second session made.
+ * the selection and ⌥⌘← giving it back; a ⌘D on a pane too narrow to halve
+ * is refused, with the reason on screen and no second session made; and one
+ * pane of a split killed outright leaves a tombstone in its own slot, with the
+ * sibling still drawn, until the overlay's own Restart clears it and brings the
+ * session back.
  *
  * Before this file no test anywhere in this repo had rendered a split.
  * `tabs.spec.ts` says so in its own "what this file does NOT see": nothing
@@ -30,8 +33,22 @@
  * - **the row floor.** The refusal test squeezes the window along the column
  *   axis only, so `MIN_PANE_ROWS` and the `'rows'` half of the message are
  *   never the branch taken;
- * - **closing one pane of a split, restoring a split across a relaunch, and a
- *   dead pane inside one.** Nothing here closes, relaunches or kills;
+ * - **closing one pane of a split, and restoring a split across a relaunch.**
+ *   Nothing here closes a pane or relaunches the app, so `closedPane` and the
+ *   restore path are both unreached — and with them `withKeptPanes`, which is
+ *   called from exactly those two places plus the `split` reply
+ *   (`workspace.ts:830`, `workspace.ts:1071`, read 2026-08-02). The tombstone
+ *   test does NOT reach it: `died` is one line that writes `state.dead` and
+ *   leaves the row alone, and restart dispatches `opened`, which rewrites
+ *   `state.panes` and never `state.tabs`. The order this file asserts after a
+ *   death is `boxesOfRow` walking the row the split already wrote;
+ * - **most of the dead-pane overlay.** The tombstone test renders `DeadPane`
+ *   and clicks `pane-restart-<id>`, which is the whole of what is witnessed
+ *   here. `pane-dismiss-<id>` is never clicked, `pane-dot-<id>`'s colour is
+ *   never read — the dot is asserted nowhere, so `ended` vs `crashed` after a
+ *   `kill -9` is not a distinction this file draws — and nothing checks that
+ *   the dead box keeps the width it died at or that dismissing it hands that
+ *   width back to its sibling;
  * - **the OS keyboard layer.** ⌘D and ⌥⌘← are dispatched into the window by
  *   Playwright, as everywhere else in this suite.
  */
@@ -121,6 +138,45 @@ async function windowCols(name: string): Promise<number> {
     '-L', SOCKET, 'display-message', '-p', '-t', `=${name}:`, '#{window_width}',
   ])
   return Number(stdout.trim())
+}
+
+/**
+ * The pid of the process running in one of THIS socket's sessions, checked
+ * before anything is allowed to signal it.
+ *
+ * The one test in this file that kills a process is the only place in the
+ * suite where a mis-parse is not a failed assertion but real damage: this
+ * machine runs a default tmux server carrying the developer's own work, and
+ * `kill -9 ''` or `kill -9` on whatever a wrong lookup returned is not
+ * something a green suite would tell you about afterwards. So every step of
+ * the derivation is narrowed rather than trusted:
+ *
+ * - `-L SOCKET` is fixed, so the lookup can only ever see sessions this file
+ *   created. There is no parameter for it and no call site that could pass
+ *   `default`;
+ * - `=${session}:` is an EXACT session name (tmux's `=` prefix), and the
+ *   caller builds that name from the app's own pane id, having first asserted
+ *   the name is one of `sessionNames(SOCKET)`;
+ * - exactly one line must come back, and it must be a positive integer.
+ *   Anything else — no server, an unknown session, a window that somehow held
+ *   two panes — throws here rather than travelling on to `kill` as `''`, `NaN`
+ *   or a second pid nobody meant to name.
+ *
+ * `tests/integration/pane-death.test.ts` reads `#{pane_pid}` the same way for
+ * the same reason; this is that shape with the guard written out.
+ */
+async function panePid(session: string): Promise<string> {
+  const { stdout } = await run('tmux', [
+    '-L', SOCKET, 'list-panes', '-t', `=${session}:`, '-F', '#{pane_pid}',
+  ])
+  const pids = stdout.split('\n').map((line) => line.trim()).filter(Boolean)
+  if (pids.length !== 1 || !/^[1-9][0-9]*$/.test(pids[0])) {
+    throw new Error(
+      `refusing to kill: expected exactly one numeric pane pid for "${session}" on ` +
+        `socket ${SOCKET}, got ${JSON.stringify(pids)}`,
+    )
+  }
+  return pids[0]
 }
 
 test.beforeEach(async () => {
@@ -245,6 +301,62 @@ test('⌘D on a pane too narrow to halve is refused, and says why', async () => 
   ).toHaveCount(1)
   // And no second session was made — the refusal is BEFORE the IPC call.
   expect(await sessionNames(SOCKET)).toHaveLength(1)
+
+  await app.close()
+})
+
+/**
+ * The first test anywhere in this repo to render `DeadPane`.
+ *
+ * Measured, 2026-08-02, before this test existed: mutating `DeadPane` to
+ * return `null` left `status.spec.ts` — the only other spec that kills a
+ * session — 10 of 10 green, because its `a dead tab lingers, then restarts`
+ * drives `TabBar`'s `restart-<id>` and never the overlay's
+ * `pane-restart-<id>`. The overlay had shipped unwitnessed.
+ */
+test('a killed pane leaves a tombstone where it was, and its tab keeps the other pane', async () => {
+  const app = await launch()
+  const window = await app.firstWindow()
+  await window.getByTestId('new-tab').click()
+  await expect(window.getByTestId('terminal-active')).toBeVisible()
+  await window.keyboard.press('Meta+d')
+  await expect(
+    window.getByTestId('terminal-active').locator(':scope > [data-testid^="pane-"]'),
+  ).toHaveCount(2)
+  await expect.poll(async () => (await sessionNames(SOCKET)).length, { timeout: 20_000 }).toBe(2)
+  const ids = await paneIds(window)
+  expect(ids).toHaveLength(2)
+  const [left, right] = ids
+
+  // The victim is named from the APP's own pane id and the slug `beforeEach`
+  // seeded, never from whatever a session listing happened to return second —
+  // `SessionManager` names a member session `prcli-<projectSlug>-<paneId>`
+  // (see `tests/integration/pane-death.test.ts`'s `prcli-alpha-${founder.id}`).
+  // Asserted to exist on THIS socket before its pid is looked up, so the
+  // `kill` below cannot be aimed at anything this file did not create; see
+  // `panePid` for the rest of the guard.
+  const victim = `prcli-scratch-${right}`
+  expect(await sessionNames(SOCKET)).toContain(victim)
+  await run('kill', ['-9', await panePid(victim)])
+
+  // The box stays where it was and the overlay draws over it. A pane that
+  // vanished — or that reappeared at the end of the row — is the regression
+  // this pins, so the ORDER is asserted, not just the count.
+  await expect(window.getByTestId(`dead-${right}`)).toBeVisible({ timeout: 20_000 })
+  expect(await paneIds(window)).toEqual([left, right])
+  await expect(window.getByTestId(`pane-${left}`)).toBeVisible()
+
+  // Restart brings a live session back under the same pane id. `toHaveCount(0)`
+  // is a polling matcher and so is the poll below, but neither is a non-change
+  // assertion: both wait for something the click MAKES happen — the tombstone
+  // going and the second session coming back — so returning on the first match
+  // is exactly right here.
+  await window.getByTestId(`pane-restart-${right}`).click()
+  await expect(window.getByTestId(`dead-${right}`)).toHaveCount(0, { timeout: 20_000 })
+  await expect.poll(async () => (await sessionNames(SOCKET)).length, { timeout: 20_000 }).toBe(2)
+  // And the session that came back is the dead pane's own, under the same
+  // name: two sessions could otherwise be the survivor plus something else.
+  expect(await sessionNames(SOCKET)).toContain(victim)
 
   await app.close()
 })
