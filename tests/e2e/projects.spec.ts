@@ -61,7 +61,12 @@
  *   test here opens it;
  * - **the OS accelerator layer.** ⌘1/⌥⌘1/⌘W are dispatched into the window by
  *   Playwright; that the physical keystroke reaches the window at all is
- *   outside this file.
+ *   outside this file;
+ * - **whether a launch reaches `createWindow()` at all.** Roughly one
+ *   full-suite run in three dies before it does — a known pre-existing flake,
+ *   measured and accounted for in full at the `launch` const below. Nothing
+ *   here asserts on startup reliability: when it bites, the run reports a
+ *   timeout instead of reporting anything about projects.
  */
 import { test, expect, type ElectronApplication } from '@playwright/test'
 import { execFile } from 'node:child_process'
