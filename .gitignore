@@ -4,6 +4,10 @@ out/
 .vite/
 .DS_Store
 .superpowers/
+# Worktrees live here so two Claude sessions can work the same repo without
+# fighting over one checkout. Ignored because an unignored worktree directory
+# commits an entire second copy of the tree into the repository.
+.claude/worktrees/
 *.log
 test-results/
 # Playwright's HTML reporter writes here. Added on `e2e-plan-revision` ahead of
