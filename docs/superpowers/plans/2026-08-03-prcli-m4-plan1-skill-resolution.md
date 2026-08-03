@@ -863,7 +863,12 @@ async function parse(path: string): Promise<{ name?: string; description?: strin
 }
 
 async function walk(dir: string): Promise<string[]> {
-  let items: Awaited<ReturnType<typeof readdir>>
+  // Deliberately un-annotated, matching `discovery.ts`'s `let entries` for the
+  // identical `readdir(…, { withFileTypes: true })` call. An explicit
+  // `Awaited<ReturnType<typeof readdir>>` resolves to the Buffer overload
+  // under TS 7.0.2 and fails typecheck — vitest never sees it, so it survives
+  // every test run and dies at the gate.
+  let items
   try {
     items = await readdir(dir, { withFileTypes: true })
   } catch {
