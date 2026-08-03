@@ -319,6 +319,23 @@ export interface ResolvedPreset {
   origin: 'user' | 'repo'
 }
 
+/**
+ * Where a skill or command came from. Declared here rather than in
+ * `src/main/skills/resolve.ts`, which now imports it, because the renderer
+ * draws this tag and cannot import from `src/main` to get its shape — the
+ * same reason `ResolvedPreset` and `NotificationConfig` live here.
+ */
+export type SkillOrigin = { kind: 'user' } | { kind: 'repo' } | { kind: 'plugin'; plugin: string }
+
+/** One row of the skills panel, and one action row of the command palette. */
+export interface SkillEntry {
+  /** What gets typed into a pane, without the leading slash. */
+  name: string
+  description: string
+  kind: 'skill' | 'command'
+  source: SkillOrigin
+}
+
 export interface ProjectDescriptor {
   id: string
   name: string

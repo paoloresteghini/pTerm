@@ -1,11 +1,7 @@
 import { join } from 'node:path'
+import type { SkillOrigin } from '../../shared/ipc'
 
-/**
- * Where an entry came from. Moved to `src/shared/ipc.ts` in Task 3, once the
- * renderer needs to draw it; defined here first so this module and its tests
- * stand alone.
- */
-export type SkillOrigin = { kind: 'user' } | { kind: 'repo' } | { kind: 'plugin'; plugin: string }
+export type { SkillOrigin }
 
 export interface SkillSource {
   dir: string
