@@ -39,7 +39,7 @@
  *   single gap in this file. A `col` tab takes the other branch of all three
  *   things the drag tests assert: `PaneDivider` positions on `top` rather than
  *   `left` and measures `offsetHeight` rather than `offsetWidth`
- *   (`PaneDivider.tsx:126,72`), `grabFor` reads `grid.rows` against
+ *   (`PaneDivider.tsx:144,72`), `grabFor` reads `grid.rows` against
  *   `MIN_PANE_ROWS` rather than `grid.cols` against `MIN_PANE_COLS`
  *   (`workspace.ts:438,447`), and the reflow travels as `-y` rather than `-x`.
  *   Nothing here executes any of them;
@@ -213,6 +213,12 @@ async function paneIds(window: Page): Promise<string[]> {
   // Non-empty first: `.map` over nothing is `[]`, and `[]` compares equal to
   // itself in every assertion that would otherwise catch a broken selector.
   await expect(boxes.first()).toBeVisible()
+  // The `?? ''` is unreachable and is kept for the type checker alone: the
+  // locator matches on `[data-testid^="pane-"]`, so every element it returns
+  // has the attribute and `dataset.testid` is always a string — but `dataset`
+  // is a `DOMStringMap`, typed `string | undefined`, and dropping the fallback
+  // is a `tsc --noEmit` error (verified 2026-08-03: TS18048 at this line). It
+  // is not a case that can happen, and an empty id should not be read as one.
   return (
     await boxes.evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.testid ?? ''))
   ).map((id) => id.replace('pane-', ''))
@@ -443,6 +449,14 @@ test('⌘D on a pane too narrow to halve is refused, and says why', async () => 
   // the four paths, and its socket cases the fifth, a real value one at a time
   // and require the throw to beat the launch. Adding an optional option is a
   // step back towards the defaults that argument exists to keep out.
+  //
+  // And it does not leak into the tests after it. Nothing persists window
+  // bounds: `src/main/index.ts:292-294` constructs the window at a hardcoded
+  // 1280x800 every launch, and no `getBounds`/`setBounds` pair anywhere writes
+  // a size back to disk (grepped 2026-08-03). The fresh `mkdtemp` userDataDir
+  // and configDir per test, and the `app.close()` below, are two further
+  // reasons rather than the load-bearing one — every other test in this file
+  // measures against 1280x800 and says so in its own numbers.
   await app.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows()[0].setSize(560, 800)
   })
@@ -610,8 +624,10 @@ test('dragging the divider moves the seam, reflows tmux, and is written down on 
   // 6px, derived rather than guessed and then measured: `PaneDivider`'s own
   // comment bounds the seam error at `n − 1.5` pixels — half a pixel for the two
   // panes here. Measured 2026-08-02 on a 1280x800 window: exactly 0.5px, with
-  // both panes at 423.5px. 6px is eleven times the measured value and two orders
-  // of magnitude under the 423.5px error the two mutations below produce.
+  // both panes at 423.5px. 6px is twelve times that measured 0.5px, and the
+  // 423.5px error the two mutations below produce is 70.6 times this bound —
+  // not the "two orders of magnitude" an earlier draft of this comment claimed,
+  // which is a factor of 100.
   const seamMiddle = seamBefore.x + seamBefore.width / 2
   expect(Math.abs(seamMiddle - (leftBefore.x + leftBefore.width))).toBeLessThan(6)
 
@@ -633,8 +649,19 @@ test('dragging the divider moves the seam, reflows tmux, and is written down on 
   // tolerable: a baseline that had NOT caught up would be too HIGH (the whole
   // tab rather than half of it), and the poll below would then time out rather
   // than pass. A lagging reflow makes this test fail loudly; it cannot make it
-  // pass silently. This is also the one assertion in the file with no A/B behind
-  // it — no mutation run here has failed the reflow poll on its own.
+  // pass silently.
+  //
+  // Both halves of that now have an A/B behind them, run 2026-08-03 — until
+  // then the reflow poll was the one assertion in this file with none.
+  // `SessionManager.resize`'s `void this.resizeWindow(entry, cols, rows)`
+  // (`manager.ts:1324`) deleted, one line, which is the whole of how a pane's
+  // size reaches the tmux window: 1 failed, 6 passed, the failure being the
+  // poll below and nothing else in the file. `splitTab` puts `window-size
+  // manual` on every pane's window and a manual window ignores its client
+  // outright (see that method's own comment), so with the push gone the width
+  // freezes — and it froze at 106, the PRE-split width, exactly the too-high
+  // baseline described above. The poll then timed out on `106 > 106` rather
+  // than passing. So the failure direction is measured now, not just argued.
 
   await window.mouse.move(seamMiddle, seamBefore.y + seamBefore.height / 2)
   await window.mouse.down()
@@ -941,6 +968,11 @@ test('a drag on a tab holding a tombstone is kept, and the tombstone keeps its n
   const farAfter = await paneBox(window, far)
   const onScreen = liveAfter.width / (liveAfter.width + farAfter.width)
   const written = await savedRatio(live)
+  // UNMEASURED, said rather than implied: no mutation run against this file has
+  // failed this line on its own. It is a guard on the line below rather than a
+  // claim of its own — `?? 0` there would turn a missing row into a comparison
+  // against zero — and the poll above has already waited for a two-kid row, so
+  // anything that emptied it reddens that first.
   expect(written?.[0]).toBeDefined()
   expect(Math.abs((written?.[0] ?? 0) - onScreen)).toBeLessThan(0.01)
 
@@ -963,6 +995,11 @@ test('a drag on a tab holding a tombstone is kept, and the tombstone keeps its n
   // third a reset row would have given it. The bound would still discriminate
   // at ten times its size.
   expect(Math.abs(revived.width - deadDragged.width)).toBeLessThan(12)
+  // UNMEASURED, said rather than implied: no mutation has failed this line on
+  // its own either. It repeats the order assertion made before the drag, so
+  // what it adds is only that a restart did not reorder the row — and `opened`
+  // rewrites `state.panes`, never `state.tabs`, so on today's code there is no
+  // path from a restart to a reordering for it to catch.
   expect(await paneIds(window)).toEqual([live, dead, far])
 
   await app.close()

@@ -2,8 +2,15 @@ import { readFileSync } from 'node:fs'
 import { describe, it, expect } from 'vitest'
 
 /**
- * The drag gesture, checked against source text because nothing in this suite
+ * The drag gesture, checked against source text because nothing in THIS FILE
  * can press a mouse button.
+ *
+ * Something in the repo now can. `tests/e2e/splits.spec.ts` drives a real
+ * pointer onto a real divider in a real window, and three of the items this
+ * header used to list as unseeable are seen there. The list below marks which,
+ * and marks the two that are still nobody's — the distinction matters, because
+ * a reader who takes this file's word for what cannot be tested will read a red
+ * `splits.spec.ts` as noise.
  *
  * `vitest.config.mts` runs in `environment: 'node'`: there is no DOM to render
  * `PaneDivider` into, and a DOM alone would not be enough — jsdom performs no
@@ -30,16 +37,36 @@ import { describe, it, expect } from 'vitest'
  *   pinned elsewhere: `layoutWrite` and `routeShares` in `shares.test.ts`
  *   cover the routing decision, and `persistence.test.ts` covers the write
  *   reaching disk, tombstone and all;
- * - that a pointerdown starts a drag at all, or that a pointerup ends one;
- * - that the cursor changes, or that a 7px strip is comfortable to hit;
+ * - **that a pointerdown starts a drag at all, or that a pointerup ends one —
+ *   covered since this branch**, by `tests/e2e/splits.spec.ts`'s `dragging the
+ *   divider moves the seam, reflows tmux, and is written down on release`. It
+ *   reads the pane widening BETWEEN the press and the release, so the press
+ *   started something, and then waits for the row to reach disk, which only
+ *   `onCommit` on the release sends;
+ * - that the cursor changes, or that a 7px strip is comfortable to hit. **Still
+ *   nobody's.** `splits.spec.ts` never reads a computed `cursor` and says so in
+ *   its own non-coverage header; a human with the app open remains the only
+ *   thing that sees it;
  * - that React actually calls the effect's cleanup — the assertion below reads
- *   the text `window.removeEventListener`, nothing more;
- * - that a pane follows the cursor 1:1 over a long drag, that it stops at the
- *   floor, or that the tmux session reflows behind it;
+ *   the text `window.removeEventListener`, nothing more. **Still nobody's**,
+ *   with a caveat worth stating rather than glossing: `splits.spec.ts` runs the
+ *   real component in a real DOM, so the cleanup does EXECUTE there, but no
+ *   assertion in that file is aimed at a leaked listener and no mutation has
+ *   been run to see whether one would fail. Executing a path is not covering it;
+ * - **that a pane follows the cursor 1:1 over a long drag, that it stops at the
+ *   floor, or that the tmux session reflows behind it — all three covered since
+ *   this branch**, by the same file: three equal cursor steps read mid-gesture
+ *   producing three equal width gains (0.008px of spread, measured), then `a
+ *   drag stops at the floor, and the same gesture reversed reopens the pane`,
+ *   then a poll on tmux's own `#{window_width}` after the release;
  * - **`grabPane`'s refusal guards were here** — the length check and the two
  *   identity checks that stop a box index being taken for a kid index. This
  *   file could not see them: measured, deleting all three left it eleven of
- *   eleven green. They are now covered by `workspace.test.ts`'s `grabFor`
+ *   eleven green. Eleven and not the twelve below because that measurement was
+ *   taken while this file still held eleven tests and the guards still lived in
+ *   `App.tsx`; it cannot be re-run against either as they now stand, which is
+ *   why the number is left as it was taken rather than quietly modernised.
+ *   They are now covered by `workspace.test.ts`'s `grabFor`
  *   describe, which moved the guards out of `App.tsx` and exercises each by
  *   name — `refuses when the boxes are the same length but not the same
  *   panes` fails the moment the two identity guards are deleted, and
@@ -55,14 +82,20 @@ import { describe, it, expect } from 'vitest'
  *   under either mutation — under the argument swap because the wrong floor
  *   is measured against the wrong axis, and under `*` because the result
  *   comes out as 1/3 instead of 5/60;
- * - **where the divider lands.** `offset` is a cumulative sum computed in
- *   `App.tsx` and turned into a percentage at runtime. A wrong sum draws the
- *   strip over the wrong seam — or at the tab's leading edge — and every
- *   assertion in this file still passes. That was measured, not assumed: see
- *   the list below.
+ * - **where the divider lands — covered since this branch.** `offset` is a
+ *   cumulative sum computed in `App.tsx` and turned into a percentage at
+ *   runtime. A wrong sum draws the strip over the wrong seam — or at the tab's
+ *   leading edge — and every assertion in this file still passes. That was
+ *   measured, not assumed: see the list below. What sees it now is one line of
+ *   `tests/e2e/splits.spec.ts`, which reads the strip's own `boundingBox()`
+ *   before touching it and compares its middle against the left pane's
+ *   trailing edge.
  *
- * A human with the app open is the only thing that sees any of those. Same
- * trade as `appLayout.test.ts`, and the same reason.
+ * Two of those are still nobody's — the cursor changing, and React calling the
+ * cleanup — and for those two a human with the app open really is the only
+ * thing that sees them. Same trade as `appLayout.test.ts`, and the same reason.
+ * Every other bullet names where it is covered, and three of them now name
+ * `tests/e2e/splits.spec.ts`.
  *
  * **Edits that will fail this without anything being wrong.** Each was made
  * against the real files and the result counted, so this list is measured
@@ -82,8 +115,22 @@ import { describe, it, expect } from 'vitest'
  * divider drawn one seam early, the first of them flush against the tab's
  * leading edge. And replacing the `${offset * 100}%` the strip is placed at
  * with a constant `0%`: every divider in the app stacked at that same leading
- * edge. Eleven of eleven green both times. If you are changing either, the
- * running app is the only thing that will tell you.
+ * edge. Twelve of twelve green both times — re-measured 2026-08-03 against this
+ * file as it now stands, because the count in this paragraph said eleven for as
+ * long as it took a twelfth test to be added without it.
+ *
+ * **What does tell you is `tests/e2e/splits.spec.ts`**, and that is measured the
+ * same day rather than hoped for. Its seam-placement assertion fails under both
+ * edits, by 423.5 pixels against a 6px bound. The first fails there and nowhere
+ * else in that file (1 failed, 6 passed): it moves `offset` alone. The second
+ * also changes which seam the gesture grabs, because every strip stacked at the
+ * same x makes the press hit-test to whichever painted last, so it takes both
+ * three-pane tests with it (3 failed, 4 passed).
+ *
+ * So if you are changing either, a red `splits.spec.ts` is the real failure and
+ * not a flake, and this header is not permission to dismiss it. It once said no
+ * test could see placement, which was true when it was written and would have
+ * been read as exactly that permission.
  *
  * Worth knowing about one that *does* fail, because it fails for the wrong
  * reason: changing the render gate from `index > 0` to `index >= 0` — which

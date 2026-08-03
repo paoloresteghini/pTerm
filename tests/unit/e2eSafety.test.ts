@@ -102,6 +102,42 @@ const GUARDED_VARS = [
 /** Ways of launching Electron that go around `launchApp` and its env block. */
 const DIRECT_LAUNCH = ['electron.launch', '_electron']
 
+/**
+ * The identifiers a `tmux -L` in this tree is allowed to name.
+ *
+ * `SOCKET` is the module const every spec declares; `socket` is the parameter
+ * `harness.ts` takes and checks. Both are indirections a human has to look
+ * through, and looking through them is what the two tests below make
+ * unnecessary — a `-L` whose next argument is a string literal is rejected on
+ * sight, whatever the literal says.
+ */
+const SOCKET_IDENTIFIERS = ['SOCKET', 'socket']
+
+/** What must follow a `'-L'` in the argument array: `, SOCKET` or `, socket`. */
+const TAKES_SOCKET = new RegExp(`^\\s*,\\s*(?:${SOCKET_IDENTIFIERS.join('|')})\\s*[,\\]]`)
+
+/** A bare `'-L'` string literal, in any of the three quote styles. */
+const MINUS_L = /(['"`])-L\1/g
+
+/**
+ * `tmux -Lname`, the glued spelling — a string literal beginning `-L` and
+ * carrying the socket name inside it, so the check above has no next argument
+ * to look at. tmux accepts it. Nothing here uses it, and it is rejected rather
+ * than parsed: a form this file cannot see into is a form that should not be
+ * the one a copy reaches for.
+ */
+const GLUED_MINUS_L = /(['"`])-L[^'"`]+\1/g
+
+/** `const SOCKET = '…'` — the module const a `-L` is allowed to name. */
+const SOCKET_CONST = /\b(?:const|let|var)\s+(?:SOCKET|socket)\s*=\s*(['"`])([^'"`]*)\1/g
+
+/**
+ * The prefix a socket literal must carry, duplicated from `harness.ts`'s own
+ * `SOCKET_PREFIX` on purpose: importing it would make this test agree with the
+ * harness by construction even if both were changed to `default` together.
+ */
+const SOCKET_PREFIX = 'prcli-e2e'
+
 const E2E_DIR = new URL('../e2e/', import.meta.url)
 const HARNESS = new URL('harness.ts', E2E_DIR)
 
@@ -145,6 +181,29 @@ function e2eFiles(dir: URL = E2E_DIR, prefix = ''): string[] {
   return found
 }
 
+/**
+ * Every `.ts` under `tests/e2e/` **including `harness.ts`**.
+ *
+ * The launch check excludes the harness because the harness is the one place
+ * allowed to say `electron.launch`. There is no such exemption for `-L`: the
+ * harness's own two `-L` sites pass the check below today (`['-L', socket, …]`,
+ * the parameter `assertTestSocket` has already vetted), and including it costs
+ * nothing while catching a harness that ever started writing the socket in.
+ */
+function allE2eFiles(): string[] {
+  return [...e2eFiles(), ALLOWED_LAUNCH_SITE]
+}
+
+/**
+ * Comments out, then whitespace flattened, so a `-L` and the argument after it
+ * read the same whether they sit on one line or four. The two token checks
+ * above read the unflattened form because a bare `includes` does not care;
+ * these two look at what FOLLOWS a token, and do.
+ */
+function readFlat(path: URL): string {
+  return readCode(path).replace(/\s+/g, ' ')
+}
+
 describe('the E2E suite keeps its hands off the developer\'s real state', () => {
   it('sets all four env vars in the one place the app is launched from', () => {
     const source = readCode(HARNESS)
@@ -175,6 +234,98 @@ describe('the E2E suite keeps its hands off the developer\'s real state', () => 
         }
       }
     }
+    expect(violations).toEqual([])
+  })
+
+  /**
+   * `launchApp`, `killServer` and `sessionNames` are checked at runtime by
+   * `harness.ts`. Four specs also run `tmux` directly, around the harness
+   * entirely — `splits.spec.ts`'s `windowCols` and `panePid`,
+   * `status.spec.ts`'s kill-session and send-keys, `tabs.spec.ts`'s three,
+   * `projects.spec.ts`'s new-session — and nothing checked those at all.
+   *
+   * Today every one of them passes `SOCKET`, a fixed module const, so today
+   * this test finds nothing. It is here because of what landed on 2026-08-02:
+   * `splits.spec.ts` introduced the first `kill` in the E2E tree, `run('kill',
+   * ['-9', await panePid(victim)])`, and `panePid` derives that pid from a
+   * `tmux -L` listing. The pattern is now in the tree to be copied, and a copy
+   * that reached for `'default'` instead of `SOCKET` would not fail an
+   * assertion — it would signal the developer's own running work on the tmux
+   * server carrying all of it. That is not a class of mistake worth catching
+   * once it has happened.
+   *
+   * **What this does NOT catch**, stated rather than implied:
+   *
+   * - a socket reached by any route that is not a literal `-L` in an argument
+   *   array — `run('tmux', buildArgs())`, or a `-L` inside a shell string
+   *   handed to `execFile('sh', ['-c', …])`. The check reads argument arrays,
+   *   not what a helper might return;
+   * - `tmux` invoked through something other than these files, and any tmux
+   *   command that needs no socket flag because it inherits `$TMUX`;
+   * - the value behind the identifier, which is why the SOCKET-const test
+   *   below exists — the two are one guard in two halves, and either alone
+   *   leaves a way through.
+   */
+  it('names a checked socket at every -L in the tree, never a literal', () => {
+    const files = allE2eFiles()
+    expect(files.length).toBeGreaterThan(0)
+    const violations: string[] = []
+    let sites = 0
+    for (const name of files) {
+      const source = readFlat(new URL(name, E2E_DIR))
+      for (const match of source.matchAll(MINUS_L)) {
+        sites += 1
+        const after = source.slice(match.index + match[0].length)
+        if (!TAKES_SOCKET.test(after)) {
+          violations.push(
+            `${name}: -L is followed by ${JSON.stringify(after.slice(0, 24))}, not one of ` +
+              `${SOCKET_IDENTIFIERS.join('/')}`,
+          )
+        }
+      }
+      for (const match of source.matchAll(GLUED_MINUS_L)) {
+        violations.push(`${name}: ${match[0]} hides the socket inside the flag`)
+      }
+    }
+    // The non-vacuity pin, and the whole reason this assertion is not
+    // self-satisfying: with no `-L` anywhere the loop above finds nothing and
+    // `violations` is `[]` for the wrong reason. A rename of the flag, a
+    // move of every tmux call behind a helper, or a broken `MINUS_L` would
+    // each empty this silently. There are 10 sites across five files as this
+    // is written; the bound is left loose so that adding a tmux call is not a
+    // test edit, and tightening it to a count would only move the silence.
+    expect(sites).toBeGreaterThan(0)
+    expect(violations).toEqual([])
+  })
+
+  /**
+   * The other half. The check above proves a `-L` names `SOCKET`; this one
+   * proves `SOCKET` is not `'default'`.
+   *
+   * Without it the first check is satisfied by `const SOCKET = 'default'` plus
+   * every `-L` naming it faithfully, which is a worse outcome than the
+   * hardcoded literal it was written to catch — the same damage with an
+   * indirection in front of it. In practice each spec also hands `SOCKET` to
+   * `killServer` and `launchApp`, which throw on it in `beforeEach`, so the
+   * damage would take a spec that did neither; this makes that a rejected
+   * file rather than a lucky one.
+   */
+  it('declares no SOCKET outside the suite\'s own namespace', () => {
+    const files = allE2eFiles()
+    const violations: string[] = []
+    let declarations = 0
+    for (const name of files) {
+      for (const match of readFlat(new URL(name, E2E_DIR)).matchAll(SOCKET_CONST)) {
+        declarations += 1
+        if (!match[2].startsWith(SOCKET_PREFIX)) {
+          violations.push(`${name}: SOCKET = ${JSON.stringify(match[2])}`)
+        }
+      }
+    }
+    // Same pin, same reason: five specs declare one each today, and a regex
+    // that matched none of them would otherwise report an empty violation
+    // list as a pass.
+    expect(declarations).toBeGreaterThan(0)
     expect(violations).toEqual([])
   })
 })
