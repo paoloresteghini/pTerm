@@ -90,8 +90,8 @@ warning or dropping one.
 
 | File | Change |
 |---|---|
-| Create `src/renderer/lib/match.ts` | The one ranking rule: `scoreEntry`, `filterEntries`, `byName`. Pure, no React, no DOM. |
-| Create `tests/unit/match.test.ts` | Unit tests for all three exports, including the ordering rule. |
+| Create `src/renderer/lib/match.ts` | The one ranking rule: `scoreEntry`, `byName`, `filterEntries`, `rankSessions`. Pure, no React, no DOM. |
+| Create `tests/unit/match.test.ts` | Unit tests for every export, including the ordering rule and the gap-penalty cap. |
 | Modify `src/renderer/RightPanel.tsx` | A Skills section above Presets, with a filter input, using `filterEntries`. |
 | Modify `src/renderer/App.tsx` | Pass `onInsert` to `RightPanel`; add the ⌘K branch; mount `CommandPalette`. |
 | Create `src/renderer/CommandPalette.tsx` | The palette, on the existing `Dialog` primitive. |
@@ -159,6 +159,18 @@ describe('scoreEntry', () => {
     expect(boundary).not.toBeNull()
     expect(buried).not.toBeNull()
     expect(boundary as number).toBeGreaterThan(buried as number)
+  })
+
+  it('keeps a segment start ahead however far into the name it sits', () => {
+    // The bug this pins: the skip cost once grew with position without limit
+    // while the segment bonus stayed fixed, so a segment start far into a long
+    // name lost to a buried match near the front of a short one. Distance must
+    // not be able to outweigh starting a segment.
+    const far = scoreEntry('b', 'solutions-architect-skills:business-continuity')
+    const near = scoreEntry('b', 'aab')
+    expect(far).not.toBeNull()
+    expect(near).not.toBeNull()
+    expect(far as number).toBeGreaterThan(near as number)
   })
 
   it('scores an empty query as zero rather than refusing it', () => {
@@ -315,6 +327,22 @@ Create `src/renderer/lib/match.ts`:
 /** Characters that begin a segment of a name: `superpowers:brainstorming`. */
 const BOUNDARY = new Set([':', '-', '_', '/', '.', ' '])
 
+const ADJACENT_BONUS = 10
+const SEGMENT_BONUS = 8
+
+/**
+ * The most one query character can be charged for the distance it had to skip.
+ *
+ * **This cap is load-bearing and must stay below `SEGMENT_BONUS`.** Uncapped,
+ * the skip cost grows with position without limit while the segment bonus is
+ * fixed, so a segment start late in a long name loses to a buried match in a
+ * short one: `b` in `superpowers:brainstorming` scored -4 against `b` in
+ * `aaab` at -3. With the cap, a single-character boundary match scores at
+ * least `SEGMENT_BONUS - MAX_GAP_PENALTY` and a buried one at most zero, so
+ * the boundary always wins. Raising this to 8 or beyond reintroduces the bug.
+ */
+const MAX_GAP_PENALTY = 4
+
 /**
  * How well `query` matches `name`, or null when it does not match at all.
  *
@@ -340,11 +368,13 @@ export function scoreEntry(query: string, name: string): number | null {
     if (found === -1) return null
 
     // Adjacent to the previous match: `brow` in `browse` beats `b...r...o...w`.
-    if (found === previous + 1) score += 10
+    if (found === previous + 1) score += ADJACENT_BONUS
     // Starts a segment, or starts the name.
-    if (found === 0 || BOUNDARY.has(haystack[found - 1] ?? '')) score += 8
-    // Everything skipped to get here costs, so earlier matches rank higher.
-    score -= found - previous - 1
+    if (found === 0 || BOUNDARY.has(haystack[found - 1] ?? '')) score += SEGMENT_BONUS
+    // Skipping costs, so an earlier match ranks higher, but only up to the cap:
+    // see MAX_GAP_PENALTY for why an uncapped version ranked a segment start
+    // below a buried match.
+    score -= Math.min(found - previous - 1, MAX_GAP_PENALTY)
 
     previous = found
   }
@@ -426,7 +456,7 @@ export function rankSessions<T extends { name: string; severity: number }>(
 - [ ] **Step 4: Run it and watch it pass**
 
 Run: `npx vitest run tests/unit/match.test.ts`
-Expected: PASS, 20 tests.
+Expected: PASS, 21 tests.
 
 Run: `npm run typecheck`
 Expected: clean.
@@ -470,6 +500,21 @@ Run the file.
 Expected: **"returns an empty array when nothing matches, rather than
 everything" fails**, and "drops entries that do not match at all" fails with it.
 Two failures, both about non-matches surviving.
+
+```bash
+cp /tmp/match.bak src/renderer/lib/match.ts
+```
+
+Mutation D, remove the cap that this task was blocked on: change
+`score -= Math.min(found - previous - 1, MAX_GAP_PENALTY)` to
+`score -= found - previous - 1`.
+Run the file.
+Expected: **"keeps a segment start ahead however far into the name it sits"
+fails**, and "scores a segment start above a match buried mid-word" fails with
+it. This is the regression test for the defect that blocked the first attempt at
+this task: uncapped, the skip cost grows without limit while the segment bonus
+stays fixed, so `b` in `superpowers:brainstorming` scored -4 against `b` in
+`aaab` at -3.
 
 ```bash
 cp /tmp/match.bak src/renderer/lib/match.ts && rm /tmp/match.bak
@@ -1328,7 +1373,7 @@ npm run e2e
 ps -eo pid,ppid,comm | awk '$2==1 && $3 ~ /zsh$/' | wc -l
 ```
 
-Expected: typecheck and check-deps clean; `npm test` green with 20 more tests
+Expected: typecheck and check-deps clean; `npm test` green with 21 more tests
 than the 1158 baseline; E2E green with 8 more than the 44 baseline.
 
 Before believing any integration failure is a defect, check for
