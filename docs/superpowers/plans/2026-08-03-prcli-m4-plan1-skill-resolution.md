@@ -158,10 +158,17 @@ describe('frontmatter', () => {
   })
 
   it('ignores nested keys rather than flattening them', () => {
-    // `allowed-tools:` with an indented list under it is common. An indented
-    // line must never be mistaken for a top-level field.
-    const text = '---\nname: n\nallowed-tools:\n  - Read\n  - Write\n---\n'
-    expect(frontmatter(text)).toEqual({ name: 'n', 'allowed-tools': '' })
+    // An indented line must never be mistaken for a top-level field. The
+    // nested entry needs a COLON to pin this: an indented `- Read` is already
+    // skipped by the no-colon check further down, so a list-only fixture
+    // passes with the indentation guard removed entirely.
+    //
+    // 13 real files nest a `key: value` in frontmatter — `schema: 1` under a
+    // metadata block, `author: laravel`, and a deeply indented
+    // `command: "bash …"` in three gstack skills. Flattening those would
+    // invent top-level fields the file never declared.
+    const text = '---\nname: n\nmetadata:\n  schema: 1\nallowed-tools:\n  - Read\n---\n'
+    expect(frontmatter(text)).toEqual({ name: 'n', metadata: '', 'allowed-tools': '' })
   })
 })
 ```
