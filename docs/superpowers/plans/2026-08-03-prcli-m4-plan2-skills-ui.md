@@ -144,8 +144,18 @@ describe('scoreEntry', () => {
   })
 
   it('scores a contiguous run above the same characters scattered', () => {
-    const contiguous = scoreEntry('bra', 'brainstorming')
-    const scattered = scoreEntry('bra', 'boring-random-away')
+    // Both names place the query characters at the same first index and the
+    // same last index, and skip three characters in total either way, so the
+    // ONLY difference between them is that two characters are adjacent in the
+    // first. Remove the adjacency bonus and the two score identically, which
+    // is what makes this assertion pin that bonus and nothing else.
+    //
+    // A realistic-looking pair does not work here, and was tried:
+    // `bra` against `brainstorming` and `boring-random-away` scores 8 against
+    // 3 with the bonus removed, so it passes either way. It reads better and
+    // measures nothing. The synthetic pair is the honest one.
+    const contiguous = scoreEntry('abc', 'xabqqc')
+    const scattered = scoreEntry('abc', 'xaqbqc')
     expect(contiguous).not.toBeNull()
     expect(scattered).not.toBeNull()
     expect(contiguous as number).toBeGreaterThan(scattered as number)
@@ -477,18 +487,29 @@ Mutation A, delete the order requirement: replace
 `const found = haystack.indexOf(character, previous + 1)` with
 `const found = haystack.indexOf(character)`.
 Run `npx vitest run tests/unit/match.test.ts`.
-Expected: **"refuses a query whose characters are in the wrong order" fails.**
+Expected: **two failures.** "refuses a query whose characters are in the wrong
+order" is the direct one. "drops entries that do not match at all" goes with it,
+because an unordered search lets `brow` match `superpowers:brainstorming`, whose
+letters all appear somewhere but not in that order. Both are the same root
+cause; confirm you see exactly these two.
 
 ```bash
 cp /tmp/match.bak src/renderer/lib/match.ts
 ```
 
 Mutation B, delete the contiguity bonus: remove the
-`if (found === previous + 1) score += 10` line.
+`if (found === previous + 1) score += ADJACENT_BONUS` line.
 Run the file.
 Expected: **"scores a contiguous run above the same characters scattered"
-fails.** Confirm the boundary test still passes, so the two bonuses are shown to
-be independently pinned.
+fails**, because its two fixtures then score identically (-3 each) and
+`toBeGreaterThan` is false on a tie. Confirm the boundary tests still pass, so
+the two bonuses are shown to be independently pinned.
+
+**This mutation is the reason that test uses a synthetic fixture.** With the
+realistic pair it originally carried, this mutation reddened nothing: the cap
+introduced in the previous round meant the segment bonus and gap costs alone
+kept the two apart, so the adjacency bonus was doing no work the test could
+see. Found by running the mutation, not by reading the code.
 
 ```bash
 cp /tmp/match.bak src/renderer/lib/match.ts
