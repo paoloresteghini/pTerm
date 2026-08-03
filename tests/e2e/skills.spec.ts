@@ -156,3 +156,61 @@ test('clicking a skill types its invocation and does NOT submit it', async () =>
   // shell actually prints under Mutation B rather than guessed at.
   expect(text).not.toMatch(SUBMITTED)
 })
+
+test('⌘K opens the palette while a terminal has focus, and Escape closes it', async () => {
+  // "It should be free, ⌘T and ⌘W already work through the same listener" is
+  // an argument, and three dead tests in Plan 1 came from arguments. This is
+  // the test instead.
+  await page.getByTestId('terminal').first().click()
+  await page.keyboard.press('Meta+k')
+  await expect(page.getByTestId('command-palette')).toBeVisible()
+
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('command-palette')).toBeHidden()
+})
+
+test('an empty query lists sessions and no actions', async () => {
+  await page.keyboard.press('Meta+k')
+  await expect(page.getByTestId('command-palette')).toBeVisible()
+
+  const sessions = page.locator('[data-testid^="palette-session-"]')
+  await expect(sessions).not.toHaveCount(0)
+  // Settle, then assert the absence: a count of zero is the claim, and
+  // toHaveCount would return on its first match if any appeared later.
+  await page.waitForTimeout(500)
+  expect(await page.locator('[data-testid^="palette-action-"]').count()).toBe(0)
+
+  await page.keyboard.press('Escape')
+})
+
+test('typing brings skills in below the sessions', async () => {
+  await page.keyboard.press('Meta+k')
+  await page.getByTestId('palette-input').fill('brow')
+  const action = page.getByTestId('palette-action-browse')
+  await expect(action).toBeVisible()
+  await expect(action).toContainText('/browse')
+
+  await page.keyboard.press('Escape')
+})
+
+test('choosing a skill from the palette types it and closes the palette', async () => {
+  await page.keyboard.press('Meta+k')
+  await page.getByTestId('palette-input').fill('brow')
+  await page.getByTestId('palette-action-browse').click()
+  await expect(page.getByTestId('command-palette')).toBeHidden()
+
+  await page.waitForTimeout(750)
+  const text = await page.locator('.xterm-rows').first().innerText()
+  expect(text).toContain('/browse')
+})
+
+test('⌘W typed into the palette does not destroy a pane', async () => {
+  const before = await page.locator('[data-testid^="tab-"]').count()
+  expect(before).toBeGreaterThan(0)
+  await page.keyboard.press('Meta+k')
+  await page.getByTestId('palette-input').click()
+  await page.keyboard.press('Meta+w')
+  await page.waitForTimeout(500)
+  await page.keyboard.press('Escape')
+  expect(await page.locator('[data-testid^="tab-"]').count()).toBe(before)
+})
