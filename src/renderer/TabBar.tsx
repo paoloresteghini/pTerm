@@ -34,9 +34,9 @@ export function TabBar({
   const [draft, setDraft] = useState('')
   // Which edit is still open, readable synchronously so that whichever of the
   // two commit paths arrives second is a no-op. Enter and Escape both unmount
-  // the input, which today's Chromium does not follow with a blur — but the
-  // handlers must not depend on that to avoid committing twice, or committing
-  // what Escape discarded. Mirrors Sidebar's project rename.
+  // the input, and today's Chromium does not reliably follow that with a
+  // blur: the handlers must not depend on that to avoid committing twice, or
+  // committing what Escape discarded. Mirrors Sidebar's project rename.
   const editing = useRef<string | null>(null)
 
   const startRename = (tab: TabDescriptor): void => {
@@ -132,6 +132,9 @@ export function TabBar({
             {menuFor === tab.id ? (
               <div
                 data-testid={`tabmenu-${tab.id}`}
+                // Without this, a click on the menu's own padding (not on
+                // the button) bubbles to the tab container and activates it.
+                onClick={(event) => event.stopPropagation()}
                 className="absolute left-0 top-8 z-10 flex flex-col border border-border bg-bg py-0.5 text-[11px]"
               >
                 <button
