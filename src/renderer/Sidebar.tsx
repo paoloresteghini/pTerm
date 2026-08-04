@@ -5,6 +5,7 @@ import { Button } from './ui/Button'
 import { NeedsYou } from './NeedsYou'
 import { StatusDot } from './StatusDot'
 import { tabLabel } from './lib/tabLabel'
+import { FileTree } from './FileTree'
 
 export function Sidebar({
   projects,
@@ -242,6 +243,8 @@ export function Sidebar({
           )
         })}
       </div>
+
+      <FileTree projectId={activeProjectId ?? undefined} />
 
       <div className="flex flex-col gap-1 border-t border-border p-2">
         <Button data-testid="add-project" variant="ghost" onClick={onAdd} className="w-full">

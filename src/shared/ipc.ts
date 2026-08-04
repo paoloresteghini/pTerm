@@ -40,6 +40,7 @@ export const CHANNELS = {
   skills: 'prcli:skills',
   notesRead: 'prcli:notesRead',
   notesWrite: 'prcli:notesWrite',
+  fsList: 'prcli:fsList',
 } as const
 
 /**
@@ -112,6 +113,18 @@ export interface HooksState {
   /** The JSON that would be added, for the screen to show before it happens. */
   pending: string
   collisions: { event: string; command: string }[]
+}
+
+/**
+ * One row of a project's file tree.
+ *
+ * Declared here rather than only in `src/main/files/tree.ts`, which the
+ * renderer cannot import from, for the reason `NotificationConfig` gives: the
+ * renderer draws these.
+ */
+export interface FileEntry {
+  name: string
+  dir: boolean
 }
 
 export interface TabDescriptor {
@@ -536,4 +549,13 @@ export interface PrcliApi {
    * shared with restore and the exit handler.
    */
   setLayout(tabId: string, shares: Record<string, number>): void
+  /**
+   * One directory of one project, directories first then files.
+   *
+   * `relPath` is relative to the project's own `cwd` and is resolved against
+   * it in main: no absolute path crosses this boundary. A path that would
+   * leave the project, or a directory that cannot be read, resolves to an
+   * empty list rather than rejecting.
+   */
+  fsList(projectId: string, relPath: string): Promise<FileEntry[]>
 }
