@@ -5,6 +5,7 @@ import { TabBar } from './TabBar'
 import { DeadPane } from './DeadPane'
 import { Sidebar } from './Sidebar'
 import { RightPanel } from './RightPanel'
+import { NotesPanel } from './NotesPanel'
 import { AddProjectDialog } from './AddProjectDialog'
 import { SettingsPane } from './SettingsPane'
 import { TitleBar } from './TitleBar'
@@ -975,6 +976,10 @@ export function App() {
             }}
           />
         ) : null}
+
+        {/* Deliberately outside the `panelOpen` conditional: the notes column
+            and the Skills/Presets column open and close independently. */}
+        <NotesPanel project={project} />
 
         <CommandPalette
           open={paletteOpen}
