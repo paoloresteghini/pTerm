@@ -29,7 +29,29 @@ export function TabBar({
   onRename: (id: string, title: string) => void
   canOpen: boolean
 }) {
-  const [menuFor, setMenuFor] = useState<string | null>(null)
+  // The open menu, with the viewport coordinates it is drawn at.
+  //
+  // Coordinates, rather than the `absolute left-0 top-8` this used to be,
+  // because the bar is `overflow-x-auto` and per CSS a box with one overflow
+  // axis not `visible` computes the other to `auto` too, so the bar clips
+  // vertically at its own 32px, and a menu starting at the bar's bottom edge
+  // is clipped away entirely. Measured in the built app, 2026-08-03: bar
+  // 38..70, menu 70..100.5, height of the menu visible inside the bar 0px,
+  // and `elementFromPoint` at both the menu's centre and the Rename… item's
+  // centre returning the terminal's `.xterm-screen`, not the menu. The e2e
+  // could not see it because Playwright scrolls the nearest scrollable
+  // ancestor before clicking, which a user cannot.
+  //
+  // `position: fixed` is the smallest thing that works: it takes the viewport
+  // as its containing block, so no ancestor's overflow clips it, and it needs
+  // no portal, no ref and no second element outside the scroller. Sidebar's
+  // menu is in flow inside a vertically scrolling list and has none of this
+  // problem, so there was no pattern here to copy.
+  //
+  // The trade is that the menu does not follow the bar if the bar is scrolled
+  // under it. It cannot be: any click closes the menu, and the bar has no
+  // other way to scroll while one is open.
+  const [menu, setMenu] = useState<{ id: string; left: number; top: number } | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   // Which edit is still open, readable synchronously so that whichever of the
@@ -62,11 +84,11 @@ export function TabBar({
   // stops propagation before this can see the click, so it only ever fires
   // for a click outside.
   useEffect(() => {
-    if (menuFor === null) return
-    const closeMenu = (): void => setMenuFor(null)
+    if (menu === null) return
+    const closeMenu = (): void => setMenu(null)
     document.addEventListener('click', closeMenu)
     return () => document.removeEventListener('click', closeMenu)
-  }, [menuFor])
+  }, [menu])
 
   return (
     <div
@@ -83,10 +105,13 @@ export function TabBar({
             onClick={() => onActivate(tab.id)}
             onContextMenu={(event) => {
               event.preventDefault()
-              setMenuFor(tab.id)
+              // The tab's own box, so the menu still hangs off this tab's left
+              // edge and the bar's bottom the way it looks like it does.
+              const box = event.currentTarget.getBoundingClientRect()
+              setMenu({ id: tab.id, left: box.left, top: box.bottom })
             }}
             className={cn(
-              'relative flex cursor-default items-center gap-1.5 whitespace-nowrap border-r border-border px-2.5',
+              'flex cursor-default items-center gap-1.5 whitespace-nowrap border-r border-border px-2.5',
               active ? 'bg-bg text-fg shadow-[inset_0_-1px_0_var(--color-accent)]' : 'text-muted',
             )}
           >
@@ -134,19 +159,20 @@ export function TabBar({
                 {labelOfPane(tab)}
               </span>
             )}
-            {menuFor === tab.id ? (
+            {menu?.id === tab.id ? (
               <div
                 data-testid={`tabmenu-${tab.id}`}
                 // Without this, a click on the menu's own padding (not on
                 // the button) bubbles to the tab container and activates it.
                 onClick={(event) => event.stopPropagation()}
-                className="absolute left-0 top-8 z-10 flex flex-col border border-border bg-bg py-0.5 text-[11px]"
+                style={{ left: menu.left, top: menu.top }}
+                className="fixed z-20 flex flex-col border border-border bg-bg py-0.5 text-[11px]"
               >
                 <button
                   data-testid={`trename-${tab.id}`}
                   onClick={(event) => {
                     event.stopPropagation()
-                    setMenuFor(null)
+                    setMenu(null)
                     startRename(tab)
                   }}
                   className="cursor-default border-none bg-transparent px-2.5 py-1 text-left text-muted hover:text-fg"

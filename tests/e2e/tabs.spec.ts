@@ -14,8 +14,9 @@
  * and View menu items do what their accelerators do; a close button destroys
  * exactly that session; a renamed tab shows the name in the bar and the
  * sidebar and it survives a relaunch, and a blank name clears it back to
- * slug and id in both places; and the context menu's Rename… item reaches
- * the same input the double-click does.
+ * slug and id in both places; and the context menu's Rename… item is the
+ * topmost element at its own centre and reaches the same input the
+ * double-click does.
  *
  * **Measured, 2026-08-02, this file run alone** (`npx playwright test
  * tests/e2e/tabs.spec.ts`): changing `event.code === 'KeyW'` to `'KeyQ'` in
@@ -577,6 +578,23 @@ test('the context menu reaches the same rename field', async () => {
   const id = (testid ?? '').replace('tab-', '')
 
   await window.getByTestId(`tab-${id}`).click({ button: 'right' })
+
+  // A human has to be able to SEE and hit the item, which neither
+  // `toBeVisible()` nor the click below can establish: Playwright scrolls the
+  // nearest scrollable ancestor before clicking, and `toBeVisible()` asks only
+  // for a non-empty box. Both passed while the menu was clipped out of sight
+  // by the bar's own overflow. Measured in the built app on 2026-08-03: menu
+  // 70..100.5 against a bar ending at 70, and `elementFromPoint` at the item's
+  // centre returning the terminal's `.xterm-screen`. This asks the page what is
+  // actually on top at that point instead.
+  const onTop = await window.evaluate((tabId) => {
+    const item = document.querySelector(`[data-testid="trename-${tabId}"]`) as HTMLElement
+    const box = item.getBoundingClientRect()
+    const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+    return hit === null ? 'nothing' : (hit.closest('[data-testid]')?.getAttribute('data-testid') ?? 'untagged')
+  }, id)
+  expect(onTop).toBe(`trename-${id}`)
+
   await window.getByTestId(`trename-${id}`).click()
 
   // Two entry points into one path, so this only has to prove it arrives.
