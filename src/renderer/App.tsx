@@ -754,7 +754,21 @@ export function App() {
                   // whole container, by one pixel; flex shrinking is weighted by
                   // base size, so that pixel comes off the panes in the same
                   // proportion as the ratios and leaves them intact.
-                  'absolute inset-0 flex gap-px p-2',
+                  //
+                  // That gap is also what draws the seam. This background is
+                  // painted, each pane paints `bg-bg` over its own box, and the
+                  // only place the colour survives is the one pixel between two
+                  // panes. Done here rather than on `PaneDivider` because the
+                  // strip is centred on a computed offset that misses the real
+                  // seam by up to `n − 1.5` pixels (its own comment measures
+                  // it), so a line drawn on the handle would sit beside the gap
+                  // on a lopsided three- or four-pane tab. The gap IS the seam.
+                  //
+                  // `bg-clip-content` so the colour stops at the content box.
+                  // A background paints the padding box by default, which would
+                  // turn the `p-2` frame into an 8px border around every tab
+                  // instead of a hairline between panes.
+                  'absolute inset-0 flex gap-px bg-border bg-clip-content p-2',
                   group.visible ? 'visible z-10' : 'invisible z-0 pointer-events-none',
                 )}
                 style={group.style}
@@ -775,7 +789,15 @@ export function App() {
                       // against this box, and an overlay that escaped to the
                       // group container would land on whichever pane happened to
                       // be at that corner.
-                      'relative',
+                      //
+                      // `bg-bg`: this is what confines the container's seam
+                      // colour to the gaps. It is the colour that was showing
+                      // here anyway — the app root is `bg-bg` and xterm's canvas
+                      // repeats the same value — so it changes nothing on screen
+                      // except by covering what is now painted underneath. The
+                      // sub-cell remainder xterm's fit leaves at a pane's edge
+                      // reads the same as it did before.
+                      'relative bg-bg',
                       // `min-w-0 min-h-0`: a flex item's automatic minimum size
                       // is its content's, not zero, so an xterm canvas still
                       // sized for the whole tab could hold this box open past its

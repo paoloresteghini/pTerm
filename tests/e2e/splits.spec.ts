@@ -32,8 +32,28 @@
  * component built only for `index > 0` (`src/renderer/App.tsx:860-861`, read 2026-08-04) — was
  * never constructed once in the whole suite.
  *
+ * **Measured 2026-08-04, the seam's paint rule**: three mutations, one per
+ * assertion of `the gap between two panes is painted`, each failing only its
+ * own line. Dropping `bg-border` from the group container reports
+ * `rgba(0, 0, 0, 0)` against `rgb(39, 39, 42)`; dropping `bg-clip-content`
+ * reports `border-box` against `content-box`; dropping `bg-bg` from the pane
+ * box reports `rgba(0, 0, 0, 0)` against `rgb(9, 9, 11)`. So none of the three
+ * is carrying the others, which matters because the seam is the conjunction:
+ * a painted container that is not clipped frames the whole tab in 8px of
+ * border colour, and a transparent pane lets that colour cover the terminal
+ * rather than the gap.
+ *
  * **What this file does NOT see** — read off this file's own text unless a
  * line says measured or names another file:
+ *
+ * - **that the seam is on the screen.** The test above reads computed style,
+ *   not pixels, and says so in its own comment. Checked by hand instead, the
+ *   same day: a split captured with `window.screenshot()` shows the hairline
+ *   running the full height at the pane boundary, and the `p-2` frame around
+ *   the panes still dark rather than border-coloured, which is the
+ *   `bg-clip-content` half. Worth recording that the capture worked at all —
+ *   Playwright's on-failure screenshot and video are inert under
+ *   `_electron.launch()`, but an explicit `window.screenshot()` is not.
  *
  * - **the `col` axis. Every drag here is horizontal**, and it is the largest
  *   single gap in this file. A `col` tab takes the other branch of all three
@@ -1013,6 +1033,52 @@ test('a drag on a tab holding a tombstone is kept, and the tombstone keeps its n
   // rewrites `state.panes`, never `state.tabs`, so on today's code there is no
   // path from a restart to a reordering for it to catch.
   expect(await paneIds(window)).toEqual([live, dead, far])
+
+  await app.close()
+})
+
+test('the gap between two panes is painted, and each pane covers the rest of it', async () => {
+  // The seam is one pixel of the group container's background showing between
+  // two pane boxes. That is three facts, and this asserts all three as
+  // COMPUTED STYLE rather than as pixels.
+  //
+  // Said plainly, because the alternative reads like more than it is: this
+  // does NOT prove a line is on the screen. `toBeVisible` has passed in this
+  // suite for a menu painted behind a terminal, and a 1px hairline is exactly
+  // the case a screenshot comparison would flake on. What it proves is the
+  // paint rule the seam is made of — container painted, clipped to content,
+  // pane opaque over it — each of which is independently mutable and none of
+  // which any other test in this file reads. The line itself was checked by
+  // running the app and looking at it, which is the only thing that can.
+  const app = await launch()
+  const window = await app.firstWindow()
+  await splitTabInto(window, 2)
+
+  const group = window.getByTestId('terminal-active')
+  const paint = await group.evaluate((node) => {
+    const style = getComputedStyle(node)
+    return { color: style.backgroundColor, clip: style.backgroundClip, gap: style.columnGap }
+  })
+
+  // `--color-border`, #27272a, the token every other seam in the app uses.
+  // Named as rgb because that is what the platform reports back.
+  expect(paint.color).toBe('rgb(39, 39, 42)')
+  // Without this the same colour paints the `p-2` frame too, and the tab wears
+  // an 8px border instead of a hairline between its panes.
+  expect(paint.clip).toBe('content-box')
+  // The gap IS the seam, so a gap of zero is a seam of nothing however the
+  // background is painted.
+  expect(paint.gap).toBe('1px')
+
+  // And the half that confines it: an opaque pane over the painted container,
+  // leaving the colour showing only where a pane is not. `bg-bg`, #09090b.
+  const ids = await paneIds(window)
+  for (const id of ids) {
+    const pane = await window
+      .getByTestId(`pane-${id}`)
+      .evaluate((node) => getComputedStyle(node).backgroundColor)
+    expect(pane).toBe('rgb(9, 9, 11)')
+  }
 
   await app.close()
 })
