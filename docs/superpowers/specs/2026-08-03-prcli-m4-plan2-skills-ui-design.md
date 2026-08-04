@@ -197,7 +197,21 @@ statement is about.
 sessions always above actions regardless of score, ties within sessions broken
 by state severity worst-first. Nothing learned, nothing remembered.
 
-**Escape and arrow-key navigation come from Radix**, not hand-rolled.
+**Escape comes from Radix**, not hand-rolled.
+
+**Arrow-key navigation does NOT, and this spec was wrong to say it did.**
+Corrected 2026-08-04, after the whole-branch review checked the claim instead
+of repeating it. `@radix-ui/react-dialog` supplies a focus trap, Escape, and
+outside-click dismissal. It supplies no roving selection: arrows, Enter and a
+highlighted row are `Menu` or `cmdk` territory, and Plan 2 built none of them
+because the plan silently dropped the requirement this line implied.
+
+So ⌘K ships **mouse and Tab only**: a keyboard user types a query and then tabs
+through the rows, with no visible selection and no Enter to choose. That is a
+real gap for a switcher whose whole point is speed, and it is **owed work,
+deliberately deferred by Paolo on 2026-08-04**, to be designed rather than
+bolted on. It needs selected-index state, ArrowUp/ArrowDown/Enter on the input,
+a highlight style, index reset on query change, and tests for each.
 
 **⌘K must work while a terminal has focus.** ⌘T, ⌘W and ⌘D already do through
 the same window listener, so this should be free — but "should be free" is how
