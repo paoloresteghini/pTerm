@@ -71,7 +71,7 @@ export function RightPanel({
           </p>
         ) : matched.length === 0 ? (
           <p data-testid="skills-empty" className="px-2.5 py-1 text-faint">
-            {skills.length === 0 ? 'No skills found.' : 'Nothing matches.'}
+            {!project ? 'No project selected.' : skills.length === 0 ? 'No skills found.' : 'Nothing matches.'}
           </p>
         ) : (
           matched.map((entry) => (

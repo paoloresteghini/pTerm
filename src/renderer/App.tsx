@@ -627,8 +627,10 @@ export function App() {
   // session is.
   //
   // `severity` is the index into the shared SEVERITY order, so lower is worse.
-  // An unreported pane sorts last rather than first, which is why the fallback
-  // is the array length and not zero.
+  // An unreported pane sorts last among equally-matching panes rather than
+  // first, which is why the fallback is the array length and not zero. Score
+  // still outranks severity: a query match beats a worse-state pane that
+  // didn't match as well.
   const paletteSessions: PaletteSession[] = state.panes.map((pane) => {
     const reported = state.status[pane.id]
     return {
