@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { restoreWorkspace } from '../../src/main/ipc/restore'
@@ -10,15 +10,29 @@ import type { SessionManager, PaneRecord, OpenInput } from '../../src/main/sessi
  *  operation immediately is equivalent to the real serialised queue. */
 const immediate = <T>(operation: () => Promise<T>): Promise<T> => operation()
 
-async function emptyConfig(): Promise<ConfigStore> {
+/**
+ * A store over a fresh file holding these pane rows, and the path it is over
+ * so a test can read back what restore actually wrote.
+ *
+ * Written at the version the rows are for: v5 has no `title` field, and a v6
+ * file is the only way to put one on disk ahead of a restore.
+ */
+async function configHolding(
+  version: 5 | 6,
+  panes: PaneRecord[],
+): Promise<{ store: ConfigStore; file: string }> {
   const dir = await mkdtemp(join(tmpdir(), 'prcli-restore-unit-'))
   const file = join(dir, 'config.json')
   await writeFile(
     file,
-    JSON.stringify({ version: 5, projects: [], activeProjectId: null, panes: [], tabs: [] }),
+    JSON.stringify({ version, projects: [], activeProjectId: null, panes, tabs: [] }),
     'utf8',
   )
-  return new ConfigStore(file)
+  return { store: new ConfigStore(file), file }
+}
+
+async function emptyConfig(): Promise<ConfigStore> {
+  return (await configHolding(5, [])).store
 }
 
 function pane(id: string): PaneRecord {
@@ -84,5 +98,29 @@ describe('restoreWorkspace: a pane that will not attach', () => {
     } finally {
       warn.mockRestore()
     }
+  })
+})
+
+describe('restoreWorkspace: a saved title', () => {
+  it('survives two consecutive restores against the same file', async () => {
+    const named = { ...pane('named1'), title: 'payments api' }
+    const { store, file } = await configHolding(6, [named])
+    const manager = fakeManager([named], new Set())
+
+    // Two, not one. One restore passes even when the write persists the
+    // untitled panes `manager.open()` returned, because the reply it is
+    // asserted on is patched separately from the file. The erasure only shows
+    // when a second restore has to read back what the first one wrote, which
+    // is every relaunch after the first, and every ⌘R reload in between.
+    const first = await restoreWorkspace(manager, store, immediate)
+    expect(first.panes.map((p) => p.title)).toEqual(['payments api'])
+
+    // Read the file itself between the two, so a failure says whether the
+    // title was lost on the way out or on the way back in.
+    const onDisk = JSON.parse(await readFile(file, 'utf8')) as { panes: PaneRecord[] }
+    expect(onDisk.panes.map((row) => row.title)).toEqual(['payments api'])
+
+    const second = await restoreWorkspace(manager, store, immediate)
+    expect(second.panes.map((p) => p.title)).toEqual(['payments api'])
   })
 })
