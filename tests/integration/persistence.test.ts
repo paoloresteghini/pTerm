@@ -142,13 +142,21 @@ function openTabIn(projectSlug: string): Promise<{ id: string; tmuxSession: stri
  * Applied everywhere a `.tmuxSession` read in this file is `TabDescriptor`-
  * shaped, with no selective skipping: a read guarded here and an identical
  * one left raw two lines below is the failure mode this function exists to
- * remove, not a style choice. The two things in this file NOT routed through
- * it are not exceptions to that rule, they are values it cannot even accept:
- * `openTab`/`openTabIn`'s own return type (`{ id, tmuxSession: string }`),
- * which has none of `TabDescriptor`'s other required fields, and
- * `manager.get(id)?.tmuxSession`, where the optional chaining is answering
- * "does this id still have a live entry" rather than "does this pane have a
- * session", a question this function does not ask.
+ * remove, not a style choice. Guarded even where the receiver's own type
+ * already happens to guarantee a session (a `TerminalTabDescriptor` bound
+ * straight from `invoke`, a `TerminalPaneRecord` bound straight from
+ * `manager.splitTab`) - the point is one path for reading a pane's session,
+ * not a guard that only shows up where the type checker already complained.
+ *
+ * The two things in this file NOT routed through it are not exceptions to
+ * that rule, they are values it cannot even accept, and this is a property of
+ * the TYPE, not of what a caller happens to name the variable: `openTab`'s
+ * and `openTabIn`'s own return type (`{ id, tmuxSession: string }`), which
+ * has none of `TabDescriptor`'s other required fields, wherever it is bound
+ * (`tab`, `founder`, or otherwise), and `manager.get(id)?.tmuxSession`, where
+ * the optional chaining is answering "does this id still have a live entry"
+ * rather than "does this pane have a session", a question this function does
+ * not ask.
  */
 function sessionOf(pane: TabDescriptor): string {
   if (pane.tmuxSession === undefined) {
@@ -575,17 +583,17 @@ describe('restartTab', () => {
     await waitForPrompt(tab.id)
 
     resizeTab(tab.id, 111, 41)
-    await expect.poll(() => windowSize(tab.tmuxSession), { timeout: 8000 }).toBe('111x41')
+    await expect.poll(() => windowSize(sessionOf(tab)), { timeout: 8000 }).toBe('111x41')
 
     // Exactly what a crash outside the app leaves behind: the client is gone
     // and so is the session, with nothing routed through manager.kill().
     const exitEvent = waitForExitEvent(tab.id)
-    await run('tmux', ['-L', SOCKET, 'kill-session', '-t', `=${tab.tmuxSession}`])
+    await run('tmux', ['-L', SOCKET, 'kill-session', '-t', `=${sessionOf(tab)}`])
     await exitEvent
 
     const restarted = await invoke<TerminalTabDescriptor>(CHANNELS.restartTab, { tab })
 
-    expect(sessionOf(restarted)).toBe(tab.tmuxSession)
+    expect(sessionOf(restarted)).toBe(sessionOf(tab))
     // No cols/rows in the request above, so this can only have come from
     // `lastGeometry` — the attach-at-80x24-default defect this codebase has
     // now shipped twice, proven fixed a second, independent way.
@@ -2662,13 +2670,13 @@ describe('status registry', () => {
     // routed through manager.kill() or CHANNELS.closePane — the `exited` path,
     // where the config row is forgotten in this very same handler.
     const exitEvent = waitForExitEvent(tab.id)
-    await run('tmux', ['-L', SOCKET, 'kill-session', '-t', `=${tab.tmuxSession}`])
+    await run('tmux', ['-L', SOCKET, 'kill-session', '-t', `=${sessionOf(tab)}`])
     await exitEvent
     await settle(200)
 
     expect(seen).toHaveLength(1)
     expect(seen[0].to).toBe('ended')
-    expect(seen[0].tab).toMatchObject({ id: tab.id, tmuxSession: tab.tmuxSession })
+    expect(seen[0].tab).toMatchObject({ id: tab.id, tmuxSession: sessionOf(tab) })
 
     // The half that makes carrying the record necessary rather than tidy: by
     // now there is nothing left to look the tab up in. A listener handed only
