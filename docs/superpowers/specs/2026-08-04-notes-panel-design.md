@@ -79,9 +79,11 @@ Two new channels, wired the same way as `skills`:
 
 ## Collapse state
 
-- `localStorage` key `prcli:notesCollapsed`, values `'1'` / absent. Read once
-  at mount into `useState`, written on toggle. Global across projects,
-  restored on relaunch. No config.json change, no version bump.
+- `localStorage` key `prcli:notesCollapsed`: `'0'` when the user has expanded
+  the panel; anything else, including absent, is collapsed. Collapsed is the
+  default so a new column must not steal terminal width unasked. Read once at
+  mount into `useState`, written on toggle. Global across projects, restored on
+  relaunch. No config.json change, no version bump.
 
 ## Testing
 
@@ -89,11 +91,13 @@ Two new channels, wired the same way as `skills`:
   read missing file → `''`; write then read roundtrip; write creates the
   `notes/` directory; id containing `/` or `..` → read `''`, write no-op.
 - E2E: new spec file `tests/e2e/notes.spec.ts` with its own page (a fresh spec
-  file, so no earlier test's typing makes an assertion vacuous). Flow: select
-  project, type into `notes-textarea`, switch project (textarea now shows that
-  project's note: empty for a fresh project), switch back, text restored. Collapse: click toggle,
-  textarea gone, click again, back. Relaunch persistence of the collapse bit
-  is not e2e-asserted (localStorage, manual check).
+  file, so no earlier test's typing makes an assertion vacuous). Fresh profiles
+  start with the panel collapsed, so the spec must expand it first. Flow: select
+  project, expand notes panel, type into `notes-textarea`, switch project
+  (textarea now shows that project's note: empty for a fresh project), switch
+  back, text restored. Collapse: click toggle, textarea gone, click again, back.
+  Relaunch persistence of the collapse bit is not e2e-asserted (localStorage,
+  manual check).
 - Autosave timing in e2e: assert persistence via the project-switch roundtrip
   (switch forces a flush), not by racing the 500ms debounce.
 

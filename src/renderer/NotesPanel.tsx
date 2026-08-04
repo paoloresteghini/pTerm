@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import type { ProjectDescriptor } from '../shared/ipc'
 import { createNoteSaver } from './lib/noteSaver'
 
-/** `'1'` when collapsed, absent when expanded. Global, deliberately not per project. */
+/** '0' when the user has expanded the panel; anything else, including absent, is collapsed. Collapsed is the default so a new column must not steal terminal width unasked. */
 const COLLAPSED_KEY = 'prcli:notesCollapsed'
 
 export function NotesPanel({ project }: { project: ProjectDescriptor | undefined }) {
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSED_KEY) === '1')
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSED_KEY) !== '0')
   // null is "loading": the textarea is disabled so keystrokes cannot land in a
   // note that is about to be replaced by the fetch result.
   const [text, setText] = useState<string | null>(null)
@@ -48,7 +48,7 @@ export function NotesPanel({ project }: { project: ProjectDescriptor | undefined
     setCollapsed((was) => {
       const now = !was
       if (now) localStorage.setItem(COLLAPSED_KEY, '1')
-      else localStorage.removeItem(COLLAPSED_KEY)
+      else localStorage.setItem(COLLAPSED_KEY, '0')
       return now
     })
   }
