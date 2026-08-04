@@ -48,6 +48,13 @@ type Store = InstanceType<typeof ConfigStore>
 type Registry = InstanceType<typeof StatusRegistry>
 type Config = Awaited<ReturnType<Store['read']>>
 
+// What CHANNELS.open and CHANNELS.restartTab actually return: a terminal
+// pane, never an editor one. An editor pane is created through its own
+// CHANNELS.openEditor (Task 5) and neither opened nor restarted through
+// SessionManager, so every invoke<...>(CHANNELS.open | restartTab, ...) below
+// is entitled to a tmuxSession, unlike the wire-general TabDescriptor.
+type TerminalTabDescriptor = TabDescriptor & { tmuxSession: string }
+
 const run = promisify(execFile)
 const SOCKET = 'prcli-test'
 
@@ -535,7 +542,7 @@ describe('durable tab record', () => {
 // same defect goes unnoticed in.
 describe('restartTab', () => {
   it('reattaches at the size lastGeometry remembered, not the 80x24 default', async () => {
-    const tab = await invoke<TabDescriptor>(CHANNELS.open, { projectSlug: 'lumio', cwd: tmpdir() })
+    const tab = await invoke<TerminalTabDescriptor>(CHANNELS.open, { projectSlug: 'lumio', cwd: tmpdir() })
     await waitForPrompt(tab.id)
 
     resizeTab(tab.id, 111, 41)
@@ -547,7 +554,7 @@ describe('restartTab', () => {
     await run('tmux', ['-L', SOCKET, 'kill-session', '-t', `=${tab.tmuxSession}`])
     await exitEvent
 
-    const restarted = await invoke<TabDescriptor>(CHANNELS.restartTab, { tab })
+    const restarted = await invoke<TerminalTabDescriptor>(CHANNELS.restartTab, { tab })
 
     expect(restarted.tmuxSession).toBe(tab.tmuxSession)
     // No cols/rows in the request above, so this can only have come from
@@ -594,7 +601,7 @@ describe('restartTab', () => {
     // from: this pane's own id names no group, and the group is named after the
     // founder. Main's own record of which tab it made this pane in is the only
     // thing that can answer.
-    const restarted = await invoke<TabDescriptor>(CHANNELS.restartTab, {
+    const restarted = await invoke<TerminalTabDescriptor>(CHANNELS.restartTab, {
       tab: second,
       cols: 100,
       rows: 30,
@@ -655,7 +662,7 @@ describe('restartTab', () => {
     // No cols/rows anywhere: none were passed, and `lastGeometry` holds
     // nothing for a tab nothing has resized. So this restart is unsized, which
     // is what the window-size assertion below is here to hold.
-    const restarted = await invoke<TabDescriptor>(CHANNELS.restartTab, { tab: founder })
+    const restarted = await invoke<TerminalTabDescriptor>(CHANNELS.restartTab, { tab: founder })
 
     // Polled for the same reason as in the test above.
     await expect.poll(() => adapter.hasSession(restarted.tmuxSession), { timeout: 8000 }).toBe(true)
@@ -714,7 +721,7 @@ describe('restartTab', () => {
     await expect(adapter.hasSession(founder.tmuxSession)).resolves.toBe(false)
     await expect(adapter.hasSession(second.tmuxSession)).resolves.toBe(false)
 
-    const backFirst = await invoke<TabDescriptor>(CHANNELS.restartTab, { tab: founder })
+    const backFirst = await invoke<TerminalTabDescriptor>(CHANNELS.restartTab, { tab: founder })
     await expect.poll(() => adapter.hasSession(backFirst.tmuxSession), { timeout: 8000 }).toBe(true)
     // Ungrouped, and correctly so: there was nothing left of the tab to join.
     // Asserted rather than assumed, because it is the precondition the second
@@ -722,7 +729,7 @@ describe('restartTab', () => {
     // below would be exercising the ordinary path instead of this one.
     expect(await sessionGroup(backFirst.tmuxSession)).toBe('')
 
-    const backSecond = await invoke<TabDescriptor>(CHANNELS.restartTab, { tab: second })
+    const backSecond = await invoke<TerminalTabDescriptor>(CHANNELS.restartTab, { tab: second })
     await expect.poll(() => adapter.hasSession(backSecond.tmuxSession), { timeout: 8000 }).toBe(true)
 
     const group = await sessionGroup(backSecond.tmuxSession)
@@ -791,7 +798,7 @@ describe('restartTab', () => {
     await exitEvent
     await expect(adapter.hasSession(adopted.tmuxSession)).resolves.toBe(false)
 
-    const restarted = await invoke<TabDescriptor>(CHANNELS.restartTab, { tab: adopted })
+    const restarted = await invoke<TerminalTabDescriptor>(CHANNELS.restartTab, { tab: adopted })
 
     await expect.poll(() => adapter.hasSession(restarted.tmuxSession), { timeout: 8000 }).toBe(true)
     // The group this tab had before the relaunch, read back for both panes and
@@ -825,7 +832,7 @@ describe('restartTab', () => {
     await exitEvent
     await expect(adapter.hasSession(tab.tmuxSession)).resolves.toBe(false)
 
-    const restarted = await invoke<TabDescriptor>(CHANNELS.restartTab, { tab })
+    const restarted = await invoke<TerminalTabDescriptor>(CHANNELS.restartTab, { tab })
 
     expect(restarted.tmuxSession).toBe(tab.tmuxSession)
     // Alive first. `sessionGroup` answers `''` for a session tmux does not
@@ -868,7 +875,7 @@ describe('a tab that re-founds', () => {
    * `kill-window` nothing to talk to.
    */
   async function deadSplitTab(): Promise<{ founder: TabDescriptor; second: TabDescriptor }> {
-    const founder = await invoke<TabDescriptor>(CHANNELS.open, {
+    const founder = await invoke<TerminalTabDescriptor>(CHANNELS.open, {
       projectSlug: 'lumio',
       cwd: tmpdir(),
     })
@@ -938,7 +945,7 @@ describe('a tab that re-founds', () => {
     const { founder, second } = await deadSplitTab()
     const adapter = new TmuxAdapter({ socket: SOCKET })
 
-    const backFirst = await invoke<TabDescriptor>(CHANNELS.restartTab, { tab: second })
+    const backFirst = await invoke<TerminalTabDescriptor>(CHANNELS.restartTab, { tab: second })
     await expect.poll(() => adapter.hasSession(backFirst.tmuxSession), { timeout: 8000 }).toBe(true)
     // Ungrouped, and correctly so — there was nothing left of the tab to join.
     // Asserted rather than assumed, because it is the precondition the second
@@ -946,7 +953,7 @@ describe('a tab that re-founds', () => {
     // below would be exercising the ordinary path instead of this one.
     expect(await sessionGroup(backFirst.tmuxSession)).toBe('')
 
-    const backSecond = await invoke<TabDescriptor>(CHANNELS.restartTab, { tab: founder })
+    const backSecond = await invoke<TerminalTabDescriptor>(CHANNELS.restartTab, { tab: founder })
     await expect.poll(() => adapter.hasSession(backSecond.tmuxSession), { timeout: 8000 }).toBe(true)
 
     // Read back from tmux for each, with the trailing colon `sessionGroup`
@@ -975,7 +982,7 @@ describe('a tab that re-founds', () => {
   async function refoundedTab(): Promise<{ founder: TabDescriptor; second: TabDescriptor }> {
     const { founder, second } = await deadSplitTab()
     const adapter = new TmuxAdapter({ socket: SOCKET })
-    const backSibling = await invoke<TabDescriptor>(CHANNELS.restartTab, {
+    const backSibling = await invoke<TerminalTabDescriptor>(CHANNELS.restartTab, {
       tab: second,
       cols: 100,
       rows: 30,
@@ -983,7 +990,7 @@ describe('a tab that re-founds', () => {
     await expect
       .poll(() => adapter.hasSession(backSibling.tmuxSession), { timeout: 8000 })
       .toBe(true)
-    const backFounder = await invoke<TabDescriptor>(CHANNELS.restartTab, {
+    const backFounder = await invoke<TerminalTabDescriptor>(CHANNELS.restartTab, {
       tab: founder,
       cols: 100,
       rows: 30,
@@ -1049,7 +1056,7 @@ describe('a tab that re-founds', () => {
   // and never match this tab again on any future restore, which is the layout
   // lost permanently rather than for one run.
   it('corrects a saved row that outlived its group when the tab re-founds', async () => {
-    const founder = await invoke<TabDescriptor>(CHANNELS.open, {
+    const founder = await invoke<TerminalTabDescriptor>(CHANNELS.open, {
       projectSlug: 'lumio',
       cwd: tmpdir(),
     })
@@ -1093,7 +1100,7 @@ describe('a tab that re-founds', () => {
     expect(before.tabs[0].id).toBe(founder.id)
     expect(before.tabs[0].groupId).toBe(founder.id)
 
-    const back = await invoke<TabDescriptor>(CHANNELS.restartTab, { tab: second })
+    const back = await invoke<TerminalTabDescriptor>(CHANNELS.restartTab, { tab: second })
     await expect.poll(() => adapter.hasSession(back.tmuxSession), { timeout: 8000 }).toBe(true)
     // Ungrouped: there was nothing left to rejoin, so this pane is the tab's
     // new founder and its own session is the group any sibling will join.
@@ -1159,7 +1166,7 @@ describe('splitPane and closePane', () => {
   async function splitOnce(
     dir: 'row' | 'col' = 'row',
   ): Promise<{ founder: TabDescriptor; second: TabDescriptor; shape: TabShape }> {
-    const founder = await invoke<TabDescriptor>(CHANNELS.open, {
+    const founder = await invoke<TerminalTabDescriptor>(CHANNELS.open, {
       projectSlug: 'lumio',
       cwd: tmpdir(),
     })
@@ -1329,7 +1336,7 @@ describe('splitPane and closePane', () => {
   // size to 80x24 and then resizes the new window to it, so "do not pass a
   // default" can only be honoured by refusing the call.
   it('refuses to split a pane the renderer has not measured', async () => {
-    const founder = await invoke<TabDescriptor>(CHANNELS.open, {
+    const founder = await invoke<TerminalTabDescriptor>(CHANNELS.open, {
       projectSlug: 'lumio',
       cwd: tmpdir(),
     })
@@ -1419,7 +1426,7 @@ describe('splitPane and closePane', () => {
     await exitEvent
     await expect(adapter.hasSession(second.tmuxSession)).resolves.toBe(false)
 
-    const restarted = await invoke<TabDescriptor>(CHANNELS.restartTab, {
+    const restarted = await invoke<TerminalTabDescriptor>(CHANNELS.restartTab, {
       tab: second,
       cols: 100,
       rows: 30,
@@ -1503,12 +1510,12 @@ describe('splitPane and closePane', () => {
   // test here has one tab, so nothing else exercises it — and a re-founding
   // rewrites a row's `groupId` through the same helper.
   it('leaves the other tabs where they are when one is split or closed', async () => {
-    const first = await invoke<TabDescriptor>(CHANNELS.open, {
+    const first = await invoke<TerminalTabDescriptor>(CHANNELS.open, {
       projectSlug: 'lumio',
       cwd: tmpdir(),
     })
     await waitForPrompt(first.id)
-    const other = await invoke<TabDescriptor>(CHANNELS.open, {
+    const other = await invoke<TerminalTabDescriptor>(CHANNELS.open, {
       projectSlug: 'lumio',
       cwd: tmpdir(),
     })
@@ -1732,7 +1739,7 @@ describe('splitPane and closePane', () => {
     ])
     await exitEvent
     await expect(adapter.hasSession(second.tmuxSession)).resolves.toBe(false)
-    const restarted = await invoke<TabDescriptor>(CHANNELS.restartTab, {
+    const restarted = await invoke<TerminalTabDescriptor>(CHANNELS.restartTab, {
       tab: second, cols: 100, rows: 30,
     })
     await expect.poll(() => adapter.hasSession(restarted.tmuxSession), { timeout: 8000 }).toBe(true)
@@ -1889,7 +1896,7 @@ describe('splitPane and closePane', () => {
     ])
     await exitEvent
     await expect(adapter.hasSession(second.tmuxSession)).resolves.toBe(false)
-    const restarted = await invoke<TabDescriptor>(CHANNELS.restartTab, {
+    const restarted = await invoke<TerminalTabDescriptor>(CHANNELS.restartTab, {
       tab: second, cols: 100, rows: 30,
     })
     await expect.poll(() => adapter.hasSession(restarted.tmuxSession), { timeout: 8000 }).toBe(true)
@@ -1993,7 +2000,7 @@ describe('splitPane and closePane', () => {
     expect(betweenRow?.layout.ratio[1]).toBeCloseTo(0.375)
 
     await kill(third) // C, at a true 0.3 that the row calls 0.375
-    const restarted = await invoke<TabDescriptor>(CHANNELS.restartTab, {
+    const restarted = await invoke<TerminalTabDescriptor>(CHANNELS.restartTab, {
       tab: third, cols: 100, rows: 30,
     })
     await expect.poll(() => adapter.hasSession(restarted.tmuxSession), { timeout: 8000 }).toBe(true)
@@ -2079,7 +2086,7 @@ describe('splitPane and closePane', () => {
     // — being restarted rather than rebuilt by a split or a close — still
     // unnamed by the row.
     await kill(second)
-    const restarted = await invoke<TabDescriptor>(CHANNELS.restartTab, {
+    const restarted = await invoke<TerminalTabDescriptor>(CHANNELS.restartTab, {
       tab: second, cols: 100, rows: 30,
     })
     await expect.poll(() => adapter.hasSession(restarted.tmuxSession), { timeout: 8000 }).toBe(true)
@@ -2186,7 +2193,7 @@ describe('splitPane and closePane', () => {
     await settle(100)
 
     // C — the surviving tombstone — is restarted at its now-widened claim.
-    const restarted = await invoke<TabDescriptor>(CHANNELS.restartTab, {
+    const restarted = await invoke<TerminalTabDescriptor>(CHANNELS.restartTab, {
       tab: third, cols: 100, rows: 30,
     })
     expect(restarted.id).toBe(third.id)
@@ -2509,7 +2516,7 @@ describe('project channels', () => {
       name: 'Lumio',
       cwd: tmpdir(),
     })
-    const tab = await invoke<TabDescriptor>(CHANNELS.open, {
+    const tab = await invoke<TerminalTabDescriptor>(CHANNELS.open, {
       projectSlug: 'stray',
       cwd: tmpdir(),
       type: 'claude',
@@ -2588,7 +2595,7 @@ describe('status registry', () => {
   // tombstone: nothing else will ever call `forget` for this id again, since
   // the row is already gone from config and the tab from the tab bar.
   it('never leaves a tombstone behind for a tab killed on purpose', async () => {
-    const tab = await invoke<TabDescriptor>(CHANNELS.open, {
+    const tab = await invoke<TerminalTabDescriptor>(CHANNELS.open, {
       projectSlug: 'lumio',
       cwd: tmpdir(),
       type: 'preset',
@@ -2615,7 +2622,7 @@ describe('status registry', () => {
   // nowhere. What a listener actually receives is the contract — it is all
   // the notification router ever sees.
   it('carries the dying tab on its transition, though the saved row is already gone', async () => {
-    const tab = await invoke<TabDescriptor>(CHANNELS.open, { projectSlug: 'lumio', cwd: tmpdir() })
+    const tab = await invoke<TerminalTabDescriptor>(CHANNELS.open, { projectSlug: 'lumio', cwd: tmpdir() })
     await waitForPrompt(tab.id)
     const seen: { to: TabState | null; tab?: TabDescriptor }[] = []
     registry.onTransition((transition) => {
@@ -2648,7 +2655,7 @@ describe('status registry', () => {
   // nobody has typed into, rather than the hollow `unknown` a tab that should
   // have a state and does not deserves.
   it('gives a relaunch-restored claude tab a state, not silence', async () => {
-    const tab = await invoke<TabDescriptor>(CHANNELS.open, {
+    const tab = await invoke<TerminalTabDescriptor>(CHANNELS.open, {
       projectSlug: 'lumio',
       cwd: tmpdir(),
       type: 'claude',
@@ -2676,7 +2683,7 @@ describe('status registry', () => {
   // which is precisely the "a ⌘R must not blank the board" defect this task
   // exists to avoid.
   it('does not blank a tab restore already knows the real state of', async () => {
-    const tab = await invoke<TabDescriptor>(CHANNELS.open, {
+    const tab = await invoke<TerminalTabDescriptor>(CHANNELS.open, {
       projectSlug: 'lumio',
       cwd: tmpdir(),
       type: 'claude',

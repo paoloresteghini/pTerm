@@ -1,5 +1,5 @@
 import { homedir } from 'node:os'
-import type { SessionManager, PaneRecord } from '../sessions/manager'
+import type { SessionManager, PaneRecord, TerminalPaneRecord } from '../sessions/manager'
 import type { ConfigStore, ProjectRecord, TabRow } from '../state/store'
 import { readManifest, mergePresets } from '../projects/manifest'
 import { isDirectory } from '../fsutil'
@@ -125,10 +125,14 @@ export type WorkspaceReconcile = Omit<RestoreResult, 'status'>
  * shown, once, under the other pane's id and saved cwd/command/type; when
  * nothing prunes at all it is shown twice, which is the failure this exists
  * for.
+ *
+ * `tab.panes` is always `TerminalPaneRecord[]`: the only caller passes what
+ * `manager.findOrphanTabs()` returned, which is built entirely from live
+ * tmux session names and never produces an editor pane.
  */
 async function withoutSharedWindows(
   manager: SessionManager,
-  tab: { tabId: string; panes: PaneRecord[] },
+  tab: { tabId: string; panes: TerminalPaneRecord[] },
 ): Promise<PaneRecord[]> {
   // A tab of one pane has no sibling to shadow, and asking tmux for its window
   // would put a round trip on every ordinary unsplit tab for nothing.

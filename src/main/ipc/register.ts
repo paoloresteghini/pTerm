@@ -16,7 +16,7 @@ import {
   type TabRow,
   type TabShape,
 } from '../../shared/ipc'
-import type { ExitReason, SessionManager, PaneRecord } from '../sessions/manager'
+import type { ExitReason, SessionManager, PaneRecord, TerminalPaneRecord } from '../sessions/manager'
 import { ConfigStore, type PrcliConfig } from '../state/store'
 import { StatusRegistry } from '../status/registry'
 import {
@@ -498,8 +498,12 @@ export function registerIpc(
    * `pendingKills`, when there is one to ask. `exited` — and a `killed` with
    * no pending kill on record, which should not happen but must still get a
    * real answer rather than an assumed one — asks tmux directly.
+   *
+   * `record` is always a `TerminalPaneRecord`: the only caller is
+   * `manager.onExit`, and an exit event only ever fires for a pane
+   * `SessionManager` itself holds, which is always a terminal.
    */
-  const sessionSurvived = async (record: PaneRecord, reason: ExitReason): Promise<boolean> => {
+  const sessionSurvived = async (record: TerminalPaneRecord, reason: ExitReason): Promise<boolean> => {
     if (reason === 'detached') return true
     const pending = reason === 'killed' ? pendingKills.get(record.id) : undefined
     if (pending) {
