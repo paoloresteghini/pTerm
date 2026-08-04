@@ -66,7 +66,7 @@
  *   seeded config carries `tabs: []`, so each tab has exactly one pane and
  *   each group renders exactly one box, whose share renormalises to 1.
  *   `PaneDivider` is constructed only for `index > 0`
- *   (`src/renderer/App.tsx:812-813`, read 2026-08-03), so not one is ever
+ *   (`src/renderer/App.tsx:860-861`, read 2026-08-04), so not one is ever
  *   constructed and the dividers overlay renders with no strips. Stated as
  *   what renders rather than as which branch runs: an earlier version of this
  *   line said `boxesOfRow` is never reached, and it is — restore builds one

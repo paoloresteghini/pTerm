@@ -1,6 +1,6 @@
 import type { TabDescriptor, TabState } from '../shared/ipc'
 import { StatusDot } from './StatusDot'
-import { labelOfPane } from './workspace'
+import { tabLabel } from './lib/tabLabel'
 
 /**
  * The chrome over a pane whose session has died: a dot, a Restart and a
@@ -50,7 +50,7 @@ export function DeadPane({
           here names a tab. */}
       <button
         data-testid={`pane-restart-${pane.id}`}
-        aria-label={`Restart ${labelOfPane(pane)}`}
+        aria-label={`Restart ${tabLabel(pane)}`}
         onClick={() => onRestart(pane)}
         className="pointer-events-auto cursor-default border-none bg-transparent p-0 text-[10px] text-muted hover:text-fg"
       >
@@ -61,7 +61,7 @@ export function DeadPane({
           it off the screen. No `onClose`: there is no session left to kill. */}
       <button
         data-testid={`pane-dismiss-${pane.id}`}
-        aria-label={`Dismiss ${labelOfPane(pane)}`}
+        aria-label={`Dismiss ${tabLabel(pane)}`}
         onClick={() => onDismiss(pane.id)}
         className="pointer-events-auto cursor-default border-none bg-transparent p-0 text-xs leading-none text-muted hover:text-fg"
       >

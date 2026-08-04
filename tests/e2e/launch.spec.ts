@@ -46,7 +46,7 @@
  *   seeded config's `tabs` is always `[]`, and nothing here presses ⌘D, so
  *   every tab has exactly one pane and every group renders exactly one box,
  *   whose share renormalises to 1. `PaneDivider` is constructed only for
- *   `index > 0` (`src/renderer/App.tsx:806-807`, read 2026-08-02), so not one
+ *   `index > 0` (`src/renderer/App.tsx:860-861`, read 2026-08-04), so not one
  *   is ever constructed: no divider is on screen in any test here, and nothing
  *   in this file can see a divider, a share, or a drag. Stated as what renders
  *   rather than as which branch runs, because the branch reading was wrong:

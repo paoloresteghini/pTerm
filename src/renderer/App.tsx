@@ -11,7 +11,27 @@ import { TitleBar } from './TitleBar'
 import { Welcome } from './Welcome'
 import { CommandPalette, type PaletteSession } from './CommandPalette'
 import { cn } from './lib/cn'
-import { INITIAL_WORKSPACE_STATE, activeProject, activeTabId, canOpenSession, grabFor, labelOfPane, needsYou, paneGroups, paneInDirection, panesOfTab, projectIdForTab, resizeKids, stateOfProject, tabOfPane, tabsOfProject, type PaneBox, type PaneDirection, welcomeHint, workspaceReducer } from './workspace'
+import { tabLabel } from './lib/tabLabel'
+import {
+  INITIAL_WORKSPACE_STATE,
+  activeProject,
+  activeTabId,
+  canOpenSession,
+  grabFor,
+  needsYou,
+  paneGroups,
+  paneInDirection,
+  panesOfTab,
+  projectIdForTab,
+  resizeKids,
+  stateOfProject,
+  tabOfPane,
+  tabsOfProject,
+  welcomeHint,
+  workspaceReducer,
+  type PaneBox,
+  type PaneDirection,
+} from './workspace'
 import { projectMuted, toggleProjectMute } from './mute'
 import { UNSORTED_ID, type NotificationConfig, type TabDescriptor, type TabType } from '../shared/ipc'
 import { SEVERITY } from '../shared/status'
@@ -625,7 +645,7 @@ export function App() {
     const reported = state.status[pane.id]
     return {
       id: pane.id,
-      name: labelOfPane(pane),
+      name: tabLabel(pane),
       severity: reported ? SEVERITY.indexOf(reported) : SEVERITY.length,
     }
   })

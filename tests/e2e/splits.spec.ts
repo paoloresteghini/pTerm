@@ -29,7 +29,7 @@
  * Before this file no test anywhere in this repo had rendered a split.
  * `tabs.spec.ts` says so in its own "what this file does NOT see": nothing
  * pressed ⌘D, every group rendered exactly one box, and so `PaneDivider` — a
- * component built only for `index > 0` (`src/renderer/App.tsx:805-807`) — was
+ * component built only for `index > 0` (`src/renderer/App.tsx:860-861`, read 2026-08-04) — was
  * never constructed once in the whole suite.
  *
  * **What this file does NOT see** — read off this file's own text unless a

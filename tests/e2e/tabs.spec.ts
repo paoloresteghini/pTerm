@@ -35,7 +35,7 @@
  *
  * **Measured, 2026-08-03, this file run alone**: two mutations, one per
  * surface the rename has to reach. Reverting `Sidebar.tsx`'s
- * `{labelOfPane(tab)}` to its own inlined `{tab.projectSlug} · {tab.id.slice(0, 6)}`
+ * `{tabLabel(tab)}` to its own inlined `{tab.projectSlug} · {tab.id.slice(0, 6)}`
  * copy fails `a renamed tab shows its name in the bar and the sidebar, and
  * survives a relaunch` at the assertion `await
  * expect(window.getByTestId('stab-${id}')).toContainText('payments api')`,
@@ -52,6 +52,20 @@
  * file in turn returned this file to green with an empty `git diff` against
  * the committed version before the next mutation was made.
  *
+ * **Measured, 2026-08-04, this file run alone**: two mutations against the
+ * palette test, one per half of its claim. Building the palette's label inline
+ * in `App.tsx` — `name: ${pane.projectSlug} · ${pane.id.slice(0, 6)}` in place
+ * of `name: tabLabel(pane)` — fails `the palette names a renamed tab the way
+ * the bar does` at `await expect(row).toContainText('payments api')`, with the
+ * row reading `scratch · d9a378`, which is the drift a shared selector exists
+ * to prevent. Making `tabLabel` append rather than replace — returning
+ * `${tab.title} (${tab.projectSlug} · ${tab.id.slice(0, 6)})` for a named tab
+ * — clears that assertion and fails the next one,
+ * `await expect(row).not.toContainText(id.slice(0, 6))`, on
+ * `payments api (scratch · 6b5ee3)`. So neither assertion is carrying the
+ * other: the positive one names the title, the negative one is what makes the
+ * title a replacement.
+ *
  * **What this file does NOT see** — read off this file's own text unless a
  * line says measured or names another file:
  *
@@ -59,7 +73,7 @@
  *   seeded config's `tabs` is always `[]`, so every tab has exactly one pane
  *   and every group renders exactly one box, whose share renormalises to 1.
  *   `PaneDivider` is constructed only for `index > 0`
- *   (`src/renderer/App.tsx:806-807`, read 2026-08-02), so not one is ever
+ *   (`src/renderer/App.tsx:860-861`, read 2026-08-04), so not one is ever
  *   constructed and the dividers overlay renders with no strips in it. A tab
  *   here is a pane wearing a tab's name, and the split behaviour the tab bar
  *   is shared with is invisible to this file. Stated as what renders rather
@@ -604,6 +618,47 @@ test('the context menu reaches the same rename field', async () => {
 
   // Two entry points into one path, so this only has to prove it arrives.
   await expect(window.getByTestId(`tabinput-${id}`)).toBeVisible()
+
+  await app.close()
+})
+
+test('the palette names a renamed tab the way the bar does', async () => {
+  // The fourth surface. `tabLabel` exists so the bar, the sidebar, the dead
+  // pane and ⌘K cannot disagree, and the two tests above pin the first two,
+  // but nothing covered the palette and a title together: the palette's own
+  // tests in `skills.spec.ts` never name a tab, and the rename tests never
+  // open the palette. A palette wired to its own copy of the slug template
+  // would have passed every one of them.
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  await window.getByTestId('new-tab').click()
+  await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
+  const testid = await window.locator(ACTIVE_TAB).getAttribute('data-testid')
+  const id = (testid ?? '').replace('tab-', '')
+  expect(id).not.toBe('')
+
+  // Read unnamed first, so the assertion after the rename is a change rather
+  // than a string that happened to be there all along.
+  await window.keyboard.press('Meta+k')
+  const row = window.getByTestId(`palette-session-${id}`)
+  await expect(row).toContainText(id.slice(0, 6))
+  await window.keyboard.press('Escape')
+  await expect(window.getByTestId('command-palette')).toBeHidden()
+
+  await window.getByTestId(`tablabel-${id}`).dblclick()
+  const field = window.getByTestId(`tabinput-${id}`)
+  await field.fill('payments api')
+  await field.press('Enter')
+  await expect(window.getByTestId(`tab-${id}`)).toContainText('payments api')
+
+  await window.keyboard.press('Meta+k')
+  await expect(row).toContainText('payments api')
+  // The negative is the load-bearing half. A palette that appended the name to
+  // the fallback, or ignored the title and kept rendering the fallback, would
+  // satisfy the line above on its own. The id is lowercase hex, so no slice of
+  // it can hide inside `payments api`.
+  await expect(row).not.toContainText(id.slice(0, 6))
 
   await app.close()
 })

@@ -879,7 +879,7 @@ export function registerIpc(
         row.id === id
           ? // An empty name is how a title is removed, so it is stored as
             // absent rather than as "": one representation on disk, and
-            // `labelOfPane` never has to decide between them.
+            // `tabLabel` never has to decide between them.
             { ...row, title: trimmed === '' ? undefined : trimmed }
           : row,
       )

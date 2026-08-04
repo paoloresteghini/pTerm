@@ -1192,25 +1192,3 @@ export function workspaceReducer(
     }
   }
 }
-
-/**
- * What any surface listing this pane should call it.
- *
- * One rule with three callers, which is the point: the tab bar, the sidebar
- * and the dead-pane overlay each built this string themselves before, so a
- * name that reached one of them would have reached only that one. The tab bar
- * and the sidebar are the two places the user sees, and the overlay's copies
- * are what a screen reader announces.
- *
- * An empty title falls back rather than rendering. Empty is how a name is
- * cleared, and the rename handler stores a cleared name as absent rather than
- * as `""`. The store itself keeps any string it is given, though, so a config
- * edited by hand can still carry `title: ""`, and a tab with no label at all
- * cannot be read or aimed at.
- *
- * Here rather than in a component so it can be tested against a plain object
- * with no DOM, which is how every other derivation in this file is tested.
- */
-export function labelOfPane(pane: TabDescriptor): string {
-  return pane.title ? pane.title : `${pane.projectSlug} · ${pane.id.slice(0, 6)}`
-}

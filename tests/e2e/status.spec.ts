@@ -39,7 +39,7 @@
  *   with `tabs: []` seeded and nothing presses ⌘D, so every tab has exactly
  *   one pane and every group renders exactly one box, whose share renormalises
  *   to 1. `PaneDivider` is constructed only for `index > 0`
- *   (`src/renderer/App.tsx:806-807`, read 2026-08-02), so not one is ever
+ *   (`src/renderer/App.tsx:860-861`, read 2026-08-04), so not one is ever
  *   constructed and the dividers overlay renders with no strips. A dead *pane*
  *   beside a live one, which is the case the overlay exists for, cannot occur
  *   here. Stated as what renders rather than as which branch runs: an earlier
