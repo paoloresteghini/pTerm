@@ -64,7 +64,11 @@ export function RightPanel({
         spellCheck={false}
         className="mx-2.5 mb-1 border border-border bg-transparent px-1.5 py-1 text-[11px] text-fg placeholder:text-faint focus:outline-none"
       />
-      <div className="min-h-0 flex-[2] overflow-y-auto">
+      {/* `scroll-`, not `skills-`: every prefix locator in the e2e suite is
+          listed in `tests/e2e/`, and `[data-testid^="skill-"]` counts the rows
+          in this very list. A testid called `skills-scroll` would be counted as
+          a fifth skill by assertions that name four. */}
+      <div data-testid="scroll-skills" className="scroll-thin min-h-0 flex-[2] overflow-y-auto">
         {skills === null ? (
           <p data-testid="skills-loading" className="px-2.5 py-1 text-faint">
             …
@@ -98,7 +102,7 @@ export function RightPanel({
       <div className="px-2.5 pb-1 pt-3 text-[10px] uppercase tracking-wider text-faint">
         Presets
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         {/* Not `preset-claude`: a repository declaring a preset labelled
             `claude` would otherwise produce two elements with that testid. */}
         <button

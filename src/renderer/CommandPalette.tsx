@@ -77,7 +77,7 @@ export function CommandPalette({
           spellCheck={false}
           className="mb-2 w-full border border-border bg-transparent px-2 py-1 text-[12px] text-fg placeholder:text-faint focus:outline-none"
         />
-        <div className="max-h-72 overflow-y-auto text-[11px]">
+        <div className="scroll-thin max-h-72 overflow-y-auto text-[11px]">
           {matchedSessions.map((session) => (
             <button
               key={session.id}

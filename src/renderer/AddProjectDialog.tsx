@@ -48,7 +48,7 @@ export function AddProjectDialog({
 
         {error ? <p className="mb-2 text-[11px] text-danger">{error}</p> : null}
 
-        <div className="mb-3 max-h-72 overflow-y-auto text-[11px]">
+        <div className="scroll-thin mb-3 max-h-72 overflow-y-auto text-[11px]">
           {candidates.length === 0 ? (
             <p className="py-2 text-muted">
               Nothing found to suggest. Choose a folder instead.

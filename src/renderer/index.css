@@ -43,3 +43,64 @@ html, body, #root {
   -webkit-app-region: drag;
   app-region: drag;
 }
+
+/* Every scrollbar the app draws, in the app's own colours instead of the
+   system's light grey.
+
+   **Measured 2026-08-04, and it corrects the assumption this rule was first
+   written under.** There are no overlay scrollbars here: an Electron window on
+   this machine gets the CLASSIC bar, always present and 15px wide, which
+   `offsetWidth - clientWidth` reports on every scrollable container including
+   `.xterm-viewport`. So this is not a choice between a floating bar and a
+   permanent one. The permanent bar already existed, in every terminal pane and
+   every panel; the only thing in question was its colour and its width.
+
+   The terminal is INCLUDED for that reason. Leaving it out would have kept the
+   palest bar in the app on the surface it covers most of. It also gains a
+   pixel: `@xterm/addon-fit` reserves a HARDCODED 14px for the scrollbar
+   whenever `scrollback !== 0` (`overviewRuler?.width || 14`, read in
+   `node_modules/@xterm/addon-fit/lib/addon-fit.js` on 2026-08-04) and never
+   measures the real one, so at 15px the last column sat a pixel under the bar
+   and at 8px it does not. The reserve being constant is also why no width
+   chosen here can move a column count or resize a tmux session.
+
+   NOT the tab bar, which is the one deliberate exclusion left. It is
+   `overflow-x-auto` inside an `h-8` strip, so a horizontal bar would take a
+   quarter of its height as soon as enough tabs open to overflow it.
+
+   A class rather than a rule on `*` because the exclusion has to be
+   expressible, and because there is no way back: once `::-webkit-scrollbar` is
+   defined for an element there is no value that returns it to the platform's
+   own. Opting in says which surfaces were considered. */
+.scroll-thin::-webkit-scrollbar,
+.xterm-viewport::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scroll-thin::-webkit-scrollbar-track,
+.xterm-viewport::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scroll-thin::-webkit-scrollbar-thumb,
+.xterm-viewport::-webkit-scrollbar-thumb {
+  /* `--color-faint` rather than `--color-border`: the thumb has to read on
+     `--color-bg` and on `--color-surface`, and border is only two steps off
+     both. */
+  background: var(--color-faint);
+  border-radius: 4px;
+}
+
+.scroll-thin::-webkit-scrollbar-thumb:hover,
+.xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted);
+}
+
+/* Where a vertical and a horizontal bar meet. Left unpainted, it is drawn in
+   the system's light grey and is the one bright square the rest of this rule
+   would otherwise miss. */
+.scroll-thin::-webkit-scrollbar-corner,
+.xterm-viewport::-webkit-scrollbar-corner {
+  background: transparent;
+}

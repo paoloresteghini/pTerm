@@ -84,7 +84,7 @@ export function Sidebar({
         Projects
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         {projects.map((project, index) => {
           const active = project.id === activeProjectId
           const synthetic = project.id === UNSORTED_ID

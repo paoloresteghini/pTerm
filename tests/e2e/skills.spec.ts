@@ -6,6 +6,23 @@
  * at a temp tree holding four known entries and asserts against a known list.
  * That is what makes "the panel shows the right names" a real assertion here
  * rather than a restatement of the developer's own plugin set.
+ *
+ * **Measured 2026-08-04, the scrollbar rule**: three mutations against
+ * `the panel and the terminal both scroll on the styled bar`, each failing
+ * only its own assertion. Dropping `.xterm-viewport` from the rule in
+ * `index.css` leaves the panel at 8 and returns the terminal to 15; dropping
+ * `scroll-thin` from the skills container in `RightPanel.tsx` does the
+ * reverse; recolouring the thumb to `--color-danger` leaves both widths at 8
+ * and fails on `rgb(248, 113, 113)`. The 15 in the first two is the platform
+ * bar this rule replaces, so a revert is a visible number here and not a zero.
+ *
+ * **This file shares one `page` across every test, and that is load-bearing
+ * against it.** The scrollbar test first failed because
+ * `clicking a skill types its invocation` leaves `brow` in the filter box and
+ * nothing after it clears one, so by then the panel held ONE row, fit its box,
+ * and laid out no bar at all. Running the file alone hid the failure entirely.
+ * Anything added here that depends on the panel's contents must set them
+ * rather than inherit them.
  */
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises'
@@ -275,4 +292,67 @@ test('⌘W typed into the skills filter does not destroy a pane', async () => {
   await page.keyboard.press('Meta+w')
   await page.waitForTimeout(500)
   expect(await page.locator('[data-testid^="tab-"]').count()).toBe(before)
+})
+
+test('the panel and the terminal both scroll on the styled bar, at its width', async () => {
+  // Measured as LAYOUT, not as computed style, because a custom scrollbar's
+  // cost and its proof are the same number: `offsetWidth - clientWidth` is the
+  // width the bar takes out of the box, and nothing else in the box model
+  // produces that difference on a container with no border.
+  //
+  // The number that makes this bite is what it USED to be. This environment
+  // has no overlay scrollbars — measured 2026-08-04, the platform bar here is
+  // classic and 15px — so before this rule both containers below read 15, and
+  // both now read 8. A revert does not make them read 0; it makes them read
+  // 15, which is why 8 is asserted rather than "not zero".
+  //
+  // Last in the file because it resizes the window, and every test above
+  // shares this one page.
+
+  // Opened here rather than relied on from a test above. Several of those do
+  // open tabs, so `.xterm-viewport` would usually exist by now — but only
+  // usually, and running this test alone found that out: it timed out waiting
+  // for a viewport no earlier test had created.
+  await page.getByTestId('new-tab').click()
+  await expect(page.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
+
+  // Cleared, not inherited. `clicking a skill types its invocation` leaves
+  // `brow` in this box and nothing after it puts the list back, so in a
+  // full-file run the panel holds ONE row, fits its box, and lays out no bar
+  // at all — measured, and it is how this test first failed. Running the file
+  // alone hid it, because then no earlier test had typed anything.
+  await page.getByTestId('skills-filter').fill('')
+  await expect(page.locator('[data-testid^="skill-"]')).toHaveCount(4)
+
+  // 240px, measured: at 360 the four skills and the Presets header still fit
+  // in the 153px the panel gets, so nothing overflowed and the bar was never
+  // laid out. At 240 the list is 98px of content in a 73px box.
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0].setSize(760, 240)
+  })
+
+  const gutter = async (selector: string): Promise<number> =>
+    // Typed: a `Locator` resolves to `HTMLElement | SVGElement`, and only the
+    // HTML half has `offsetWidth`. Every selector passed here is a div.
+    page.locator(selector).first().evaluate((node: HTMLElement) => node.offsetWidth - node.clientWidth)
+
+  // Polled: the resize reaches the renderer asynchronously, and until it lands
+  // the panel still fits its content and this reads 0.
+  await expect.poll(async () => gutter('[data-testid="scroll-skills"]'), { timeout: 10_000 }).toBe(8)
+
+  // The terminal, which is the surface the rule covers most of and the one it
+  // was nearly written to exclude. `.xterm-viewport` is `overflow-y: scroll`,
+  // so it is laid out with a bar whether or not there is scrollback to reach:
+  // no resize or scroll is needed to make this measurable, and dropping
+  // `.xterm-viewport` from the rule leaves the assertion above green and fails
+  // only this one.
+  expect(await gutter('.xterm-viewport')).toBe(8)
+
+  // The colour, separately and honestly: this reads the pseudo-element's
+  // computed style, which says what was declared rather than what was
+  // rasterised. `--color-faint`, #3f3f46.
+  const thumb = await page
+    .locator('[data-testid="scroll-skills"]')
+    .evaluate((node) => getComputedStyle(node, '::-webkit-scrollbar-thumb').backgroundColor)
+  expect(thumb).toBe('rgb(63, 63, 70)')
 })
