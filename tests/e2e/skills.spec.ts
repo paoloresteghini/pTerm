@@ -190,18 +190,47 @@ test('typing brings skills in below the sessions', async () => {
   await expect(action).toBeVisible()
   await expect(action).toContainText('/browse')
 
+  // Not just that both lists exist: every session row above every action
+  // row. Swapping the two `.map` blocks in CommandPalette.tsx would leave the
+  // assertions above green, since neither one names a position.
+  //
+  // `d`, not `brow`: every session label is `demo · <id>` (`tabLabel`), and a
+  // tmux session id is lowercase hex, which never contains `w`, so `brow`
+  // above matches no session at all and this order check needs both lists
+  // populated at once. `d` matches every session through the literal `demo`
+  // and matches `gsd:stats`, the one fixture entry with a `d` in it, without
+  // depending on the id's random hex.
+  await page.getByTestId('palette-input').fill('d')
+  const rows = page.locator('[data-testid^="palette-session-"], [data-testid^="palette-action-"]')
+  await expect(rows).not.toHaveCount(0)
+  const ids = await rows.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-testid') ?? ''))
+  const sessionIds = ids.filter((id) => id.startsWith('palette-session-'))
+  const actionIds = ids.filter((id) => id.startsWith('palette-action-'))
+  expect(sessionIds.length).toBeGreaterThan(0)
+  expect(actionIds.length).toBeGreaterThan(0)
+  expect(ids.findIndex((id) => id.startsWith('palette-action-'))).toBeGreaterThan(
+    ids.findLastIndex((id) => id.startsWith('palette-session-')),
+  )
+
   await page.keyboard.press('Escape')
 })
 
 test('choosing a skill from the palette types it and closes the palette', async () => {
   await page.keyboard.press('Meta+k')
-  await page.getByTestId('palette-input').fill('brow')
-  await page.getByTestId('palette-action-browse').click()
+  // Cleared on open, not carried over from whatever an earlier test left in
+  // it: CommandPalette's own effect does this, and it was otherwise untested.
+  await expect(page.getByTestId('palette-input')).toHaveValue('')
+  // `zebra`, not `browse`: the panel test above already typed `/browse` into
+  // this same pane, so asserting `/browse` here would pass even with this
+  // path's `onInsert` stubbed to a no-op. `zebra` is untouched by every test
+  // above it, which is what makes this assertion belong to the palette.
+  await page.getByTestId('palette-input').fill('zeb')
+  await page.getByTestId('palette-action-zebra').click()
   await expect(page.getByTestId('command-palette')).toBeHidden()
 
   await page.waitForTimeout(750)
   const text = await page.locator('.xterm-rows').first().innerText()
-  expect(text).toContain('/browse')
+  expect(text).toContain('/zebra')
 })
 
 test('⌘W typed into the palette does not destroy a pane', async () => {
@@ -212,5 +241,38 @@ test('⌘W typed into the palette does not destroy a pane', async () => {
   await page.keyboard.press('Meta+w')
   await page.waitForTimeout(500)
   await page.keyboard.press('Escape')
+  expect(await page.locator('[data-testid^="tab-"]').count()).toBe(before)
+})
+
+test('choosing a session from the palette switches the active tab', async () => {
+  const original = page.locator('[data-testid^="tab-"]')
+  await expect(original).toHaveCount(1)
+  const originalId = (await original.first().getAttribute('data-testid'))?.slice('tab-'.length)
+  if (!originalId) throw new Error('no tab id found')
+
+  // A second tab so switching is a real choice, not a no-op back to the tab
+  // already active. `new-tab` activates what it opens, so `originalId` starts
+  // this test not-active.
+  await page.getByTestId('new-tab').click()
+  const tabs = page.locator('[data-testid^="tab-"]')
+  await expect(tabs).toHaveCount(2)
+  await expect(page.getByTestId(`tab-${originalId}`)).toHaveAttribute('data-active', 'false')
+
+  await page.keyboard.press('Meta+k')
+  // The raw pane id, not the label: same reason CommandPalette's own testids
+  // are keyed on it rather than the truncated text a row renders.
+  await page.getByTestId(`palette-session-${originalId}`).click()
+  await expect(page.getByTestId('command-palette')).toBeHidden()
+  await expect(page.getByTestId(`tab-${originalId}`)).toHaveAttribute('data-active', 'true')
+})
+
+test('⌘W typed into the skills filter does not destroy a pane', async () => {
+  // Same guard as the palette's input, same reason: without it ⌘W typed while
+  // filtering closes the active pane and destroys its tmux session.
+  const before = await page.locator('[data-testid^="tab-"]').count()
+  expect(before).toBeGreaterThan(0)
+  await page.getByTestId('skills-filter').fill('z')
+  await page.keyboard.press('Meta+w')
+  await page.waitForTimeout(500)
   expect(await page.locator('[data-testid^="tab-"]').count()).toBe(before)
 })
