@@ -83,6 +83,15 @@
  * switching back to `p1` without re-clicking `tree-row-src`. Reverted after
  * measuring; `git diff src/renderer/FileTree.tsx` was empty before
  * continuing.
+ *
+ * **Mutation measured 2026-08-04, round 7**: deleting the whole eviction
+ * block round 4 added to `reload` (the `setLoaded` call dropping keys that
+ * are neither `''` nor in `expanded`), leaving `reload` as only the two
+ * `load` calls below it. Run as the whole file, this FAILED the new
+ * `refresh drops a collapsed folder's stale cache` at its
+ * `tree-row-src/zzz-late.ts` `toBeVisible()` and no other, with the other 7
+ * tests passing. Reverted after measuring; `git diff
+ * src/renderer/FileTree.tsx` was empty before continuing.
  */
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
@@ -301,4 +310,23 @@ test('refresh re-reads the root and every open folder', async () => {
   // The open folder too, not just the root. A refresh that re-read only the
   // root would satisfy the line above.
   await expect(page.getByTestId('tree-row-src/zzz-nested.ts')).toBeVisible()
+})
+
+test('refresh drops a collapsed folder’s stale cache', async () => {
+  // `src` is left expanded by the test above. Collapse it, change it on disk,
+  // refresh while it is closed, then open it: the fresh listing must be what
+  // opens, not whatever `loaded` still held from before the refresh.
+  await page.getByTestId('tree-row-src').click()
+  await expect(page.getByTestId('tree-row-src/app.ts')).toHaveCount(0)
+
+  await writeFile(join(projectCwd, 'src', 'zzz-late.ts'), '')
+
+  await page.getByTestId('tree-refresh').click()
+  // No visible effect on a closed folder to wait for: the root's own re-read
+  // landing is not a signal that the collapsed folder's eviction has been
+  // applied, so this gives the refresh time to finish before the next click.
+  await page.waitForTimeout(300)
+
+  await page.getByTestId('tree-row-src').click()
+  await expect(page.getByTestId('tree-row-src/zzz-late.ts')).toBeVisible()
 })
