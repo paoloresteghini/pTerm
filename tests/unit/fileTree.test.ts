@@ -72,6 +72,27 @@ describe('resolveInside', () => {
   it('refuses a sibling whose name extends the root', () => {
     expect(resolveInside('/a/b', '../bb')).toBeNull()
   })
+
+  // IPC does not enforce the type it declares. Before the `typeof` guard,
+  // each of these threw a `TypeError` out of `isAbsolute` instead of
+  // returning null: `listDir(root, undefined | null | 42 | {} | ['sub'])`,
+  // verified against the pre-fix module on 2026-08-04.
+  it('refuses a relPath that is not a string', () => {
+    expect(resolveInside('/a/b', undefined as unknown as string)).toBeNull()
+    expect(resolveInside('/a/b', null as unknown as string)).toBeNull()
+    expect(resolveInside('/a/b', 42 as unknown as string)).toBeNull()
+    expect(resolveInside('/a/b', {} as unknown as string)).toBeNull()
+    expect(resolveInside('/a/b', ['sub'] as unknown as string)).toBeNull()
+  })
+
+  // `config.json` is hand-editable and a trailing separator on `cwd` is easy
+  // to introduce by hand. Before `resolve(root)` ran once up front, this
+  // returned null: `root + '/' + sep` never matches `resolve(root, relPath)`,
+  // which normalises the trailing slash away. Verified against the pre-fix
+  // module on 2026-08-04.
+  it('normalises a trailing slash on root', () => {
+    expect(resolveInside('/a/b/', 'src')).toBe('/a/b/src')
+  })
 })
 
 describe('listDir', () => {
@@ -136,5 +157,17 @@ describe('listDir', () => {
   // A symlink nested inside a directory must be caught the same way.
   it('returns empty list when a nested symlink points outside', async () => {
     await expect(listDir(root, 'dirA/link')).resolves.toEqual([])
+  })
+
+  // Before `resolveInside` normalised `root`, a trailing separator on it (as
+  // a hand-edited `config.json` could carry) made `isInside` reject every
+  // target under it, and this returned `[]` instead of the root's own
+  // listing. Verified against the pre-fix module on 2026-08-04: with the fix
+  // reverted, `listDir(root + '/', '')` came back `[]` while `listDir(root,
+  // '')` still returned the 7 entries above.
+  it('does not blank the tree when root has a trailing separator', async () => {
+    const withSlash = await listDir(root + '/', '')
+    expect(withSlash.length).toBeGreaterThan(0)
+    expect(withSlash).toEqual(await listDir(root, ''))
   })
 })

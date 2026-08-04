@@ -1,5 +1,15 @@
-import { readdir, realpath } from 'node:fs/promises'
+import { readdir, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, join, resolve, sep } from 'node:path'
+
+/**
+ * The boundary this module enforces is per-project containment: a project can
+ * only ever be listed inside its own `cwd`, never anywhere else. It is not "the
+ * renderer cannot enumerate the disk". The project's own root is chosen by
+ * whatever added the project (`addProject` takes `{ name, cwd }` straight from
+ * the renderer, unvalidated), so a compromised renderer that registers a
+ * project rooted at `/` would still be free to list `/`; this module only
+ * stops it from listing anywhere else.
+ */
 
 /** One row of a directory, as the sidebar draws it. */
 export interface FileEntry {
@@ -14,6 +24,12 @@ export interface FileEntry {
  * are exactly the things worth reaching from a file tree. These two are hidden
  * because they are large and never edited by hand, not because they are
  * hidden files.
+ *
+ * True of ROWS, not of traversal: this only filters what `listDir` renders as
+ * a row of its own directory. It does not stop a caller from asking for
+ * `.git` or `node_modules` by path, and `listDir(root, '.git')` returns
+ * `.git`'s contents rather than an empty list. Nothing in the app does that
+ * today; if that ever changes, this set does not cover it.
  */
 const HIDDEN: ReadonlySet<string> = new Set(['.git', 'node_modules'])
 
@@ -36,11 +52,23 @@ function isInside(root: string, path: string): boolean {
  * directory-listing primitive for anything that reaches it. So no absolute
  * path crosses IPC, and this is where a relative one is checked rather than
  * trusted.
+ *
+ * `relPath` is `unknown` in every way that matters: IPC does not check the
+ * type it declares. `isAbsolute` throws a `TypeError` on anything that is not
+ * a string, which would otherwise turn a malformed message into a main-process
+ * crash rather than an empty list, so the type is checked here before that.
+ *
+ * `root` is resolved once, up front. `config.json` is hand-editable, and a
+ * trailing separator on it (`/a/b/`) is not equal to the `/a/b` this function
+ * builds from `resolve`, so `isInside` would reject every target under it and
+ * the whole tree would silently render empty.
  */
 export function resolveInside(root: string, relPath: string): string | null {
+  if (typeof relPath !== 'string') return null
   if (isAbsolute(relPath)) return null
-  const target = resolve(root, relPath)
-  return isInside(root, target) ? target : null
+  const cleanRoot = resolve(root)
+  const target = resolve(cleanRoot, relPath)
+  return isInside(cleanRoot, target) ? target : null
 }
 
 /**
@@ -108,11 +136,11 @@ async function symlinkIsInsideDir(root: string, target: string, name: string): P
   try {
     const real = await realpath(join(target, name))
     if (!isInside(root, real)) return false
-    // Reached only to answer "is it a directory". `readdir` throws ENOTDIR on
-    // a file, which is the whole test; the entries themselves are read again
-    // if and when the row is expanded.
-    await readdir(real)
-    return true
+    // `stat`, not `readdir`: this only needs to know the KIND, which is the
+    // whole reason `listDir` reads its own directory with `withFileTypes`
+    // rather than a `stat` per entry. Reading every entry of `real` here to
+    // answer "is it a directory" would undercut that.
+    return (await stat(real)).isDirectory()
   } catch {
     return false
   }
