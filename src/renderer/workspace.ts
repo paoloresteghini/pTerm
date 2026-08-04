@@ -1203,9 +1203,10 @@ export function workspaceReducer(
  * are what a screen reader announces.
  *
  * An empty title falls back rather than rendering. Empty is how a name is
- * cleared, and the store drops the field when it sees one, but a config edited
- * by hand can still carry `title: ""`, and a tab with no label at all cannot
- * be read or aimed at.
+ * cleared, and the rename handler stores a cleared name as absent rather than
+ * as `""`. The store itself keeps any string it is given, though, so a config
+ * edited by hand can still carry `title: ""`, and a tab with no label at all
+ * cannot be read or aimed at.
  *
  * Here rather than in a component so it can be tested against a plain object
  * with no DOM, which is how every other derivation in this file is tested.

@@ -851,18 +851,23 @@ export function registerIpc(
       //
       // The tab's own row is deliberately untouched: it carries layout, and a
       // move changes no pane id, no axis and no ratio.
-      const byId = new Map<string, PaneRecord>(moved.map((pane) => [pane.id, pane]))
+      //
+      // So a tab does not lose its name by being filed into another project:
+      // `moved` came out of `manager.moveTabToProject`, which renames tmux
+      // sessions and knows nothing of titles. Merged here, above the array
+      // that gets written, rather than onto the reply alone: these records
+      // REPLACE the saved rows below, so patching only the reply would show
+      // the name until the next restore and then lose it for good.
+      const merged = attachTitles(moved, config.panes)
+      const byId = new Map<string, PaneRecord>(merged.map((pane) => [pane.id, pane]))
       const listed = new Set(config.panes.map((row) => row.id))
       const panes = [
         ...config.panes.map((row) => byId.get(row.id) ?? row),
-        ...moved.filter((pane) => !listed.has(pane.id)),
+        ...merged.filter((pane) => !listed.has(pane.id)),
       ]
       const updated: PrcliConfig = { ...config, panes }
       await store.write(updated)
-      // So a tab does not lose its name by being filed into another project:
-      // `moved` came out of `manager.moveTabToProject`, which renames tmux
-      // sessions and knows nothing of titles.
-      return { projects: await described(updated), panes: attachTitles(moved, config.panes) }
+      return { projects: await described(updated), panes: merged }
     }),
   )
 
