@@ -41,6 +41,7 @@ import { hookPaths, installHooks, readHooksState, uninstallHooks } from '../hook
 import { drainSpool } from '../hooks/spool'
 import { listSkills } from '../skills/scan'
 import { readNote, writeNote } from '../notes/store'
+import { listDir } from '../files/tree'
 import {
   addProject,
   projectForSlug,
@@ -1312,4 +1313,20 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.notesWrite, (_event, projectId: string, text: string) =>
     writeNote(projectId, text),
   )
+
+  // Like `skills` and the notes channels above, deliberately not inside
+  // `serialise`: this reads the filesystem and never writes config, so there
+  // is nothing to serialise against.
+  //
+  // A project ID rather than the `projectCwd` that `skills` takes. That
+  // channel names one fixed directory inside a project; this one lists any
+  // directory it is given, so a renderer-supplied absolute path would be a
+  // general directory-listing primitive. Here the renderer chooses a project
+  // and a path within it, and main decides what that resolves to.
+  ipcMain.handle(CHANNELS.fsList, async (_event, projectId: string, relPath: string) => {
+    const config = await store.read()
+    const project = config.projects.find((row) => row.id === projectId)
+    if (!project) return []
+    return listDir(project.cwd, relPath)
+  })
 }
