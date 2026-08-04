@@ -1,5 +1,7 @@
-// Mutation check (Step 5): When resolveInside's containment check is removed,
-// 4 test assertions fail across 3 test functions. Observed on 2026-08-04.
+// Mutation check (Step 5): When the realpath containment check in listDir is
+// removed (if (!isInside(realRoot, realTarget)) return []), 2 tests fail:
+// "returns empty list when a top-level symlink points outside" and
+// "returns empty list when a nested symlink points outside". Observed on 2026-08-04.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises'
@@ -17,12 +19,14 @@ beforeAll(async () => {
 
   await mkdir(join(root, 'src'), { recursive: true })
   await mkdir(join(root, 'docs'), { recursive: true })
+  await mkdir(join(root, 'dirA'), { recursive: true })
   await mkdir(join(root, 'node_modules'), { recursive: true })
   await mkdir(join(root, '.git'), { recursive: true })
   await writeFile(join(root, 'README.md'), '#')
   await writeFile(join(root, '.env'), 'KEY=1')
   await writeFile(join(root, 'app.ts'), '')
   await symlink(outside, join(root, 'escape'))
+  await symlink(outside, join(root, 'dirA', 'link'))
 })
 
 afterAll(async () => {
@@ -72,6 +76,7 @@ describe('listDir', () => {
   it('lists directories first, then files, each alphabetical', async () => {
     const entries = await listDir(root, '')
     expect(entries.map((entry) => entry.name)).toEqual([
+      'dirA',
       'docs',
       'src',
       '.env',
@@ -79,7 +84,7 @@ describe('listDir', () => {
       'escape',
       'README.md',
     ])
-    expect(entries.filter((entry) => entry.dir).map((entry) => entry.name)).toEqual(['docs', 'src'])
+    expect(entries.filter((entry) => entry.dir).map((entry) => entry.name)).toEqual(['dirA', 'docs', 'src'])
   })
 
   // Hidden by name, at any depth. Dotfiles in general are NOT hidden: seeing
@@ -108,5 +113,18 @@ describe('listDir', () => {
   // isolation above.
   it('resolves a path outside the root to an empty list', async () => {
     await expect(listDir(root, '../..')).resolves.toEqual([])
+  })
+
+  // A symlink to a directory outside the project, when traversed directly,
+  // must not expose that directory's contents. The symlink itself appears in
+  // the parent listing with dir: false; requesting it as a path must return
+  // empty, not follow through.
+  it('returns empty list when a top-level symlink points outside', async () => {
+    await expect(listDir(root, 'escape')).resolves.toEqual([])
+  })
+
+  // A symlink nested inside a directory must be caught the same way.
+  it('returns empty list when a nested symlink points outside', async () => {
+    await expect(listDir(root, 'dirA/link')).resolves.toEqual([])
   })
 })
