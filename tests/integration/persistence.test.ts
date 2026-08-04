@@ -128,6 +128,24 @@ function openTabIn(projectSlug: string): Promise<{ id: string; tmuxSession: stri
   }>
 }
 
+/**
+ * The session of a pane this test expects to be a terminal.
+ *
+ * `TabShape.panes` and `RestoreResult.panes` hold a mix once an editor pane
+ * can be split into a tab (Task 6) or survive a relaunch (Task 4), so their
+ * declared type cannot promise a session. Every call site below is on a pane
+ * this test itself opened through `CHANNELS.open`, which never produces an
+ * editor pane, so the session is always there in practice. Throwing here
+ * means a test that somehow gets an editor pane fails saying so, rather than
+ * passing `undefined` into tmux and failing somewhere unrecognisable.
+ */
+function sessionOf(pane: TabDescriptor): string {
+  if (pane.tmuxSession === undefined) {
+    throw new Error(`pane ${pane.id} has no tmux session; expected a terminal pane`)
+  }
+  return pane.tmuxSession
+}
+
 function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   const handler = ipc.handlers.get(channel)
   if (!handler) throw new Error(`no handler registered for ${channel}`)
@@ -785,7 +803,7 @@ describe('restartTab', () => {
     // alive and attached, and no exit event at all, which is a green pane on a
     // red assertion's behalf. The prompt is proof the attach has landed.
     await waitForPrompt(adopted.id)
-    const adoptedWindow = await adapter.windowIdOf(adopted.tmuxSession)
+    const adoptedWindow = await adapter.windowIdOf(sessionOf(adopted))
     expect(adoptedWindow).toMatch(/^@\d+$/)
 
     // The death hook's own two commands, in its order — see the sibling test
@@ -796,7 +814,7 @@ describe('restartTab', () => {
       'kill-session', '-t', `=${adopted.tmuxSession}`, ';', 'kill-window', '-t', adoptedWindow,
     ])
     await exitEvent
-    await expect(adapter.hasSession(adopted.tmuxSession)).resolves.toBe(false)
+    await expect(adapter.hasSession(sessionOf(adopted))).resolves.toBe(false)
 
     const restarted = await invoke<TerminalTabDescriptor>(CHANNELS.restartTab, { tab: adopted })
 
@@ -893,7 +911,7 @@ describe('a tab that re-founds', () => {
     await waitForPrompt(second.id)
 
     const adapter = new TmuxAdapter({ socket: SOCKET })
-    const secondWindow = await adapter.windowIdOf(second.tmuxSession)
+    const secondWindow = await adapter.windowIdOf(sessionOf(second))
     expect(secondWindow).toMatch(/^@\d+$/)
 
     // A session of tmux's own, so that killing both panes does not take the
@@ -932,7 +950,7 @@ describe('a tab that re-founds', () => {
     await founderExit
     await secondExit
     await expect(adapter.hasSession(founder.tmuxSession)).resolves.toBe(false)
-    await expect(adapter.hasSession(second.tmuxSession)).resolves.toBe(false)
+    await expect(adapter.hasSession(sessionOf(second))).resolves.toBe(false)
 
     // Waited for, not assumed: `forgetTab` runs off the exit event and takes
     // its own turn in the config queue, so a later read of the file would
@@ -1072,7 +1090,7 @@ describe('a tab that re-founds', () => {
     await waitForPrompt(second.id)
 
     const adapter = new TmuxAdapter({ socket: SOCKET })
-    const secondWindow = await adapter.windowIdOf(second.tmuxSession)
+    const secondWindow = await adapter.windowIdOf(sessionOf(second))
     expect(secondWindow).toMatch(/^@\d+$/)
     // Keeps the server up once both panes are gone; see `deadSplitTab`.
     await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-s', 'keeper'])
@@ -1090,7 +1108,7 @@ describe('a tab that re-founds', () => {
     await run('tmux', ['-L', SOCKET, 'kill-session', '-t', `=${second.tmuxSession}`])
     await exitEvent
     await expect(adapter.hasSession(founder.tmuxSession)).resolves.toBe(false)
-    await expect(adapter.hasSession(second.tmuxSession)).resolves.toBe(false)
+    await expect(adapter.hasSession(sessionOf(second))).resolves.toBe(false)
     await waitForSavedIds(store, [founder.id])
 
     // The precondition, asserted rather than assumed: a row for a tab with no
@@ -1194,9 +1212,9 @@ describe('splitPane and closePane', () => {
     // One group, read back from tmux for each pane and asserted non-empty
     // first: `display-message` exits 0 with empty stdout for a session it does
     // not have, so two failed lookups agree perfectly.
-    const group = await sessionGroup(founder.tmuxSession)
+    const group = await sessionGroup(sessionOf(founder))
     expect(group).not.toBe('')
-    expect(await sessionGroup(second.tmuxSession)).toBe(group)
+    expect(await sessionGroup(sessionOf(second))).toBe(group)
 
     // Each pane's OWN id, read out of each pane's own running PROCESS — which
     // is where the hook script reads it from, and a different object from the
@@ -1210,23 +1228,23 @@ describe('splitPane and closePane', () => {
     // for the other: `-e` on `new-window` reaches only the process, `-e` on
     // `new-session -t <group>` reaches only the table.
     await expect
-      .poll(() => sessionEnv(founder.tmuxSession, 'PRCLI_TAB_ID'), { timeout: 10_000 })
+      .poll(() => sessionEnv(sessionOf(founder), 'PRCLI_TAB_ID'), { timeout: 10_000 })
       .toBe(`PRCLI_TAB_ID=${founder.id}`)
     await expect
-      .poll(() => sessionEnv(second.tmuxSession, 'PRCLI_TAB_ID'), { timeout: 10_000 })
+      .poll(() => sessionEnv(sessionOf(second), 'PRCLI_TAB_ID'), { timeout: 10_000 })
       .toBe(`PRCLI_TAB_ID=${second.id}`)
 
     // A window each, bound before either client attached. A member that
     // attaches onto a sibling's window leaves two xterms rendering one pane.
     const adapter = new TmuxAdapter({ socket: SOCKET })
-    const founderWindow = await adapter.windowIdOf(founder.tmuxSession)
-    const secondWindow = await adapter.windowIdOf(second.tmuxSession)
+    const founderWindow = await adapter.windowIdOf(sessionOf(founder))
+    const secondWindow = await adapter.windowIdOf(sessionOf(second))
     expect(founderWindow).toMatch(/^@\d+$/)
     expect(secondWindow).toMatch(/^@\d+$/)
     expect(secondWindow).not.toBe(founderWindow)
     // The size the request carried, not the 80x24 `splitTab` would have
     // defaulted to had `splitPane` let an unmeasured request through.
-    await expect.poll(() => windowSize(second.tmuxSession), { timeout: 8000 }).toBe('100x30')
+    await expect.poll(() => windowSize(sessionOf(second)), { timeout: 8000 }).toBe('100x30')
 
     // The file, raw. Nothing before this task wrote a multi-pane tab row from a
     // user action at all, so every field here is new.
@@ -1357,19 +1375,19 @@ describe('splitPane and closePane', () => {
   it('closes one pane of two and leaves the sibling running in its own window', async () => {
     const { founder, second } = await splitOnce()
     const adapter = new TmuxAdapter({ socket: SOCKET })
-    const founderWindow = await adapter.windowIdOf(founder.tmuxSession)
+    const founderWindow = await adapter.windowIdOf(sessionOf(founder))
     expect(founderWindow).toMatch(/^@\d+$/)
 
     const shape = await invoke<TabShape>(CHANNELS.closePane, second.id)
     expect(shape.panes.map((pane) => pane.id)).toEqual([founder.id])
     expect(shape.tabs).toHaveLength(1)
 
-    await expect.poll(() => adapter.hasSession(second.tmuxSession), { timeout: 8000 }).toBe(false)
+    await expect.poll(() => adapter.hasSession(sessionOf(second)), { timeout: 8000 }).toBe(false)
     // The sibling's session AND the window its shell lives in. `manager.kill`
     // reaps the closed pane's window too, and a pane that reports its
     // sibling's would take the other shell down with it.
-    expect(await adapter.hasSession(founder.tmuxSession)).toBe(true)
-    expect(await adapter.windowIdOf(founder.tmuxSession)).toBe(founderWindow)
+    expect(await adapter.hasSession(sessionOf(founder))).toBe(true)
+    expect(await adapter.windowIdOf(sessionOf(founder))).toBe(founderWindow)
 
     // Raw, because this is the assertion `store.read()` would repair: it
     // rescales whatever ratio array it finds by that array's own total, so a
@@ -1413,7 +1431,7 @@ describe('splitPane and closePane', () => {
       await settle(200)
     }
     const adapter = new TmuxAdapter({ socket: SOCKET })
-    const secondWindow = await adapter.windowIdOf(second.tmuxSession)
+    const secondWindow = await adapter.windowIdOf(sessionOf(second))
     expect(secondWindow).toMatch(/^@\d+$/)
 
     // The death hook's own two commands, in its order — see the restartTab
@@ -1424,7 +1442,7 @@ describe('splitPane and closePane', () => {
       'kill-session', '-t', `=${second.tmuxSession}`, ';', 'kill-window', '-t', secondWindow,
     ])
     await exitEvent
-    await expect(adapter.hasSession(second.tmuxSession)).resolves.toBe(false)
+    await expect(adapter.hasSession(sessionOf(second))).resolves.toBe(false)
 
     const restarted = await invoke<TerminalTabDescriptor>(CHANNELS.restartTab, {
       tab: second,
@@ -1486,8 +1504,8 @@ describe('splitPane and closePane', () => {
 
     // The pane that had to survive really did, in tmux and not only in the
     // reply. Polled for the founder's death, asserted plainly for the sibling.
-    await expect.poll(() => adapter.hasSession(founder.tmuxSession), { timeout: 8000 }).toBe(false)
-    expect(await adapter.hasSession(second.tmuxSession)).toBe(true)
+    await expect.poll(() => adapter.hasSession(sessionOf(founder)), { timeout: 8000 }).toBe(false)
+    expect(await adapter.hasSession(sessionOf(second))).toBe(true)
 
     const after = await written()
     expect(after.panes.map((pane) => pane.id)).toEqual([second.id])
@@ -1566,8 +1584,8 @@ describe('splitPane and closePane', () => {
     expect(shape.panes).toEqual([])
     expect(shape.tabs).toEqual([])
 
-    await expect.poll(() => adapter.hasSession(founder.tmuxSession), { timeout: 8000 }).toBe(false)
-    expect(await adapter.hasSession(second.tmuxSession)).toBe(false)
+    await expect.poll(() => adapter.hasSession(sessionOf(founder)), { timeout: 8000 }).toBe(false)
+    expect(await adapter.hasSession(sessionOf(second))).toBe(false)
 
     const config = await written()
     expect(config.panes).toEqual([])
@@ -1612,7 +1630,7 @@ describe('splitPane and closePane', () => {
     await waitForPrompt(middle.id)
 
     const adapter = new TmuxAdapter({ socket: SOCKET })
-    const window = await adapter.windowIdOf(second.tmuxSession)
+    const window = await adapter.windowIdOf(sessionOf(second))
     expect(window).toMatch(/^@\d+$/)
     const exited = waitForExitEvent(second.id)
     await run('tmux', [
@@ -1730,7 +1748,7 @@ describe('splitPane and closePane', () => {
     // B dies and comes back the way `splitThenRestartSibling` above
     // establishes: running, back in `config.panes`, claimed by no row.
     const adapter = new TmuxAdapter({ socket: SOCKET })
-    const secondWindow = await adapter.windowIdOf(second.tmuxSession)
+    const secondWindow = await adapter.windowIdOf(sessionOf(second))
     expect(secondWindow).toMatch(/^@\d+$/)
     const exitEvent = waitForExitEvent(second.id)
     await run('tmux', [
@@ -1738,7 +1756,7 @@ describe('splitPane and closePane', () => {
       'kill-session', '-t', `=${second.tmuxSession}`, ';', 'kill-window', '-t', secondWindow,
     ])
     await exitEvent
-    await expect(adapter.hasSession(second.tmuxSession)).resolves.toBe(false)
+    await expect(adapter.hasSession(sessionOf(second))).resolves.toBe(false)
     const restarted = await invoke<TerminalTabDescriptor>(CHANNELS.restartTab, {
       tab: second, cols: 100, rows: 30,
     })
@@ -1887,7 +1905,7 @@ describe('splitPane and closePane', () => {
     // B dies for real and comes back — the death hook's own two commands, in
     // its order, the way every other death in this file is staged.
     const adapter = new TmuxAdapter({ socket: SOCKET })
-    const secondWindow = await adapter.windowIdOf(second.tmuxSession)
+    const secondWindow = await adapter.windowIdOf(sessionOf(second))
     expect(secondWindow).toMatch(/^@\d+$/)
     const exitEvent = waitForExitEvent(second.id)
     await run('tmux', [
@@ -1895,7 +1913,7 @@ describe('splitPane and closePane', () => {
       'kill-session', '-t', `=${second.tmuxSession}`, ';', 'kill-window', '-t', secondWindow,
     ])
     await exitEvent
-    await expect(adapter.hasSession(second.tmuxSession)).resolves.toBe(false)
+    await expect(adapter.hasSession(sessionOf(second))).resolves.toBe(false)
     const restarted = await invoke<TerminalTabDescriptor>(CHANNELS.restartTab, {
       tab: second, cols: 100, rows: 30,
     })
@@ -1969,7 +1987,7 @@ describe('splitPane and closePane', () => {
     const adapter = new TmuxAdapter({ socket: SOCKET })
     /** A real death, staged the way the death hook stages one. */
     const kill = async (pane: TabDescriptor): Promise<void> => {
-      const window = await adapter.windowIdOf(pane.tmuxSession)
+      const window = await adapter.windowIdOf(sessionOf(pane))
       expect(window).toMatch(/^@\d+$/)
       const exited = waitForExitEvent(pane.id)
       await run('tmux', [
@@ -1977,7 +1995,7 @@ describe('splitPane and closePane', () => {
         'kill-session', '-t', `=${pane.tmuxSession}`, ';', 'kill-window', '-t', window,
       ])
       await exited
-      await expect(adapter.hasSession(pane.tmuxSession)).resolves.toBe(false)
+      await expect(adapter.hasSession(sessionOf(pane))).resolves.toBe(false)
     }
 
     await kill(second) // B, at a true 0.2
@@ -2065,7 +2083,7 @@ describe('splitPane and closePane', () => {
     const adapter = new TmuxAdapter({ socket: SOCKET })
     // The same two-command death every other test in this file stages.
     const kill = async (pane: TabDescriptor): Promise<void> => {
-      const window = await adapter.windowIdOf(pane.tmuxSession)
+      const window = await adapter.windowIdOf(sessionOf(pane))
       expect(window).toMatch(/^@\d+$/)
       const exited = waitForExitEvent(pane.id)
       await run('tmux', [
@@ -2073,7 +2091,7 @@ describe('splitPane and closePane', () => {
         'kill-session', '-t', `=${pane.tmuxSession}`, ';', 'kill-window', '-t', window,
       ])
       await exited
-      await expect(adapter.hasSession(pane.tmuxSession)).resolves.toBe(false)
+      await expect(adapter.hasSession(sessionOf(pane))).resolves.toBe(false)
     }
 
     // C dies and stays dead — the tombstone the drag below has to widen.
@@ -2151,7 +2169,7 @@ describe('splitPane and closePane', () => {
     const adapter = new TmuxAdapter({ socket: SOCKET })
     // The same two-command death every other test in this file stages.
     const kill = async (pane: TabDescriptor): Promise<void> => {
-      const window = await adapter.windowIdOf(pane.tmuxSession)
+      const window = await adapter.windowIdOf(sessionOf(pane))
       expect(window).toMatch(/^@\d+$/)
       const exited = waitForExitEvent(pane.id)
       await run('tmux', [
@@ -2159,7 +2177,7 @@ describe('splitPane and closePane', () => {
         'kill-session', '-t', `=${pane.tmuxSession}`, ';', 'kill-window', '-t', window,
       ])
       await exited
-      await expect(adapter.hasSession(pane.tmuxSession)).resolves.toBe(false)
+      await expect(adapter.hasSession(sessionOf(pane))).resolves.toBe(false)
     }
 
     // C dies first and stays dead — the tombstone the dismiss below has to
@@ -2364,7 +2382,7 @@ describe('project channels', () => {
     expect(moved.panes[0].id).toBe(tab.id)
     expect(moved.panes[0].tmuxSession).toBe(`prcli-lumio-${tab.id}`)
     const adapter = new TmuxAdapter({ socket: SOCKET })
-    await expect(adapter.hasSession(moved.panes[0].tmuxSession)).resolves.toBe(true)
+    await expect(adapter.hasSession(sessionOf(moved.panes[0]))).resolves.toBe(true)
     await expect(adapter.hasSession(before)).resolves.toBe(false)
     // Nothing is stray any more, so there is nothing for Unsorted to hold.
     expect(moved.projects.map((p) => p.id)).toEqual([project.id])

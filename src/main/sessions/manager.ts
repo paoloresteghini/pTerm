@@ -16,7 +16,11 @@ export interface PaneRecord {
   projectSlug: string
   cwd: string
   command?: string
-  tmuxSession: string
+  /**
+   * Absent on an editor pane, which has no tmux session at all. Present on
+   * every terminal pane, which is what `isPane` still enforces per kind.
+   */
+  tmuxSession?: string
   type: TabType
   /**
    * What the user called this pane, absent until they name one.
@@ -36,6 +40,14 @@ export interface PaneRecord {
    * been literal.
    */
   color?: PaneColor
+  /**
+   * The file an editor pane is showing, absolute. Absent on every terminal
+   * pane, and absent on an editor pane whose file could not be read.
+   *
+   * Display data only, same as `title` and `color`: nothing in this file
+   * reads it, since this file deals in tmux and an editor pane has none.
+   */
+  filePath?: string
 }
 
 /**

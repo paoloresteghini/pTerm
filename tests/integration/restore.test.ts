@@ -13,7 +13,7 @@ import {
   type TabRow,
 } from '../../src/main/state/store'
 import { restoreWorkspace } from '../../src/main/ipc/restore'
-import { UNSORTED_ID } from '../../src/shared/ipc'
+import { UNSORTED_ID, type TabDescriptor } from '../../src/shared/ipc'
 
 const run = promisify(execFile)
 const SOCKET = 'prcli-test'
@@ -66,6 +66,24 @@ function tab(id: string, slug = 'lumio') {
     cwd: tmpdir(),
     tmuxSession: `prcli-${slug}-${id}`,
   }
+}
+
+/**
+ * The session of a pane this test expects to be a terminal.
+ *
+ * `RestoreResult.panes` (what `restoreWorkspace` hands back) holds a mix once
+ * an editor pane can survive a relaunch (Task 4), so its declared type cannot
+ * promise a session. Every call site below is on a pane this test itself
+ * opened or split through `SessionManager` directly, which never produces an
+ * editor pane, so the session is always there in practice. Throwing here
+ * means a test that somehow gets an editor pane fails saying so, rather than
+ * passing `undefined` into tmux and failing somewhere unrecognisable.
+ */
+function sessionOf(pane: TabDescriptor): string {
+  if (pane.tmuxSession === undefined) {
+    throw new Error(`pane ${pane.id} has no tmux session; expected a terminal pane`)
+  }
+  return pane.tmuxSession
 }
 
 /** A v5 file, written as the app writes one: flat panes plus tab rows. */
@@ -611,7 +629,7 @@ describe('restoreWorkspace panes and tabs', () => {
     // No two live members of this tab may report the same window: one window
     // rendered by two xterms is the failure a fallen-back member causes.
     expect(result.panes.length).toBeGreaterThan(1)
-    const windows = await Promise.all(result.panes.map((pane) => windowIdOf(pane.tmuxSession)))
+    const windows = await Promise.all(result.panes.map((pane) => windowIdOf(sessionOf(pane))))
     expect(new Set(windows).size).toBe(windows.length)
     manager.detachAll()
   })

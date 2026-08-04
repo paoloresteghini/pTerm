@@ -462,7 +462,7 @@ export async function restoreWorkspace(
     const restored = attachSavedFields(panes, saved.panes)
 
     await store.write({
-      version: 7,
+      version: 8,
       // Only real projects are persisted; the Unsorted row is synthetic.
       // Matched by id rather than by index: `describeProjects` returns one row
       // per project today, but adding a `filter` or a `continue` to it would

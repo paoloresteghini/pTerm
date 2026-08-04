@@ -76,9 +76,10 @@ export type MenuCommand =
  * A declaration of intent, not a gate on status: it decides the launch command
  * and whether an expecting-hooks dot is drawn before any event has arrived.
  * Every tab carries PRCLI_TAB_ID regardless, so a `claude` typed by hand into
- * a shell tab gets full status the moment its first hook lands.
+ * a shell tab gets full status the moment its first hook lands. `editor` is
+ * the exception: it has no launch command at all.
  */
-export type TabType = 'claude' | 'preset' | 'shell'
+export type TabType = 'claude' | 'preset' | 'shell' | 'editor'
 
 /** A notification rule, exactly as it is stored. */
 export interface Rule {
@@ -132,7 +133,11 @@ export interface TabDescriptor {
   projectSlug: string
   cwd: string
   command?: string
-  tmuxSession: string
+  /**
+   * Absent on an editor pane, which has no tmux session at all. Present on
+   * every terminal pane, which is what `isPane` still enforces per kind.
+   */
+  tmuxSession?: string
   type: TabType
   /** What the user called this tab. Absent until they name one. */
   title?: string
@@ -141,6 +146,14 @@ export interface TabDescriptor {
    * which is what every pane was before this field existed.
    */
   color?: PaneColor
+  /**
+   * The file an editor pane is showing, absolute. Absent on every terminal
+   * pane, and absent on an editor pane whose file could not be read.
+   *
+   * Absolute here and relative across `fsRead`: this is written by main and
+   * read back by main, and never spelled by the renderer.
+   */
+  filePath?: string
 }
 
 export interface TabLayout {
