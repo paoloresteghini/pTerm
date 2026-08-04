@@ -38,6 +38,8 @@ export const CHANNELS = {
   menuCommand: 'prcli:menuCommand',
   setLayout: 'prcli:setLayout',
   skills: 'prcli:skills',
+  notesRead: 'prcli:notesRead',
+  notesWrite: 'prcli:notesWrite',
 } as const
 
 /**
@@ -509,6 +511,14 @@ export interface PrcliApi {
    * both call this on open, and a skill written a minute ago should be there.
    */
   skills(projectCwd: string): Promise<SkillEntry[]>
+  /** The project's note text, `''` when none has been written. */
+  notesRead(projectId: string): Promise<string>
+  /**
+   * Overwrite the project's note. Atomic on disk; the renderer treats it as
+   * fire-and-forget and swallows a rejection, since the text is still on
+   * screen and this panel is not where transport faults get reported.
+   */
+  notesWrite(projectId: string, text: string): Promise<void>
   /**
    * Persist a tab's ratios after a drag. Fire-and-forget: the renderer already
    * has the layout on screen, and a failed write costs a ratio, not a session.

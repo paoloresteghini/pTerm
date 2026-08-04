@@ -40,6 +40,7 @@ import { scanCandidates } from '../projects/discovery'
 import { hookPaths, installHooks, readHooksState, uninstallHooks } from '../hooks/install'
 import { drainSpool } from '../hooks/spool'
 import { listSkills } from '../skills/scan'
+import { readNote, writeNote } from '../notes/store'
 import {
   addProject,
   projectForSlug,
@@ -1303,4 +1304,12 @@ export function registerIpc(
   // through that queue would add a deadlock risk for a panel the user is
   // looking straight at, and buy nothing.
   ipcMain.handle(CHANNELS.skills, (_event, projectCwd: string) => listSkills(projectCwd))
+
+  // Like `skills` above, deliberately not inside `serialise`: notes live in
+  // their own files beside config.json, never inside it, so there is nothing
+  // to serialise against and no deadlock risk to buy.
+  ipcMain.handle(CHANNELS.notesRead, (_event, projectId: string) => readNote(projectId))
+  ipcMain.handle(CHANNELS.notesWrite, (_event, projectId: string, text: string) =>
+    writeNote(projectId, text),
+  )
 }

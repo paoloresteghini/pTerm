@@ -66,6 +66,8 @@ const api: PrcliApi = {
   uninstallHooks: () => ipcRenderer.invoke(CHANNELS.uninstallHooks),
   setLayout: (tabId, shares) => ipcRenderer.send(CHANNELS.setLayout, tabId, shares),
   skills: (projectCwd) => ipcRenderer.invoke(CHANNELS.skills, projectCwd),
+  notesRead: (projectId) => ipcRenderer.invoke(CHANNELS.notesRead, projectId),
+  notesWrite: (projectId, text) => ipcRenderer.invoke(CHANNELS.notesWrite, projectId, text),
 }
 
 contextBridge.exposeInMainWorld('prcli', api)
