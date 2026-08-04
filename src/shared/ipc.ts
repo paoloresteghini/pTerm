@@ -41,6 +41,7 @@ export const CHANNELS = {
   notesRead: 'prcli:notesRead',
   notesWrite: 'prcli:notesWrite',
   fsList: 'prcli:fsList',
+  fsRead: 'prcli:fsRead',
 } as const
 
 /**
@@ -126,6 +127,17 @@ export interface HooksState {
 export interface FileEntry {
   name: string
   dir: boolean
+}
+
+/**
+ * One file's text and the mtime it was read at.
+ *
+ * Declared here rather than only in `src/main/files/tree.ts` for the reason
+ * `FileEntry` gives: the renderer draws this.
+ */
+export interface FileContents {
+  text: string
+  mtimeMs: number
 }
 
 export interface TabDescriptor {
@@ -571,4 +583,13 @@ export interface PrcliApi {
    * empty list rather than rejecting.
    */
   fsList(projectId: string, relPath: string): Promise<FileEntry[]>
+  /**
+   * One file of one project, or null if it cannot be read.
+   *
+   * `relPath` is relative to the project's own `cwd` and is resolved against
+   * it in main: no absolute path crosses this boundary. A path that would
+   * leave the project, a directory, and a missing file all resolve to null
+   * rather than rejecting.
+   */
+  fsRead(projectId: string, relPath: string): Promise<FileContents | null>
 }

@@ -12,12 +12,20 @@
 // outside" and "returns empty list when a nested symlink points outside".
 //
 // Both guards are load-bearing. Tests observed on 2026-08-04.
+//
+// Mutation 3: readFileInside's realpath containment check.
+// Changed: if (!isInside(realRoot, realTarget)) return null   to:   if (false) return null
+// Observed: 1 test fails, "refuses to read through a symlink pointing
+// outside". The tests "refuses to read outside the root" (both the ../..
+// and the absolute-path case) pass unchanged, because resolveInside's own
+// checks catch those before this guard is ever reached; only the symlink
+// case depends on this half. Tests observed on 2026-08-04.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { resolveInside, listDir } from '../../src/main/files/tree'
+import { resolveInside, listDir, readFileInside } from '../../src/main/files/tree'
 
 let root: string
 let outside: string
@@ -35,6 +43,7 @@ beforeAll(async () => {
   await writeFile(join(root, 'README.md'), '#')
   await writeFile(join(root, '.env'), 'KEY=1')
   await writeFile(join(root, 'app.ts'), '')
+  await writeFile(join(root, 'src', 'nested.ts'), 'const x = 1\n')
   await symlink(outside, join(root, 'escape'))
   await symlink(outside, join(root, 'dirA', 'link'))
 })
@@ -169,5 +178,44 @@ describe('listDir', () => {
     const withSlash = await listDir(root + '/', '')
     expect(withSlash.length).toBeGreaterThan(0)
     expect(withSlash).toEqual(await listDir(root, ''))
+  })
+})
+
+describe('readFileInside', () => {
+  it('reads a file under the root', async () => {
+    const found = await readFileInside(root, 'app.ts')
+    expect(found?.text).toBe('')
+    expect(typeof found?.mtimeMs).toBe('number')
+  })
+
+  it('reads a file in a subdirectory', async () => {
+    const found = await readFileInside(root, 'src/nested.ts')
+    expect(found?.text).toBe('const x = 1\n')
+  })
+
+  // The same boundary `listDir` has, reached through the other entry point.
+  // A guard on one channel and not the other is not a guard.
+  it('refuses to read outside the root', async () => {
+    await expect(readFileInside(root, '../../etc/hosts')).resolves.toBeNull()
+    await expect(readFileInside(root, '/etc/hosts')).resolves.toBeNull()
+  })
+
+  // The half `..` cannot express, which the listing side already covers.
+  it('refuses to read through a symlink pointing outside', async () => {
+    await expect(readFileInside(root, 'escape/secret.txt')).resolves.toBeNull()
+  })
+
+  it('resolves a missing file to null rather than throwing', async () => {
+    await expect(readFileInside(root, 'nope.ts')).resolves.toBeNull()
+  })
+
+  // A directory is not a file. Reading one must not throw out of a channel
+  // whose caller is a React render.
+  it('resolves a directory to null rather than throwing', async () => {
+    await expect(readFileInside(root, 'src')).resolves.toBeNull()
+  })
+
+  it('refuses a relPath that is not a string', async () => {
+    await expect(readFileInside(root, 42 as unknown as string)).resolves.toBeNull()
   })
 })

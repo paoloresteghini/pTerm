@@ -41,7 +41,7 @@ import { hookPaths, installHooks, readHooksState, uninstallHooks } from '../hook
 import { drainSpool } from '../hooks/spool'
 import { listSkills } from '../skills/scan'
 import { readNote, writeNote } from '../notes/store'
-import { listDir } from '../files/tree'
+import { listDir, readFileInside } from '../files/tree'
 import {
   addProject,
   projectForSlug,
@@ -1332,5 +1332,15 @@ export function registerIpc(
     const project = config.projects.find((row) => row.id === projectId)
     if (!project) return []
     return listDir(project.cwd, relPath)
+  })
+
+  // Beside `fsList` and for the same reasons: outside `serialise` because it
+  // reads the filesystem and writes no config, and keyed by project id rather
+  // than by a renderer-supplied path.
+  ipcMain.handle(CHANNELS.fsRead, async (_event, projectId: string, relPath: string) => {
+    const config = await store.read()
+    const project = config.projects.find((row) => row.id === projectId)
+    if (!project) return null
+    return readFileInside(project.cwd, relPath)
   })
 }

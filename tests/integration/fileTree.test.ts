@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { listDir } from '../../src/main/files/tree'
+import { listDir, readFileInside } from '../../src/main/files/tree'
 
 /**
  * The handler's own logic, exercised without Electron: resolve a project id
@@ -50,5 +50,30 @@ describe('the fsList handler', () => {
   // actually called.
   it('will not list outside the project it names', async () => {
     await expect(handle([{ id: 'p1', cwd: root }], 'p1', '../..')).resolves.toEqual([])
+  })
+})
+
+async function handleRead(
+  projects: { id: string; cwd: string }[],
+  projectId: string,
+  relPath: string,
+): Promise<{ text: string; mtimeMs: number } | null> {
+  const project = projects.find((row) => row.id === projectId)
+  if (!project) return null
+  return readFileInside(project.cwd, relPath)
+}
+
+describe('the fsRead handler', () => {
+  it('reads a file from the named project', async () => {
+    const found = await handleRead([{ id: 'p1', cwd: root }], 'p1', 'README.md')
+    expect(found?.text).toBe('#')
+  })
+
+  it('resolves an unknown project to null rather than throwing', async () => {
+    await expect(handleRead([{ id: 'p1', cwd: root }], 'nope', 'README.md')).resolves.toBeNull()
+  })
+
+  it('will not read outside the project it names', async () => {
+    await expect(handleRead([{ id: 'p1', cwd: root }], 'p1', '../../etc/hosts')).resolves.toBeNull()
   })
 })
