@@ -78,6 +78,12 @@ export function FileTree({ projectId }: { projectId: string | undefined }) {
     if (next.has(relPath) && loaded[relPath] === undefined) load(projectId, relPath)
   }
 
+  const reload = (): void => {
+    if (!projectId) return
+    load(projectId, '')
+    for (const path of expanded) load(projectId, path)
+  }
+
   if (!projectId) return null
 
   /** One directory's rows, then each expanded child's, depth first. */
@@ -107,6 +113,14 @@ export function FileTree({ projectId }: { projectId: string | undefined }) {
     <>
       <div className="flex items-center justify-between px-2.5 pb-1 pt-3 text-[10px] uppercase tracking-wider text-faint">
         <span>Files</span>
+        <button
+          data-testid="tree-refresh"
+          aria-label="Refresh files"
+          onClick={reload}
+          className="cursor-default border-none bg-transparent p-0 text-[11px] leading-none text-faint hover:text-fg"
+        >
+          ↻
+        </button>
       </div>
       <div
         data-testid="tree-scroll"

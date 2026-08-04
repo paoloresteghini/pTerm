@@ -30,6 +30,23 @@
  * `tree-row-src/early-arrival.ts`'s `toBeVisible()`, with the other 4 tests
  * passing. The mutation was reverted after each measurement; `git diff
  * src/renderer/FileTree.tsx` was empty before continuing both times.
+ *
+ * **Mutation measured 2026-08-04, round 3**: deleting `reload`'s loop over
+ * `expanded`, leaving only its root `load`, so a refresh re-reads the root
+ * but never an already-open folder. Against `refresh re-reads the root and
+ * every open folder` as first written, without priming `src` before the
+ * writes below, this PASSED at 7/7 despite the mutation: `switching
+ * projects...`, above, is the last thing before this test to change
+ * `projectId`, and `FileTree.tsx`'s launch effect calls `setLoaded({})` on
+ * every such change, clearing `src`'s cache; nothing after that switch
+ * re-expands it, so this test's own first click on `src` was its first
+ * expand since the reset, a live fetch landing after both writes regardless
+ * of `reload`. Priming `src` (expand it, collapse it) before either write,
+ * as the test now does, closed that gap: run as the whole file, the mutation
+ * FAILED at `tree-row-src/zzz-nested.ts`'s `toBeVisible()` and NOT at
+ * `tree-row-zzz-new.md`, which passed, with the other 6 tests passing. The
+ * mutation was reverted after measuring; `git diff src/renderer/FileTree.tsx`
+ * was empty before continuing.
  */
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
@@ -187,4 +204,42 @@ test('a file is not expandable', async () => {
   // Nothing opened under it, and nothing else changed: still the four
   // top-level rows from the first test.
   await expect(page.locator('[data-testid^="tree-row-"]')).toHaveCount(4)
+})
+
+test('refresh re-reads the root and every open folder', async () => {
+  // Primed and closed before either file is written, so `src`'s directory
+  // listing is already cached by the time the write below happens. Without
+  // this, `switching projects...` above is the last thing to change
+  // `projectId`, and that effect's `setLoaded({})` clears the cache on every
+  // switch; nothing after it re-expands `src`, so the click further down
+  // would be `src`'s FIRST expand since that reset and would fetch live,
+  // already after the write, passing this test even with `reload`'s loop
+  // over `expanded` deleted. Measured 2026-08-04, see this file's header.
+  await page.getByTestId('tree-row-src').click()
+  await expect(page.getByTestId('tree-row-src/app.ts')).toBeVisible()
+  await page.getByTestId('tree-row-src').click()
+  await expect(page.getByTestId('tree-row-src/app.ts')).toHaveCount(0)
+
+  // Written to disk behind the app's back, which is the case refresh exists
+  // for: another session, or a Claude pane, changing the tree under it.
+  await writeFile(join(projectCwd, 'zzz-new.md'), '#')
+  await writeFile(join(projectCwd, 'src', 'zzz-nested.ts'), '')
+
+  await page.getByTestId('tree-row-src').click()
+  await expect(page.getByTestId('tree-row-src/app.ts')).toBeVisible()
+
+  // Not there yet: the tree has no watcher, and this asserts that as much as
+  // it asserts the refresh. Without it, a refresh button wired to nothing
+  // would pass the rest of this test on a tree that happened to re-render.
+  await expect(page.getByTestId('tree-row-zzz-new.md')).toHaveCount(0)
+  // Nor the nested file: `src` was primed and closed above, before the
+  // write, so this expand is reading the stale cache, not a fresh fetch.
+  await expect(page.getByTestId('tree-row-src/zzz-nested.ts')).toHaveCount(0)
+
+  await page.getByTestId('tree-refresh').click()
+
+  await expect(page.getByTestId('tree-row-zzz-new.md')).toBeVisible()
+  // The open folder too, not just the root. A refresh that re-read only the
+  // root would satisfy the line above.
+  await expect(page.getByTestId('tree-row-src/zzz-nested.ts')).toBeVisible()
 })
