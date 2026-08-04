@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { FileEntry } from '../shared/ipc'
 import { readExpanded, writeExpanded, toggled } from './lib/treeState'
 import { cn } from './lib/cn'
@@ -15,18 +15,37 @@ import { cn } from './lib/cn'
  * No `fs.watch`. A recursive watcher over several repos costs descriptors and
  * wakeups continuously for a tree that is idle most of the time, and macOS
  * drops events past a limit without saying so, which is a worse failure than a
- * stale tree the user can see is stale. `onReload` is the refresh button.
+ * stale tree the user can see is stale. Reloading it is a deliberate click,
+ * not a prop this component takes.
  */
 export function FileTree({ projectId }: { projectId: string | undefined }) {
   // Relative path to that directory's entries. '' is the project root.
   const [loaded, setLoaded] = useState<Record<string, FileEntry[]>>({})
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
+  // The project this component is showing right now, read fresh from inside
+  // `load`'s resolved callback rather than closed over. `load` is called with
+  // the project it was READ FOR, which is fixed the moment the call goes out
+  // and says nothing about what is on screen by the time the reply lands.
+  // Written at the top of the effect below, before that effect fires any
+  // reads for the project it is switching to, so a read started for the OLD
+  // project is already stale by the read count that matters: this ref, not
+  // the `id` the read carries.
+  const activeProject = useRef(projectId)
+
   const load = useCallback(
     (id: string, relPath: string) => {
       window.prcli
         .fsList(id, relPath)
-        .then((entries) => setLoaded((was) => ({ ...was, [relPath]: entries })))
+        .then((entries) => {
+          // The project switched while this was in flight. Five clients
+          // means switching mid-read is ordinary use, not a corner case, and
+          // writing a stale project's file names into the one on screen now
+          // would be silent: nothing else about the sidebar says which
+          // project the row you are looking at actually came from.
+          if (activeProject.current !== id) return
+          setLoaded((was) => ({ ...was, [relPath]: entries }))
+        })
         // Swallowed like the skills fetch: a directory that will not read is a
         // row that does not open, and this panel is not where transport faults
         // get reported.
@@ -36,6 +55,7 @@ export function FileTree({ projectId }: { projectId: string | undefined }) {
   )
 
   useEffect(() => {
+    activeProject.current = projectId
     if (!projectId) {
       setLoaded({})
       setExpanded(new Set())
