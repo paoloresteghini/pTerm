@@ -28,3 +28,39 @@ describe('tabLabel', () => {
     expect(tabLabel({ ...tab('a'.repeat(16), 'lumio'), title: '' })).toBe('lumio · aaaaaa')
   })
 })
+
+const editor = (over: Partial<TabDescriptor> = {}): TabDescriptor =>
+  ({
+    id: 'abcdef123456',
+    projectSlug: 'demo',
+    cwd: '/tmp/demo',
+    type: 'editor',
+    filePath: '/tmp/demo/src/main.ts',
+    ...over,
+  }) as TabDescriptor
+
+describe('tabLabel, for an editor pane', () => {
+  it('names it for the file, not the slug and id', () => {
+    expect(tabLabel(editor())).toBe('main.ts')
+  })
+
+  // A user-set title still wins, exactly as it does for a terminal. This is
+  // the reason the editor case goes through this function rather than being
+  // special-cased at each of the four call sites.
+  it('still prefers a title the user set', () => {
+    expect(tabLabel(editor({ title: 'the parser' }))).toBe('the parser')
+  })
+
+  // An editor pane whose file could not be read has no filePath (Task 1
+  // drops a malformed one). It must not render as an empty tab.
+  it('falls back to the slug and id when there is no file', () => {
+    expect(tabLabel(editor({ filePath: undefined }))).toBe('demo · abcdef')
+  })
+
+  // A path ending in a separator has no basename. Whatever it does, it must
+  // not be blank, because a nameless tab cannot be clicked with confidence.
+  it('never returns an empty string', () => {
+    expect(tabLabel(editor({ filePath: '/tmp/demo/' }))).not.toBe('')
+    expect(tabLabel(editor({ filePath: '/' }))).not.toBe('')
+  })
+})
