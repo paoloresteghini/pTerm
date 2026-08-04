@@ -1,7 +1,17 @@
-// Mutation check (Step 5): When the realpath containment check in listDir is
-// removed (if (!isInside(realRoot, realTarget)) return []), 2 tests fail:
-// "returns empty list when a top-level symlink points outside" and
-// "returns empty list when a nested symlink points outside". Observed on 2026-08-04.
+// Mutation check results (Step 5):
+//
+// Mutation 1: resolveInside's containment check.
+// Changed: return isInside(root, target) ? target : null   to:   return target
+// Observed: 2 tests fail, "refuses to climb out with .." and
+// "refuses a sibling whose name extends the root". The test "refuses an
+// absolute path" passes because isAbsolute is an independent check earlier.
+//
+// Mutation 2: listDir's realpath containment check.
+// Changed: if (!isInside(realRoot, realTarget)) return []   to:   commented out
+// Observed: 2 tests fail, "returns empty list when a top-level symlink points
+// outside" and "returns empty list when a nested symlink points outside".
+//
+// Both guards are load-bearing. Tests observed on 2026-08-04.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises'
