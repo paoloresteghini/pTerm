@@ -93,7 +93,7 @@ export function TabBar({
             <StatusDot state={status[tab.id] ?? null} testid={`dot-${tab.id}`} />
             {renamingId === tab.id ? (
               <input
-                data-testid={`tab-rename-input-${tab.id}`}
+                data-testid={`tabinput-${tab.id}`}
                 // `App.tsx`'s ⌘ handler returns early inside this, and the
                 // comment there records why: ⌘W typed while renaming used to
                 // close the tab and kill its session, taking the half-typed
@@ -116,7 +116,10 @@ export function TabBar({
               />
             ) : (
               <span
-                data-testid={`tab-label-${tab.id}`}
+                // Not `tab-label-`: the e2e suite counts tabs with a
+                // `data-testid^="tab-"` prefix match, so a second element per
+                // tab under that prefix would inflate every count it takes.
+                data-testid={`tablabel-${tab.id}`}
                 onDoubleClick={(event) => {
                   event.stopPropagation()
                   startRename(tab)
