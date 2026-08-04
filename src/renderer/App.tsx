@@ -33,6 +33,8 @@ import {
   type PaneDirection,
 } from './workspace'
 import { projectMuted, toggleProjectMute } from './mute'
+import { PANE_COLOR_DEFAULT, type PaneColor } from '../shared/paneColors'
+import { ColorSwatches } from './ColorSwatches'
 import { UNSORTED_ID, type NotificationConfig, type TabDescriptor, type TabType } from '../shared/ipc'
 import { SEVERITY } from '../shared/status'
 
@@ -472,7 +474,30 @@ export function App() {
     (id: string, title: string) => {
       window.prcli
         .renameTab(id, title)
-        .then((panes) => dispatch({ type: 'renamedTab', panes }))
+        .then((panes) => dispatch({ type: 'panesMerged', panes }))
+        .catch(fail)
+    },
+    [fail],
+  )
+
+  // The open pane menu, with the viewport coordinates it is drawn at. Same
+  // shape and same reasons as `TabBar`'s: see the long note there for why
+  // these are coordinates and a `fixed` box rather than an absolutely
+  // positioned child.
+  const [paneMenu, setPaneMenu] = useState<{ id: string; left: number; top: number } | null>(null)
+
+  useEffect(() => {
+    if (paneMenu === null) return
+    const close = (): void => setPaneMenu(null)
+    document.addEventListener('click', close)
+    return () => document.removeEventListener('click', close)
+  }, [paneMenu])
+
+  const recolorPane = useCallback(
+    (id: string, color: PaneColor | null) => {
+      window.prcli
+        .setPaneColor(id, color)
+        .then((panes) => dispatch({ type: 'panesMerged', panes }))
         .catch(fail)
     },
     [fail],
@@ -724,6 +749,7 @@ export function App() {
             onDismiss={dismissTab}
             onNew={openTab}
             onRename={renameTab}
+            onRecolor={recolorPane}
             canOpen={canOpen}
           />
           {error ? (
@@ -784,20 +810,29 @@ export function App() {
                     // textarea — and so a drag that starts a selection inside a
                     // pane counts as choosing it too.
                     onMouseDown={() => selectPane(box.pane.id)}
+                    // Right-click opens the colour menu. Nothing else in the
+                    // app listened for `contextmenu` on a pane, and xterm does
+                    // not take it either, so this claims a gesture that did
+                    // nothing rather than displacing one.
+                    onContextMenu={(event) => {
+                      event.preventDefault()
+                      selectPane(box.pane.id)
+                      setPaneMenu({ id: box.pane.id, left: event.clientX, top: event.clientY })
+                    }}
                     className={cn(
                       // `relative`: the dead-pane chrome below positions itself
                       // against this box, and an overlay that escaped to the
                       // group container would land on whichever pane happened to
                       // be at that corner.
                       //
-                      // `bg-bg`: this is what confines the container's seam
-                      // colour to the gaps. It is the colour that was showing
-                      // here anyway — the app root is `bg-bg` and xterm's canvas
-                      // repeats the same value — so it changes nothing on screen
-                      // except by covering what is now painted underneath. The
-                      // sub-cell remainder xterm's fit leaves at a pane's edge
-                      // reads the same as it did before.
-                      'relative bg-bg',
+                      // The background confines the container's seam colour to
+                      // the gaps, and it is the PANE'S colour rather than a
+                      // fixed `bg-bg` (see `style` below, which sets it). Both
+                      // halves matter: xterm's fit leaves a sub-cell remainder
+                      // at each edge, so a pane whose canvas is tinted and
+                      // whose box is not wears a strip of the old background
+                      // down one side and along the bottom.
+                      'relative',
                       // `min-w-0 min-h-0`: a flex item's automatic minimum size
                       // is its content's, not zero, so an xterm canvas still
                       // sized for the whole tab could hold this box open past its
@@ -813,10 +848,11 @@ export function App() {
                         box.pane.id === activePaneId &&
                         'shadow-[inset_0_0_0_1px_var(--color-accent)]',
                     )}
-                    style={box.style}
+                    style={{ ...box.style, background: box.pane.color ?? PANE_COLOR_DEFAULT }}
                   >
                     <Terminal
                       tabId={box.pane.id}
+                      color={box.pane.color ?? PANE_COLOR_DEFAULT}
                       visible={group.visible}
                       // Never for a tab that is off screen: taking focus into one
                       // would move typing to a terminal the user cannot see.
@@ -897,6 +933,35 @@ export function App() {
             ))}
           </div>
         </div>
+
+        {/* The pane's colour menu, rendered here rather than inside the pane
+            box it belongs to. A hidden tab's container is `invisible`, and
+            `visibility: hidden` inherits, so a menu that lived in a pane would
+            be undrawable the moment its tab went to the background. It only
+            ever opens on a visible pane today, which makes that theoretical,
+            but the cost of being wrong is a menu nobody can see or click and
+            the cost of avoiding it is where the element sits. */}
+        {paneMenu !== null ? (
+          <div
+            data-testid={`pmenu-${paneMenu.id}`}
+            // Without this a click on the menu's own padding closes it through
+            // the document listener before reaching a swatch.
+            onClick={(event) => event.stopPropagation()}
+            style={{ left: paneMenu.left, top: paneMenu.top }}
+            className="fixed z-30 flex flex-col border border-border bg-bg py-0.5 text-[11px]"
+          >
+            <ColorSwatches
+              paneId={paneMenu.id}
+              selected={
+                state.panes.find((pane) => pane.id === paneMenu.id)?.color ?? PANE_COLOR_DEFAULT
+              }
+              onPick={(color) => {
+                setPaneMenu(null)
+                recolorPane(paneMenu.id, color)
+              }}
+            />
+          </div>
+        ) : null}
 
         {panelOpen ? (
           <RightPanel

@@ -34,7 +34,7 @@ import {
   rescaledClaims,
   type Claim,
 } from './shares'
-import { attachTitles } from './titles'
+import { attachSavedFields } from './savedFields'
 import { isDirectory } from '../fsutil'
 import { scanCandidates } from '../projects/discovery'
 import { hookPaths, installHooks, readHooksState, uninstallHooks } from '../hooks/install'
@@ -47,6 +47,7 @@ import {
   reorderProjects,
   updateProject,
 } from '../projects/projects'
+import { isPaneColor, PANE_COLOR_DEFAULT, type PaneColor } from '../../shared/paneColors'
 
 /**
  * The new pane's ratio, carved out of the pane it split from.
@@ -858,7 +859,7 @@ export function registerIpc(
       // that gets written, rather than onto the reply alone: these records
       // REPLACE the saved rows below, so patching only the reply would show
       // the name until the next restore and then lose it for good.
-      const merged = attachTitles(moved, config.panes)
+      const merged = attachSavedFields(moved, config.panes)
       const byId = new Map<string, PaneRecord>(merged.map((pane) => [pane.id, pane]))
       const listed = new Set(config.panes.map((row) => row.id))
       const panes = [
@@ -886,10 +887,34 @@ export function registerIpc(
       await store.write({ ...config, panes })
       // The saved rows, not `manager.list()`: `panes` is the state that was
       // just persisted, rather than a second, separate derivation of it, and
-      // it already carries the title just written, so no `attachTitles` call
+      // it already carries the title just written, so no `attachSavedFields` call
       // is needed on this path. (What keeps a dead tab's entry on the bar
-      // through a rename is the `renamedTab` reducer's own merge by id, not
+      // through a rename is the `panesMerged` reducer's own merge by id, not
       // a property of this reply.)
+      return panes
+    }),
+  )
+
+  ipcMain.handle(CHANNELS.setPaneColor, (_event, id: string, color: PaneColor | null) =>
+    serialise(async () => {
+      const config = await store.read()
+      const panes = config.panes.map((row) =>
+        row.id === id
+          ? // Null is how a colour is cleared, and the default is stored the
+            // same way, so the disk has one spelling of "no colour" rather
+            // than two. `PANE_COLOR_DEFAULT` is a real entry in the picker and
+            // reaching it must not leave `#09090b` written on the row. See
+            // `paneColors.ts`, which is where that rule is stated.
+            //
+            // Re-validated here even though the renderer can only send one of
+            // six: this handler is reachable from any renderer code, and the
+            // rule that an unofferable colour never reaches a pane belongs
+            // with the write rather than with the widget.
+            { ...row, color: color !== null && isPaneColor(color) && color !== PANE_COLOR_DEFAULT ? color : undefined }
+          : row,
+      )
+      await store.write({ ...config, panes })
+      // The saved rows, for the reason `renameTab` gives above.
       return panes
     }),
   )

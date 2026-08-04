@@ -7,6 +7,7 @@ import { decodeSessionName, encodeSessionName, newSessionId, tabIdFromGroupName 
 // in shared/ipc.ts), so a second, main-only definition here would only
 // invite drift. Re-exported so existing importers keep working unchanged.
 import type { ExitReason, TabType } from '../../shared/ipc'
+import type { PaneColor } from '../../shared/paneColors'
 
 export type { ExitReason }
 
@@ -27,6 +28,14 @@ export interface PaneRecord {
    * window's colour does.
    */
   title?: string
+  /**
+   * The pane's background, one of `PANE_COLORS`, absent until they pick one.
+   *
+   * Display only, and here for the same reason `title` is: config persists it
+   * and nothing in this file reads it. The sentence above turns out to have
+   * been literal.
+   */
+  color?: PaneColor
 }
 
 export interface OpenInput {

@@ -6,6 +6,7 @@ import type { PaneRecord } from '../sessions/manager'
 // back, and a second structurally identical declaration here would only invite
 // drift. Re-exported so existing importers keep working.
 import type { NotificationConfig, Preset, TabLayout, TabRow, TabType } from '../../shared/ipc'
+import { isPaneColor } from '../../shared/paneColors'
 
 export type { Preset, TabLayout, TabRow }
 
@@ -32,7 +33,7 @@ export interface ProjectRecord {
 }
 
 export interface PrcliConfig {
-  version: 6
+  version: 7
   /** Array order is sidebar order, and the order ⌘1–9 follows. */
   projects: ProjectRecord[]
   activeProjectId: string | null
@@ -66,7 +67,7 @@ export const DEFAULT_NOTIFICATIONS: NotificationConfig = {
 }
 
 const EMPTY: PrcliConfig = {
-  version: 6,
+  version: 7,
   projects: [],
   activeProjectId: null,
   panes: [],
@@ -122,10 +123,16 @@ function normalisePane(pane: PaneRecord): PaneRecord {
   // Before the `type` shortcut below, which returns early: a row can have a
   // good type and a bad title at the same time.
   const titled = typeof pane.title === 'string' ? pane : { ...pane, title: undefined }
-  if (TAB_TYPES.includes(titled.type)) return titled
+  // Validated rather than carried, and validated HERE rather than at the
+  // picker. The picker can only offer the six, but a config file is a text
+  // file: without this an edited `"color": "#ffffff"` reaches xterm's theme
+  // and leaves a pane whose text cannot be read. Anything unrecognised reads
+  // as no colour, which is the default background.
+  const coloured = isPaneColor(titled.color) ? titled : { ...titled, color: undefined }
+  if (TAB_TYPES.includes(coloured.type)) return coloured
   // A v3 row cannot say whether it was running Claude, and does not need to —
   // hooks decide that. Only the launch command is knowable from the record.
-  return { ...titled, type: titled.command === undefined ? 'shell' : 'preset' }
+  return { ...coloured, type: coloured.command === undefined ? 'shell' : 'preset' }
 }
 
 /** Every readable pane row, in file order. Anything else on the way out. */
@@ -317,13 +324,14 @@ function migrate(value: unknown): PrcliConfig {
   const activeProjectId =
     typeof candidate.activeProjectId === 'string' ? candidate.activeProjectId : null
 
-  // 5 and 6 share a shape. v6 added an optional pane title, and a v5 row not
-  // having one is exactly what "never named" already means, so there is
-  // nothing to convert and one branch reads both.
-  if (value.version === 5 || value.version === 6) {
+  // 5, 6 and 7 share a shape. v6 added an optional pane title and v7 an
+  // optional pane colour, and in both cases a row from the older version not
+  // having the field is exactly what "never set" already means, so there is
+  // nothing to convert and one branch reads all three.
+  if (value.version === 5 || value.version === 6 || value.version === 7) {
     const panes = paneRows(candidate.panes)
     return {
-      version: 6,
+      version: 7,
       projects,
       activeProjectId,
       panes,
@@ -336,7 +344,7 @@ function migrate(value: unknown): PrcliConfig {
     // and a tab holding just that pane, full width and necessarily selected.
     const panes = paneRows(candidate.tabs)
     return {
-      version: 6,
+      version: 7,
       projects,
       activeProjectId,
       panes,

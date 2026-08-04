@@ -1,4 +1,5 @@
 import type { TabState } from './status'
+import type { PaneColor } from './paneColors'
 
 export type { TabState }
 
@@ -19,6 +20,7 @@ export const CHANNELS = {
   pickFolder: 'prcli:pickFolder',
   moveTabToProject: 'prcli:moveTabToProject',
   renameTab: 'prcli:renameTab',
+  setPaneColor: 'prcli:setPaneColor',
   data: 'prcli:data',
   exit: 'prcli:exit',
   status: 'prcli:status',
@@ -119,6 +121,11 @@ export interface TabDescriptor {
   type: TabType
   /** What the user called this tab. Absent until they name one. */
   title?: string
+  /**
+   * The pane's background, one of `PANE_COLORS`. Absent means `--color-bg`,
+   * which is what every pane was before this field existed.
+   */
+  color?: PaneColor
 }
 
 export interface TabLayout {
@@ -443,6 +450,12 @@ export interface PrcliApi {
    * entry and hoping the rest still agree.
    */
   renameTab(id: string, title: string): Promise<TabDescriptor[]>
+  /**
+   * Resolves to the whole pane list, like `renameTab`: a colour changes one
+   * row, and the renderer replacing its list wholesale is what keeps the
+   * reply from being a second source of truth about the others.
+   */
+  setPaneColor(id: string, color: PaneColor | null): Promise<TabDescriptor[]>
   input(id: string, data: string): void
   resize(id: string, cols: number, rows: number): void
   detach(id: string): void

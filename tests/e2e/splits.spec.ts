@@ -1,7 +1,7 @@
 /**
  * The split surface, seen by a test for the first time.
  *
- * Seven tests on the `prcli-e2e-splits` socket. Three are about making a split:
+ * Nine tests on the `prcli-e2e-splits` socket. Three are about making a split:
  * ⌘D turns one pane into two inside a single tab, backed by two tmux sessions,
  * with the new pane taking the selection and ⌥⌘← giving it back; a ⌘D on a pane
  * too narrow to halve is refused, with the reason on screen and no second
@@ -42,6 +42,16 @@
  * a painted container that is not clipped frames the whole tab in 8px of
  * border colour, and a transparent pane lets that colour cover the terminal
  * rather than the gap.
+ *
+ * **Measured 2026-08-04, the pane colour**: three mutations against
+ * `right-clicking a pane recolours it`, each failing only its own assertion.
+ * Pinning the pane box to `PANE_COLOR_DEFAULT` fails the box poll; removing
+ * the `term.options.theme` assignment in `Terminal.tsx` fails the xterm poll
+ * on the line after it; and dropping the colour line from
+ * `attachSavedFields` fails only the assertion after the relaunch. That third
+ * one is not a hypothetical: it is the bug this test found. The colour was
+ * right on screen and right on disk, and restore rebuilt the pane list from
+ * live tmux and reattached the title alone, so the pane came back grey.
  *
  * **What this file does NOT see** — read off this file's own text unless a
  * line says measured or names another file:
@@ -1081,4 +1091,74 @@ test('the gap between two panes is painted, and each pane covers the rest of it'
   }
 
   await app.close()
+})
+
+test('right-clicking a pane recolours it, in the canvas and the box, and it survives a relaunch', async () => {
+  // Two surfaces for one colour, which is the whole reason this asserts twice.
+  // xterm paints its canvas from `term.options.theme`, but its fit leaves a
+  // sub-cell remainder at the box's edges, and that remainder is painted by
+  // the pane BOX. Setting only the theme leaves a strip of the old background
+  // down one side of every coloured pane, and setting only the box leaves the
+  // pane itself untouched.
+  const app = await launch()
+  const window = await app.firstWindow()
+  await window.getByTestId('new-tab').click()
+  await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
+  const [id] = await paneIds(window)
+
+  const boxBackground = async (): Promise<string> =>
+    window.getByTestId(`pane-${id}`).evaluate((node) => getComputedStyle(node).backgroundColor)
+  // xterm's own answer, not ours. `onChangeColors` writes the resolved theme
+  // background onto the scrollable element's inline style
+  // (`xterm.js`: `getDomNode().style.backgroundColor = colors.background.css`),
+  // so this reads what the terminal's colour service actually resolved rather
+  // than what we passed in. Sampling the canvas was the alternative and is the
+  // one thing here that would flake on a font or a cursor blink.
+  const termBackground = async (): Promise<string> =>
+    window
+      .locator(`[data-testid="pane-${id}"] .xterm-scrollable-element`)
+      .evaluate((node) => getComputedStyle(node).backgroundColor)
+
+  // `#09090b` on both, before anything is picked.
+  expect(await boxBackground()).toBe('rgb(9, 9, 11)')
+  expect(await termBackground()).toBe('rgb(9, 9, 11)')
+
+  await window.getByTestId(`pane-${id}`).click({ button: 'right' })
+  await expect(window.getByTestId(`pmenu-${id}`)).toBeVisible()
+
+  // `232326`, not the first swatch: the first IS the default, so picking it
+  // would leave every assertion below reading the value it already had.
+  await window.getByTestId(`swatch-${id}-232326`).click()
+
+  await expect.poll(boxBackground, { timeout: 5_000 }).toBe('rgb(35, 35, 38)')
+  // The half a box-only change would miss, and vice versa.
+  await expect.poll(termBackground, { timeout: 5_000 }).toBe('rgb(35, 35, 38)')
+
+  await app.close()
+
+  // The half no unit test reaches: the colour has to be on disk and come back
+  // through restore, not merely live in the renderer's state.
+  const second = await launch()
+  const reopened = await second.firstWindow()
+  await expect(reopened.getByTestId(`terminal-active`)).toBeVisible({ timeout: 20_000 })
+  await expect
+    .poll(
+      async () =>
+        reopened.getByTestId(`pane-${id}`).evaluate((node) => getComputedStyle(node).backgroundColor),
+      { timeout: 10_000 },
+    )
+    .toBe('rgb(35, 35, 38)')
+
+  // And back to the default, which must clear the row rather than write
+  // `#09090b` onto it. What is asserted here is only what shows; that the
+  // store holds no colour at all is `store.test.ts`'s.
+  await reopened.getByTestId(`pane-${id}`).click({ button: 'right' })
+  await reopened.getByTestId(`swatch-${id}-09090b`).click()
+  await expect
+    .poll(async () =>
+      reopened.getByTestId(`pane-${id}`).evaluate((node) => getComputedStyle(node).backgroundColor),
+    )
+    .toBe('rgb(9, 9, 11)')
+
+  await second.close()
 })

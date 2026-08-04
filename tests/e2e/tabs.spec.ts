@@ -2,7 +2,7 @@
  * Tabs, and the tmux sessions behind them, across every way a window can come
  * and go.
  *
- * Thirteen tests on the `prcli-e2e-tabs` socket: a second instance exits
+ * Fifteen tests on the `prcli-e2e-tabs` socket: a second instance exits
  * rather than opening its own session; several tabs each keep their own
  * scrollback; a relaunch restores every tab and the one that was active; a
  * restored background tab keeps its tmux window size instead of settling to
@@ -16,7 +16,9 @@
  * sidebar and it survives a relaunch, and a blank name clears it back to
  * slug and id in both places; and the context menu's Rename… item is the
  * topmost element at its own centre and reaches the same input the
- * double-click does.
+ * double-click does; the ⌘K palette names a renamed tab the way the bar does;
+ * and the tab's context menu recolours its pane from the same swatch row the
+ * pane's own menu shows.
  *
  * **Measured, 2026-08-02, this file run alone** (`npx playwright test
  * tests/e2e/tabs.spec.ts`): changing `event.code === 'KeyW'` to `'KeyQ'` in
@@ -659,6 +661,41 @@ test('the palette names a renamed tab the way the bar does', async () => {
   // satisfy the line above on its own. The id is lowercase hex, so no slice of
   // it can hide inside `payments api`.
   await expect(row).not.toContainText(id.slice(0, 6))
+
+  await app.close()
+})
+
+test('the tab menu offers the same colours as the pane', async () => {
+  // The other entry point. A tab with one pane IS that pane, and the swatch
+  // row is one component with two callers, but the two callers are separate
+  // code: `TabBar` renders its own `<ColorSwatches>` and calls its own
+  // `onRecolor`. `splits.spec.ts` covers the pane's right-click menu; nothing
+  // covered this one, and a tab menu wired to a no-op would have passed
+  // everything.
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  await window.getByTestId('new-tab').click()
+  await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
+  const testid = await window.locator(ACTIVE_TAB).getAttribute('data-testid')
+  const id = (testid ?? '').replace('tab-', '')
+
+  const background = async (): Promise<string> =>
+    window.getByTestId(`pane-${id}`).evaluate((node) => getComputedStyle(node).backgroundColor)
+
+  expect(await background()).toBe('rgb(9, 9, 11)')
+
+  await window.getByTestId(`tab-${id}`).click({ button: 'right' })
+  await expect(window.getByTestId(`swatches-${id}`)).toBeVisible()
+  // `2c2c30`, and deliberately not the `232326` the pane-menu test picks: if
+  // both tests named the same colour, a tab menu that somehow drove the pane
+  // menu's path would still look right here.
+  await window.getByTestId(`swatch-${id}-2c2c30`).click()
+
+  await expect.poll(background, { timeout: 5_000 }).toBe('rgb(44, 44, 48)')
+
+  // The menu closes on the pick rather than staying open over the pane.
+  await expect(window.getByTestId(`tabmenu-${id}`)).toBeHidden()
 
   await app.close()
 })

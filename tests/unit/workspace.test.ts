@@ -1887,7 +1887,7 @@ describe('welcomeHint', () => {
   })
 })
 
-describe('renamedTab', () => {
+describe('panesMerged', () => {
   // Updates the named panes and leaves tabs and layout alone: a name changes
   // no tab's membership, order or selection.
   it('replaces the named panes and leaves tabs and layout alone', () => {
@@ -1899,7 +1899,7 @@ describe('renamedTab', () => {
       activeProjectId: 'p1',
     }
     const next = workspaceReducer(before, {
-      type: 'renamedTab',
+      type: 'panesMerged',
       panes: [{ ...tab('aaa', 'lumio'), title: 'payments api' }, tab('bbb', 'lumio')],
     })
     expect(next.panes.map((pane) => pane.title)).toEqual(['payments api', undefined])
@@ -1923,7 +1923,7 @@ describe('renamedTab', () => {
       dead: { bbb: 0 },
     }
     const next = workspaceReducer(before, {
-      type: 'renamedTab',
+      type: 'panesMerged',
       // A reply naming only 'aaa', whatever a real caller's reason for
       // omitting 'bbb' might be.
       panes: [{ ...tab('aaa', 'lumio'), title: 'payments api' }],

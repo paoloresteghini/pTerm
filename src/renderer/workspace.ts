@@ -70,7 +70,7 @@ export type WorkspaceAction =
   | { type: 'activatedTab'; id: string }
   | { type: 'activatedProject'; id: string }
   | { type: 'movedTab'; panes: TabDescriptor[]; projects: ProjectDescriptor[] }
-  | { type: 'renamedTab'; panes: TabDescriptor[] }
+  | { type: 'panesMerged'; panes: TabDescriptor[] }
   | { type: 'statusSnapshot'; status: Record<string, TabState> }
   | { type: 'statusChanged'; tabId: string; state: TabState | null }
   | { type: 'died'; id: string; code: number }
@@ -1063,12 +1063,18 @@ export function workspaceReducer(
       }
     }
 
-    case 'renamedTab': {
+    case 'panesMerged': {
       // Merged by id, like `movedTab`, rather than replacing `state.panes`
       // outright: whatever reason a reply has for being silent about some
       // pane, that pane must keep the entry it already had rather than
       // vanish from the bar. Defence in depth for the reducer itself, not a
       // response to a specific gap in what any one caller sends today.
+      //
+      // Named for what it does rather than for who calls it. Renaming and
+      // recolouring both reply with the whole pane list and both want exactly
+      // this merge, and a `recoloredPane` case with a body identical to a
+      // `renamedTab` one is two rules that can drift, which is the mistake
+      // the tab label made before `tabLabel` was one function.
       const named = new Map(action.panes.map((pane) => [pane.id, pane]))
       return { ...state, panes: state.panes.map((pane) => named.get(pane.id) ?? pane) }
     }

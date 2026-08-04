@@ -4,7 +4,7 @@ import type { ConfigStore, ProjectRecord, TabRow } from '../state/store'
 import { readManifest, mergePresets } from '../projects/manifest'
 import { isDirectory } from '../fsutil'
 import { sharesAroundClaims, claimFor, tombstonesOf, inLiveFrame, type Claim } from './shares'
-import { attachTitles } from './titles'
+import { attachSavedFields } from './savedFields'
 // One definition, shared with the renderer — `TabDescriptor` and `PaneRecord`
 // are the same shape, and duplicating the types here would let them drift.
 import {
@@ -446,18 +446,19 @@ export async function restoreWorkspace(
       projects[0]?.id ??
       null
 
-    // Titles are put back here because `panes` came out of `manager.open()`
-    // above, which deals in tmux and carries none. Computed once, before the
-    // write, and used for both it and the reply: writing the untitled array
-    // would persist a titleless row over every saved title on every launch,
-    // and the renderer could not tell, because it draws from the patched reply
-    // rather than from the file. Nothing between `manager.open()` and here
-    // reads a title: `held` and `tabRows` key off `pane.id`, and
-    // `describeProjects` and `withUnsorted` off `id` and `projectSlug`.
-    const titled = attachTitles(panes, saved.panes)
+    // Titles and colours are put back here because `panes` came out of
+    // `manager.open()` above, which deals in tmux and carries neither.
+    // Computed once, before the write, and used for both it and the reply:
+    // writing the bare array would persist a stripped row over every saved
+    // title and colour on every launch, and the renderer could not tell,
+    // because it draws from the patched reply rather than from the file.
+    // Nothing between `manager.open()` and here reads either: `held` and
+    // `tabRows` key off `pane.id`, and `describeProjects` and `withUnsorted`
+    // off `id` and `projectSlug`.
+    const restored = attachSavedFields(panes, saved.panes)
 
     await store.write({
-      version: 6,
+      version: 7,
       // Only real projects are persisted; the Unsorted row is synthetic.
       // Matched by id rather than by index: `describeProjects` returns one row
       // per project today, but adding a `filter` or a `continue` to it would
@@ -472,7 +473,7 @@ export async function restoreWorkspace(
         return described ? { ...project, activeTabId: described.activeTabId } : project
       }),
       activeProjectId,
-      panes: titled,
+      panes: restored,
       // One row per tab live tmux still has, holding the saved axis and ratios
       // wherever a saved row still describes panes that came back. A tab whose
       // panes have all gone has no row here at all — dropped by having no
@@ -485,7 +486,7 @@ export async function restoreWorkspace(
     // used to be (finding I5): `store.write` above just took the same
     // `tabRows`, and a caller laying out a split needs exactly what was
     // written, not a second `store.read()` to get it back. The same now goes
-    // for `titled`, for the same reason.
-    return { projects, panes: titled, tabs: tabRows, activeProjectId }
+    // for `restored`, for the same reason.
+    return { projects, panes: restored, tabs: tabRows, activeProjectId }
   })
 }

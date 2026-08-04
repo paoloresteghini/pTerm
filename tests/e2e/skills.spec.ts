@@ -342,11 +342,19 @@ test('the panel and the terminal both scroll on the styled bar, at its width', a
 
   // The terminal, which is the surface the rule covers most of and the one it
   // was nearly written to exclude. `.xterm-viewport` is `overflow-y: scroll`,
-  // so it is laid out with a bar whether or not there is scrollback to reach:
-  // no resize or scroll is needed to make this measurable, and dropping
-  // `.xterm-viewport` from the rule leaves the assertion above green and fails
-  // only this one.
-  expect(await gutter('.xterm-viewport')).toBe(8)
+  // so it is laid out with a bar whether or not there is scrollback to reach,
+  // and dropping `.xterm-viewport` from the rule leaves the assertion above
+  // green and fails only this one.
+  //
+  // Polled rather than read once, and the reason is a MITIGATION rather than a
+  // diagnosis. This test failed twice on 2026-08-04, once in a full-suite run
+  // and once alone, and then passed four times (three alone, one full suite)
+  // without the error text ever being captured. What is known is that the
+  // resize above makes xterm refit, and a refit is the one thing between here
+  // and a settled viewport; polling costs nothing and covers a transient
+  // measurement during it. If this line fails again, that it is polled is not
+  // evidence the cause lies elsewhere.
+  await expect.poll(async () => gutter('.xterm-viewport'), { timeout: 10_000 }).toBe(8)
 
   // The colour, separately and honestly: this reads the pseudo-element's
   // computed style, which says what was declared rather than what was

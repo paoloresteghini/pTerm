@@ -25,6 +25,7 @@ const api: PrcliApi = {
   moveTabToProject: (tabId, projectId) =>
     ipcRenderer.invoke(CHANNELS.moveTabToProject, tabId, projectId),
   renameTab: (id, title) => ipcRenderer.invoke(CHANNELS.renameTab, id, title),
+  setPaneColor: (id, color) => ipcRenderer.invoke(CHANNELS.setPaneColor, id, color),
   input: (id, data) => ipcRenderer.send(CHANNELS.input, id, data),
   resize: (id, cols, rows) => ipcRenderer.send(CHANNELS.resize, id, cols, rows),
   detach: (id) => ipcRenderer.send(CHANNELS.detach, id),

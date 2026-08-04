@@ -24,7 +24,7 @@ async function storeWith(raw: unknown): Promise<ConfigStore> {
 }
 
 const sampleConfig: PrcliConfig = {
-  version: 6,
+  version: 7,
   activeProjectId: 'p1',
   projects: [
     {
@@ -58,7 +58,7 @@ const sampleConfig: PrcliConfig = {
 
 /** Two panes side by side under one tab — the shape v4 could not express. */
 const splitConfig: PrcliConfig = {
-  version: 6,
+  version: 7,
   activeProjectId: null,
   projects: [],
   panes: [
@@ -90,7 +90,7 @@ const splitConfig: PrcliConfig = {
 
 /** What `read()` answers with when it has nothing it can trust. */
 const EMPTY_CONFIG: PrcliConfig = {
-  version: 6,
+  version: 7,
   activeProjectId: null,
   projects: [],
   panes: [],
@@ -190,7 +190,7 @@ describe('ConfigStore.write', () => {
   it('does not corrupt the existing file when given unserialisable input', async () => {
     const store = new ConfigStore(file)
     await store.write(sampleConfig)
-    const circular = { version: 6, panes: [], tabs: [] } as unknown as PrcliConfig
+    const circular = { version: 7, panes: [], tabs: [] } as unknown as PrcliConfig
     ;(circular as unknown as { self: unknown }).self = circular
     await expect(store.write(circular)).rejects.toThrow()
     await expect(store.read()).resolves.toEqual(sampleConfig)
@@ -268,10 +268,10 @@ describe('ConfigStore migration', () => {
     ],
   }
 
-  it('reads a v2 file as v5, keeping tab order', async () => {
+  it('reads a v2 file as v7, keeping tab order', async () => {
     await writeFile(file, JSON.stringify(v2), 'utf8')
     const config = await new ConfigStore(file).read()
-    expect(config.version).toBe(6)
+    expect(config.version).toBe(7)
     expect(config.panes.map((pane) => pane.id)).toEqual([
       'a1b2c3d4e5f60718',
       '00000000000000ff',
@@ -297,7 +297,7 @@ describe('ConfigStore migration', () => {
   it('still reads a v1 file, three versions back', async () => {
     await writeFile(file, JSON.stringify(v1), 'utf8')
     const config = await new ConfigStore(file).read()
-    expect(config.version).toBe(6)
+    expect(config.version).toBe(7)
     expect(config.panes.map((pane) => pane.id)).toEqual(['a1b2c3d4e5f60718'])
     expect(config.projects).toEqual([])
   })
@@ -371,16 +371,20 @@ describe('ConfigStore migration', () => {
     await expect(new ConfigStore(file).read()).resolves.toEqual(EMPTY_CONFIG)
   })
 
-  // The next version up, not a distant one: v7 is the file a build one step
+  // The next version up, not a distant one: v8 is the file a build one step
   // ahead of this one leaves behind, and it is the version this build is most
   // likely to actually meet. Reading its `panes` as if the shape had not moved
   // is exactly the guess `write()`'s refusal exists to keep off disk.
-  it('refuses to guess at a v7 file, one version ahead', async () => {
-    await writeFile(file, JSON.stringify({ ...splitConfig, version: 7 }), 'utf8')
+  //
+  // Moved from v7 to v8 when the pane colour landed. v7 is now a version this
+  // build understands, so leaving this at 7 would have kept a green test that
+  // asserted the opposite of the code.
+  it('refuses to guess at a v8 file, one version ahead', async () => {
+    await writeFile(file, JSON.stringify({ ...splitConfig, version: 8 }), 'utf8')
     await expect(new ConfigStore(file).read()).resolves.toEqual(EMPTY_CONFIG)
   })
 
-  it('migrates a v3 config to v5, typing tabs by whether they carry a command', async () => {
+  it('migrates a v3 config to v7, typing tabs by whether they carry a command', async () => {
     const store = await storeWith({
       version: 3,
       projects: [],
@@ -399,7 +403,7 @@ describe('ConfigStore migration', () => {
 
     const config = await store.read()
 
-    expect(config.version).toBe(6)
+    expect(config.version).toBe(7)
     // A v3 tab cannot say whether it was running Claude, and it does not need
     // to: hooks decide. Only the launch command is knowable from the record.
     expect(config.panes[0]?.type).toBe('shell')
@@ -499,9 +503,9 @@ describe('ConfigStore migration', () => {
     expect(config.panes[0]?.type).toBe('shell')
   })
 
-  it('carries a pane title through a v6 read', async () => {
+  it('carries a pane title through a v7 read', async () => {
     const store = await storeWith({
-      version: 6,
+      version: 7,
       projects: [],
       activeProjectId: null,
       panes: [
@@ -517,8 +521,51 @@ describe('ConfigStore migration', () => {
       tabs: [],
     })
     const config = await store.read()
-    expect(config.version).toBe(6)
+    expect(config.version).toBe(7)
     expect(config.panes[0].title).toBe('payments api')
+  })
+
+  const colouredPane = (color: unknown) => ({
+    version: 7,
+    projects: [],
+    activeProjectId: null,
+    panes: [
+      {
+        id: 'a'.repeat(16),
+        projectSlug: 'lumio',
+        cwd: '/tmp',
+        tmuxSession: 'prcli-lumio-' + 'a'.repeat(16),
+        type: 'shell',
+        color,
+      },
+    ],
+    tabs: [],
+  })
+
+  it('carries an offered pane colour through a v7 read', async () => {
+    const store = await storeWith(colouredPane('#232326'))
+    const config = await store.read()
+    expect(config.panes[0].color).toBe('#232326')
+  })
+
+  // The reason `isPaneColor` is called in `normalisePane` and not only at the
+  // picker. Config is a text file: nothing stops a hand edit putting white in
+  // this field, and the renderer would hand it straight to xterm's theme,
+  // leaving `#d4d4d8` text on `#ffffff` in a pane with no way back except
+  // another edit of the same file.
+  it('drops a pane colour that is not one of the offered ones', async () => {
+    const store = await storeWith(colouredPane('#ffffff'))
+    const config = await store.read()
+    expect(config.panes[0].color).toBeUndefined()
+    // The rest of the row survives it: a bad colour is not a bad pane.
+    expect(config.panes[0].id).toBe('a'.repeat(16))
+    expect(config.panes[0].type).toBe('shell')
+  })
+
+  it('drops a pane colour that is not a string', async () => {
+    const store = await storeWith(colouredPane(17))
+    const config = await store.read()
+    expect(config.panes[0].color).toBeUndefined()
   })
 
   // A title is display text read straight back out to the screen, and config is
@@ -526,7 +573,7 @@ describe('ConfigStore migration', () => {
   // reads; a title is not the one field to trust.
   it('drops a title that is not a string', async () => {
     const store = await storeWith({
-      version: 6,
+      version: 7,
       projects: [],
       activeProjectId: null,
       panes: [
@@ -549,7 +596,7 @@ describe('ConfigStore migration', () => {
   // v5 is the shape this feature was added to. A row from it was never named,
   // which is exactly what an absent title already means, so the migration has
   // nothing to invent.
-  it('migrates a v5 config to v6, leaving panes unnamed', async () => {
+  it('migrates a v5 config to v7, leaving panes unnamed and uncoloured', async () => {
     const store = await storeWith({
       version: 5,
       projects: [],
@@ -566,7 +613,7 @@ describe('ConfigStore migration', () => {
       tabs: [],
     })
     const config = await store.read()
-    expect(config.version).toBe(6)
+    expect(config.version).toBe(7)
     expect(config.panes).toHaveLength(1)
     expect(config.panes[0].id).toBe('a'.repeat(16))
     expect(config.panes[0].title).toBeUndefined()
@@ -609,7 +656,7 @@ describe('ConfigStore migration, v4 to v5', () => {
   it('keeps every v4 tab row as a pane, in order and field for field', async () => {
     const config = await (await storeWith(v4)).read()
 
-    expect(config.version).toBe(6)
+    expect(config.version).toBe(7)
     expect(config.panes).toHaveLength(2)
     // Pane by pane rather than by id alone: a migration that dropped `command`
     // or `type` would keep both ids and still cost the user a preset tab.

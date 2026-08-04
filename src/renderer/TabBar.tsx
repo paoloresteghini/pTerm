@@ -3,6 +3,8 @@ import type { TabDescriptor, TabState } from '../shared/ipc'
 import { StatusDot } from './StatusDot'
 import { cn } from './lib/cn'
 import { tabLabel } from './lib/tabLabel'
+import { ColorSwatches } from './ColorSwatches'
+import { PANE_COLOR_DEFAULT, type PaneColor } from '../shared/paneColors'
 
 export function TabBar({
   tabs,
@@ -15,6 +17,7 @@ export function TabBar({
   onDismiss,
   onNew,
   onRename,
+  onRecolor,
   canOpen,
 }: {
   tabs: TabDescriptor[]
@@ -27,6 +30,7 @@ export function TabBar({
   onDismiss: (id: string) => void
   onNew: () => void
   onRename: (id: string, title: string) => void
+  onRecolor: (id: string, color: PaneColor | null) => void
   canOpen: boolean
 }) {
   // The open menu, with the viewport coordinates it is drawn at.
@@ -184,6 +188,17 @@ export function TabBar({
                 >
                   Rename…
                 </button>
+                {/* The same row the pane's own right-click menu shows. A tab
+                    with one pane IS that pane, and reaching the colour should
+                    not depend on which of the two the pointer was over. */}
+                <ColorSwatches
+                  paneId={tab.id}
+                  selected={tab.color ?? PANE_COLOR_DEFAULT}
+                  onPick={(color) => {
+                    setMenu(null)
+                    onRecolor(tab.id, color)
+                  }}
+                />
               </div>
             ) : null}
             {dead[tab.id] !== undefined ? (

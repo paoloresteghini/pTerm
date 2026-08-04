@@ -146,7 +146,11 @@ describe('App.tsx terminal area', () => {
     // tested. If they stop being applied here, that test is measuring
     // something nothing renders.
     expect(app).toMatch(/style=\{ ?group\.style ?\}/)
-    expect(app).toMatch(/style=\{ ?box\.style ?\}/)
+    // `box.style` spread into an object literal rather than passed alone: the
+    // pane's background rides in the same `style` prop, and the flex basis it
+    // carries has to survive that. A regex naming only `box.style` would have
+    // gone red on the colour change even though the layout claim still holds.
+    expect(app).toMatch(/style=\{\{ ?\.\.\.box\.style,/)
   })
 })
 
