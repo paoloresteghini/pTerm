@@ -80,6 +80,21 @@ export function FileTree({ projectId }: { projectId: string | undefined }) {
 
   const reload = (): void => {
     if (!projectId) return
+    // Evict first, fetch second. Without this, a directory that was expanded
+    // and then collapsed stays in `loaded` forever: `reload` only ever
+    // fetches `''` and the currently expanded paths, so a collapsed folder's
+    // stale entries survive every refresh and `toggle` shows them again
+    // on the next expand without a fetch, because it only fetches when
+    // `loaded[relPath]` is undefined. Dropping the collapsed keys here makes
+    // that undefined again. `''` and anything still expanded is kept so the
+    // rows on screen do not blank out while the fresh reads are in flight.
+    setLoaded((was) => {
+      const next: Record<string, FileEntry[]> = {}
+      for (const [path, entries] of Object.entries(was)) {
+        if (path === '' || expanded.has(path)) next[path] = entries
+      }
+      return next
+    })
     load(projectId, '')
     for (const path of expanded) load(projectId, path)
   }

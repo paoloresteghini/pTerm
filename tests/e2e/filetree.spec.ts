@@ -47,6 +47,42 @@
  * `tree-row-zzz-new.md`, which passed, with the other 6 tests passing. The
  * mutation was reverted after measuring; `git diff src/renderer/FileTree.tsx`
  * was empty before continuing.
+ *
+ * **Mutation measured 2026-08-04, round 4**: `reload` was changed to evict
+ * `loaded` keys that are neither `''` nor in `expanded` before it fetches, so
+ * a folder that was expanded, then collapsed, does not keep serving a stale
+ * cached listing forever. Re-running round 3's mutation (deleting the loop
+ * over `expanded`) against the changed `reload`, as the whole file, still
+ * FAILED at `tree-row-src/zzz-nested.ts`'s `toBeVisible()` and NOT at
+ * `tree-row-zzz-new.md` — the split survives the eviction change, because at
+ * the moment `refresh re-reads...` clicks the refresh button, `src` is
+ * expanded, so eviction leaves its cache alone and the loop deletion is what
+ * the test still isolates. Separately, a scratch reproduction of the
+ * unfixed bug (expand `src`, collapse it, write a file into `src` and one at
+ * the root, click refresh while `src` is collapsed, then expand it) showed
+ * the pre-fix code needing a SECOND refresh to show the nested file, and the
+ * fixed code showing it on the first expand after one refresh. Reverted
+ * after measuring; `git diff src/renderer/FileTree.tsx` was empty before
+ * continuing.
+ *
+ * **Mutation measured 2026-08-04, round 5**: deleting `!entry.dir ||` from
+ * `toggle`'s guard in `FileTree.tsx`, so a file (not just a directory)
+ * reaches `expanded`. `a file is not expandable`'s row-count assertion alone
+ * did not catch this: clicking a file still renders no new rows, because its
+ * `readdir` throws ENOTDIR and `listDir` reports that as `[]`. Run as the
+ * whole file, this mutation FAILED the added `localStorage` assertion in
+ * that test and no other. Reverted after measuring; `git diff
+ * src/renderer/FileTree.tsx` was empty before continuing.
+ *
+ * **Mutation measured 2026-08-04, round 6**: `readExpanded(projectId)` in the
+ * launch effect replaced with `new Set<string>()`, and the `writeExpanded`
+ * call in `toggle` deleted, together — the same double mutation the review
+ * that produced this fix measured. Run as the whole file, twice, this FAILED
+ * `switching projects shows the new project, not the previous one` both
+ * times, at the `tree-row-src/app.ts` visibility assertion made after
+ * switching back to `p1` without re-clicking `tree-row-src`. Reverted after
+ * measuring; `git diff src/renderer/FileTree.tsx` was empty before
+ * continuing.
  */
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
@@ -183,6 +219,13 @@ test('expanding a folder reads it, and only then', async () => {
 })
 
 test('switching projects shows the new project, not the previous one', async () => {
+  // Expanded before the switch, so returning to p1 can prove the expanded
+  // set actually came back with it. `tests/unit/treeState.test.ts` proves
+  // `readExpanded`/`writeExpanded` work in isolation; nothing before this
+  // proved `FileTree.tsx` calls either one.
+  await page.getByTestId('tree-row-src').click()
+  await expect(page.getByTestId('tree-row-src/app.ts')).toBeVisible()
+
   // Not a race test: `fsList`'s IPC round trip is not something this suite
   // can delay, so it cannot force project A's response to land after the
   // switch to B, which is the actual bug the ref guard in `FileTree.tsx`
@@ -193,9 +236,17 @@ test('switching projects shows the new project, not the previous one', async () 
   await expect(page.getByTestId('tree-row-docs')).toHaveCount(0)
 
   // Back to the project every other test in this file assumes is active.
+  // `src/app.ts` must be visible here WITHOUT clicking `tree-row-src` again:
+  // that is what tells `readExpanded` restored the set apart from `toggle`
+  // simply still working.
   await page.getByTestId('project-p1').click()
   await expect(page.getByTestId('tree-row-docs')).toBeVisible()
   await expect(page.getByTestId('tree-row-only-in-other.txt')).toHaveCount(0)
+  await expect(page.getByTestId('tree-row-src/app.ts')).toBeVisible()
+
+  // Collapsed again: the tests below assume `src` starts closed.
+  await page.getByTestId('tree-row-src').click()
+  await expect(page.getByTestId('tree-row-src/app.ts')).toHaveCount(0)
 })
 
 test('a file is not expandable', async () => {
@@ -204,6 +255,14 @@ test('a file is not expandable', async () => {
   // Nothing opened under it, and nothing else changed: still the four
   // top-level rows from the first test.
   await expect(page.locator('[data-testid^="tree-row-"]')).toHaveCount(4)
+  // The row count alone does not discriminate a missing guard from a
+  // present one: a file that gets past `toggle`'s `entry.dir` check still
+  // renders no children, because `README.md`'s own `readdir` throws
+  // ENOTDIR and `listDir` reports that as an empty list. What the guard
+  // actually controls is whether the click ever reaches `expanded` at all,
+  // so assert that directly.
+  const raw = await page.evaluate(() => localStorage.getItem('prcli:treeExpanded:p1'))
+  expect(raw === null ? [] : (JSON.parse(raw) as string[])).not.toContain('README.md')
 })
 
 test('refresh re-reads the root and every open folder', async () => {
