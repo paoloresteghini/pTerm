@@ -113,6 +113,9 @@ export function Sidebar({
                     data-shortcuts="off"
                     aria-label={`Rename ${project.name}`}
                     autoFocus
+                    // Selected, not just focused: the draft is seeded with the
+                    // current name, and a rename is usually a replacement.
+                    onFocus={(event) => event.target.select()}
                     value={draft}
                     // Without this, typing in the row also selects the project.
                     onClick={(event) => event.stopPropagation()}

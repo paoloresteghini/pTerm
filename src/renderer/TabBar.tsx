@@ -102,6 +102,11 @@ export function TabBar({
                 data-shortcuts="off"
                 aria-label={`Rename ${labelOfPane(tab)}`}
                 autoFocus
+                // Selected, not just focused: renaming an already-named tab
+                // is usually replacing the name, and a bare caret makes the
+                // user clear the old one by hand first. Sidebar's project
+                // rename does the same.
+                onFocus={(event) => event.target.select()}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 onBlur={() => finishRename(tab.id, true)}
