@@ -57,10 +57,11 @@ describe('tabLabel, for an editor pane', () => {
     expect(tabLabel(editor({ filePath: undefined }))).toBe('demo · abcdef')
   })
 
-  // A path ending in a separator has no basename. Whatever it does, it must
-  // not be blank, because a nameless tab cannot be clicked with confidence.
+  // A trailing separator still leaves a last non-empty segment, so it names
+  // the tab for the directory. A bare '/' has none, and must not render as
+  // an empty tab: it falls back to the slug and id like a missing file does.
   it('never returns an empty string', () => {
-    expect(tabLabel(editor({ filePath: '/tmp/demo/' }))).not.toBe('')
-    expect(tabLabel(editor({ filePath: '/' }))).not.toBe('')
+    expect(tabLabel(editor({ filePath: '/tmp/demo/' }))).toBe('demo')
+    expect(tabLabel(editor({ filePath: '/' }))).toBe('demo · abcdef')
   })
 })

@@ -24,9 +24,10 @@ import type { TabDescriptor } from '../../shared/ipc'
  * basename is taken by hand rather than with `node:path`: `nodeIntegration`
  * is off for this window (`src/main/index.ts`) and nothing else under
  * `src/renderer/` imports a `node:` builtin, so there is nothing to bundle
- * it against. A trailing separator or a bare `/` yields nothing, which
- * falls through to the same label a terminal gets rather than to a blank
- * tab.
+ * it against. A trailing separator still leaves a last non-empty segment
+ * (`/tmp/demo/` names the tab `demo`), so only a bare `/` yields nothing;
+ * that case falls through to the same label a terminal gets rather than to
+ * a blank tab.
  */
 export function tabLabel(tab: TabDescriptor): string {
   if (tab.title) return tab.title
