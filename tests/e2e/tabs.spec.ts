@@ -587,6 +587,11 @@ test('the context menu reaches the same rename field', async () => {
   // 70..100.5 against a bar ending at 70, and `elementFromPoint` at the item's
   // centre returning the terminal's `.xterm-screen`. This asks the page what is
   // actually on top at that point instead.
+  //
+  // Waited for first: the `evaluate` below reads the element straight out of
+  // the DOM, so without this a menu that has not rendered yet throws a
+  // TypeError rather than failing the assertion.
+  await window.getByTestId(`trename-${id}`).waitFor()
   const onTop = await window.evaluate((tabId) => {
     const item = document.querySelector(`[data-testid="trename-${tabId}"]`) as HTMLElement
     const box = item.getBoundingClientRect()

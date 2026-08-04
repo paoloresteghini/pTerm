@@ -48,9 +48,14 @@ export function TabBar({
   // menu is in flow inside a vertically scrolling list and has none of this
   // problem, so there was no pattern here to copy.
   //
-  // The trade is that the menu does not follow the bar if the bar is scrolled
-  // under it. It cannot be: any click closes the menu, and the bar has no
-  // other way to scroll while one is open.
+  // The trade is that the menu does not follow its tab, so it can end up
+  // hanging off the wrong one: a wheel or trackpad swipe scrolls the bar
+  // without firing the `click` that closes the menu; ⌘W closes the ACTIVE
+  // pane, which a right-click does not make this tab, so closing a tab to the
+  // left shifts this one; and a session exiting swaps one button for two on
+  // its tab, widening it, on main's schedule rather than on any input. The
+  // item still renames the tab it was opened on, because the id travels in
+  // this state rather than being read back off the position.
   const [menu, setMenu] = useState<{ id: string; left: number; top: number } | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
