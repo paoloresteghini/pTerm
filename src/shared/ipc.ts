@@ -18,6 +18,7 @@ export const CHANNELS = {
   scanCandidates: 'prcli:scanCandidates',
   pickFolder: 'prcli:pickFolder',
   moveTabToProject: 'prcli:moveTabToProject',
+  renameTab: 'prcli:renameTab',
   data: 'prcli:data',
   exit: 'prcli:exit',
   status: 'prcli:status',
@@ -116,6 +117,8 @@ export interface TabDescriptor {
   command?: string
   tmuxSession: string
   type: TabType
+  /** What the user called this tab. Absent until they name one. */
+  title?: string
 }
 
 export interface TabLayout {
@@ -432,6 +435,14 @@ export interface PrcliApi {
     tabId: string,
     projectId: string,
   ): Promise<{ projects: ProjectDescriptor[]; panes: TabDescriptor[] }>
+  /**
+   * Name a tab, or clear its name with an empty string.
+   *
+   * Resolves to every pane, like every other mutation here: the renderer
+   * replaces its list from one authoritative reply rather than patching one
+   * entry and hoping the rest still agree.
+   */
+  renameTab(id: string, title: string): Promise<TabDescriptor[]>
   input(id: string, data: string): void
   resize(id: string, cols: number, rows: number): void
   detach(id: string): void

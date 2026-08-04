@@ -34,6 +34,7 @@ import {
   rescaledClaims,
   type Claim,
 } from './shares'
+import { attachTitles } from './titles'
 import { isDirectory } from '../fsutil'
 import { scanCandidates } from '../projects/discovery'
 import { hookPaths, installHooks, readHooksState, uninstallHooks } from '../hooks/install'
@@ -850,15 +851,46 @@ export function registerIpc(
       //
       // The tab's own row is deliberately untouched: it carries layout, and a
       // move changes no pane id, no axis and no ratio.
-      const byId = new Map<string, PaneRecord>(moved.map((pane) => [pane.id, pane]))
+      //
+      // So a tab does not lose its name by being filed into another project:
+      // `moved` came out of `manager.moveTabToProject`, which renames tmux
+      // sessions and knows nothing of titles. Merged here, above the array
+      // that gets written, rather than onto the reply alone: these records
+      // REPLACE the saved rows below, so patching only the reply would show
+      // the name until the next restore and then lose it for good.
+      const merged = attachTitles(moved, config.panes)
+      const byId = new Map<string, PaneRecord>(merged.map((pane) => [pane.id, pane]))
       const listed = new Set(config.panes.map((row) => row.id))
       const panes = [
         ...config.panes.map((row) => byId.get(row.id) ?? row),
-        ...moved.filter((pane) => !listed.has(pane.id)),
+        ...merged.filter((pane) => !listed.has(pane.id)),
       ]
       const updated: PrcliConfig = { ...config, panes }
       await store.write(updated)
-      return { projects: await described(updated), panes: moved }
+      return { projects: await described(updated), panes: merged }
+    }),
+  )
+
+  ipcMain.handle(CHANNELS.renameTab, (_event, id: string, title: string) =>
+    serialise(async () => {
+      const config = await store.read()
+      const trimmed = title.trim()
+      const panes = config.panes.map((row) =>
+        row.id === id
+          ? // An empty name is how a title is removed, so it is stored as
+            // absent rather than as "": one representation on disk, and
+            // `labelOfPane` never has to decide between them.
+            { ...row, title: trimmed === '' ? undefined : trimmed }
+          : row,
+      )
+      await store.write({ ...config, panes })
+      // The saved rows, not `manager.list()`: `panes` is the state that was
+      // just persisted, rather than a second, separate derivation of it, and
+      // it already carries the title just written, so no `attachTitles` call
+      // is needed on this path. (What keeps a dead tab's entry on the bar
+      // through a rename is the `renamedTab` reducer's own merge by id, not
+      // a property of this reply.)
+      return panes
     }),
   )
 

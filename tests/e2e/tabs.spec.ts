@@ -2,16 +2,21 @@
  * Tabs, and the tmux sessions behind them, across every way a window can come
  * and go.
  *
- * Eleven tests on the `prcli-e2e-tabs` socket: a second instance exits rather
- * than opening its own session; several tabs each keep their own scrollback;
- * a relaunch restores every tab and the one that was active; a restored
- * background tab keeps its tmux window size instead of settling to 80×24; a
- * relaunch lands on the tab that closing another one activated, and the saved
- * `activeTabId` agrees; a session the app never opened is adopted; a renderer
- * reload reattaches what is open without stranding or duplicating; a `⌃b d`
- * detach from inside a pane leaves the tab and its session alone; ⌘T, ⌥⌘1 and
- * ⌘W drive the renderer's own handler; the File and View menu items do what
- * their accelerators do; and a close button destroys exactly that session.
+ * Thirteen tests on the `prcli-e2e-tabs` socket: a second instance exits
+ * rather than opening its own session; several tabs each keep their own
+ * scrollback; a relaunch restores every tab and the one that was active; a
+ * restored background tab keeps its tmux window size instead of settling to
+ * 80×24; a relaunch lands on the tab that closing another one activated, and
+ * the saved `activeTabId` agrees; a session the app never opened is adopted;
+ * a renderer reload reattaches what is open without stranding or
+ * duplicating; a `⌃b d` detach from inside a pane leaves the tab and its
+ * session alone; ⌘T, ⌥⌘1 and ⌘W drive the renderer's own handler; the File
+ * and View menu items do what their accelerators do; a close button destroys
+ * exactly that session; a renamed tab shows the name in the bar and the
+ * sidebar and it survives a relaunch, and a blank name clears it back to
+ * slug and id in both places; and the context menu's Rename… item is the
+ * topmost element at its own centre and reaches the same input the
+ * double-click does.
  *
  * **Measured, 2026-08-02, this file run alone** (`npx playwright test
  * tests/e2e/tabs.spec.ts`): changing `event.code === 'KeyW'` to `'KeyQ'` in
@@ -27,6 +32,25 @@
  * `a shortcut typed into the rename field does not reach the tab handler`,
  * which presses ⌘W with a terminal focused. Suite-wide that mutation is two
  * failures, not one.
+ *
+ * **Measured, 2026-08-03, this file run alone**: two mutations, one per
+ * surface the rename has to reach. Reverting `Sidebar.tsx`'s
+ * `{labelOfPane(tab)}` to its own inlined `{tab.projectSlug} · {tab.id.slice(0, 6)}`
+ * copy fails `a renamed tab shows its name in the bar and the sidebar, and
+ * survives a relaunch` at the assertion `await
+ * expect(window.getByTestId('stab-${id}')).toContainText('payments api')`,
+ * and only there: the `tab-` assertion just above it still passed, so the
+ * bar side of the rename kept reading the shared selector while the sidebar
+ * side went back to computing its own copy. 1 failed, 12 passed of the
+ * thirteen tests this file now holds. Dropping the `store.write` call from
+ * `renameTab`'s handler in `register.ts` fails the same test at the
+ * assertion `await expect(reopened.getByTestId('tab-${id}')).toContainText(
+ * 'payments api')`, the one after the relaunch, not at either assertion
+ * before the close and relaunch: the name reached both surfaces live and
+ * only failed to come back, which is what a reply-only rename with nothing
+ * written to disk would do. Same shape, 1 failed, 12 passed. Restoring each
+ * file in turn returned this file to green with an empty `git diff` against
+ * the committed version before the next mutation was made.
  *
  * **What this file does NOT see** — read off this file's own text unless a
  * line says measured or names another file:
@@ -496,6 +520,90 @@ test('closing a tab destroys its session', async () => {
 
   await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(1)
   await expect.poll(async () => (await sessionNames(SOCKET)).length, { timeout: 20_000 }).toBe(1)
+
+  await app.close()
+})
+
+test('a renamed tab shows its name in the bar and the sidebar, and survives a relaunch', async () => {
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  await window.getByTestId('new-tab').click()
+  await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
+  // This file has no pane-id helper (`paneIds` lives in `splits.spec.ts` and
+  // is not exported), and it already has the selector for the active tab, so
+  // the id comes off that rather than a helper copied between files.
+  const testid = await window.locator(ACTIVE_TAB).getAttribute('data-testid')
+  const id = (testid ?? '').replace('tab-', '')
+  expect(id).not.toBe('')
+
+  // Double-click the label, type, commit.
+  await window.getByTestId(`tablabel-${id}`).dblclick()
+  const field = window.getByTestId(`tabinput-${id}`)
+  await field.fill('payments api')
+  await field.press('Enter')
+
+  // Both surfaces, which is the whole point: they read one selector over one
+  // pane list, so a name that reaches the bar and not the sidebar means they
+  // have drifted apart again.
+  await expect(window.getByTestId(`tab-${id}`)).toContainText('payments api')
+  await expect(window.getByTestId(`stab-${id}`)).toContainText('payments api')
+
+  await app.close()
+
+  // The half no unit test can reach: the name has to be on disk and come back
+  // through restore, not merely live in the renderer's state.
+  const second = await launch()
+  const reopened = await second.firstWindow()
+  await expect(reopened.getByTestId(`tab-${id}`)).toContainText('payments api')
+
+  // Blank clears it, and both surfaces go back to slug and id.
+  await reopened.getByTestId(`tablabel-${id}`).dblclick()
+  const again = reopened.getByTestId(`tabinput-${id}`)
+  await again.fill('')
+  await again.press('Enter')
+  await expect(reopened.getByTestId(`tab-${id}`)).toContainText(id.slice(0, 6))
+  await expect(reopened.getByTestId(`stab-${id}`)).toContainText(id.slice(0, 6))
+
+  await second.close()
+})
+
+test('the context menu reaches the same rename field', async () => {
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  await window.getByTestId('new-tab').click()
+  await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
+  const testid = await window.locator(ACTIVE_TAB).getAttribute('data-testid')
+  const id = (testid ?? '').replace('tab-', '')
+
+  await window.getByTestId(`tab-${id}`).click({ button: 'right' })
+
+  // A human has to be able to SEE and hit the item, which neither
+  // `toBeVisible()` nor the click below can establish: Playwright scrolls the
+  // nearest scrollable ancestor before clicking, and `toBeVisible()` asks only
+  // for a non-empty box. Both passed while the menu was clipped out of sight
+  // by the bar's own overflow. Measured in the built app on 2026-08-03: menu
+  // 70..100.5 against a bar ending at 70, and `elementFromPoint` at the item's
+  // centre returning the terminal's `.xterm-screen`. This asks the page what is
+  // actually on top at that point instead.
+  //
+  // Waited for first: the `evaluate` below reads the element straight out of
+  // the DOM, so without this a menu that has not rendered yet throws a
+  // TypeError rather than failing the assertion.
+  await window.getByTestId(`trename-${id}`).waitFor()
+  const onTop = await window.evaluate((tabId) => {
+    const item = document.querySelector(`[data-testid="trename-${tabId}"]`) as HTMLElement
+    const box = item.getBoundingClientRect()
+    const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+    return hit === null ? 'nothing' : (hit.closest('[data-testid]')?.getAttribute('data-testid') ?? 'untagged')
+  }, id)
+  expect(onTop).toBe(`trename-${id}`)
+
+  await window.getByTestId(`trename-${id}`).click()
+
+  // Two entry points into one path, so this only has to prove it arrives.
+  await expect(window.getByTestId(`tabinput-${id}`)).toBeVisible()
 
   await app.close()
 })

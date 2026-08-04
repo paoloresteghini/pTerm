@@ -4,6 +4,7 @@ import { cn } from './lib/cn'
 import { Button } from './ui/Button'
 import { NeedsYou } from './NeedsYou'
 import { StatusDot } from './StatusDot'
+import { labelOfPane } from './workspace'
 
 export function Sidebar({
   projects,
@@ -112,6 +113,9 @@ export function Sidebar({
                     data-shortcuts="off"
                     aria-label={`Rename ${project.name}`}
                     autoFocus
+                    // Selected, not just focused: the draft is seeded with the
+                    // current name, and a rename is usually a replacement.
+                    onFocus={(event) => event.target.select()}
                     value={draft}
                     // Without this, typing in the row also selects the project.
                     onClick={(event) => event.stopPropagation()}
@@ -206,7 +210,7 @@ export function Sidebar({
                           tab.id === activeTabId ? 'text-fg' : 'text-muted hover:text-fg',
                         )}
                       >
-                        {tab.projectSlug} · {tab.id.slice(0, 6)}
+                        {labelOfPane(tab)}
                       </div>
                       {/* Rehoming: a stray must be filable, or Unsorted is a
                           place things can be seen but never leave. Renaming

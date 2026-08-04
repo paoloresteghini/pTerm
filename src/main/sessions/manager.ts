@@ -17,6 +17,16 @@ export interface PaneRecord {
   command?: string
   tmuxSession: string
   type: TabType
+  /**
+   * What the user called this pane, absent until they name one.
+   *
+   * Display text only. It is on this record because config is where it is
+   * persisted, and nothing in this file reads it: a pane's tmux session is
+   * named `prcli-${slug}-${id}` and restore matches saved rows against live
+   * sessions by that name, so a title has no more to do with tmux than a
+   * window's colour does.
+   */
+  title?: string
 }
 
 export interface OpenInput {

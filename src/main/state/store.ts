@@ -32,7 +32,7 @@ export interface ProjectRecord {
 }
 
 export interface PrcliConfig {
-  version: 5
+  version: 6
   /** Array order is sidebar order, and the order ⌘1–9 follows. */
   projects: ProjectRecord[]
   activeProjectId: string | null
@@ -66,7 +66,7 @@ export const DEFAULT_NOTIFICATIONS: NotificationConfig = {
 }
 
 const EMPTY: PrcliConfig = {
-  version: 5,
+  version: 6,
   projects: [],
   activeProjectId: null,
   panes: [],
@@ -119,10 +119,13 @@ function isPane(value: unknown): value is PaneRecord {
 const TAB_TYPES: readonly TabType[] = ['claude', 'preset', 'shell']
 
 function normalisePane(pane: PaneRecord): PaneRecord {
-  if (TAB_TYPES.includes(pane.type)) return pane
+  // Before the `type` shortcut below, which returns early: a row can have a
+  // good type and a bad title at the same time.
+  const titled = typeof pane.title === 'string' ? pane : { ...pane, title: undefined }
+  if (TAB_TYPES.includes(titled.type)) return titled
   // A v3 row cannot say whether it was running Claude, and does not need to —
   // hooks decide that. Only the launch command is knowable from the record.
-  return { ...pane, type: pane.command === undefined ? 'shell' : 'preset' }
+  return { ...titled, type: titled.command === undefined ? 'shell' : 'preset' }
 }
 
 /** Every readable pane row, in file order. Anything else on the way out. */
@@ -314,10 +317,13 @@ function migrate(value: unknown): PrcliConfig {
   const activeProjectId =
     typeof candidate.activeProjectId === 'string' ? candidate.activeProjectId : null
 
-  if (value.version === 5) {
+  // 5 and 6 share a shape. v6 added an optional pane title, and a v5 row not
+  // having one is exactly what "never named" already means, so there is
+  // nothing to convert and one branch reads both.
+  if (value.version === 5 || value.version === 6) {
     const panes = paneRows(candidate.panes)
     return {
-      version: 5,
+      version: 6,
       projects,
       activeProjectId,
       panes,
@@ -330,7 +336,7 @@ function migrate(value: unknown): PrcliConfig {
     // and a tab holding just that pane, full width and necessarily selected.
     const panes = paneRows(candidate.tabs)
     return {
-      version: 5,
+      version: 6,
       projects,
       activeProjectId,
       panes,

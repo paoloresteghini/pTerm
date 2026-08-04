@@ -70,6 +70,7 @@ export type WorkspaceAction =
   | { type: 'activatedTab'; id: string }
   | { type: 'activatedProject'; id: string }
   | { type: 'movedTab'; panes: TabDescriptor[]; projects: ProjectDescriptor[] }
+  | { type: 'renamedTab'; panes: TabDescriptor[] }
   | { type: 'statusSnapshot'; status: Record<string, TabState> }
   | { type: 'statusChanged'; tabId: string; state: TabState | null }
   | { type: 'died'; id: string; code: number }
@@ -1062,6 +1063,16 @@ export function workspaceReducer(
       }
     }
 
+    case 'renamedTab': {
+      // Merged by id, like `movedTab`, rather than replacing `state.panes`
+      // outright: whatever reason a reply has for being silent about some
+      // pane, that pane must keep the entry it already had rather than
+      // vanish from the bar. Defence in depth for the reducer itself, not a
+      // response to a specific gap in what any one caller sends today.
+      const named = new Map(action.panes.map((pane) => [pane.id, pane]))
+      return { ...state, panes: state.panes.map((pane) => named.get(pane.id) ?? pane) }
+    }
+
     case 'statusSnapshot':
       return { ...state, status: action.status }
 
@@ -1180,4 +1191,26 @@ export function workspaceReducer(
       }
     }
   }
+}
+
+/**
+ * What any surface listing this pane should call it.
+ *
+ * One rule with three callers, which is the point: the tab bar, the sidebar
+ * and the dead-pane overlay each built this string themselves before, so a
+ * name that reached one of them would have reached only that one. The tab bar
+ * and the sidebar are the two places the user sees, and the overlay's copies
+ * are what a screen reader announces.
+ *
+ * An empty title falls back rather than rendering. Empty is how a name is
+ * cleared, and the rename handler stores a cleared name as absent rather than
+ * as `""`. The store itself keeps any string it is given, though, so a config
+ * edited by hand can still carry `title: ""`, and a tab with no label at all
+ * cannot be read or aimed at.
+ *
+ * Here rather than in a component so it can be tested against a plain object
+ * with no DOM, which is how every other derivation in this file is tested.
+ */
+export function labelOfPane(pane: TabDescriptor): string {
+  return pane.title ? pane.title : `${pane.projectSlug} · ${pane.id.slice(0, 6)}`
 }

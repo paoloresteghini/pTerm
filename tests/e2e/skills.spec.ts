@@ -194,8 +194,10 @@ test('typing brings skills in below the sessions', async () => {
   // row. Swapping the two `.map` blocks in CommandPalette.tsx would leave the
   // assertions above green, since neither one names a position.
   //
-  // `d`, not `brow`: every session label is `demo · <id>` (`tabLabel`), and a
-  // tmux session id is lowercase hex, which never contains `w`, so `brow`
+  // `d`, not `brow`: every session label here is `demo · <id>`, because
+  // `labelOfPane` falls back to that whenever a tab has no name and no test in
+  // this file names one. A tmux session id is lowercase hex, which never
+  // contains `w`, so `brow`
   // above matches no session at all and this order check needs both lists
   // populated at once. `d` matches every session through the literal `demo`
   // and matches `gsd:stats`, the one fixture entry with a `d` in it, without

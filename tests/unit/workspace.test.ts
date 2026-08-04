@@ -20,6 +20,7 @@ import {
   grabFor,
   canOpenSession,
   welcomeHint,
+  labelOfPane,
   type WorkspaceState,
   type PaneBox,
 } from '../../src/renderer/workspace'
@@ -1884,5 +1885,71 @@ describe('welcomeHint', () => {
       activeProjectId: 'id-alpha',
     }
     expect(welcomeHint(state)).toBe('/tmp/gone is missing')
+  })
+})
+
+describe('labelOfPane', () => {
+  it('falls back to the project slug and a slice of the id', () => {
+    expect(labelOfPane(tab('a'.repeat(16), 'lumio'))).toBe('lumio · aaaaaa')
+  })
+
+  it('uses the title once there is one', () => {
+    expect(labelOfPane({ ...tab('a'.repeat(16), 'lumio'), title: 'payments api' })).toBe(
+      'payments api',
+    )
+  })
+
+  // How a name is cleared: the renderer sends '' and the store drops the
+  // field, but a config edited by hand can still hold one, and an empty tab
+  // is unclickable and unreadable.
+  it('falls back when the title is an empty string', () => {
+    expect(labelOfPane({ ...tab('a'.repeat(16), 'lumio'), title: '' })).toBe('lumio · aaaaaa')
+  })
+})
+
+describe('renamedTab', () => {
+  // Updates the named panes and leaves tabs and layout alone: a name changes
+  // no tab's membership, order or selection.
+  it('replaces the named panes and leaves tabs and layout alone', () => {
+    const before: WorkspaceState = {
+      ...INITIAL_WORKSPACE_STATE,
+      projects: [project('p1', 'lumio')],
+      panes: [tab('aaa', 'lumio'), tab('bbb', 'lumio')],
+      tabs: [tabRow('aaa', ['aaa']), tabRow('bbb', ['bbb'])],
+      activeProjectId: 'p1',
+    }
+    const next = workspaceReducer(before, {
+      type: 'renamedTab',
+      panes: [{ ...tab('aaa', 'lumio'), title: 'payments api' }, tab('bbb', 'lumio')],
+    })
+    expect(next.panes.map((pane) => pane.title)).toEqual(['payments api', undefined])
+    expect(next.tabs).toEqual(before.tabs)
+    expect(next.activeProjectId).toBe('p1')
+  })
+
+  // Merged by id rather than replaced outright: a reply that is silent about
+  // some pane, for whatever reason, must not erase the entry that pane
+  // already had. Defence in depth for the reducer itself, independent of
+  // what any particular caller's reply happens to contain today. A pane
+  // marked dead here is the case that matters most to get right: dropping it
+  // would take a tombstone off the bar until the next relaunch.
+  it('keeps a pane the reply omits, rather than dropping it', () => {
+    const before: WorkspaceState = {
+      ...INITIAL_WORKSPACE_STATE,
+      projects: [project('p1', 'lumio')],
+      panes: [tab('aaa', 'lumio'), tab('bbb', 'lumio')],
+      tabs: [tabRow('aaa', ['aaa']), tabRow('bbb', ['bbb'])],
+      activeProjectId: 'p1',
+      dead: { bbb: 0 },
+    }
+    const next = workspaceReducer(before, {
+      type: 'renamedTab',
+      // A reply naming only 'aaa', whatever a real caller's reason for
+      // omitting 'bbb' might be.
+      panes: [{ ...tab('aaa', 'lumio'), title: 'payments api' }],
+    })
+    expect(next.panes.map((pane) => pane.id)).toEqual(['aaa', 'bbb'])
+    expect(next.panes.find((pane) => pane.id === 'bbb')).toEqual(before.panes[1])
+    expect(next.dead).toEqual({ bbb: 0 })
   })
 })

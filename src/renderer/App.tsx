@@ -11,27 +11,7 @@ import { TitleBar } from './TitleBar'
 import { Welcome } from './Welcome'
 import { CommandPalette, type PaletteSession } from './CommandPalette'
 import { cn } from './lib/cn'
-import { tabLabel } from './lib/tabLabel'
-import {
-  INITIAL_WORKSPACE_STATE,
-  activeProject,
-  activeTabId,
-  canOpenSession,
-  grabFor,
-  needsYou,
-  paneGroups,
-  paneInDirection,
-  panesOfTab,
-  projectIdForTab,
-  resizeKids,
-  stateOfProject,
-  tabOfPane,
-  tabsOfProject,
-  welcomeHint,
-  workspaceReducer,
-  type PaneBox,
-  type PaneDirection,
-} from './workspace'
+import { INITIAL_WORKSPACE_STATE, activeProject, activeTabId, canOpenSession, grabFor, labelOfPane, needsYou, paneGroups, paneInDirection, panesOfTab, projectIdForTab, resizeKids, stateOfProject, tabOfPane, tabsOfProject, type PaneBox, type PaneDirection, welcomeHint, workspaceReducer } from './workspace'
 import { projectMuted, toggleProjectMute } from './mute'
 import { UNSORTED_ID, type NotificationConfig, type TabDescriptor, type TabType } from '../shared/ipc'
 import { SEVERITY } from '../shared/status'
@@ -468,6 +448,16 @@ export function App() {
     dispatch({ type: 'dismissed', id })
   }, [])
 
+  const renameTab = useCallback(
+    (id: string, title: string) => {
+      window.prcli
+        .renameTab(id, title)
+        .then((panes) => dispatch({ type: 'renamedTab', panes }))
+        .catch(fail)
+    },
+    [fail],
+  )
+
   const muted = useCallback(
     (projectId: string) => (notifications ? projectMuted(notifications.rules, projectId) : false),
     [notifications],
@@ -635,7 +625,7 @@ export function App() {
     const reported = state.status[pane.id]
     return {
       id: pane.id,
-      name: tabLabel(pane),
+      name: labelOfPane(pane),
       severity: reported ? SEVERITY.indexOf(reported) : SEVERITY.length,
     }
   })
@@ -713,6 +703,7 @@ export function App() {
             onRestart={restartTab}
             onDismiss={dismissTab}
             onNew={openTab}
+            onRename={renameTab}
             canOpen={canOpen}
           />
           {error ? (

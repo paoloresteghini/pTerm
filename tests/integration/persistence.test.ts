@@ -2366,6 +2366,32 @@ describe('project channels', () => {
     ])
   })
 
+  // A title is the one thing on a pane row that live tmux cannot supply, and a
+  // move rebuilds every record from live tmux. So the reply is asserted second
+  // here and the FILE first: patching only the reply leaves the name on screen
+  // until the next restore reads the row that replaced it, and then loses it
+  // for good.
+  it('keeps a tab name on disk when the tab is filed into a project', async () => {
+    const [project] = await invoke<ProjectDescriptor[]>(CHANNELS.addProject, {
+      name: 'Lumio',
+      cwd: tmpdir(),
+    })
+    const tab = await openTabIn('stray')
+    await waitForPrompt(tab.id)
+    await invoke<TabDescriptor[]>(CHANNELS.renameTab, tab.id, 'payments api')
+
+    const moved = await invoke<{ projects: ProjectDescriptor[]; panes: TabDescriptor[] }>(
+      CHANNELS.moveTabToProject,
+      tab.id,
+      project.id,
+    )
+
+    await expect(store.read().then((c) => c.panes.map((p) => p.title))).resolves.toEqual([
+      'payments api',
+    ])
+    expect(moved.panes.map((p) => p.title)).toEqual(['payments api'])
+  })
+
   // A pane's project lives in its own member session name and, on disk, in its
   // own row — so a move that writes back one row leaves the tab split across
   // two projects the moment a second pane exists. No IPC splits a tab yet
