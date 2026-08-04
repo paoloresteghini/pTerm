@@ -139,7 +139,12 @@ export function FileTree({ projectId }: { projectId: string | undefined }) {
       </div>
       <div
         data-testid="tree-scroll"
-        className="scroll-thin min-h-0 flex-1 overflow-y-auto font-mono text-[11px]"
+        // Capped at 40% of the column rather than `flex-1`: an even split
+        // with the projects list above starved it whenever the tree had more
+        // than a couple of rows open. No `flex-1` here either, so a small
+        // tree takes only the height its rows need; the cap only bites once
+        // it grows past that.
+        className="scroll-thin max-h-[40%] overflow-y-auto font-mono text-[11px]"
       >
         {rows('', 0)}
       </div>
