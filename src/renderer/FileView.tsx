@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Compartment, EditorState, type Extension } from '@codemirror/state'
 import { EditorView, keymap, lineNumbers, highlightActiveLine } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
@@ -7,6 +7,35 @@ import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
 import { languageForPath } from './lib/languageForPath'
 import { syntaxColorStyle } from './lib/syntaxColors'
 import { PANE_COLOR_DEFAULT, type PaneColor } from '../shared/paneColors'
+
+/**
+ * Every mounted editor pane's save function, by pane id.
+ *
+ * A module-level map, the same shape `Terminal.tsx` uses for `paneGrid`: ⌘S
+ * lands in `App.tsx`, which holds no reference to any editor and has to name
+ * the pane it is saving by id alone.
+ *
+ * Holds the pane's own `save` closure rather than the bare `EditorView`.
+ * `Terminal.tsx` can answer `paneGrid` straight off the `XTerm` it stores
+ * because cols and rows are the terminal's own properties; a save is not a
+ * property of an `EditorView`, it needs this pane's `mtime` and `baseline`
+ * refs, its `setRefused`, and its `projectId`/`relPath`, none of which the
+ * view carries. Storing the closure is what lets `saveEditorPane` stay a
+ * one-line lookup with no ref chain, matching `paneGrid`'s shape instead of
+ * reinventing one.
+ */
+const mounted = new Map<string, () => Promise<void>>()
+
+/**
+ * Save the pane `paneId` is showing, or do nothing if none is mounted.
+ *
+ * Null rather than throwing: a ⌘S that races a pane's unmount (the tab
+ * closed between the keydown and this running) has nothing to save, and
+ * that is not an error.
+ */
+export function saveEditorPane(paneId: string): Promise<void> {
+  return mounted.get(paneId)?.() ?? Promise.resolve()
+}
 
 /**
  * How an editor pane is painted, given the colour of the pane it sits in.
@@ -124,6 +153,12 @@ export function FileView({
 }) {
   const [text, setText] = useState<string | null>(null)
   const [missing, setMissing] = useState(false)
+  // The mtime the text on screen was read at, and what a save was refused
+  // for. Both null together outside a refusal: `mtime` starts null until the
+  // first `fsRead` resolves, and a save before then has nothing to compare
+  // against, which is why `save` below refuses to run while it is.
+  const mtime = useRef<number | null>(null)
+  const [refused, setRefused] = useState<null | 'changed' | 'missing' | 'failed'>(null)
   const host = useRef<HTMLDivElement | null>(null)
   const view = useRef<EditorView | null>(null)
   // One compartment for the life of the pane, not one per view. A compartment
@@ -151,13 +186,18 @@ export function FileView({
     // go on rendering the OLD file's text until the new read resolved.
     setMissing(false)
     setText(null)
+    setRefused(null)
+    mtime.current = null
     let live = true
     window.prcli
       .fsRead(projectId, relPath)
       .then((found) => {
         if (!live) return
         if (found === null) setMissing(true)
-        else setText(found.text)
+        else {
+          setText(found.text)
+          mtime.current = found.mtimeMs
+        }
       })
       // Swallowed like the tree's own fetch: a file that will not read is a
       // pane that says so, and this is not where transport faults get
@@ -260,6 +300,73 @@ export function FileView({
     view.current?.dispatch({ effects: themes.current.reconfigure(themeFor(color)) })
   }, [color])
 
+  const save = useCallback(async () => {
+    const current = view.current
+    if (current === null || relPath === null || mtime.current === null) return
+    const text = current.state.doc.toString()
+    const result = await window.prcli.fsWrite(projectId, relPath, text, mtime.current)
+    if (result.ok) {
+      // The baseline moves to what was just written, so the pane is clean
+      // against the file rather than against what it was opened with.
+      baseline.current = text
+      mtime.current = result.mtimeMs
+      setRefused(null)
+      onDirtyChange(paneId, false)
+      return
+    }
+    setRefused(result.reason)
+  }, [projectId, relPath, paneId, onDirtyChange])
+
+  /**
+   * Reload from disk, discarding whatever is typed. `text` cannot be
+   * reassigned to do this: the build effect above treats it as the initial
+   * document only, and setting it again would re-run that effect and rebuild
+   * the view mid-session. `dispatch` with a change spanning the whole
+   * document mutates the existing view in place instead, which is reachable
+   * from here and does not touch the compartment holding the theme.
+   */
+  const reload = useCallback(() => {
+    if (relPath === null) return
+    window.prcli
+      .fsRead(projectId, relPath)
+      .then((found) => {
+        if (found === null) {
+          setMissing(true)
+          return
+        }
+        // Set before the dispatch below, not after: the update listener
+        // reads `baseline.current` synchronously inside `dispatch`, and
+        // setting it first is what keeps that listener from reporting the
+        // pane dirty for the one tick between the two.
+        baseline.current = found.text
+        mtime.current = found.mtimeMs
+        const current = view.current
+        if (current !== null) {
+          current.dispatch({
+            changes: { from: 0, to: current.state.doc.length, insert: found.text },
+          })
+        }
+        setRefused(null)
+        onDirtyChange(paneId, false)
+      })
+      .catch(() => setMissing(true))
+  }, [projectId, relPath, paneId, onDirtyChange])
+
+  // Registered and deregistered here rather than inside the view-build
+  // effect above: `save` closes over `projectId`, which is not one of that
+  // effect's dependencies (a pane's project never changes), so tying
+  // registration to `save`'s own identity is the one that cannot go stale.
+  // The identity guard mirrors `Terminal.tsx`'s: without it, a remount that
+  // runs this effect before the old one's cleanup would delete the live
+  // entry, and `saveEditorPane` would answer "nothing mounted" for a pane
+  // still on screen.
+  useEffect(() => {
+    mounted.set(paneId, save)
+    return () => {
+      if (mounted.get(paneId) === save) mounted.delete(paneId)
+    }
+  }, [paneId, save])
+
   if (missing) {
     return (
       <div
@@ -287,14 +394,43 @@ export function FileView({
     )
   }
 
-  // `editor-content` is on the host rather than on anything CodeMirror makes,
-  // because CodeMirror owns everything under here and replaces it freely. The
-  // testid is the same one the `<pre>` carried and B1's e2e still reads text
-  // off it: measured 2026-08-05, `textContent` here is the gutter's line
-  // numbers followed by the document, so a `toContainText` on a file's text
-  // still passes. Only for a document that fits on screen, though: CodeMirror
-  // renders a window rather than the whole file, and a seeded 4000-line file
-  // measured 80 lines and 1012 characters in the DOM. Every fixture in this
-  // suite is two lines, so nothing asserts past that today.
-  return <div data-testid="editor-content" ref={host} className="scroll-thin h-full overflow-auto" />
+  return (
+    <div className="flex h-full flex-col">
+      {/* Above the editor rather than replacing it: the user's unsaved text
+          is the thing this exists to protect, so it has to stay on screen
+          while the banner is up, not get swapped out for a message. */}
+      {refused !== null && (
+        <div
+          data-testid="editor-refused"
+          className="border-b border-border bg-surface px-3 py-2 text-[11px] text-fg"
+        >
+          {refused === 'changed'
+            ? 'That file changed on disk since you opened it. Your edits are still here.'
+            : refused === 'missing'
+              ? 'That file is no longer there. Your edits are still here.'
+              : 'That file could not be written.'}
+          {refused === 'changed' && (
+            <button data-testid="editor-reload" onClick={reload} className="ml-2 underline">
+              Reload and lose my edits
+            </button>
+          )}
+        </div>
+      )}
+      {/* `editor-content` is on the host rather than on anything CodeMirror
+          makes, because CodeMirror owns everything under here and replaces
+          it freely. The testid is the same one the `<pre>` carried and B1's
+          e2e still reads text off it: measured 2026-08-05, `textContent`
+          here is the gutter's line numbers followed by the document, so a
+          `toContainText` on a file's text still passes. Only for a document
+          that fits on screen, though: CodeMirror renders a window rather
+          than the whole file, and a seeded 4000-line file measured 80 lines
+          and 1012 characters in the DOM. Every fixture in this suite is two
+          lines, so nothing asserts past that today. */}
+      <div
+        data-testid="editor-content"
+        ref={host}
+        className="scroll-thin min-h-0 flex-1 overflow-auto"
+      />
+    </div>
+  )
 }

@@ -11,7 +11,7 @@ import { SettingsPane } from './SettingsPane'
 import { TitleBar } from './TitleBar'
 import { Welcome } from './Welcome'
 import { CommandPalette, type PaletteSession } from './CommandPalette'
-import { FileView } from './FileView'
+import { FileView, saveEditorPane } from './FileView'
 import { cn } from './lib/cn'
 import { tabLabel } from './lib/tabLabel'
 import { relativeToProject } from './lib/relativeToProject'
@@ -634,6 +634,14 @@ export function App() {
         closePane(activePaneId)
         return
       }
+      // `saveEditorPane` is a no-op for a pane that is not an editor (or not
+      // mounted at all), so this needs no check of the pane's kind: a ⌘S
+      // typed at a terminal pane reaches here and does nothing.
+      if (event.code === 'KeyS' && !event.altKey && activePaneId) {
+        event.preventDefault()
+        saveEditorPane(activePaneId).catch(fail)
+        return
+      }
       // Both here rather than as registered menu accelerators, for the reason
       // the whole File menu is unregistered: an accelerator the menu claims
       // never reaches the window, and these keystrokes are typed at panes
@@ -698,7 +706,7 @@ export function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [activePaneId, currentTabs, state.projects, openTab, closePane, splitActive, focusPane])
+  }, [activePaneId, currentTabs, state.projects, openTab, closePane, splitActive, focusPane, fail])
 
   /**
    * Where an editor pane's file sits relative to its own project, or null when

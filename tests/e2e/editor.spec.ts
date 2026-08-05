@@ -488,6 +488,70 @@ test('closing an editor tab kills no session, and says nothing', async () => {
     .toEqual({ pane: false, tab: false })
 })
 
+/**
+ * ⌘S writes the pane's document to disk and clears the dirty dot.
+ *
+ * `tree-row-README.md` is safe to click here: the "closing an editor tab"
+ * test just above closed the tab test 1 opened for this file, so this mints
+ * a fresh one rather than a second tab beside one already open (see the note
+ * above `tabIdFor`).
+ */
+test('Cmd+S writes the file and clears the dot', async () => {
+  await page.getByTestId('tree-row-README.md').click()
+  const content = visiblePane().getByTestId('editor-content')
+  await expect(content).toContainText('# demo', { timeout: 10_000 })
+  const paneId = await tabIdFor('README.md')
+
+  await content.locator('.cm-content').click()
+  await page.keyboard.type('X')
+  await page.keyboard.press('Meta+s')
+
+  await expect(page.getByTestId(`editor-dirty-${paneId}`)).toHaveCount(0)
+  // The assertion this test exists for: what is on DISK, not what is on
+  // screen. A save that cleared the dot without writing would pass every
+  // visual assertion here.
+  await expect
+    .poll(async () => readFile(join(projectCwd, 'README.md'), 'utf8'), { timeout: 5_000 })
+    .toContain('X')
+})
+
+/**
+ * A file changed underneath the pane refuses the save, and a reload picks up
+ * what is actually there.
+ *
+ * Reached through the tab the test above left open, not a second click on
+ * `tree-row-README.md`: that tab is still open, and a second click on the
+ * tree row would mint a duplicate and break `tabIdFor('README.md')`'s
+ * strict-mode locator.
+ */
+test('a file changed underneath the pane refuses the save and offers a reload', async () => {
+  const paneId = await tabIdFor('README.md')
+  await page.getByTestId(`tab-${paneId}`).click()
+  const content = visiblePane().getByTestId('editor-content')
+  await content.locator('.cm-content').click()
+  await page.keyboard.type('Y')
+
+  // Somebody else, which on this machine is the normal case.
+  await writeFile(join(projectCwd, 'README.md'), '# theirs\n')
+
+  await page.keyboard.press('Meta+s')
+  await expect(visiblePane().getByTestId('editor-refused')).toBeVisible({ timeout: 10_000 })
+
+  // Refused means refused: their text is still on disk.
+  expect(await readFile(join(projectCwd, 'README.md'), 'utf8')).toBe('# theirs\n')
+
+  await visiblePane().getByTestId('editor-reload').click()
+  await expect(content).toContainText('# theirs')
+  await expect(visiblePane().getByTestId('editor-refused')).toHaveCount(0)
+
+  // Closed rather than left open: the last test in this file finds "the
+  // terminal tab" as whichever tab is last in the bar, an assumption laid
+  // down before this pair of tests existed. Leaving this one open would put
+  // it there instead of the shell tab that test expects.
+  await page.getByTestId(`close-${paneId}`).click()
+  await expect(page.getByTestId(`tab-${paneId}`)).toHaveCount(0)
+})
+
 test('the pane menu on an editor offers colours and nothing else', async () => {
   // The second editor tab, the one whose file was deleted in the fourth test.
   // It is still a pane and still right-clickable; what it is showing does not
