@@ -11,8 +11,10 @@ import { SettingsPane } from './SettingsPane'
 import { TitleBar } from './TitleBar'
 import { Welcome } from './Welcome'
 import { CommandPalette, type PaletteSession } from './CommandPalette'
+import { FileView } from './FileView'
 import { cn } from './lib/cn'
 import { tabLabel } from './lib/tabLabel'
+import { relativeToProject } from './lib/relativeToProject'
 import {
   INITIAL_WORKSPACE_STATE,
   activeProject,
@@ -108,6 +110,36 @@ export function App() {
   )
 
   const openTab = useCallback(() => launch(undefined), [launch])
+
+  /**
+   * Open one file of the active project in an editor pane of its own tab.
+   *
+   * `opened` is the dispatch `launch` uses for a new terminal, and it both adds
+   * the pane and selects it. That is enough here for the reason it is enough
+   * there: an editor pane founds its own tab, so the id it selects by is the
+   * tab's id as well.
+   *
+   * A null reply is main declining (no such project, a path that leaves it, or
+   * a file that will not read), and nothing is dispatched, so the click did
+   * nothing rather than opening a tab that could only say so.
+   *
+   * No `canOpen` gate, unlike `launch`: that test is about whether a project
+   * can host a tmux session, and an editor pane needs none. Unsorted, the one
+   * project `canOpen` exists to refuse, is synthetic and in no config file, so
+   * main's own lookup answers null for it.
+   */
+  const openFile = useCallback(
+    (relPath: string) => {
+      if (!project) return
+      window.prcli
+        .openEditor(project.id, relPath)
+        .then((tab) => {
+          if (tab) dispatch({ type: 'opened', tab })
+        })
+        .catch(fail)
+    },
+    [project, fail],
+  )
 
   // The selection is a PANE id — the tab bar lists panes — so this is the
   // pane ⌘D splits, ⌘W closes and ⌘⌥arrow moves off. Every route that changes
@@ -657,6 +689,24 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [activePaneId, currentTabs, state.projects, openTab, closePane, splitActive, focusPane])
 
+  /**
+   * Where an editor pane's file sits relative to its own project, or null when
+   * it does not sit there: a pane with no `filePath`, a pane whose slug matches
+   * no project row, or a path outside that project's `cwd`.
+   *
+   * The pane row stores an absolute path and `fsRead` takes a relative one, so
+   * this is the conversion between them. The arithmetic is `relativeToProject`,
+   * which has unit tests of its own; this is the project lookup that feeds it.
+   * Both halves are here rather than inside `FileView` because vitest runs with
+   * no DOM and cannot mount a component to reach them.
+   */
+  const editorRelPath = (pane: TabDescriptor): string | null => {
+    if (!pane.filePath) return null
+    const owner = projectIdForTab(state.projects, pane)
+    const cwd = state.projects.find((candidate) => candidate.id === owner)?.cwd
+    return cwd === undefined ? null : relativeToProject(cwd, pane.filePath)
+  }
+
   // One row per PANE, not per tab, per the spec: a split tab holds two
   // sessions and both are switchable. `state.panes` is the same collection
   // `needsYou` ranks, so this list and Needs You cannot disagree about what a
@@ -699,6 +749,7 @@ export function App() {
           onToggleMute={toggleMute}
           onSelectProject={(id) => dispatch({ type: 'activatedProject', id })}
           onSelectTab={(id) => dispatch({ type: 'activatedTab', id })}
+          onOpenFile={openFile}
           onAdd={() => setAdding(true)}
           onOpenSettings={() => setSettingsOpen(true)}
           onMoveTab={(tabId, projectId) => {
@@ -851,14 +902,25 @@ export function App() {
                     )}
                     style={{ ...box.style, background: box.pane.color ?? PANE_COLOR_DEFAULT }}
                   >
-                    <Terminal
-                      tabId={box.pane.id}
-                      color={box.pane.color ?? PANE_COLOR_DEFAULT}
-                      visible={group.visible}
-                      // Never for a tab that is off screen: taking focus into one
-                      // would move typing to a terminal the user cannot see.
-                      focused={group.visible && box.pane.id === activePaneId}
-                    />
+                    {/* The pane's contents, by kind. Every pane was a terminal
+                        until this slice; an editor has no session to attach and
+                        mounting one for it would create the very tmux session
+                        the kind exists to do without. */}
+                    {box.pane.type === 'editor' ? (
+                      <FileView
+                        projectId={projectIdForTab(state.projects, box.pane)}
+                        relPath={editorRelPath(box.pane)}
+                      />
+                    ) : (
+                      <Terminal
+                        tabId={box.pane.id}
+                        color={box.pane.color ?? PANE_COLOR_DEFAULT}
+                        visible={group.visible}
+                        // Never for a tab that is off screen: taking focus into one
+                        // would move typing to a terminal the user cannot see.
+                        focused={group.visible && box.pane.id === activePaneId}
+                      />
+                    )}
                     {/* Only the pane's session has died — the box, the xterm and
                         the scrollback in it are all still here, which is why this
                         draws over the pane instead of collapsing it. See

@@ -20,6 +20,7 @@ export function Sidebar({
   onToggleMute,
   onSelectProject,
   onSelectTab,
+  onOpenFile,
   onRename,
   onMove,
   onRemove,
@@ -39,6 +40,8 @@ export function Sidebar({
   onToggleMute: (projectId: string) => void
   onSelectProject: (id: string) => void
   onSelectTab: (id: string) => void
+  /** A file row clicked in the tree, by its path relative to the project. */
+  onOpenFile: (relPath: string) => void
   onRename: (id: string, name: string) => void
   onMove: (id: string, direction: -1 | 1) => void
   onRemove: (id: string) => void
@@ -244,7 +247,7 @@ export function Sidebar({
         })}
       </div>
 
-      <FileTree projectId={activeProjectId ?? undefined} />
+      <FileTree projectId={activeProjectId ?? undefined} onOpenFile={onOpenFile} />
 
       <div className="flex flex-col gap-1 border-t border-border p-2">
         <Button data-testid="add-project" variant="ghost" onClick={onAdd} className="w-full">

@@ -41,7 +41,8 @@ import { hookPaths, installHooks, readHooksState, uninstallHooks } from '../hook
 import { drainSpool } from '../hooks/spool'
 import { listSkills } from '../skills/scan'
 import { readNote, writeNote } from '../notes/store'
-import { listDir, readFileInside } from '../files/tree'
+import { listDir, readFileInside, resolveInside } from '../files/tree'
+import { newSessionId } from '../tmux/names'
 import {
   addProject,
   projectForSlug,
@@ -1343,4 +1344,78 @@ export function registerIpc(
     if (!project) return null
     return readFileInside(project.cwd, relPath)
   })
+
+  // Inside `serialise`, unlike `fsList` and `fsRead` just above: this one
+  // writes a pane row and a tab row, and two of them racing would interleave
+  // two read-modify-write cycles over one config file.
+  //
+  // Keyed by project id and given a relative path, like both of those: the
+  // renderer never spells an absolute path, and `PaneRecord.filePath` is
+  // absolute because MAIN writes it here and reads it back at the next restore.
+  //
+  // Two things separate this from `CHANNELS.open`, which it otherwise follows.
+  // There is no `manager.open`, because there is no session to attach: the id
+  // is minted here with the same `newSessionId` the manager uses. And a tab row
+  // is written, which `CHANNELS.open` deliberately does not do: a terminal
+  // regains its row from live tmux at the next restore, whereas
+  // `mergeSessionlessPanes` puts back only a sessionless pane whose saved tab
+  // row still names it, and drops one no tab holds. Without the row here, this
+  // pane would be on disk after a relaunch and unreachable.
+  ipcMain.handle(
+    CHANNELS.openEditor,
+    (_event, projectId: string, relPath: string): Promise<TabDescriptor | null> =>
+      serialise(async () => {
+        const config = await store.read()
+        const project = config.projects.find((row) => row.id === projectId)
+        if (!project) return null
+
+        // The path the renderer named, resolved under the project and checked
+        // for containment. Lexical rather than `realpath`-resolved on purpose:
+        // this is the string the renderer turns back into a relative path for
+        // every later `fsRead`, and each of those re-applies the whole guard
+        // anyway, symlink half included.
+        const filePath = resolveInside(project.cwd, relPath)
+        if (filePath === null) return null
+
+        // The guard's other half, called rather than re-derived: `fsRead`'s
+        // `realpath` re-check and its is-it-a-file test both live in
+        // `readFileInside`, and a file that cannot be read is not worth a tab
+        // that could only ever say so. The cost is one read of a file the pane
+        // is about to read again, paid once per deliberate click.
+        if ((await readFileInside(project.cwd, relPath)) === null) return null
+
+        const id = newSessionId()
+        const pane: PaneRecord = {
+          id,
+          projectSlug: project.slug,
+          cwd: project.cwd,
+          type: 'editor',
+          filePath,
+        }
+        // A tab this pane founds, so the tab's id is the pane's. That is the
+        // identity `TabRow.id` describes, and the one the renderer selects by.
+        //
+        // No `registry.applyOpen` beside this, unlike `CHANNELS.open` and
+        // restore: `stateForOpen('editor')` is null, so `applyOpen` would only
+        // ever `forget` an id nothing has ever recorded a state for.
+        const row: TabRow = {
+          id,
+          // Its own id, because there is no tmux group for it to be in. Restore
+          // matches a saved row by `id` and only reads `groupId` for tabs live
+          // tmux reported, which will never include this one.
+          groupId: id,
+          activePaneId: id,
+          layout: { dir: 'row', ratio: [1], kids: [id] },
+        }
+
+        // Both arrays in one write, for `splitPane`'s reason: a separate write
+        // per array leaves a window in which the file holds a pane no tab lists.
+        await store.write({
+          ...config,
+          panes: [...config.panes, pane],
+          tabs: withTabRow(config.tabs, id, row),
+        })
+        return pane
+      }),
+  )
 }

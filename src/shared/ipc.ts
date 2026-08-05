@@ -42,6 +42,7 @@ export const CHANNELS = {
   notesWrite: 'prcli:notesWrite',
   fsList: 'prcli:fsList',
   fsRead: 'prcli:fsRead',
+  openEditor: 'prcli:openEditor',
 } as const
 
 /**
@@ -592,4 +593,19 @@ export interface PrcliApi {
    * rather than rejecting.
    */
   fsRead(projectId: string, relPath: string): Promise<FileContents | null>
+  /**
+   * Open one file of one project in an editor pane of its own, in a new tab.
+   *
+   * `relPath` is relative and resolved in main, like `fsList` and `fsRead`: the
+   * absolute `filePath` on the pane this answers with is one main spelled, and
+   * the renderer never supplies one. A path that would leave the project, and a
+   * file that cannot be read, both resolve to null rather than rejecting, and
+   * to no tab: a tab that could never show anything is worse than a click that
+   * did nothing.
+   *
+   * The pane it resolves to founds its own tab, so the pane's id is that tab's
+   * id. That is what makes this reply the same shape as `open`'s, and what lets
+   * the renderer select the new tab by the pane it was handed.
+   */
+  openEditor(projectId: string, relPath: string): Promise<TabDescriptor | null>
 }
