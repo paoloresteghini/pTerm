@@ -33,12 +33,27 @@ describe('languageIdForPath', () => {
     expect(languageIdForPath('A.TS')).toBe('javascript')
   })
 
-  // A dotfile whose LAST dot has a known suffix is still that language: the
-  // `dot <= 0` guard is about a name with no extension at all, not about a
-  // name that begins with a dot. Not in the brief; added because that guard
-  // reads as though it rejects every dotfile, and this is the case that says
-  // it does not.
-  it('reads an extension on a dotfile', () => {
+  /**
+   * The `dot <= 0` guard, and the only input in this file that covers it.
+   *
+   * A name that is NOTHING but a known extension is not a file with that
+   * extension. `.ts` is a dotfile called `ts`, exactly as `.env` is one called
+   * `env`, and neither has a suffix at all.
+   *
+   * **Measured 2026-08-05 by deleting the guard.** Every other case in this
+   * file answers identically without it, `.env` and `.eslintrc.js` included:
+   * `.env` falls through to `null` anyway because `env` is not a known
+   * extension, and `.eslintrc.js` never reaches the guard because its last dot
+   * is not the leading one. `.ts` is the one input that changes answer, from
+   * `null` to `'javascript'`. Without this assertion the guard could be
+   * deleted and the suite would stay green, which is what a review found.
+   */
+  it('reads a lone leading dot as the name, not as an extension', () => {
+    expect(languageIdForPath('.ts')).toBe(null)
+    expect(languageIdForPath('.md')).toBe(null)
+    // The other half of what `dot <= 0` means, and the half the guard is easy
+    // to misread as forbidding: a dotfile with a SECOND dot does have an
+    // extension. This one passes with or without the guard.
     expect(languageIdForPath('.eslintrc.js')).toBe('javascript')
   })
 

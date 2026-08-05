@@ -18,11 +18,15 @@ export type LanguageId = 'javascript' | 'markdown' | null
 export function languageIdForPath(path: string): LanguageId {
   const name = path.slice(path.lastIndexOf('/') + 1)
   const dot = name.lastIndexOf('.')
-  // No dot at all (`Makefile`), or a leading dot that is the only one
-  // (`.env`), where what follows it is the whole name rather than an
-  // extension. A dotfile with a second dot still has one: `.eslintrc.js` is
-  // javascript, and the unit file asserts that so this guard is not read as
-  // rejecting every dotfile.
+  // No dot at all (`Makefile`), or a leading dot that is the only one, where
+  // what follows it is the whole name rather than an extension: `.env` is a
+  // file called `env` and `.ts` is one called `ts`.
+  //
+  // `.ts` is the only input that covers this line, and the unit file asserts
+  // it for that reason. Measured 2026-08-05 by deleting the guard: `.env`,
+  // `.eslintrc.js` and every other case in that file answer identically
+  // without it, so before that assertion existed this line could be removed
+  // with the suite staying green.
   if (dot <= 0) return null
   const ext = name.slice(dot + 1).toLowerCase()
   if (['js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs'].includes(ext)) return 'javascript'

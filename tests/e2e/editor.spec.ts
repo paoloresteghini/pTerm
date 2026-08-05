@@ -199,6 +199,55 @@ test('the editor takes typing', async () => {
 })
 
 /**
+ * Recolouring a pane must not throw away what is in its editor.
+ *
+ * **This pins a fix, and it caught a real defect on the way in.** The pane's
+ * colour is a prop, and the first version of `FileView` had it in the view's
+ * dependency array, so a recolour destroyed the `EditorView` and rebuilt it
+ * from the text last read off disk. Everything typed since went with it,
+ * silently, and the pane looked fine afterwards. The theme now lives in a
+ * `Compartment` that is reconfigured in place instead.
+ *
+ * It is asserted here rather than deferred to the task that adds saving,
+ * because nothing about the loss is visible: there is no error, no dirty mark
+ * to go stale, just a pane that quietly says what the file used to say.
+ *
+ * Uses the pane's own right-click menu rather than reaching into state, which
+ * is the route a user actually has. `swatch-<paneId>-<hex without #>` is the
+ * same locator shape `splits.spec.ts` recolours through.
+ */
+test('recolouring a pane keeps what was typed into it', async () => {
+  const editorTab = await tabIdFor('app.ts')
+  const content = visiblePane().getByTestId('editor-content')
+
+  await content.locator('.cm-content').click()
+  await page.keyboard.press('ControlOrMeta+End')
+  await page.keyboard.type('KEEPME')
+  await expect(content).toContainText('KEEPME')
+
+  await page.getByTestId(`pane-${editorTab}`).click({ button: 'right' })
+  await page.getByTestId(`swatch-${editorTab}-232326`).click()
+
+  // The recolour landed. Without this the assertion below would also pass on a
+  // menu that never opened, which is the same shape of hole the pane-menu test
+  // further down guards against.
+  await expect(page.getByTestId(`pane-${editorTab}`)).toHaveCSS(
+    'background-color',
+    'rgb(35, 35, 38)',
+  )
+
+  // And the document is untouched: the typed text AND the file's own, so a
+  // rebuild that happened to re-read the same file could not pass this.
+  await expect(content).toContainText('KEEPME')
+  await expect(content).toContainText('export const answer = 42')
+
+  // Put it back, so the pane-menu test below opens on a pane in the state it
+  // was written against.
+  await page.getByTestId(`pane-${editorTab}`).click({ button: 'right' })
+  await page.getByTestId(`swatch-${editorTab}-09090b`).click()
+})
+
+/**
  * A grammar was applied, asserted against the same bytes with no grammar.
  *
  * Measured 2026-08-05 rather than assumed, because the plan offered the

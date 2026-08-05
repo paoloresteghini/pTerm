@@ -1,11 +1,76 @@
 import { useEffect, useRef, useState } from 'react'
-import { EditorState } from '@codemirror/state'
+import { Compartment, EditorState, type Extension } from '@codemirror/state'
 import { EditorView, keymap, lineNumbers, highlightActiveLine } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
-import { syntaxHighlighting, defaultHighlightStyle } from '@codemirror/language'
+import { syntaxHighlighting } from '@codemirror/language'
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
 import { languageForPath } from './lib/languageForPath'
+import { syntaxColorStyle } from './lib/syntaxColors'
 import { PANE_COLOR_DEFAULT, type PaneColor } from '../shared/paneColors'
+
+/**
+ * How an editor pane is painted, given the colour of the pane it sits in.
+ *
+ * A function rather than a constant because the pane's background is a
+ * runtime value, and a named function rather than an inline object because
+ * two places call it: the effect that builds the view, and the one that
+ * reconfigures it when the pane is recoloured.
+ *
+ * Every entry was measured 2026-08-05 by building the app with the entry
+ * removed and reading `getComputedStyle` off the real elements in a running
+ * window. None of them is decoration.
+ *
+ * `color: '#d4d4d8'` on `&`. Without it the content computes `rgb(0, 0, 0)`
+ * over a `rgb(9, 9, 11)` pane, about 1.06:1, which is not dim text but
+ * invisible text: CodeMirror's base theme sets no foreground at all, and
+ * nothing between this element and `<html>` does either. #d4d4d8 is what xterm
+ * is handed as its foreground (`Terminal.tsx` repeats the value by hand
+ * because a canvas cannot read a CSS variable), so an editor pane and a
+ * terminal pane in one row read as the same surface. It is hardcoded rather
+ * than derived from `color` because `PANE_COLORS` were chosen against this
+ * exact value: its own doc records the worst of the six at 7.89:1.
+ *
+ * `backgroundColor` on `.cm-gutters`, and NOT on `&`. The pane box in
+ * `App.tsx` already paints itself `pane.color`, so `&` needs nothing: measured
+ * without it, `.cm-editor` is `rgba(0, 0, 0, 0)` and the box shows through
+ * correctly. The gutter is the opposite case, because CodeMirror paints that
+ * one itself: measured without this line it is `rgb(245, 245, 245)`, a
+ * near-white strip down the left of a near-black pane.
+ *
+ * **The font stack and size sit on `.cm-scroller`, which is the element the
+ * base theme sets `fontFamily: monospace` on, and they have to name a real
+ * family rather than the generic one.** With the size on the host `<div>` and
+ * the family on `.cm-content` alone, the line numbers measured 13px generic
+ * `monospace` beside 11px `ui-monospace` code: a different typeface 18 per
+ * cent larger than the text it numbers. Generic `monospace` does not inherit
+ * the surrounding font size, it triggers the browser's own default fixed
+ * font, so setting a size further up does not reach it. Naming the stack on
+ * the common ancestor is what fixes both halves at once.
+ *
+ * `{ dark: true }` picks the base theme's `&dark` rules over its `&light`
+ * ones, which is a legibility fix and not a naming preference. Measured under
+ * `&light`: the caret computes `rgb(0, 0, 0)` on a near-black pane, so the
+ * editor you can type into has a cursor you cannot see, and ⌘F's search panel
+ * opens `rgb(245, 245, 245)` with black text. Under `&dark` those are
+ * `rgb(255, 255, 255)` and `rgb(51, 51, 56)` with white text.
+ */
+function themeFor(color: PaneColor): Extension {
+  return EditorView.theme(
+    {
+      '&': { color: '#d4d4d8', height: '100%' },
+      '.cm-scroller': {
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+        fontSize: '11px',
+      },
+      '.cm-gutters': { backgroundColor: color, color: '#3f3f46', border: 'none' },
+      // The base theme's own focus ring is `1px dotted #212121`. This app
+      // marks a focused pane differently, with an inset accent ring on the box
+      // (`App.tsx`).
+      '&.cm-focused': { outline: 'none' },
+    },
+    { dark: true },
+  )
+}
 
 /**
  * One file, in an editor.
@@ -35,6 +100,10 @@ export function FileView({
   const [missing, setMissing] = useState(false)
   const host = useRef<HTMLDivElement | null>(null)
   const view = useRef<EditorView | null>(null)
+  // One compartment for the life of the pane, not one per view. A compartment
+  // is just a key that a state and a later reconfigure have to agree on, so it
+  // has to outlive any single `EditorView` the pane builds.
+  const themes = useRef(new Compartment())
 
   useEffect(() => {
     if (relPath === null) {
@@ -80,13 +149,17 @@ export function FileView({
    * above only writes it once per `relPath`, and Task 3's dirty tracking has
    * to keep it that way.
    *
-   * `color` is in the dependencies for the same reason it is in the theme,
-   * and it carries the same cost: recolouring a pane from its right-click
-   * menu rebuilds the view and drops the document back to what was read from
-   * disk. Harmless today, because nothing here is saved and a rebuild only
-   * costs the user a re-read. It stops being harmless once there is unsaved
-   * work to lose, so whichever task introduces that has to move the theme
-   * into a `Compartment` and reconfigure it instead.
+   * **`color` is deliberately NOT a dependency here.** It was, and that was a
+   * data-loss bug waiting for the next task: recolouring a pane from its
+   * right-click menu re-ran this effect, and the rebuild dropped whatever had
+   * been typed back to what was read from disk. The theme lives in a
+   * `Compartment` instead, reconfigured in place by the effect below, so a
+   * colour change never touches the document. `themes` is a ref rather than a
+   * value so the same compartment key survives a rebuild for a new file.
+   *
+   * Reading `color` without depending on it is safe rather than stale: this
+   * closure is the one from the render it runs in, so a build always uses the
+   * current colour, and any LATER change arrives through the reconfigure.
    */
   useEffect(() => {
     if (text === null || host.current === null) return
@@ -97,78 +170,18 @@ export function FileView({
         highlightActiveLine(),
         highlightSelectionMatches(),
         history(),
-        // **`defaultHighlightStyle` is CodeMirror's LIGHT-background palette,
-        // and it is a legibility regression on this app's panes.** Measured
-        // 2026-08-05 by reading `getComputedStyle(span).color` off the real
-        // token spans in a running window: keywords come out `rgb(119, 0, 136)`,
-        // definitions `rgb(0, 0, 255)`, literals `rgb(17, 102, 68)`, strings
-        // `rgb(170, 17, 17)`. Against `#09090b` those are 2.03:1, 2.32:1,
-        // 2.85:1 and 2.65:1, and against `PANE_COLORS`' lightest `#38383d`
-        // they are 1.19:1, 1.36:1, 1.67:1 and 1.55:1. The worst entry in the
-        // style, `local(variableName)` `#30a`, is 1.05:1 on that pane.
+        // Our own palette, not `defaultHighlightStyle`, which is CodeMirror's
+        // LIGHT-background one and measured worse than no highlighting at all
+        // on these panes. The numbers, the bar and the reasons are at
+        // `SYNTAX_COLORS`, and `tests/unit/syntaxColors.test.ts` enforces
+        // them.
         //
-        // For scale: the plain `#d4d4d8` below is 13.46:1 and 7.89:1 on those
-        // same two, so EVERY token is harder to read coloured than it would be
-        // uncoloured, and `editor-missing` records this repo rejecting a colour
-        // at 1.9:1 as invisible. Kept anyway because the fix is a decision
-        // rather than a correction: `@codemirror/language` exports no dark
-        // style and does not re-export `tags`, so a hand-written
-        // `HighlightStyle` needs `@lezer/highlight` declared as an eighth
-        // dependency (it is on disk transitively, but importing it from `src/`
-        // undeclared would be a hidden dependency that `check-deps` cannot
-        // see), and `@codemirror/theme-one-dark` is a whole package for a
-        // palette nobody has chosen. Raised with the numbers above rather than
-        // settled here.
-        syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        // `fallback: true` still: it makes this the style used when a language
+        // brings no highlighter of its own, which is every language here.
+        syntaxHighlighting(syntaxColorStyle, { fallback: true }),
         keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
         ...languageForPath(relPath ?? ''),
-        // Every entry below was measured 2026-08-05 by building the app with
-        // the entry removed and reading `getComputedStyle` off the real
-        // elements in a running window. None of them is decoration.
-        //
-        // `color: '#d4d4d8'` on `&`. Without it the content computes
-        // `rgb(0, 0, 0)` over a `rgb(9, 9, 11)` pane, about 1.06:1, which is
-        // not dim text but invisible text: CodeMirror's base theme sets no
-        // foreground at all, and nothing between this element and `<html>`
-        // does either. #d4d4d8 is what xterm is handed as its foreground
-        // (`Terminal.tsx` repeats the value by hand because a canvas cannot
-        // read a CSS variable), so an editor pane and a terminal pane in one
-        // row read as the same surface. It is hardcoded rather than taken
-        // from `color` because `PANE_COLORS` were chosen against this exact
-        // value: its own doc records the worst of the six at 7.89:1, so a
-        // recoloured editor pane is covered by a ratio somebody already
-        // worked out.
-        //
-        // `backgroundColor` on `.cm-gutters`, and NOT on `&`. The pane box in
-        // `App.tsx` already paints itself `pane.color`, so `&` needs nothing:
-        // measured without it, `.cm-editor` is `rgba(0, 0, 0, 0)` and the box
-        // shows through correctly. The gutter is the opposite case, because
-        // CodeMirror paints it itself: measured without this line it is
-        // `rgb(245, 245, 245)`, a near-white strip down the left of a
-        // near-black pane.
-        //
-        // `{ dark: true }` picks the base theme's `&dark` rules over its
-        // `&light` ones, which is a legibility fix and not a naming
-        // preference. Measured under `&light`: the caret computes
-        // `rgb(0, 0, 0)` on the same near-black pane, so the editor you can
-        // type into has a cursor you cannot see, and ⌘F's search panel opens
-        // `rgb(245, 245, 245)` with black text. Under `&dark` those are
-        // `rgb(255, 255, 255)` and `rgb(51, 51, 56)` with white text.
-        EditorView.theme(
-          {
-            '&': { color: '#d4d4d8', height: '100%' },
-            '.cm-content': {
-              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-              fontSize: '11px',
-            },
-            '.cm-gutters': { backgroundColor: color, color: '#3f3f46', border: 'none' },
-            // The base theme's own focus ring is `1px dotted #212121`, which
-            // this app marks a focused pane differently from (`App.tsx` draws
-            // an inset accent ring on the box).
-            '&.cm-focused': { outline: 'none' },
-          },
-          { dark: true },
-        ),
+        themes.current.of(themeFor(color)),
       ],
     })
     const created = new EditorView({ state, parent: host.current })
@@ -177,7 +190,18 @@ export function FileView({
       created.destroy()
       view.current = null
     }
-  }, [text, relPath, color])
+  }, [text, relPath])
+
+  /**
+   * A recolour, applied without rebuilding anything.
+   *
+   * The whole reason the theme is compartmented. On the first render there is
+   * no view yet and this does nothing; the build above runs first and already
+   * has the right colour in it.
+   */
+  useEffect(() => {
+    view.current?.dispatch({ effects: themes.current.reconfigure(themeFor(color)) })
+  }, [color])
 
   if (missing) {
     return (

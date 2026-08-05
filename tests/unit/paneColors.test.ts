@@ -1,20 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { PANE_COLORS, PANE_COLOR_DEFAULT, isPaneColor } from '../../src/shared/paneColors'
+// Moved to `contrast.ts` when `syntaxColors.test.ts` came to need the same
+// arithmetic. Same functions, unchanged; this file is still where they earned
+// their place.
+import { contrast } from './contrast'
 
 /** xterm's foreground, fixed in `Terminal.tsx` and not offered as a choice. */
 const TERM_FG = '#d4d4d8'
-
-/** WCAG relative luminance, from the sRGB definition. */
-function luminance(hex: string): number {
-  const channels = [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16) / 255)
-  const [r, g, b] = channels.map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4))
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b
-}
-
-function contrast(a: string, b: string): number {
-  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x)
-  return (hi + 0.05) / (lo + 0.05)
-}
 
 describe('the offered pane colours', () => {
   // The point of this file. Every entry is a terminal background, the
