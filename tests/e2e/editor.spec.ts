@@ -147,6 +147,18 @@ test('the pane shows the file contents', async () => {
   await expect(visiblePane().getByTestId('editor-content')).toContainText('# demo')
 })
 
+// The fourth caller of `tabLabel`, alongside the bar, the sidebar and a dead
+// pane's chrome. `tabs.spec.ts` pins this for a terminal tab; nothing pinned
+// it for an editor one, whose label comes from a file's basename instead of
+// a slug and id.
+test('the command palette names an editor tab the way the tab bar does', async () => {
+  const editorTab = await tabIdFor('README.md')
+  await page.keyboard.press('Meta+k')
+  await expect(page.getByTestId(`palette-session-${editorTab}`)).toContainText('README.md')
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('command-palette')).toBeHidden()
+})
+
 // A second file gets a second tab, which is this slice's ruling: one tab per
 // file, rather than one editor tab that swaps its contents.
 test('a second file opens a second tab', async () => {
@@ -732,6 +744,88 @@ test('⌘D on an editor pane does nothing, which is deferred rather than intende
   // defect this one paints nothing, which is what made it worth a test rather
   // than a bug report.
   await expect(page.getByTestId('startup-error')).toHaveCount(0)
+})
+
+/**
+ * Two editor panes open on the SAME file, in two different tabs. The mtime
+ * check exists for exactly this case, and this is where it is caught doing
+ * its job inside one running app rather than only against an outside writer.
+ *
+ * A file of its own (`dual.txt`), written and cleaned up by this test alone,
+ * so it cannot collide with any fixture another test in this file depends on.
+ * Both tabs it opens are closed before the test ends, so the tab count and
+ * the `.last()` tab assumptions later tests make are undisturbed.
+ *
+ * Opened by two clicks on the same tree row, which is the only way to get
+ * two tabs of one file: `openEditor` mints a fresh pane per call with no
+ * dedup by path (see the note above `tabIdFor`), so nothing stops it.
+ */
+test('two editor panes on one file: a save from one refuses the other, and neither silently shows stale text', async () => {
+  const dualFile = join(projectCwd, 'dual.txt')
+  await writeFile(dualFile, 'original\n')
+  await page.getByTestId('tree-refresh').click()
+
+  // Waited for by count, not read off `.last()` straight after the click:
+  // `openEditor` is an IPC round trip, and reading `.last()` before the new
+  // tab has actually rendered grabs whichever tab was last BEFORE the click,
+  // one of the terminal tabs earlier tests in this file leave open.
+  const beforeA = await page.locator('[data-testid^="tab-"]').count()
+  await page.getByTestId('tree-row-dual.txt').click()
+  await expect(page.locator('[data-testid^="tab-"]')).toHaveCount(beforeA + 1)
+  const paneA = (
+    (await page.locator('[data-testid^="tab-"]').last().getAttribute('data-testid')) ?? ''
+  ).replace('tab-', '')
+  await expect(visiblePane().getByTestId('editor-content')).toContainText('original', {
+    timeout: 10_000,
+  })
+
+  const beforeB = await page.locator('[data-testid^="tab-"]').count()
+  await page.getByTestId('tree-row-dual.txt').click()
+  await expect(page.locator('[data-testid^="tab-"]')).toHaveCount(beforeB + 1)
+  const paneB = (
+    (await page.locator('[data-testid^="tab-"]').last().getAttribute('data-testid')) ?? ''
+  ).replace('tab-', '')
+  expect(paneB).not.toBe(paneA)
+  await expect(visiblePane().getByTestId('editor-content')).toContainText('original', {
+    timeout: 10_000,
+  })
+
+  // Edit and save from A.
+  await page.getByTestId(`tab-${paneA}`).click()
+  const contentA = visiblePane().getByTestId('editor-content')
+  await contentA.locator('.cm-content').click()
+  await page.keyboard.press('ControlOrMeta+End')
+  await page.keyboard.type('\nfrom A')
+  await page.keyboard.press('Meta+s')
+  await expect(page.getByTestId(`editor-dirty-${paneA}`)).toHaveCount(0)
+  await expect.poll(() => readFile(dualFile, 'utf8'), { timeout: 5_000 }).toContain('from A')
+
+  // B, not silently refreshed: it is still showing what it read at open,
+  // which predates A's write.
+  await page.getByTestId(`tab-${paneB}`).click()
+  const contentB = visiblePane().getByTestId('editor-content')
+  await expect(contentB).toContainText('original')
+  await expect(contentB).not.toContainText('from A')
+
+  // B's own save now refuses: its mtime is the one it opened with, and the
+  // file's mtime moved when A wrote it.
+  await contentB.locator('.cm-content').click()
+  await page.keyboard.type('from B')
+  await page.keyboard.press('Meta+s')
+  await expect(visiblePane().getByTestId('editor-refused')).toBeVisible({ timeout: 10_000 })
+  expect(await readFile(dualFile, 'utf8')).not.toContain('from B')
+
+  // Both tabs closed, so nothing this test opened is left for a later test's
+  // `.last()` tab to trip over. B is still dirty (the refused save did not
+  // clear it), so its close asks first; A saved clean, so its close does not.
+  await page.getByTestId(`close-${paneB}`).click()
+  await expect(page.getByTestId('confirm-close')).toBeVisible()
+  await page.getByTestId('confirm-close-discard').click()
+  await expect(page.getByTestId(`tab-${paneB}`)).toHaveCount(0)
+
+  await page.getByTestId(`tab-${paneA}`).click()
+  await page.getByTestId(`close-${paneA}`).click()
+  await expect(page.getByTestId(`tab-${paneA}`)).toHaveCount(0)
 })
 
 /**
