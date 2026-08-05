@@ -19,51 +19,63 @@ import { tags } from '@lezer/highlight'
  * it off. `editor-missing` four files away records this repo refusing a colour
  * at 1.9:1 on exactly those grounds.
  *
- * **The bar is 4.5:1 against every entry in `PANE_COLORS`**, WCAG AA for
- * normal text, worst case the lightest pane `#38383d`. Choosing it over the
- * 7.89:1 `paneColors.test.ts` holds plain text to is a judgement, but the
- * cost of the higher bar was computed rather than asserted: lifting each hue
- * below, at its own hue and saturation, until it clears 7.89:1 moves seven of
- * the nine hardly at all (`#5eead4` to `#60ead4`, `#6ee7b7` to `#7ae9bd`,
- * `#fcd34d` not at all), so "a higher bar would flatten the palette into one
- * pale wash" is NOT what the arithmetic says and is not the reason.
+ * **The bar is split, and the split is the interesting part.** Eight of the
+ * nine clear **7.89:1** against every entry in `PANE_COLORS`, which is the
+ * figure this app already holds `#d4d4d8` to (`paneColors.test.ts`), so they
+ * meet the house standard rather than sitting under it. `comment` alone is
+ * held to **4.5:1**, WCAG AA, and that exception is named in the test so it
+ * cannot quietly spread to a second role.
  *
- * The reason is one entry. `comment` at 7.89:1 lands on `#d5d5d9`, one step
- * from the `#d4d4d8` that ordinary text is drawn in, so the colour that exists
- * to be quieter than the code stops being distinguishable from it. The bar is
- * 4.5 to keep one colour dim, not to keep nine colours apart, and if that
- * entry ever moved the rest could be held higher.
+ * The bar is a choice. The reason for the exception is a measurement, and it
+ * replaced a wrong one. This file used to say 4.5 was chosen for all nine
+ * because a higher bar would flatten distinct hues into one pale wash.
+ * Computing it says otherwise: lifting each colour at its own hue and
+ * saturation until it clears 7.89 leaves `value` untouched at `#fcd34d` and
+ * moves `type` and `string` by a step or two. Seven of the nine were nowhere
+ * near being the problem.
  *
- * `tests/unit/syntaxColors.test.ts` computes every colour against every pane
- * and is what fails when one is added below the bar.
+ * The problem is `comment`, and only `comment`. Lifted to 7.89 it lands on
+ * `#d5d5d9`, which is 1.01:1 against the `#d4d4d8` ordinary text is drawn in.
+ * The colour whose entire job is to read quieter than the code becomes the
+ * same colour as the code. "Dim" and "7.89:1 on the lightest pane a user can
+ * pick" are contradictory requirements, so one of them gives, and it is not
+ * legibility: at `#a1a1aa` it is 4.55:1 on that pane and still 1.73:1 away
+ * from plain text. `tests/unit/syntaxColors.test.ts` asserts both halves.
  *
- * Hues are chosen to stay separable from each other as well as from the
- * background, which contrast arithmetic alone does not give you: keyword,
- * string, comment, value and name each read as a different thing.
+ * **What the lift cost, measured rather than waved at.** Raising the eight
+ * compresses the palette: the closest pair by CIE76 distance in Lab, `string`
+ * and `type`, goes from 14.0 to 11.8, and `special` and `invalid` from 23.8 to
+ * 14.5. That is real compression and it is the honest residue of the argument
+ * this file used to make badly. It is also still far above the roughly 2.3
+ * that is one just-noticeable difference, and it was confirmed by eye in a
+ * running window rather than left as arithmetic.
  */
 export const SYNTAX_COLORS = {
   /** Language keywords: `const`, `class`, `return`. */
-  keyword: '#c4b5fd',
+  keyword: '#d9d0fe',
   /** Strings, and the inserted side of a diff. */
-  string: '#6ee7b7',
+  string: '#7deabf',
   /** Numbers, booleans, `null`, and anything else that is a bare value. */
   value: '#fcd34d',
   /** Names being bound or read: variables and properties. */
-  name: '#7dd3fc',
+  name: '#9edefd',
   /** Types, classes and namespaces. */
-  type: '#5eead4',
+  type: '#62ebd5',
   /** Regexes and escape sequences, which are strings that are not quite. */
-  escape: '#fdba74',
+  escape: '#fecd9a',
   /** `this`, `super`, macro names: names the language itself owns. */
-  special: '#f9a8d4',
+  special: '#fbc7e3',
   /**
-   * Comments and metadata. The dimmest entry, which is the point, and the one
-   * with the least headroom over the bar at 4.55:1 on `#38383d`. A comment
-   * that reads as loudly as the code is a comment in the way.
+   * Comments and metadata, and the one entry held to 4.5 rather than 7.89.
+   *
+   * 4.55:1 on `#38383d`, and 1.73:1 against the `#d4d4d8` of ordinary text,
+   * which is the number that earns the exception: a comment has to read
+   * quieter than the code beside it, and at 7.89 it cannot. See the head of
+   * this file.
    */
   comment: '#a1a1aa',
   /** Parse errors. Rare, and meant to be alarming when it is not. */
-  invalid: '#fca5a5',
+  invalid: '#fdc9c9',
 } as const
 
 /**
