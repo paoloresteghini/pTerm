@@ -5,7 +5,7 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { syntaxHighlighting } from '@codemirror/language'
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
 import { languageForPath } from './lib/languageForPath'
-import { syntaxColorStyle } from './lib/syntaxColors'
+import { GUTTER_TEXT, syntaxColorStyle } from './lib/syntaxColors'
 import { PANE_COLOR_DEFAULT, type PaneColor } from '../shared/paneColors'
 
 /**
@@ -67,6 +67,13 @@ export function saveEditorPane(paneId: string): Promise<void> {
  * one itself: measured without this line it is `rgb(245, 245, 245)`, a
  * near-white strip down the left of a near-black pane.
  *
+ * `color: GUTTER_TEXT` on the same rule, and NOT the `text-faint` (#3f3f46)
+ * this shipped with. Computed 2026-08-05 with `tests/unit/contrast.ts`,
+ * #3f3f46 is 1.905:1 on the default pane and 1.116:1 on `#38383d`, which is
+ * the same hex at the same numbers that the `editor-missing` note further down
+ * this file records this repo rejecting as invisible. The replacement carries
+ * its own stated bar and its own test; both are at `GUTTER_TEXT`.
+ *
  * **The font stack and size sit on `.cm-scroller`, the element the base theme
  * sets `fontFamily: monospace` on and the common ancestor of the content and
  * the gutters. Naming a REAL family there is the half that matters.** Two
@@ -113,7 +120,7 @@ function themeFor(color: PaneColor): Extension {
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
         fontSize: '11px',
       },
-      '.cm-gutters': { backgroundColor: color, color: '#3f3f46', border: 'none' },
+      '.cm-gutters': { backgroundColor: color, color: GUTTER_TEXT, border: 'none' },
       // The base theme's own focus ring is `1px dotted #212121`. This app
       // marks a focused pane differently, with an inset accent ring on the box
       // (`App.tsx`).
@@ -136,7 +143,10 @@ function themeFor(color: PaneColor): Extension {
  * pane, or one that does not sit inside its project), and it draws the same
  * thing a deleted file does, since from here they are the same sentence.
  *
- * Nothing saves yet. Typing reaches the document and goes no further.
+ * ⌘S is the only thing that writes. It arrives through `mounted`, which `save`
+ * below registers this pane in, and nothing here writes on a timer, on blur or
+ * on close: typing reaches the document and stays there until the user asks
+ * for it to go to disk.
  */
 export function FileView({
   projectId,
@@ -303,15 +313,26 @@ export function FileView({
   const save = useCallback(async () => {
     const current = view.current
     if (current === null || relPath === null || mtime.current === null) return
-    const text = current.state.doc.toString()
-    const result = await window.prcli.fsWrite(projectId, relPath, text, mtime.current)
+    const written = current.state.doc.toString()
+    const result = await window.prcli.fsWrite(projectId, relPath, written, mtime.current)
     if (result.ok) {
-      // The baseline moves to what was just written, so the pane is clean
-      // against the file rather than against what it was opened with.
-      baseline.current = text
+      // **The invariant: the baseline is what is on disk, and the dirty flag is
+      // the document compared against that same baseline, decided at the same
+      // moment.** The two lines below are the only place both move, and they
+      // say it in one expression each so they cannot disagree.
+      //
+      // `written` is the right baseline: it is exactly the bytes this write put
+      // on disk, and the pane is clean when it matches them. What is NOT safe
+      // is to conclude "clean" from having written: nothing blocks typing
+      // during the await above, so the document may have moved on since the
+      // snapshot. Reporting clean unconditionally left a pane holding
+      // characters that were on no disk with its dot off, and
+      // `requestClosePane` then closed it without asking, destroying them
+      // silently. So the flag is recomputed against the document as it is NOW.
+      baseline.current = written
       mtime.current = result.mtimeMs
       setRefused(null)
-      onDirtyChange(paneId, false)
+      onDirtyChange(paneId, current.state.doc.toString() !== baseline.current)
       return
     }
     setRefused(result.reason)
@@ -324,6 +345,18 @@ export function FileView({
    * the view mid-session. `dispatch` with a change spanning the whole
    * document mutates the existing view in place instead, which is reachable
    * from here and does not touch the compartment holding the theme.
+   *
+   * **A file that has gone by the time this runs sets `refused`, where the
+   * opening fetch sets `missing`.** The difference is what is at stake: this
+   * pane has a built view with the user's typing in it, and `missing`
+   * short-circuits the render below, which unmounts the host without running
+   * the build effect's cleanup (its dependencies have not changed). That left
+   * the document alive but unreachable, the dot on with nothing behind it, and
+   * ⌘S a silent no-op, because the banner it sets is behind that same early
+   * return. `refused` sits ABOVE the editor for exactly the reason written at
+   * the banner: unsaved text is what this is here to protect. A file that was
+   * never there at mount has no typing to protect, so the opening fetch keeps
+   * `missing`.
    */
   const reload = useCallback(() => {
     if (relPath === null) return
@@ -331,7 +364,7 @@ export function FileView({
       .fsRead(projectId, relPath)
       .then((found) => {
         if (found === null) {
-          setMissing(true)
+          setRefused('missing')
           return
         }
         // Set before the dispatch below, not after: the update listener
@@ -349,7 +382,11 @@ export function FileView({
         setRefused(null)
         onDirtyChange(paneId, false)
       })
-      .catch(() => setMissing(true))
+      // The same sentence for a read that faults as for one that answers null,
+      // which is the conflation the opening fetch already makes ("a file that
+      // will not read is a pane that says so"). Not `'failed'`: that banner
+      // reads "could not be written", and nothing here was being written.
+      .catch(() => setRefused('missing'))
   }, [projectId, relPath, paneId, onDirtyChange])
 
   // Registered and deregistered here rather than inside the view-build

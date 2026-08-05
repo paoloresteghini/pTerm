@@ -53,7 +53,14 @@ import { tags } from '@lezer/highlight'
 export const SYNTAX_COLORS = {
   /** Language keywords: `const`, `class`, `return`. */
   keyword: '#d9d0fe',
-  /** Strings, and the inserted side of a diff. */
+  /**
+   * Strings, and the REMOVED side of a diff.
+   *
+   * Removed, not inserted: the style below groups `tags.deleted` here and
+   * `tags.inserted` under `value`, which is how `defaultHighlightStyle` groups
+   * them and is why this reads backwards. Worth stating because this one is a
+   * green, so a reader going by hue alone concludes the opposite.
+   */
   string: '#7deabf',
   /** Numbers, booleans, `null`, and anything else that is a bare value. */
   value: '#fcd34d',
@@ -77,6 +84,32 @@ export const SYNTAX_COLORS = {
   /** Parse errors. Rare, and meant to be alarming when it is not. */
   invalid: '#fdc9c9',
 } as const
+
+/**
+ * The editor's line numbers: the one colour in a pane that is not a syntax role.
+ *
+ * Here rather than beside the theme that uses it (`FileView.tsx`) because this
+ * is where the bar and the test that enforces it live. `syntaxColors.test.ts`
+ * holds it to 4.5, WCAG AA, against every entry in `PANE_COLORS`, which is
+ * `comment`'s exception rather than the house 7.89 above, taken for `comment`'s
+ * own reason: a line number is meant to read quieter than the code it numbers.
+ * That is a second named exception and not a spreading one, because it is
+ * asserted by name in the same file the first one is.
+ *
+ * **It lands on `comment`'s own value, and that is arithmetic rather than
+ * laziness.** Measured 2026-08-05 with `tests/unit/contrast.ts`: the dimmest
+ * neutral grey clearing 4.5 on `#38383d`, the lightest pane the right-click
+ * menu offers, is `#a1a1a1` at 4.513. The bar is a constraint on lightness, so
+ * anything that meets it is at least that light and there was no dimmer choice
+ * available to make. This one is 4.549 there and 1.734 against the `#d4d4d8`
+ * of ordinary text, so it still reads quieter than what it numbers.
+ *
+ * What it replaced: `#3f3f46`, this app's `text-faint`, measured on the same
+ * helper at 1.905 on the default pane and 1.116 on `#38383d`. `FileView.tsx`
+ * records this repo rejecting that exact hex at those exact numbers for
+ * `editor-missing`, and called it invisible.
+ */
+export const GUTTER_TEXT = '#a1a1aa'
 
 /**
  * `defaultHighlightStyle`'s tag coverage, in colours that can be read here.

@@ -189,8 +189,10 @@ test('a second file opens a second tab', async () => {
  * existing TAB is how you get back to a file.
  */
 
-// Nothing saves in this slice, so this asserts the keystroke reached the
-// document and nothing about where it went afterwards.
+// Deliberately says nothing about disk, even though ⌘S now writes: this is the
+// keystroke reaching the document and nothing else. What typing then goes on to
+// do is `Cmd+S writes the file and clears the dot`'s to assert, and it reads
+// the bytes rather than the screen.
 test('the editor takes typing', async () => {
   const content = visiblePane().getByTestId('editor-content')
   await expect(content).toContainText('export const answer = 42', { timeout: 10_000 })
@@ -826,6 +828,116 @@ test('two editor panes on one file: a save from one refuses the other, and neith
   await page.getByTestId(`tab-${paneA}`).click()
   await page.getByTestId(`close-${paneA}`).click()
   await expect(page.getByTestId(`tab-${paneA}`)).toHaveCount(0)
+})
+
+/**
+ * A keystroke that lands while a save is in flight, and the dot afterwards.
+ *
+ * `save` snapshots the document, then awaits an IPC round trip, a disk write
+ * and a `stat`. Nothing blocks input during that await, so a character typed
+ * inside it is in the document and on no disk. Concluding "clean" from the
+ * fact of having written is what made that lossy: the dot went out, and
+ * `requestClosePane` then took its no-prompt branch and destroyed the
+ * character without asking. Type, ⌘S, type one more, stop, close.
+ *
+ * **The race is placed rather than raced for**, and that is the only reason
+ * this test is worth anything. The ⌘S and the keystroke go out in ONE
+ * `page.evaluate`, which is one synchronous task in the renderer:
+ * `saveEditorPane` runs inside `dispatchEvent`, so the snapshot is taken and
+ * the IPC is in flight before that call returns, and the `execCommand` on the
+ * next line cannot be beaten by a reply that needs a later task to arrive.
+ * The keystroke lands inside the await every run, with no timing to tune.
+ *
+ * Two things this trades away, both deliberately. The ⌘S is a synthetic
+ * `keydown` on `window`, where `Cmd+S writes the file and clears the dot`
+ * above presses the real key through the same handler, so the real route is
+ * covered and this one is not asserting it. And `execCommand('insertText')`
+ * is how the character is typed, which is checked twice rather than assumed:
+ * its return value, and `toContainText('savedz')` on the pane. An insert that
+ * quietly did nothing reds there rather than leaving a clean pane to agree
+ * with a broken one.
+ *
+ * **The settle is a `waitForTimeout` and it cannot be anything better.** What
+ * has to be waited out is the save's own continuation, which paints nothing
+ * of its own: with the defect present the dot goes out only when it runs, so
+ * an assertion made a moment too early passes against the bug. Nothing else
+ * in the pane moves at that instant: `setRefused(null)` is invisible and the
+ * new `mtime` is only observable through another save, which would clear the
+ * dot itself and destroy the thing being measured. Holding the write open from
+ * the page, which would have given an exact marker, was tried and is not
+ * available: measured 2026-08-05, `contextBridge` hands the renderer a frozen
+ * object, `window.prcli` is `writable: false, configurable: false` and so is
+ * `fsWrite` on it, and both a plain assignment and `defineProperty` are refused
+ * (the assignment silently). The continuation is triggered by the same IPC
+ * reply the disk write precedes, so once the bytes below are on disk it is one
+ * message-loop hop away; two seconds is the same kind of margin the ⌘D test
+ * above waits out for the same kind of reason.
+ *
+ * **Mutation measured 2026-08-05**: `FileView.tsx`'s `onDirtyChange(paneId,
+ * current.state.doc.toString() !== baseline.current)` put back to
+ * `onDirtyChange(paneId, false)`, the line this test exists for. Reverted
+ * after measuring; the result is recorded at the assertion it failed on.
+ */
+test('a keystroke typed while a save is in flight leaves the pane dirty, and closing it still asks', async () => {
+  const raceFile = join(projectCwd, 'race.txt')
+  await writeFile(raceFile, 'original\n')
+  await page.getByTestId('tree-refresh').click()
+
+  // By count and not off `.last()` straight after the click, for the reason
+  // the test above spells out.
+  const before = await page.locator('[data-testid^="tab-"]').count()
+  await page.getByTestId('tree-row-race.txt').click()
+  await expect(page.locator('[data-testid^="tab-"]')).toHaveCount(before + 1)
+  const paneId = (
+    (await page.locator('[data-testid^="tab-"]').last().getAttribute('data-testid')) ?? ''
+  ).replace('tab-', '')
+  const content = visiblePane().getByTestId('editor-content')
+  await expect(content).toContainText('original', { timeout: 10_000 })
+
+  await content.locator('.cm-content').click()
+  await page.keyboard.press('ControlOrMeta+End')
+  await page.keyboard.type('\nsaved')
+  await expect(page.getByTestId(`editor-dirty-${paneId}`)).toBeAttached()
+
+  // The whole race, in one task. `code: 'KeyS'` because the handler reads
+  // `event.code`, and on `window` because that is where it is registered and
+  // because a target that is not an Element passes its `data-shortcuts` guard.
+  const typed = await page.evaluate(() => {
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'KeyS', metaKey: true, bubbles: true, cancelable: true }),
+    )
+    return document.execCommand('insertText', false, 'z')
+  })
+  expect(typed).toBe(true)
+
+  // The two halves of the race, each read where it landed: the character is in
+  // the document, and the bytes on disk are the snapshot from before it.
+  await expect(content).toContainText('savedz', { timeout: 10_000 })
+  await expect.poll(() => readFile(raceFile, 'utf8'), { timeout: 10_000 }).toContain('saved')
+  expect(await readFile(raceFile, 'utf8')).not.toContain('savedz')
+
+  await page.waitForTimeout(2000)
+
+  // **Mutation measured 2026-08-05**, with `onDirtyChange(paneId, false)` put
+  // back: FAILED here with
+  //
+  //     expect(locator).toBeAttached() failed
+  //     Locator: getByTestId('editor-dirty-2c94a2074efc0d3e')
+  //     Error: element(s) not found
+  //
+  // which is the dot going out over a document holding a character that is on
+  // no disk.
+  await expect(page.getByTestId(`editor-dirty-${paneId}`)).toBeAttached()
+
+  // And what the dot is FOR. With the same mutation still in and the assertion
+  // above commented out to see the rest of the path, this FAILED too, with
+  // `expect(locator).toBeVisible() failed / Locator: getByTestId('confirm-close')
+  // / Error: element(s) not found`: the tab closed with no prompt at all, which
+  // is the data loss itself rather than a signal of it.
+  await page.getByTestId(`close-${paneId}`).click()
+  await expect(page.getByTestId('confirm-close')).toBeVisible()
+  await page.getByTestId('confirm-close-discard').click()
+  await expect(page.getByTestId(`tab-${paneId}`)).toHaveCount(0)
 })
 
 /**

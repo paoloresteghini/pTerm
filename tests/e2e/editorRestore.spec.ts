@@ -269,7 +269,17 @@ test('an unsaved edit is gone after a relaunch, and the tab is clean', async () 
 
   const second = await launch()
   const reopened = await second.firstWindow()
-  await expect(reopened.getByTestId('editor-content')).toBeVisible({ timeout: 10_000 })
+  // The load, anchored POSITIVELY before either negative below is read, and it
+  // is the whole point of this line. `editor-content` is the host div: it is on
+  // screen from the first paint, before `fsRead` resolves and before CodeMirror
+  // builds anything under it, and it has a non-zero box, so a `toBeVisible`
+  // here is satisfied by an EMPTY editor. Both assertions below are negatives,
+  // and both pass against an empty editor too. Anchoring on the seeded bytes,
+  // which are on disk and unchanged, is what makes the two of them wait for a
+  // document to actually be there before they say anything about it.
+  await expect(reopened.getByTestId('editor-content')).toContainText('const seeded = 1', {
+    timeout: 10_000,
+  })
   await expect(reopened.getByTestId('editor-content')).not.toContainText('// not saved')
   await expect(reopened.getByTestId('editor-dirty-e1')).toHaveCount(0)
   await second.close()
