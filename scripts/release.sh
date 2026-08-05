@@ -20,6 +20,25 @@ if [[ -n "$(git status --porcelain)" ]]; then
   exit 1
 fi
 
+# Releases are cut from one branch. This checkout is shared by several agent
+# sessions at once, and HEAD has moved under a running session before; a
+# release built from the wrong branch is public the moment it pushes.
+RELEASE_BRANCH="${RELEASE_BRANCH:-master}"
+CURRENT_BRANCH="$(git branch --show-current)"
+if [[ "$CURRENT_BRANCH" != "$RELEASE_BRANCH" ]]; then
+  echo "On branch '$CURRENT_BRANCH', but releases are cut from '$RELEASE_BRANCH'." >&2
+  echo "Switch branches, or set RELEASE_BRANCH to override." >&2
+  exit 1
+fi
+
+# gh release create needs the repo to already exist on GitHub, and
+# git push --follow-tags needs somewhere to push to. Failing here is cheap;
+# failing after the version bump, the tag and a multi-minute build is not.
+if [[ -z "$(git remote)" ]]; then
+  echo "No git remote configured. Create the GitHub repo first, then re-run." >&2
+  exit 1
+fi
+
 npm run typecheck
 npm test
 
