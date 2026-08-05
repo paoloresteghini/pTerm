@@ -210,8 +210,12 @@ export async function writeFileInside(
     if (!isInside(realRoot, realTarget)) return { ok: false, reason: 'failed' }
     info = await stat(realTarget)
   } catch {
-    // `realpath` and `stat` both reject for a path with nothing at the end of
-    // it, which is the one refusal the caller can act on differently.
+    // A catch-all, not only "nothing at the end of the path": ENOENT is the
+    // common case and the one the caller means by `missing`, but EACCES on a
+    // directory in the path or ELOOP would land here too, and are reported
+    // the same way even though the file is not actually gone. Not split out
+    // by error code today; if a caller ever needs to tell those apart, this
+    // is where that check would go.
     return { ok: false, reason: 'missing' }
   }
   if (!info.isFile()) return { ok: false, reason: 'failed' }

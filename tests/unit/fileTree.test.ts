@@ -42,6 +42,28 @@
 // root" cases (.. and absolute path) pass unchanged because resolveInside
 // catches those before this guard runs, the same asymmetry mutation 3 found
 // for readFileInside. Tests observed on 2026-08-05.
+//
+// PLAN DEFECT, found by review, not by this task's own run: the
+// expectedMtimeMs: 0 used above meant mutation 5 was caught by the mtime
+// check, not the containment check it was supposed to prove. Feeding the
+// same mutation the outside file's REAL mtime (readFileInside(outside,
+// 'secret.txt'), the only mtime check that could still be live) showed the
+// write actually succeeding outside the project root: { ok: true, mtimeMs:
+// ... }, and outside/secret.txt's content became the string the write sent.
+// The test was strengthened to read that real mtime instead of a literal
+// and to assert the outside file's content is unchanged, so containment is
+// now the only guard that can produce this test's refusal.
+//
+// Mutation 6: writeFileInside's realpath containment check, re-run against
+// the strengthened test.
+// Changed: if (!isInside(realRoot, realTarget)) return { ok: false, reason:
+// 'failed' }   to:   if (false) return { ok: false, reason: 'failed' }
+// Observed: 1 test fails, "refuses to write through a symlink pointing
+// outside", now for the right reason: { ok: true, mtimeMs: ... } instead of
+// the expected refusal, i.e. the write actually reached the file outside
+// the project root. Restored and confirmed green (38 passed) and `git diff
+// src/main/files/tree.ts` clean before proceeding. Tests observed on
+// 2026-08-05.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises'
@@ -274,9 +296,25 @@ describe('writeFileInside', () => {
   })
 
   // The half `..` cannot express, which the listing and the read both cover.
+  //
+  // `expectedMtimeMs` is read from the real file rather than passed as a
+  // literal, and unlike a plain `readFileInside(root, 'escape/secret.txt')`
+  // (which is refused by that function's own intact guard), it is read
+  // through `outside` as the root: a direct, non-symlink read of the same
+  // file the write targets. With a literal like `0` the mtime check would
+  // refuse on its own and this test would pass even if the containment
+  // guard were deleted, which a review of this test caught. Using the real
+  // mtime makes the containment guard the only thing that can produce this
+  // refusal.
   it('refuses to write through a symlink pointing outside', async () => {
-    const result = await writeFileInside(root, 'escape/secret.txt', 'x', 0)
+    const before = await readFileInside(outside, 'secret.txt')
+    const result = await writeFileInside(root, 'escape/secret.txt', 'PWNED', before!.mtimeMs)
     expect(result).toEqual({ ok: false, reason: 'failed' })
+    // And it did not write, the same proof the changed-case test above makes:
+    // a refusal that still wrote is worse than no check, and matters more
+    // here because the write would land outside the project entirely.
+    const after = await readFileInside(outside, 'secret.txt')
+    expect(after?.text).toBe('no')
   })
 
   // B2 writes over a file that exists and does nothing else. A file that is
