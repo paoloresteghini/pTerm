@@ -22,12 +22,13 @@ const INTERVAL_MS = 6 * 60 * 60 * 1000
  * wiring the harness to set it is tracked separately.
  *
  * **The scheduling here is not covered by any test.** The decision it wraps is
- * (`tests/unit/updateService.test.ts`, twelve cases) and so is the bar it
- * feeds (`tests/e2e/update.spec.ts`), but the two timers, the env switch and
- * the `send` are verified by reading only. That is a deliberate trade: making
- * them testable means injecting a clock and a sender through main's startup,
- * and the failure mode being bought off is "the bar never appears", which is
- * the same as not having built the feature.
+ * unit tested (`tests/unit/updateService.test.ts`). The bar it would feed is
+ * not: the E2E spec that drives it is a later task, deferred while another
+ * session rewrites `App.tsx` underneath it. The two timers, the env switch
+ * and the `send` here are verified by reading only. That is a deliberate
+ * trade: making them testable means injecting a clock and a sender through
+ * main's startup, and the failure mode being bought off is "the bar never
+ * appears", which is the same as not having built the feature.
  */
 export function scheduleUpdateChecks(window: () => BrowserWindow | null): void {
   if (process.env.PRCLI_UPDATE_CHECK === '0') return
