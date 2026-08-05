@@ -120,12 +120,23 @@ export function mergeSessionlessPanes(input: MergeInput): MergeResult {
     // saved row would put a stale axis or stale ratios back over that. Length
     // equality also means nothing was taken by an earlier row, since `kids` is
     // built from the live kids minus whatever was claimed.
+    //
+    // The selection is the one field that reasoning does not cover, so it goes
+    // through `selectionFor` here as it does everywhere else. Restore resolved
+    // the axis and the ratios against the panes it had, and those are these
+    // panes; it resolved the SELECTION against the saved row it found by
+    // `groupId`, which is not always the row this loop matched by `id`. When
+    // the two differ, the live row carries a fallback and the saved row carries
+    // the user's actual choice, and `store.write` puts whichever is emitted
+    // back on disk. Every emitted row's selection goes through one rule, so
+    // that the rule is structural rather than a property of which branch a tab
+    // happened to take.
     if (
       live &&
       live.layout.kids.length === kids.length &&
       live.layout.kids.every((id, at) => id === kids[at])
     ) {
-      tabs.push(live)
+      tabs.push({ ...live, activePaneId: selectionFor(kids, [saved, live]) })
       continue
     }
 
@@ -148,7 +159,10 @@ export function mergeSessionlessPanes(input: MergeInput): MergeResult {
     if (kids.length === 0) continue
     for (const id of kids) claimed.add(id)
     if (kids.length === tab.layout.kids.length) {
-      tabs.push(tab)
+      // Through `selectionFor` for the same reason as above, though here it can
+      // only ever return the row's own selection or its first kid: this row has
+      // no saved counterpart to disagree with it.
+      tabs.push({ ...tab, activePaneId: selectionFor(kids, [tab]) })
       continue
     }
     tabs.push({

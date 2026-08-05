@@ -161,6 +161,32 @@ describe('mergeSessionlessPanes', () => {
     expect(result.tabs[0]?.activePaneId).toBe('e1')
   })
 
+  // The same rule on the pass-through path, which is where it is easiest to
+  // lose: a tab whose kids did not change is emitted as the live row itself, so
+  // a selection rule applied only where a row is REBUILT governs some emitted
+  // rows and not others.
+  //
+  // The two selections differ here because the live row was built against a
+  // different saved row than this loop matches: `restore.ts` looks a saved row
+  // up by `groupId` (`savedByGroup`), and this function matches by `id`. A
+  // saved row whose group has moved is found by one and not the other, so
+  // `tabRowFor` fell back to `kids[0]` while the saved row on disk says `t2`.
+  it('keeps a saved selection on a tab whose kids did not change', () => {
+    const result = mergeSessionlessPanes({
+      livePanes: [term('t1'), term('t2')],
+      liveTabs: [row('tabA', ['t1', 't2'], [0.5, 0.5], 't1', 'gLive')],
+      savedPanes: [term('t1'), term('t2'), editor('e1')],
+      savedTabs: [
+        row('tabA', ['t1', 't2'], [0.5, 0.5], 't2', 'gOld'),
+        row('tabE', ['e1'], [1], 'e1'),
+      ],
+    })
+    // Untouched, which is the point: the fast path is still taken.
+    expect(result.tabs[0]?.layout.kids).toEqual(['t1', 't2'])
+    expect(result.tabs[0]?.layout.ratio).toEqual([0.5, 0.5])
+    expect(result.tabs[0]?.activePaneId).toBe('t2')
+  })
+
   // Two saved rows sharing one `groupId`. `store.read()` accepts this and
   // `restore.ts`'s `savedByGroup` contemplates it outright ("First row wins").
   // `tabRowFor` cannot produce a pane in two rows because it is called once per
