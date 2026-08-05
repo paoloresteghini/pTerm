@@ -63,8 +63,8 @@ is waiting for at launch.
 small semver comparison written in this repo (roughly 15 lines: split on `.`,
 numeric compare each field). No dependency is added for this.
 
-A tag that is not plain `major.minor.patch` — a prerelease, a suffix, anything
-unparseable — is treated as "no update", not as an error.
+A tag that is not plain `major.minor.patch` (a prerelease, a suffix, anything
+unparseable) is treated as "no update", not as an error.
 
 ### Failure is always silent
 
@@ -133,11 +133,11 @@ Preload exposes all three on `PrcliApi` following the existing pattern, with
 
 New:
 
-- `src/main/update/check.ts` — fetch, parse, compare. Pure functions for parse
+- `src/main/update/check.ts`: fetch, parse, compare. Pure functions for parse
   and compare, exported for unit test.
-- `src/main/update/store.ts` — read/write `~/.prcli/update.json`.
-- `src/renderer/UpdateBar.tsx` — the bar.
-- `scripts/release.sh` — the release flow below.
+- `src/main/update/store.ts`: read/write `~/.prcli/update.json`.
+- `src/renderer/UpdateBar.tsx`: the bar.
+- `scripts/release.sh`: the release flow below.
 
 Modified: `src/shared/ipc.ts`, `src/preload/index.ts`,
 `src/main/ipc/register.ts`, `src/main/index.ts` (schedule the check),
@@ -151,9 +151,9 @@ build risk for `node-pty` on CI, and a slower loop, for no gain at one user.
 
 `scripts/release.sh`:
 
-1. `npm version <patch|minor|major>` — bumps `package.json` and creates the
+1. `npm version <patch|minor|major>`: bumps `package.json` and creates the
    `v<version>` tag.
-2. `npm run make` — produces `out/make/zip/darwin/arm64/PRCLI-darwin-arm64-<version>.zip`.
+2. `npm run make`: produces `out/make/zip/darwin/arm64/PRCLI-darwin-arm64-<version>.zip`.
 3. `git push --follow-tags`.
 4. `gh release create v<version> <the zip>`.
 
@@ -169,7 +169,7 @@ gh repo create <owner>/PRCLI --public --source=. --push
 
 `<owner>` is assumed to be `paoloresteghini`, from the author email in
 `package.json`; confirm before running. The repo currently contains `docs/`,
-tmux integration and Claude Code hook installation code — review for anything
+tmux integration and Claude Code hook installation code. Review it for anything
 that should not be public before the first push.
 
 ## Testing

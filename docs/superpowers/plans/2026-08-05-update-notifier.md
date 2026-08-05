@@ -372,7 +372,7 @@ import { configRoot } from '../state/store'
  *
  * Deliberately NOT a field on `PrcliConfig`. That store is at `version: 8`,
  * and adding a field to it means a migration to 9 plus an entry in
- * `attachSavedFields` — both on the path that decides what survives a
+ * `attachSavedFields`, both on the path that decides what survives a
  * relaunch, for a value nothing but this module ever reads. A file of its own
  * costs thirty lines and cannot break restore.
  *
