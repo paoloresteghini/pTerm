@@ -18,6 +18,13 @@ describe('relativeToProject', () => {
   it('answers null for the project root itself', () => {
     // Not `''`: the root is a directory, not a file inside the project, and an
     // empty relative path would ask `fsRead` to read the directory.
+    //
+    // This answer is over-determined, and the assertion is kept for the
+    // behaviour rather than for the branch. Measured 2026-08-04: deleting the
+    // `filePath === root` line still passes this, because the prefix test after
+    // it answers null too. So a mutation of that one line staying green here is
+    // the expected result, not a dead test. What must never change is the
+    // answer.
     expect(relativeToProject('/tmp/demo', '/tmp/demo')).toBeNull()
   })
 
@@ -27,8 +34,11 @@ describe('relativeToProject', () => {
 
   it('answers null for a sibling whose name starts with the root', () => {
     // The trailing-separator point `isInside` makes in `src/main/files/tree.ts`,
-    // from the other side of the wire: a plain `startsWith` would call this a
-    // child and hand `fsRead` a relative path spelled `-2/app.ts`.
+    // from the other side of the wire: a plain `startsWith(root)` would call
+    // this a child and hand `fsRead` a relative path spelled `2/app.ts` (the
+    // slice is `root.length + 1`, so it eats the `-` as if it were the
+    // separator, which is what makes the wrong answer look like a plausible
+    // one). Measured in node 2026-08-04.
     expect(relativeToProject('/tmp/demo', '/tmp/demo-2/app.ts')).toBeNull()
   })
 
@@ -48,10 +58,14 @@ describe('relativeToProject', () => {
   })
 
   it('answers null when either side is not absolute', () => {
-    // The empty `cwd` a synthetic project could carry is the case that matters:
-    // without the guard every absolute path would read as a child of it.
+    // The empty `cwd` is the case that matters, and it is the one a synthetic
+    // project could carry: without the guard's `cwd` half the root becomes `''`
+    // and every absolute path reads as a child of it. These two discriminate.
     expect(relativeToProject('', '/tmp/demo/app.ts')).toBeNull()
     expect(relativeToProject('demo', '/tmp/demo/app.ts')).toBeNull()
+    // The third does not, and is kept for the behaviour like the root case
+    // above. Measured 2026-08-04: deleting the guard's `filePath` half still
+    // passes this, because a relative path cannot start with an absolute root.
     expect(relativeToProject('/tmp/demo', 'src/app.ts')).toBeNull()
   })
 

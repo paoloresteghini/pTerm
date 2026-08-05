@@ -27,11 +27,14 @@ export function FileView({ projectId, relPath }: { projectId: string; relPath: s
       setMissing(true)
       return
     }
-    // Cleared before the fetch, not left from the previous path: nothing in
-    // this slice ever changes a pane's file, but a component that answers for
-    // the file it was last asked about is not a thing to leave lying around
-    // for the slice that does.
+    // BOTH cleared before the fetch, not left from the previous path: nothing
+    // in this slice ever changes a pane's file, but a component that answers
+    // for the file it was last asked about is not a thing to leave lying
+    // around for the slice that does. Clearing only `missing` would have been
+    // half of that, and the visible half is the one left behind: the pane would
+    // go on rendering the OLD file's text until the new read resolved.
     setMissing(false)
+    setText(null)
     let live = true
     window.prcli
       .fsRead(projectId, relPath)
@@ -55,7 +58,26 @@ export function FileView({ projectId, relPath }: { projectId: string; relPath: s
 
   if (missing) {
     return (
-      <div data-testid="editor-missing" className="p-3 font-mono text-[11px] text-faint">
+      <div
+        data-testid="editor-missing"
+        // `text-term-fg`, and NOT the `text-faint` that is this app's token for
+        // secondary text, which is a deliberate departure from the convention
+        // rather than drift. This string is not an annotation beside content,
+        // it IS the pane's entire content, and it reports a failure the user
+        // has to read to understand why their file is not on screen.
+        //
+        // Measured 2026-08-04: `text-faint` (#3f3f46) is about 1.9:1 on the
+        // default pane and about 1.1:1 if the user right-clicks that pane and
+        // picks #38383d, which is invisible. `text-muted` was the smaller step
+        // and was rejected by the same measurement: 4.1:1 on the default pane
+        // but only 2.4:1 on that same colour, which repeats the defect in a
+        // quieter voice. `text-term-fg` is 13.5:1 and 7.89:1, the second being
+        // the number `paneColors.ts` already records for its worst case.
+        //
+        // Everywhere else in the app `text-faint` stays what it is: this is one
+        // instance departing, not a convention being rewritten.
+        className="p-3 font-mono text-[11px] text-term-fg"
+      >
         That file is no longer there.
       </div>
     )

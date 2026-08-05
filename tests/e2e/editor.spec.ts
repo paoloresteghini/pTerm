@@ -157,5 +157,13 @@ test('a file that cannot be read says so', async () => {
   await page.getByTestId('tree-refresh').click()
   // The tab is still open on the deleted file. Reopening it is what re-reads.
   await page.reload()
+  // `visiblePane()` scopes to the ACTIVE group, so this only sees the message
+  // if the `src/app.ts` tab is still the selected one after the reload. It is,
+  // because `CHANNELS.setActive` writes the selection through to
+  // `ProjectRecord.activeTabId` inside `serialise`, and restore hands it back:
+  // the config dumped mid-run during this task's development carried
+  // `"activeTabId"` naming the pane the last click selected. If that ever
+  // stopped holding, this test would fail rather than pass falsely, since the
+  // element would be present but in a hidden group.
   await expect(visiblePane().getByTestId('editor-missing')).toBeVisible({ timeout: 10_000 })
 })

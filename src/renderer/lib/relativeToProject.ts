@@ -27,14 +27,29 @@
  * trailing-separator point `isInside` makes in `src/main/files/tree.ts`.
  */
 export function relativeToProject(cwd: string, filePath: string): string | null {
-  // Both must be absolute. A relative root has no meaning to compare against,
-  // and the empty `cwd` a synthetic project could carry would otherwise make
-  // every absolute path look like a child of it.
+  // Both must be absolute, and the two halves of that are not equally load
+  // bearing. Measured 2026-08-04 by re-implementing this function three ways
+  // and running every input in its test file through all three:
+  //
+  // - The `cwd` half decides answers. With `cwd: ''`, which is the shape a
+  //   synthetic project could carry, `root` below becomes `''` and every
+  //   absolute path reads as a child of it.
+  // - The `filePath` half decides none. By the time it is reached `root` is
+  //   absolute, so a relative `filePath` can never start with it and the
+  //   prefix test below answers null on its own.
+  //
+  // Kept as one condition anyway: the rule is "both sides are absolute paths",
+  // and half a stated rule is harder to reason about than a redundant clause.
+  // It is defence, not mechanism, which is what this comment exists to say.
   if (!cwd.startsWith('/') || !filePath.startsWith('/')) return null
   const root = cwd.replace(/\/+$/, '')
-  // The project root itself is not a file inside the project, so an exact match
-  // is null rather than an empty relative path, which `fsRead` would resolve
-  // back to the directory and refuse anyway, less legibly.
+  // The project root itself is not a file inside the project.
+  //
+  // Defence again, measured the same way and on the same date: deleting this
+  // line changes no answer, because `/tmp/demo` does not start with
+  // `/tmp/demo/` and the prefix test below already returns null. Kept because
+  // "the root is not a file in it" is worth stating where someone can read it,
+  // rather than leaving it to emerge from an off-by-one in a `startsWith`.
   if (filePath === root) return null
   if (!filePath.startsWith(`${root}/`)) return null
   const rest = filePath.slice(root.length + 1)
