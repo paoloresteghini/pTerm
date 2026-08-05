@@ -41,6 +41,8 @@ export const CHANNELS = {
   notesRead: 'prcli:notesRead',
   notesWrite: 'prcli:notesWrite',
   fsList: 'prcli:fsList',
+  fsRead: 'prcli:fsRead',
+  openEditor: 'prcli:openEditor',
 } as const
 
 /**
@@ -76,9 +78,31 @@ export type MenuCommand =
  * A declaration of intent, not a gate on status: it decides the launch command
  * and whether an expecting-hooks dot is drawn before any event has arrived.
  * Every tab carries PRCLI_TAB_ID regardless, so a `claude` typed by hand into
- * a shell tab gets full status the moment its first hook lands.
+ * a shell tab gets full status the moment its first hook lands. `editor` is
+ * the exception: it has no launch command at all.
  */
-export type TabType = 'claude' | 'preset' | 'shell'
+export type TabType = 'claude' | 'preset' | 'shell' | 'editor'
+
+/**
+ * Whether a pane of this kind has a tmux session behind it.
+ *
+ * The one place the kinds are divided that way, so the several things that
+ * only make sense over a session (dying, being restarted, being counted as
+ * blocking a human, being killed on close) all ask the same question. Written
+ * as a predicate on the KIND rather than on `tmuxSession` being present,
+ * because the answer has to hold for a pane whose session is temporarily
+ * unknown: a `TabDescriptor` for a terminal reaches the renderer with its
+ * session, but a `died` pane and a pane mid-restart are still terminals and
+ * still restartable.
+ *
+ * Here rather than in `workspace.ts` so main can reach it too: `closePane` has
+ * the same question to answer before it kills anything, and two spellings of
+ * "is this a terminal" is how a pane comes to be killable on one side of the
+ * IPC boundary and not the other.
+ */
+export function canHaveSession(pane: { type: TabType }): boolean {
+  return pane.type !== 'editor'
+}
 
 /** A notification rule, exactly as it is stored. */
 export interface Rule {
@@ -127,12 +151,27 @@ export interface FileEntry {
   dir: boolean
 }
 
+/**
+ * One file's text and the mtime it was read at.
+ *
+ * Declared here rather than only in `src/main/files/tree.ts` for the reason
+ * `FileEntry` gives: the renderer draws this.
+ */
+export interface FileContents {
+  text: string
+  mtimeMs: number
+}
+
 export interface TabDescriptor {
   id: string
   projectSlug: string
   cwd: string
   command?: string
-  tmuxSession: string
+  /**
+   * Absent on an editor pane, which has no tmux session at all. Present on
+   * every terminal pane, which is what `isPane` still enforces per kind.
+   */
+  tmuxSession?: string
   type: TabType
   /** What the user called this tab. Absent until they name one. */
   title?: string
@@ -141,6 +180,14 @@ export interface TabDescriptor {
    * which is what every pane was before this field existed.
    */
   color?: PaneColor
+  /**
+   * The file an editor pane is showing, absolute. Absent on every terminal
+   * pane, and absent on an editor pane whose file could not be read.
+   *
+   * Absolute here and relative across `fsRead`: this is written by main and
+   * read back by main, and never spelled by the renderer.
+   */
+  filePath?: string
 }
 
 export interface TabLayout {
@@ -558,4 +605,28 @@ export interface PrcliApi {
    * empty list rather than rejecting.
    */
   fsList(projectId: string, relPath: string): Promise<FileEntry[]>
+  /**
+   * One file of one project, or null if it cannot be read.
+   *
+   * `relPath` is relative to the project's own `cwd` and is resolved against
+   * it in main: no absolute path crosses this boundary. A path that would
+   * leave the project, a directory, and a missing file all resolve to null
+   * rather than rejecting.
+   */
+  fsRead(projectId: string, relPath: string): Promise<FileContents | null>
+  /**
+   * Open one file of one project in an editor pane of its own, in a new tab.
+   *
+   * `relPath` is relative and resolved in main, like `fsList` and `fsRead`: the
+   * absolute `filePath` on the pane this answers with is one main spelled, and
+   * the renderer never supplies one. A path that would leave the project, and a
+   * file that cannot be read, both resolve to null rather than rejecting, and
+   * to no tab: a tab that could never show anything is worse than a click that
+   * did nothing.
+   *
+   * The pane it resolves to founds its own tab, so the pane's id is that tab's
+   * id. That is what makes this reply the same shape as `open`'s, and what lets
+   * the renderer select the new tab by the pane it was handed.
+   */
+  openEditor(projectId: string, relPath: string): Promise<TabDescriptor | null>
 }

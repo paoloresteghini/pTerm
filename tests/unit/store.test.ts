@@ -1,3 +1,24 @@
+/**
+ * Mutation record: `isPane`'s per-kind guard, `describe('ConfigStore
+ * migration, v7 to v8')`.
+ *
+ * `still rejects a terminal row with no session` and `still rejects a row
+ * with no type and no session` passed at RED before `isPane`/`migrate` were
+ * taught v8, and passed for the wrong reason: a `version: 8` file was an
+ * unrecognised future version, so `migrate` refused the whole file and
+ * `config.panes` came back `[]` regardless of what the individual rows
+ * looked like. Neither test exercised `isPane`'s per-kind guard at all until
+ * v8 became a recognised version. Recorded here so a reader of just these two
+ * tests does not assume they always meant something.
+ *
+ * Measured (`isPane`'s final line changed to `return true`, migrate already
+ * teaching v8): `npx vitest run tests/unit/store.test.ts` -> 2 failed, 57
+ * passed. The two that failed were exactly `still rejects a terminal row
+ * with no session` and `still rejects a row with no type and no session`,
+ * each on `expect(config.panes).toEqual([])`, receiving the malformed rows
+ * back instead of an empty array. Restored, and `git diff src/main/state/
+ * store.ts` confirmed empty for that line before committing.
+ */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 // afterEach is used both for temp-dir cleanup and PRCLI_CONFIG_DIR restore.
 import { mkdtemp, rm, readFile, writeFile, readdir } from 'node:fs/promises'
@@ -24,7 +45,7 @@ async function storeWith(raw: unknown): Promise<ConfigStore> {
 }
 
 const sampleConfig: PrcliConfig = {
-  version: 7,
+  version: 8,
   activeProjectId: 'p1',
   projects: [
     {
@@ -58,7 +79,7 @@ const sampleConfig: PrcliConfig = {
 
 /** Two panes side by side under one tab — the shape v4 could not express. */
 const splitConfig: PrcliConfig = {
-  version: 7,
+  version: 8,
   activeProjectId: null,
   projects: [],
   panes: [
@@ -90,7 +111,7 @@ const splitConfig: PrcliConfig = {
 
 /** What `read()` answers with when it has nothing it can trust. */
 const EMPTY_CONFIG: PrcliConfig = {
-  version: 7,
+  version: 8,
   activeProjectId: null,
   projects: [],
   panes: [],
@@ -190,7 +211,7 @@ describe('ConfigStore.write', () => {
   it('does not corrupt the existing file when given unserialisable input', async () => {
     const store = new ConfigStore(file)
     await store.write(sampleConfig)
-    const circular = { version: 7, panes: [], tabs: [] } as unknown as PrcliConfig
+    const circular = { version: 8, panes: [], tabs: [] } as unknown as PrcliConfig
     ;(circular as unknown as { self: unknown }).self = circular
     await expect(store.write(circular)).rejects.toThrow()
     await expect(store.read()).resolves.toEqual(sampleConfig)
@@ -224,6 +245,44 @@ describe('ConfigStore.read, hostile shapes', () => {
     })
 
     await expect(store.read()).resolves.toMatchObject({ panes: [good] })
+  })
+
+  it('keeps one pane row per id when the file names the same pane twice', async () => {
+    // Not a shape this app writes deliberately, and reachable anyway: nothing
+    // between `store.write` and the file dedupes `panes`, and `read()`'s own
+    // `paneRows` filters and normalises without ever looking at an id it has
+    // already seen. `tabRows` next door has deduped kids across rows since v5,
+    // through its shrinking `known` set, which is the rule copied here.
+    //
+    // The consequence is not cosmetic. `state.panes` is what the tab bar maps
+    // over, keyed by pane id, so a duplicate is two React children under one
+    // key; `paneGroups` then drops the second by `seen`.
+    //
+    // It does NOT leave a row with no pane behind it, which is what this
+    // comment claimed until 2026-08-05, when it was measured against
+    // `tabsOfProject` and `paneGroups` rather than reasoned about: both rows
+    // carry the same id, so clicking either selects the same pane and shows the
+    // same group. What it leaves is two rows that do the same thing and may say
+    // different things, each rendering from its own record while the one box
+    // that exists is built from the first. See `paneRows` in `store.ts`.
+    const first = {
+      id: 'a1b2c3d4e5f60718',
+      projectSlug: 'lumio',
+      cwd: '/tmp',
+      tmuxSession: 'prcli-lumio-a1b2c3d4e5f60718',
+      type: 'shell',
+    }
+    const store = await storeWith({
+      version: 8,
+      projects: [],
+      activeProjectId: null,
+      tabs: [],
+      // The second copy differs, so the assertion below says WHICH one
+      // survived rather than only how many did. First wins, like `tabRows`.
+      panes: [first, { ...first, cwd: '/somewhere/else' }],
+    })
+
+    await expect(store.read()).resolves.toMatchObject({ panes: [first] })
   })
 
   it('drops a v5 tab row of every wrong shape without throwing', async () => {
@@ -268,10 +327,10 @@ describe('ConfigStore migration', () => {
     ],
   }
 
-  it('reads a v2 file as v7, keeping tab order', async () => {
+  it('reads a v2 file as v8, keeping tab order', async () => {
     await writeFile(file, JSON.stringify(v2), 'utf8')
     const config = await new ConfigStore(file).read()
-    expect(config.version).toBe(7)
+    expect(config.version).toBe(8)
     expect(config.panes.map((pane) => pane.id)).toEqual([
       'a1b2c3d4e5f60718',
       '00000000000000ff',
@@ -297,7 +356,7 @@ describe('ConfigStore migration', () => {
   it('still reads a v1 file, three versions back', async () => {
     await writeFile(file, JSON.stringify(v1), 'utf8')
     const config = await new ConfigStore(file).read()
-    expect(config.version).toBe(7)
+    expect(config.version).toBe(8)
     expect(config.panes.map((pane) => pane.id)).toEqual(['a1b2c3d4e5f60718'])
     expect(config.projects).toEqual([])
   })
@@ -371,20 +430,20 @@ describe('ConfigStore migration', () => {
     await expect(new ConfigStore(file).read()).resolves.toEqual(EMPTY_CONFIG)
   })
 
-  // The next version up, not a distant one: v8 is the file a build one step
+  // The next version up, not a distant one: v9 is the file a build one step
   // ahead of this one leaves behind, and it is the version this build is most
   // likely to actually meet. Reading its `panes` as if the shape had not moved
   // is exactly the guess `write()`'s refusal exists to keep off disk.
   //
-  // Moved from v7 to v8 when the pane colour landed. v7 is now a version this
-  // build understands, so leaving this at 7 would have kept a green test that
-  // asserted the opposite of the code.
-  it('refuses to guess at a v8 file, one version ahead', async () => {
-    await writeFile(file, JSON.stringify({ ...splitConfig, version: 8 }), 'utf8')
+  // Moved from v8 to v9 when the file path and optional session landed. v8 is
+  // now a version this build understands, so leaving this at 8 would have
+  // kept a green test that asserted the opposite of the code.
+  it('refuses to guess at a v9 file, one version ahead', async () => {
+    await writeFile(file, JSON.stringify({ ...splitConfig, version: 9 }), 'utf8')
     await expect(new ConfigStore(file).read()).resolves.toEqual(EMPTY_CONFIG)
   })
 
-  it('migrates a v3 config to v7, typing tabs by whether they carry a command', async () => {
+  it('migrates a v3 config to v8, typing tabs by whether they carry a command', async () => {
     const store = await storeWith({
       version: 3,
       projects: [],
@@ -403,7 +462,7 @@ describe('ConfigStore migration', () => {
 
     const config = await store.read()
 
-    expect(config.version).toBe(7)
+    expect(config.version).toBe(8)
     // A v3 tab cannot say whether it was running Claude, and it does not need
     // to: hooks decide. Only the launch command is knowable from the record.
     expect(config.panes[0]?.type).toBe('shell')
@@ -521,7 +580,7 @@ describe('ConfigStore migration', () => {
       tabs: [],
     })
     const config = await store.read()
-    expect(config.version).toBe(7)
+    expect(config.version).toBe(8)
     expect(config.panes[0].title).toBe('payments api')
   })
 
@@ -596,7 +655,7 @@ describe('ConfigStore migration', () => {
   // v5 is the shape this feature was added to. A row from it was never named,
   // which is exactly what an absent title already means, so the migration has
   // nothing to invent.
-  it('migrates a v5 config to v7, leaving panes unnamed and uncoloured', async () => {
+  it('migrates a v5 config to v8, leaving panes unnamed and uncoloured', async () => {
     const store = await storeWith({
       version: 5,
       projects: [],
@@ -613,10 +672,105 @@ describe('ConfigStore migration', () => {
       tabs: [],
     })
     const config = await store.read()
-    expect(config.version).toBe(7)
+    expect(config.version).toBe(8)
     expect(config.panes).toHaveLength(1)
     expect(config.panes[0].id).toBe('a'.repeat(16))
     expect(config.panes[0].title).toBeUndefined()
+  })
+})
+
+describe('ConfigStore migration, v7 to v8', () => {
+  it('accepts a sessionless editor row', async () => {
+    const store = await storeWith({
+      version: 8,
+      projects: [],
+      activeProjectId: null,
+      panes: [
+        { id: 'p1', projectSlug: 'demo', cwd: '/tmp/demo', type: 'editor', filePath: '/tmp/demo/a.ts' },
+      ],
+      tabs: [],
+    })
+
+    const config = await store.read()
+
+    expect(config.panes).toHaveLength(1)
+    expect(config.panes[0]?.type).toBe('editor')
+    expect(config.panes[0]?.filePath).toBe('/tmp/demo/a.ts')
+    expect(config.panes[0]?.tmuxSession).toBeUndefined()
+  })
+
+  // The half that must NOT relax. A terminal row with no session is the
+  // malformed row `isPane` has always rejected, and making `tmuxSession`
+  // optional on the type is exactly how that rejection gets lost by accident.
+  it('still rejects a terminal row with no session', async () => {
+    const store = await storeWith({
+      version: 8,
+      projects: [],
+      activeProjectId: null,
+      panes: [
+        { id: 'p1', projectSlug: 'demo', cwd: '/tmp/demo', type: 'shell' },
+        { id: 'p2', projectSlug: 'demo', cwd: '/tmp/demo', type: 'claude' },
+        { id: 'p3', projectSlug: 'demo', cwd: '/tmp/demo', type: 'preset', command: 'x' },
+      ],
+      tabs: [],
+    })
+
+    const config = await store.read()
+
+    expect(config.panes).toEqual([])
+  })
+
+  // A row predating `type` is a terminal row: every version before this one
+  // only had terminals. So a missing type still requires a session.
+  it('still rejects a row with no type and no session', async () => {
+    const store = await storeWith({
+      version: 8,
+      projects: [],
+      activeProjectId: null,
+      panes: [{ id: 'p1', projectSlug: 'demo', cwd: '/tmp/demo' }],
+      tabs: [],
+    })
+
+    const config = await store.read()
+
+    expect(config.panes).toEqual([])
+  })
+
+  // Same reasoning as the colour field: config is a text file, and a
+  // hand-edited `filePath` of the wrong type must not reach the renderer.
+  it('drops a filePath that is not a string', async () => {
+    const store = await storeWith({
+      version: 8,
+      projects: [],
+      activeProjectId: null,
+      panes: [{ id: 'p1', projectSlug: 'demo', cwd: '/tmp/demo', type: 'editor', filePath: 42 }],
+      tabs: [],
+    })
+
+    const config = await store.read()
+
+    // The row survives, because an editor pane with no file is a pane that
+    // says the file is gone (Task 5), not a row worth discarding.
+    expect(config.panes).toHaveLength(1)
+    expect(config.panes[0]?.filePath).toBeUndefined()
+  })
+
+  it('reads a v7 file as v8 without converting anything', async () => {
+    const store = await storeWith({
+      version: 7,
+      projects: [],
+      activeProjectId: null,
+      panes: [
+        { id: 'p1', projectSlug: 'demo', cwd: '/tmp/demo', type: 'shell', tmuxSession: 'prcli-demo-p1' },
+      ],
+      tabs: [],
+    })
+
+    const config = await store.read()
+
+    expect(config.version).toBe(8)
+    expect(config.panes[0]?.tmuxSession).toBe('prcli-demo-p1')
+    expect(config.panes[0]?.filePath).toBeUndefined()
   })
 })
 
@@ -656,7 +810,7 @@ describe('ConfigStore migration, v4 to v5', () => {
   it('keeps every v4 tab row as a pane, in order and field for field', async () => {
     const config = await (await storeWith(v4)).read()
 
-    expect(config.version).toBe(7)
+    expect(config.version).toBe(8)
     expect(config.panes).toHaveLength(2)
     // Pane by pane rather than by id alone: a migration that dropped `command`
     // or `type` would keep both ids and still cost the user a preset tab.

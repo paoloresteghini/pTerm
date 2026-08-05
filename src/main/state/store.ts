@@ -33,7 +33,7 @@ export interface ProjectRecord {
 }
 
 export interface PrcliConfig {
-  version: 7
+  version: 8
   /** Array order is sidebar order, and the order ⌘1–9 follows. */
   projects: ProjectRecord[]
   activeProjectId: string | null
@@ -67,7 +67,7 @@ export const DEFAULT_NOTIFICATIONS: NotificationConfig = {
 }
 
 const EMPTY: PrcliConfig = {
-  version: 7,
+  version: 8,
   projects: [],
   activeProjectId: null,
   panes: [],
@@ -109,15 +109,20 @@ function isProject(value: unknown): value is ProjectRecord {
 function isPane(value: unknown): value is PaneRecord {
   if (typeof value !== 'object' || value === null) return false
   const t = value as Partial<PaneRecord>
-  return (
-    typeof t.id === 'string' &&
-    typeof t.projectSlug === 'string' &&
-    typeof t.cwd === 'string' &&
-    typeof t.tmuxSession === 'string'
-  )
+  if (typeof t.id !== 'string') return false
+  if (typeof t.projectSlug !== 'string') return false
+  if (typeof t.cwd !== 'string') return false
+  // Per kind, not per row. An editor pane has no tmux session and never will,
+  // so requiring one of every row would drop it. But a TERMINAL row with no
+  // session is the malformed row this function has always rejected, and a
+  // blanket `typeof t.tmuxSession === 'string' || true` would lose that.
+  //
+  // A row with no `type` predates the field, and every version before this
+  // one held terminals only, so it is a terminal here and needs a session.
+  return t.type === 'editor' || typeof t.tmuxSession === 'string'
 }
 
-const TAB_TYPES: readonly TabType[] = ['claude', 'preset', 'shell']
+const TAB_TYPES: readonly TabType[] = ['claude', 'preset', 'shell', 'editor']
 
 function normalisePane(pane: PaneRecord): PaneRecord {
   // Before the `type` shortcut below, which returns early: a row can have a
@@ -129,15 +134,52 @@ function normalisePane(pane: PaneRecord): PaneRecord {
   // and leaves a pane whose text cannot be read. Anything unrecognised reads
   // as no colour, which is the default background.
   const coloured = isPaneColor(titled.color) ? titled : { ...titled, color: undefined }
-  if (TAB_TYPES.includes(coloured.type)) return coloured
+  // Beside the colour above, and for the same reason: config is a text file.
+  // A row whose `filePath` is not a string keeps the row and loses the field,
+  // which Task 5 draws as a pane saying the file is gone.
+  const filed = typeof coloured.filePath === 'string' ? coloured : { ...coloured, filePath: undefined }
+  if (TAB_TYPES.includes(filed.type)) return filed
   // A v3 row cannot say whether it was running Claude, and does not need to —
   // hooks decide that. Only the launch command is knowable from the record.
-  return { ...coloured, type: coloured.command === undefined ? 'shell' : 'preset' }
+  return { ...filed, type: filed.command === undefined ? 'shell' : 'preset' }
 }
 
-/** Every readable pane row, in file order. Anything else on the way out. */
+/**
+ * Every readable pane row, in file order, one per id. Anything else on the way
+ * out.
+ *
+ * The dedupe is `tabRows`' rule one level down: first wins, and a later row
+ * naming a pane already taken is dropped rather than merged, because there is
+ * no non-arbitrary way to choose between two rows claiming to be one pane.
+ *
+ * Not a shape this app writes on purpose, and reachable all the same: nothing
+ * between a handler's array-building and `store.write` checks for it, and a
+ * hand-edited file has no checks at all. What it costs is not cosmetic.
+ * `state.panes` is the list the tab bar maps over, keyed by pane id, so a
+ * duplicate is two React children under one key; `paneGroups` then boxes only
+ * the first, by `seen`.
+ *
+ * What that leaves is NOT a row with no pane behind it, which is what this
+ * comment claimed until it was measured. Both rows carry the same id, so
+ * clicking either selects the same pane and shows the same group. The cost is
+ * two rows that DO the same thing while being free to SAY different things,
+ * since each renders from its own object: measured 2026-08-05 against
+ * `tabsOfProject` and `paneGroups`, two rows titled `first` and `second`
+ * produced two bar rows with those titles, one group, and that group's box
+ * built from `first`. So the bar can offer a row labelled from the second
+ * record over a pane drawn from the first, and there is no gesture that
+ * reaches the second one's pane, because there is only ever one.
+ */
 function paneRows(value: unknown): PaneRecord[] {
-  return Array.isArray(value) ? value.filter(isPane).map(normalisePane) : []
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const rows: PaneRecord[] = []
+  for (const candidate of value) {
+    if (!isPane(candidate) || seen.has(candidate.id)) continue
+    seen.add(candidate.id)
+    rows.push(normalisePane(candidate))
+  }
+  return rows
 }
 
 /**
@@ -324,14 +366,16 @@ function migrate(value: unknown): PrcliConfig {
   const activeProjectId =
     typeof candidate.activeProjectId === 'string' ? candidate.activeProjectId : null
 
-  // 5, 6 and 7 share a shape. v6 added an optional pane title and v7 an
-  // optional pane colour, and in both cases a row from the older version not
-  // having the field is exactly what "never set" already means, so there is
-  // nothing to convert and one branch reads all three.
-  if (value.version === 5 || value.version === 6 || value.version === 7) {
+  // 5, 6, 7 and 8 share a shape. v6 added an optional pane title, v7 an
+  // optional pane colour, and v8 an optional file path plus a session that is
+  // optional per kind. In every case an older row not having the field is
+  // exactly what "never set" already means, so there is nothing to convert and
+  // one branch reads all four. A v7 row is a terminal row by construction,
+  // because no version before v8 could express a pane without a session.
+  if (value.version === 5 || value.version === 6 || value.version === 7 || value.version === 8) {
     const panes = paneRows(candidate.panes)
     return {
-      version: 7,
+      version: 8,
       projects,
       activeProjectId,
       panes,
@@ -344,7 +388,7 @@ function migrate(value: unknown): PrcliConfig {
     // and a tab holding just that pane, full width and necessarily selected.
     const panes = paneRows(candidate.tabs)
     return {
-      version: 7,
+      version: 8,
       projects,
       activeProjectId,
       panes,

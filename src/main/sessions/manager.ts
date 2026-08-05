@@ -16,7 +16,11 @@ export interface PaneRecord {
   projectSlug: string
   cwd: string
   command?: string
-  tmuxSession: string
+  /**
+   * Absent on an editor pane, which has no tmux session at all. Present on
+   * every terminal pane, which is what `isPane` still enforces per kind.
+   */
+  tmuxSession?: string
   type: TabType
   /**
    * What the user called this pane, absent until they name one.
@@ -36,6 +40,25 @@ export interface PaneRecord {
    * been literal.
    */
   color?: PaneColor
+  /**
+   * The file an editor pane is showing, absolute. Absent on every terminal
+   * pane, and absent on an editor pane whose file could not be read.
+   *
+   * Display data only, same as `title` and `color`: nothing in this file
+   * reads it, since this file deals in tmux and an editor pane has none.
+   */
+  filePath?: string
+}
+
+/**
+ * A pane `SessionManager` owns. Always a terminal, so always has a session:
+ * an editor pane has none and never enters this file. Every record this
+ * class constructs, reattaches or reports is one of these; the wider
+ * `PaneRecord` is what a pane looks like once config and an editor pane are
+ * both in the picture, neither of which this file deals in.
+ */
+export interface TerminalPaneRecord extends PaneRecord {
+  tmuxSession: string
 }
 
 export interface OpenInput {
@@ -72,7 +95,7 @@ export interface OpenInput {
 }
 
 interface Entry {
-  record: PaneRecord
+  record: TerminalPaneRecord
   session: PtySession
   /**
    * The tab this pane is in, decided by whoever created the pane and never
@@ -205,7 +228,7 @@ export class SessionManager {
   private readonly tabWasIn = new Map<string, string>()
   private readonly dataListeners = new Set<(id: string, data: string) => void>()
   private readonly exitListeners = new Set<
-    (record: PaneRecord, code: number, reason: ExitReason) => void
+    (record: TerminalPaneRecord, code: number, reason: ExitReason) => void
   >()
 
   constructor(
@@ -213,7 +236,7 @@ export class SessionManager {
     private readonly options: { deathReporter?: string } = {},
   ) {}
 
-  open(input: OpenInput): PaneRecord {
+  open(input: OpenInput): TerminalPaneRecord {
     const record = this.recordFor(input)
     return this.attach(record, {
       ...this.geometryOf(input),
@@ -269,7 +292,7 @@ export class SessionManager {
    * caller's first `await`, so "already open" is still refused before anything
    * can race it.
    */
-  private recordFor(input: OpenInput): PaneRecord {
+  private recordFor(input: OpenInput): TerminalPaneRecord {
     const id = input.id ?? newSessionId()
     if (this.entries.has(id)) throw new Error(`session ${id} is already open`)
 
@@ -327,7 +350,7 @@ export class SessionManager {
    * not recoverable later: see `Entry.tabId`.
    */
   private attach(
-    record: PaneRecord,
+    record: TerminalPaneRecord,
     {
       cols,
       rows,
@@ -335,7 +358,7 @@ export class SessionManager {
       sized,
       tabId,
     }: { cols: number; rows: number; windowId?: string; sized: boolean; tabId: string },
-  ): PaneRecord {
+  ): TerminalPaneRecord {
     const id = record.id
 
     const session = new PtySession(this.adapter, {
@@ -555,7 +578,7 @@ export class SessionManager {
    * changing it; it is the exception, not an oversight.
    */
   private async wireDeathHook(
-    record: PaneRecord,
+    record: TerminalPaneRecord,
     where: WindowLookup | (() => Promise<WindowLookup>),
   ): Promise<void> {
     const reporter = this.options.deathReporter
@@ -824,7 +847,7 @@ export class SessionManager {
     type?: TabType
     cols?: number
     rows?: number
-  }): Promise<PaneRecord> {
+  }): Promise<TerminalPaneRecord> {
     const sibling = this.entries.get(input.paneId)
     if (!sibling) throw new Error(`splitTab: no pane ${input.paneId}`)
 
@@ -877,7 +900,7 @@ export class SessionManager {
       await this.adapter.resizeWindow(founderWindow, sibling.cols, sibling.rows)
     }
 
-    const record: PaneRecord = {
+    const record: TerminalPaneRecord = {
       id,
       projectSlug: sibling.record.projectSlug,
       cwd,
@@ -952,7 +975,7 @@ export class SessionManager {
    */
   async reopenInTab(
     input: Omit<OpenInput, 'tabId'> & { id: string },
-  ): Promise<{ record: PaneRecord; groupId: string }> {
+  ): Promise<{ record: TerminalPaneRecord; groupId: string }> {
     // Before either await, so "already open" is still refused before anything
     // can race it — see `recordFor`.
     const record = this.recordFor(input)
@@ -1172,13 +1195,13 @@ export class SessionManager {
   private async addMember(input: {
     group: string
     through: string
-    record: PaneRecord
+    record: TerminalPaneRecord
     cols: number
     rows: number
     sized: boolean
     /** The tab this member joins — see `Entry.tabId`. Both callers know it. */
     tabId: string
-  }): Promise<PaneRecord> {
+  }): Promise<TerminalPaneRecord> {
     const { group, record, cols, rows, sized, tabId } = input
     // Created EMPTY — the command follows at the end, once the window can
     // survive it.
@@ -1229,13 +1252,13 @@ export class SessionManager {
    * try block reads as one guarded sequence rather than a wall of awaits.
    */
   private async finishSplit(
-    record: PaneRecord,
+    record: TerminalPaneRecord,
     window: { id: string; index: string },
     cols: number,
     rows: number,
     sized: boolean,
     tabId: string,
-  ): Promise<PaneRecord> {
+  ): Promise<TerminalPaneRecord> {
     // Wired before the command runs, and after the member session exists.
     //
     // Before, because a command given to `new-window` starts immediately:
@@ -1281,7 +1304,7 @@ export class SessionManager {
    * the same measured reason — a member whose bound window dies first falls
    * back to a sibling's, and briefly renders that sibling's pane twice.
    */
-  private async rollbackSplit(record: PaneRecord, windowId: string): Promise<void> {
+  private async rollbackSplit(record: TerminalPaneRecord, windowId: string): Promise<void> {
     const entry = this.entries.get(record.id)
     if (entry?.record === record) {
       // `attach` got as far as registering it. Mark the intent before tearing
@@ -1308,11 +1331,11 @@ export class SessionManager {
     }
   }
 
-  get(id: string): PaneRecord | undefined {
+  get(id: string): TerminalPaneRecord | undefined {
     return this.entries.get(id)?.record
   }
 
-  list(): PaneRecord[] {
+  list(): TerminalPaneRecord[] {
     return [...this.entries.values()].map((entry) => entry.record)
   }
 
@@ -1552,7 +1575,7 @@ export class SessionManager {
     id: string,
     projectSlug: string,
     known?: Pick<PaneRecord, 'cwd' | 'command' | 'type'>,
-  ): Promise<PaneRecord> {
+  ): Promise<TerminalPaneRecord> {
     const [moved] = await this.moveTabToProject(
       id,
       projectSlug,
@@ -1593,7 +1616,7 @@ export class SessionManager {
     tabId: string,
     projectSlug: string,
     known?: Map<string, Pick<PaneRecord, 'cwd' | 'command' | 'type'>>,
-  ): Promise<PaneRecord[]> {
+  ): Promise<TerminalPaneRecord[]> {
     const panes = await this.panesOfTab(tabId)
     if (panes.length === 0) throw new Error(`moveTabToProject: no session for tab ${tabId}`)
 
@@ -1636,7 +1659,7 @@ export class SessionManager {
     // Swallowed for the same reason `attach`'s hook install is: a tab whose
     // death shows grey is not worth failing an otherwise-successful rename
     // over, and the reattach later tries again regardless.
-    const renamed: { pane: PaneRecord; from: string; to: string }[] = []
+    const renamed: { pane: TerminalPaneRecord; from: string; to: string }[] = []
     try {
       for (const { pane, to } of targets) {
         if (to === pane.tmuxSession) continue
@@ -1696,7 +1719,7 @@ export class SessionManager {
       )
     }
 
-    const moved: PaneRecord[] = []
+    const moved: TerminalPaneRecord[] = []
     for (const { pane, to } of targets) {
       const overrides = known?.get(pane.id)
       const cwd = overrides?.cwd ?? pane.cwd
@@ -1754,10 +1777,10 @@ export class SessionManager {
    * prcli-owned tmux sessions with no client in this app — left behind by a
    * previous run or a crash. Callers decide whether to reopen them.
    */
-  async findOrphans(): Promise<PaneRecord[]> {
+  async findOrphans(): Promise<TerminalPaneRecord[]> {
     const open = new Set(this.list().map((record) => record.tmuxSession))
     const names = await this.adapter.listPrcliSessions()
-    const orphans: PaneRecord[] = []
+    const orphans: TerminalPaneRecord[] = []
     for (const name of names) {
       if (open.has(name)) continue
       const parts = decodeSessionName(name)
@@ -1796,12 +1819,12 @@ export class SessionManager {
    * the founder was called when the group was made and may be several projects
    * out of date — see `tabIdFromGroupName`.
    */
-  async findOrphanTabs(): Promise<{ tabId: string; panes: PaneRecord[] }[]> {
+  async findOrphanTabs(): Promise<{ tabId: string; panes: TerminalPaneRecord[] }[]> {
     const panes = await this.findOrphans()
     const rows = await this.adapter.listSessionsWithGroups()
     const groupOf = new Map(rows.map((row) => [row.name, row.group]))
 
-    const tabs = new Map<string, PaneRecord[]>()
+    const tabs = new Map<string, TerminalPaneRecord[]>()
     for (const pane of panes) {
       const group = groupOf.get(pane.tmuxSession) || pane.tmuxSession
       const tabId = tabIdFromGroupName(group) ?? pane.id
@@ -1845,7 +1868,7 @@ export class SessionManager {
    * A tab can outlive its founder, and then there is no such position: see
    * the fallback below.
    */
-  async panesOfTab(tabId: string): Promise<PaneRecord[]> {
+  async panesOfTab(tabId: string): Promise<TerminalPaneRecord[]> {
     const rows = await this.adapter.listSessionsWithGroups()
     const founder = rows.find((row) => decodeSessionName(row.name)?.id === tabId)
 
@@ -1890,7 +1913,7 @@ export class SessionManager {
       members = member.group ? rows.filter((row) => row.group === member.group) : [member]
     }
 
-    const panes: PaneRecord[] = []
+    const panes: TerminalPaneRecord[] = []
     for (const row of members) {
       const parts = decodeSessionName(row.name)
       if (!parts) continue
@@ -1974,7 +1997,7 @@ export class SessionManager {
     }
   }
 
-  onExit(listener: (record: PaneRecord, code: number, reason: ExitReason) => void): void {
+  onExit(listener: (record: TerminalPaneRecord, code: number, reason: ExitReason) => void): void {
     this.exitListeners.add(listener)
   }
 }

@@ -18,7 +18,22 @@ import type { TabDescriptor } from '../../shared/ipc'
  * The id is 16 hex characters (`newSessionId` in `main/tmux/names.ts` is
  * `randomBytes(8).toString('hex')`, and `encodeSessionName` enforces the
  * length); the first six are plenty to tell tabs apart.
+ *
+ * An editor pane is named for its file, because `slug · id` says nothing
+ * about which file you are looking at when several are open at once. The
+ * basename is taken by hand rather than with `node:path`: `nodeIntegration`
+ * is off for this window (`src/main/index.ts`) and nothing else under
+ * `src/renderer/` imports a `node:` builtin, so there is nothing to bundle
+ * it against. A trailing separator still leaves a last non-empty segment
+ * (`/tmp/demo/` names the tab `demo`), so only a bare `/` yields nothing;
+ * that case falls through to the same label a terminal gets rather than to
+ * a blank tab.
  */
 export function tabLabel(tab: TabDescriptor): string {
-  return tab.title ? tab.title : `${tab.projectSlug} · ${tab.id.slice(0, 6)}`
+  if (tab.title) return tab.title
+  if (tab.type === 'editor' && tab.filePath) {
+    const name = tab.filePath.split('/').filter(Boolean).pop()
+    if (name) return name
+  }
+  return `${tab.projectSlug} · ${tab.id.slice(0, 6)}`
 }

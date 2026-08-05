@@ -1,10 +1,11 @@
 import { homedir } from 'node:os'
-import type { SessionManager, PaneRecord } from '../sessions/manager'
+import type { SessionManager, PaneRecord, TerminalPaneRecord } from '../sessions/manager'
 import type { ConfigStore, ProjectRecord, TabRow } from '../state/store'
 import { readManifest, mergePresets } from '../projects/manifest'
 import { isDirectory } from '../fsutil'
 import { sharesAroundClaims, claimFor, tombstonesOf, inLiveFrame, type Claim } from './shares'
 import { attachSavedFields } from './savedFields'
+import { mergeSessionlessPanes } from './sessionlessPanes'
 // One definition, shared with the renderer — `TabDescriptor` and `PaneRecord`
 // are the same shape, and duplicating the types here would let them drift.
 import {
@@ -125,10 +126,14 @@ export type WorkspaceReconcile = Omit<RestoreResult, 'status'>
  * shown, once, under the other pane's id and saved cwd/command/type; when
  * nothing prunes at all it is shown twice, which is the failure this exists
  * for.
+ *
+ * `tab.panes` is always `TerminalPaneRecord[]`: the only caller passes what
+ * `manager.findOrphanTabs()` returned, which is built entirely from live
+ * tmux session names and never produces an editor pane.
  */
 async function withoutSharedWindows(
   manager: SessionManager,
-  tab: { tabId: string; panes: PaneRecord[] },
+  tab: { tabId: string; panes: TerminalPaneRecord[] },
 ): Promise<PaneRecord[]> {
   // A tab of one pane has no sibling to shadow, and asking tmux for its window
   // would put a round trip on every ordinary unsplit tab for nothing.
@@ -433,11 +438,32 @@ export async function restoreWorkspace(
       ),
     )
 
+    // Live tmux is the whole of what `panes` and `tabRows` know, and a pane
+    // with no session was never in that answer. Merged in here, before the
+    // write, because the write below is what would otherwise persist their
+    // absence: correct on screen, correct on disk until relaunch, then gone,
+    // with nothing thrown. That is exactly how `b397216` lost a pane's colour.
+    //
+    // Before `describeProjects` rather than beside `attachSavedFields` below,
+    // and that is not tidiness. It is measured. `describeProjects` resolves
+    // each project's `activeTabId` against the panes it is given, the renderer
+    // shows the group that id lands in (`visibleGroupId` in `workspace.ts`),
+    // and a project holding nothing but sessionless panes resolves to null.
+    // Given the live `panes` alone, `editorRestore.spec.ts` failed all three
+    // tests with the pane's own box in the DOM and `hidden`: the right element,
+    // inside a group nothing had made visible.
+    const merged = mergeSessionlessPanes({
+      livePanes: panes,
+      liveTabs: tabRows,
+      savedPanes: saved.panes,
+      savedTabs: saved.tabs,
+    })
+
     // One descriptor per saved project, in saved order — so the write below can
     // take each resolved active tab from here rather than resolving twice.
-    const real = await describeProjects(saved.projects, panes)
+    const real = await describeProjects(saved.projects, merged.panes)
 
-    const projects = withUnsorted(real, panes)
+    const projects = withUnsorted(real, merged.panes)
 
     // Resolved after the append, so Unsorted can be the selected project: with
     // no real projects yet it is the only place a stray can be reached from.
@@ -446,19 +472,19 @@ export async function restoreWorkspace(
       projects[0]?.id ??
       null
 
-    // Titles and colours are put back here because `panes` came out of
-    // `manager.open()` above, which deals in tmux and carries neither.
+    // Titles, colours and file paths are put back here because `panes` came out
+    // of `manager.open()` above, which deals in tmux and carries none of them.
     // Computed once, before the write, and used for both it and the reply:
     // writing the bare array would persist a stripped row over every saved
     // title and colour on every launch, and the renderer could not tell,
     // because it draws from the patched reply rather than from the file.
-    // Nothing between `manager.open()` and here reads either: `held` and
-    // `tabRows` key off `pane.id`, and `describeProjects` and `withUnsorted`
-    // off `id` and `projectSlug`.
-    const restored = attachSavedFields(panes, saved.panes)
+    // Nothing between `manager.open()` and here reads any of the three: `held`
+    // and `tabRows` key off `pane.id`, and `describeProjects` and
+    // `withUnsorted` off `id` and `projectSlug`.
+    const restored = attachSavedFields(merged.panes, saved.panes)
 
     await store.write({
-      version: 7,
+      version: 8,
       // Only real projects are persisted; the Unsorted row is synthetic.
       // Matched by id rather than by index: `describeProjects` returns one row
       // per project today, but adding a `filter` or a `continue` to it would
@@ -474,19 +500,22 @@ export async function restoreWorkspace(
       }),
       activeProjectId,
       panes: restored,
-      // One row per tab live tmux still has, holding the saved axis and ratios
-      // wherever a saved row still describes panes that came back. A tab whose
-      // panes have all gone has no row here at all — dropped by having no
-      // entry in `held` rather than by anything filtering it out.
-      tabs: tabRows,
+      // One row per tab that still holds a pane, holding the saved axis and
+      // ratios wherever a saved row still describes panes that came back. A tab
+      // whose panes have all gone has no row here at all, dropped by having no
+      // entry in `held` rather than by anything filtering it out. "Still holds a
+      // pane" rather than "live tmux still has": a tab holding only sessionless
+      // panes has no tmux group and no entry in `held`, and keeps its row
+      // through `mergeSessionlessPanes` instead.
+      tabs: merged.tabs,
       notifications: saved.notifications,
     })
 
     // `tabs` rides along with `panes` rather than being dropped here as it
     // used to be (finding I5): `store.write` above just took the same
-    // `tabRows`, and a caller laying out a split needs exactly what was
+    // `merged.tabs`, and a caller laying out a split needs exactly what was
     // written, not a second `store.read()` to get it back. The same now goes
     // for `restored`, for the same reason.
-    return { projects, panes: restored, tabs: tabRows, activeProjectId }
+    return { projects, panes: restored, tabs: merged.tabs, activeProjectId }
   })
 }

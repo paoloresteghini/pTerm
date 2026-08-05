@@ -18,7 +18,18 @@ import { cn } from './lib/cn'
  * stale tree the user can see is stale. Reloading it is a deliberate click,
  * not a prop this component takes.
  */
-export function FileTree({ projectId }: { projectId: string | undefined }) {
+export function FileTree({
+  projectId,
+  onOpenFile,
+}: {
+  projectId: string | undefined
+  /**
+   * A file row that was clicked, by its path relative to the project. A
+   * directory row never reaches this: expanding one is all a directory click
+   * does, and `toggle` below returns before calling it.
+   */
+  onOpenFile: (relPath: string) => void
+}) {
   // Relative path to that directory's entries. '' is the project root.
   const [loaded, setLoaded] = useState<Record<string, FileEntry[]>>({})
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -71,7 +82,15 @@ export function FileTree({ projectId }: { projectId: string | undefined }) {
   }, [projectId, load])
 
   const toggle = (entry: FileEntry, relPath: string): void => {
-    if (!entry.dir || !projectId) return
+    if (!projectId) return
+    // A file opens; only a directory expands. Returning here rather than
+    // falling through is what keeps a file out of `expanded` and out of the
+    // stored set with it, which is what `a file is not expandable` asserts
+    // directly, after a row count alone failed to tell the two apart.
+    if (!entry.dir) {
+      onOpenFile(relPath)
+      return
+    }
     const next = toggled(expanded, relPath)
     setExpanded(next)
     writeExpanded(projectId, next)

@@ -13,7 +13,7 @@ import {
   type TabRow,
 } from '../../src/main/state/store'
 import { restoreWorkspace } from '../../src/main/ipc/restore'
-import { UNSORTED_ID } from '../../src/shared/ipc'
+import { UNSORTED_ID, type TabDescriptor } from '../../src/shared/ipc'
 
 const run = promisify(execFile)
 const SOCKET = 'prcli-test'
@@ -66,6 +66,29 @@ function tab(id: string, slug = 'lumio') {
     cwd: tmpdir(),
     tmuxSession: `prcli-${slug}-${id}`,
   }
+}
+
+/**
+ * The session of a pane this test expects to be a terminal.
+ *
+ * `RestoreResult.panes` (what `restoreWorkspace` hands back) holds a mix once
+ * an editor pane can survive a relaunch (Task 4), so its declared type cannot
+ * promise a session. Every call site below is on a pane this test itself
+ * opened or split through `SessionManager` directly, which never produces an
+ * editor pane, so the session is always there in practice. Throwing here
+ * means a test that somehow gets an editor pane fails saying so, rather than
+ * passing `undefined` into tmux and failing somewhere unrecognisable.
+ *
+ * Applied to every `.tmuxSession` read in this file, including the ones on
+ * `SessionManager.open`/`.splitTab`'s own already-narrow return: a read
+ * guarded here and an identical one left raw elsewhere is the failure mode
+ * this function exists to remove, not a style choice.
+ */
+function sessionOf(pane: TabDescriptor): string {
+  if (pane.tmuxSession === undefined) {
+    throw new Error(`pane ${pane.id} has no tmux session; expected a terminal pane`)
+  }
+  return pane.tmuxSession
 }
 
 /** A v5 file, written as the app writes one: flat panes plus tab rows. */
@@ -605,13 +628,13 @@ describe('restoreWorkspace panes and tabs', () => {
     // idiom, and the same reason, as `does not resize the sibling's window
     // when it reattaches` in `manager.test.ts`.
     await new Promise((resolve) => setTimeout(resolve, 1500))
-    expect(await windowSize(founder.tmuxSession)).toBe('120x40')
-    expect(await windowSize(second.tmuxSession)).toBe('100x30')
+    expect(await windowSize(sessionOf(founder))).toBe('120x40')
+    expect(await windowSize(sessionOf(second))).toBe('100x30')
 
     // No two live members of this tab may report the same window: one window
     // rendered by two xterms is the failure a fallen-back member causes.
     expect(result.panes.length).toBeGreaterThan(1)
-    const windows = await Promise.all(result.panes.map((pane) => windowIdOf(pane.tmuxSession)))
+    const windows = await Promise.all(result.panes.map((pane) => windowIdOf(sessionOf(pane))))
     expect(new Set(windows).size).toBe(windows.length)
     manager.detachAll()
   })
@@ -670,7 +693,7 @@ describe('restoreWorkspace panes and tabs', () => {
     // Session and window both, which is what a pane closed from the UI leaves.
     await before.kill(middle.id)
     before.detachAll()
-    expect(await sessionExists(middle.tmuxSession)).toBe(false)
+    expect(await sessionExists(sessionOf(middle))).toBe(false)
 
     const { store, file } = await v5ConfigWith({
       projects: [project('Lumio', 'lumio', tmpdir(), founder.id)],
@@ -786,12 +809,12 @@ describe('restoreWorkspace panes and tabs', () => {
     before.detachAll()
     // The window only. Its member session survives and silently falls back to
     // the founder's window — measured on tmux 3.7b, in both directions.
-    const orphanedWindow = await windowIdOf(second.tmuxSession)
+    const orphanedWindow = await windowIdOf(sessionOf(second))
     await run('tmux', ['-L', SOCKET, 'kill-window', '-t', orphanedWindow])
-    expect(await sessionExists(second.tmuxSession)).toBe(true)
-    const founderWindow = await windowIdOf(founder.tmuxSession)
+    expect(await sessionExists(sessionOf(second))).toBe(true)
+    const founderWindow = await windowIdOf(sessionOf(founder))
     expect(founderWindow).toMatch(/^@\d+$/)
-    expect(await windowIdOf(second.tmuxSession)).toBe(founderWindow)
+    expect(await windowIdOf(sessionOf(second))).toBe(founderWindow)
 
     const { store, file } = await v5ConfigWith({
       projects: [project('Lumio', 'lumio', tmpdir(), founder.id)],
@@ -822,7 +845,7 @@ describe('restoreWorkspace panes and tabs', () => {
     // before it could reach it — the count was doing all of the work and the
     // invariant none. It is asserted where it can fail, in the two-pane test
     // at the top of this describe.
-    expect(await windowIdOf(founder.tmuxSession)).toBe(founderWindow)
+    expect(await windowIdOf(sessionOf(founder))).toBe(founderWindow)
 
     // The pruned member is not merely dropped from the tab — it is killed.
     // Dropping alone leaves a live prcli session with no config row and no
@@ -831,8 +854,8 @@ describe('restoreWorkspace panes and tabs', () => {
     // no member session behind", failed permanently. Killing its SESSION is
     // safe precisely because it has no window of its own; its window is the
     // founder's, asserted intact above.
-    await expect.poll(() => sessionExists(second.tmuxSession), { timeout: 10_000 }).toBe(false)
-    expect(await sessionExists(founder.tmuxSession)).toBe(true)
+    await expect.poll(() => sessionExists(sessionOf(second)), { timeout: 10_000 }).toBe(false)
+    expect(await sessionExists(sessionOf(founder))).toBe(true)
 
     const saved = await written(file)
     expect(saved.tabs).toHaveLength(1)

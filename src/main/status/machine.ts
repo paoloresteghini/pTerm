@@ -102,5 +102,8 @@ export function stateForOpen(type: TabType): TabState | null {
       return 'running'
     case 'shell':
       return null
+    case 'editor':
+      // An editor pane has no session to be waiting or crashed about.
+      return null
   }
 }

@@ -69,6 +69,8 @@ const api: PrcliApi = {
   notesRead: (projectId) => ipcRenderer.invoke(CHANNELS.notesRead, projectId),
   notesWrite: (projectId, text) => ipcRenderer.invoke(CHANNELS.notesWrite, projectId, text),
   fsList: (projectId, relPath) => ipcRenderer.invoke(CHANNELS.fsList, projectId, relPath),
+  fsRead: (projectId, relPath) => ipcRenderer.invoke(CHANNELS.fsRead, projectId, relPath),
+  openEditor: (projectId, relPath) => ipcRenderer.invoke(CHANNELS.openEditor, projectId, relPath),
 }
 
 contextBridge.exposeInMainWorld('prcli', api)

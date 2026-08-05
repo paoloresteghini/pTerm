@@ -1,4 +1,4 @@
-import { readdir, realpath, stat } from 'node:fs/promises'
+import { readdir, readFile, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, join, resolve, sep } from 'node:path'
 
 /**
@@ -122,6 +122,43 @@ export async function listDir(root: string, relPath: string): Promise<FileEntry[
     if (left.dir !== right.dir) return left.dir ? -1 : 1
     return left.name.localeCompare(right.name)
   })
+}
+
+/** One file's text, with the mtime it had when it was read. */
+export interface FileContents {
+  text: string
+  mtimeMs: number
+}
+
+/**
+ * One file of one project, or null.
+ *
+ * The same containment guard `listDir` uses, for the same reason and by the
+ * same two halves: `resolveInside` for the path the renderer spelled, and a
+ * `realpath` re-check for the one it did not, since `readFile` follows a
+ * symlink exactly as `readdir` does.
+ *
+ * Never throws. A missing file, a directory, an unreadable file and a path
+ * that leaves the project are all null: this is called from a React render,
+ * and the pane draws "cannot read that" rather than the app failing.
+ *
+ * The mtime rides along because a later slice refuses to write over a file
+ * that changed underneath the pane, and that check needs the mtime the text
+ * was read at rather than one fetched separately afterwards.
+ */
+export async function readFileInside(root: string, relPath: string): Promise<FileContents | null> {
+  const target = resolveInside(root, relPath)
+  if (target === null) return null
+  try {
+    const realRoot = await realpath(root)
+    const realTarget = await realpath(target)
+    if (!isInside(realRoot, realTarget)) return null
+    const info = await stat(realTarget)
+    if (!info.isFile()) return null
+    return { text: await readFile(realTarget, 'utf8'), mtimeMs: info.mtimeMs }
+  } catch {
+    return null
+  }
 }
 
 /**

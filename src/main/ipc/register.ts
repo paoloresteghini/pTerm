@@ -1,6 +1,7 @@
 import { dialog, ipcMain, type BrowserWindow } from 'electron'
 import {
   CHANNELS,
+  canHaveSession,
   type Candidate,
   type DataEvent,
   type ExitEvent,
@@ -16,7 +17,7 @@ import {
   type TabRow,
   type TabShape,
 } from '../../shared/ipc'
-import type { ExitReason, SessionManager, PaneRecord } from '../sessions/manager'
+import type { ExitReason, SessionManager, PaneRecord, TerminalPaneRecord } from '../sessions/manager'
 import { ConfigStore, type PrcliConfig } from '../state/store'
 import { StatusRegistry } from '../status/registry'
 import {
@@ -41,7 +42,8 @@ import { hookPaths, installHooks, readHooksState, uninstallHooks } from '../hook
 import { drainSpool } from '../hooks/spool'
 import { listSkills } from '../skills/scan'
 import { readNote, writeNote } from '../notes/store'
-import { listDir } from '../files/tree'
+import { listDir, readFileInside, resolveInside } from '../files/tree'
+import { newSessionId } from '../tmux/names'
 import {
   addProject,
   projectForSlug,
@@ -498,8 +500,12 @@ export function registerIpc(
    * `pendingKills`, when there is one to ask. `exited` — and a `killed` with
    * no pending kill on record, which should not happen but must still get a
    * real answer rather than an assumed one — asks tmux directly.
+   *
+   * `record` is always a `TerminalPaneRecord`: the only caller is
+   * `manager.onExit`, and an exit event only ever fires for a pane
+   * `SessionManager` itself holds, which is always a terminal.
    */
-  const sessionSurvived = async (record: PaneRecord, reason: ExitReason): Promise<boolean> => {
+  const sessionSurvived = async (record: TerminalPaneRecord, reason: ExitReason): Promise<boolean> => {
     if (reason === 'detached') return true
     const pending = reason === 'killed' ? pendingKills.get(record.id) : undefined
     if (pending) {
@@ -1203,17 +1209,43 @@ export function registerIpc(
     // is a pane this process never held, which is a tab of one by definition.
     const tabId = manager.tabIdOf(paneId) ?? paneId
 
-    // Recorded before the first await inside `manager.kill()` can run, so it
-    // is always in place before the exit event it settles could possibly fire:
-    // that event is answered by asking this map, and it fires while the kill
-    // is still in flight. See `pendingKills`.
-    const outcome = manager.kill(paneId)
-    pendingKills.set(paneId, outcome)
-    try {
-      await outcome
-    } finally {
-      pendingKills.delete(paneId)
+    // Whether there is a session behind this pane at all, asked of the saved
+    // row rather than of the manager: the manager has no entry for an editor
+    // pane AND none for a terminal pane whose client has gone, and `kill`
+    // finds the second through `findOrphans`. Only the kind tells them apart.
+    //
+    // Outside `serialise`, like the tmux work below and for the same reason,
+    // and safe to read there because a pane's kind is fixed at creation: a
+    // stale read cannot answer this differently, only earlier. A row missing
+    // altogether is treated as a terminal, which is the same answer this
+    // handler gave before there were editor panes; it cannot be an editor
+    // whose write has not landed, because `openEditor` awaits its own
+    // `store.write` before the renderer ever learns the pane's id.
+    const saved = (await store.read()).panes.find((row) => row.id === paneId)
+    const sessionless = saved !== undefined && !canHaveSession(saved)
+
+    if (!sessionless) {
+      // Recorded before the first await inside `manager.kill()` can run, so it
+      // is always in place before the exit event it settles could possibly fire:
+      // that event is answered by asking this map, and it fires while the kill
+      // is still in flight. See `pendingKills`.
+      const outcome = manager.kill(paneId)
+      pendingKills.set(paneId, outcome)
+      try {
+        await outcome
+      } finally {
+        pendingKills.delete(paneId)
+      }
     }
+    // The four lines below are NOT inside that branch, deliberately. Each is a
+    // delete from a map an editor pane was never in, so all four are no-ops
+    // for one, and a second branch that has to stay in step with the first is
+    // the thing this file's own comments keep asking the next person not to
+    // write. Only the kill has to be skipped: it is the one call that rejects
+    // rather than shrugging when there is nothing there, which is how closing
+    // an editor tab painted `kill: no tmux session found for tab ...` into the
+    // pane the user had just clicked × on.
+    //
     // A killed pane is not restartable, so its state, the geometry a restart
     // would have attached at, the share a restart would have come back at and
     // the tab a restart would have rejoined all go together. See
@@ -1329,4 +1361,88 @@ export function registerIpc(
     if (!project) return []
     return listDir(project.cwd, relPath)
   })
+
+  // Beside `fsList` and for the same reasons: outside `serialise` because it
+  // reads the filesystem and writes no config, and keyed by project id rather
+  // than by a renderer-supplied path.
+  ipcMain.handle(CHANNELS.fsRead, async (_event, projectId: string, relPath: string) => {
+    const config = await store.read()
+    const project = config.projects.find((row) => row.id === projectId)
+    if (!project) return null
+    return readFileInside(project.cwd, relPath)
+  })
+
+  // Inside `serialise`, unlike `fsList` and `fsRead` just above: this one
+  // writes a pane row and a tab row, and two of them racing would interleave
+  // two read-modify-write cycles over one config file.
+  //
+  // Keyed by project id and given a relative path, like both of those: the
+  // renderer never spells an absolute path, and `PaneRecord.filePath` is
+  // absolute because MAIN writes it here and reads it back at the next restore.
+  //
+  // Two things separate this from `CHANNELS.open`, which it otherwise follows.
+  // There is no `manager.open`, because there is no session to attach: the id
+  // is minted here with the same `newSessionId` the manager uses. And a tab row
+  // is written, which `CHANNELS.open` deliberately does not do: a terminal
+  // regains its row from live tmux at the next restore, whereas
+  // `mergeSessionlessPanes` puts back only a sessionless pane whose saved tab
+  // row still names it, and drops one no tab holds. Without the row here, this
+  // pane would be on disk after a relaunch and unreachable.
+  ipcMain.handle(
+    CHANNELS.openEditor,
+    (_event, projectId: string, relPath: string): Promise<TabDescriptor | null> =>
+      serialise(async () => {
+        const config = await store.read()
+        const project = config.projects.find((row) => row.id === projectId)
+        if (!project) return null
+
+        // The path the renderer named, resolved under the project and checked
+        // for containment. Lexical rather than `realpath`-resolved on purpose:
+        // this is the string the renderer turns back into a relative path for
+        // every later `fsRead`, and each of those re-applies the whole guard
+        // anyway, symlink half included.
+        const filePath = resolveInside(project.cwd, relPath)
+        if (filePath === null) return null
+
+        // The guard's other half, called rather than re-derived: `fsRead`'s
+        // `realpath` re-check and its is-it-a-file test both live in
+        // `readFileInside`, and a file that cannot be read is not worth a tab
+        // that could only ever say so. The cost is one read of a file the pane
+        // is about to read again, paid once per deliberate click.
+        if ((await readFileInside(project.cwd, relPath)) === null) return null
+
+        const id = newSessionId()
+        const pane: PaneRecord = {
+          id,
+          projectSlug: project.slug,
+          cwd: project.cwd,
+          type: 'editor',
+          filePath,
+        }
+        // A tab this pane founds, so the tab's id is the pane's. That is the
+        // identity `TabRow.id` describes, and the one the renderer selects by.
+        //
+        // No `registry.applyOpen` beside this, unlike `CHANNELS.open` and
+        // restore: `stateForOpen('editor')` is null, so `applyOpen` would only
+        // ever `forget` an id nothing has ever recorded a state for.
+        const row: TabRow = {
+          id,
+          // Its own id, because there is no tmux group for it to be in. Restore
+          // matches a saved row by `id` and only reads `groupId` for tabs live
+          // tmux reported, which will never include this one.
+          groupId: id,
+          activePaneId: id,
+          layout: { dir: 'row', ratio: [1], kids: [id] },
+        }
+
+        // Both arrays in one write, for `splitPane`'s reason: a separate write
+        // per array leaves a window in which the file holds a pane no tab lists.
+        await store.write({
+          ...config,
+          panes: [...config.panes, pane],
+          tabs: withTabRow(config.tabs, id, row),
+        })
+        return pane
+      }),
+  )
 }
