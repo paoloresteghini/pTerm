@@ -256,8 +256,15 @@ describe('ConfigStore.read, hostile shapes', () => {
     //
     // The consequence is not cosmetic. `state.panes` is what the tab bar maps
     // over, keyed by pane id, so a duplicate is two React children under one
-    // key; `paneGroups` then drops the second by `seen` and the tab bar draws
-    // a row that has no pane behind it.
+    // key; `paneGroups` then drops the second by `seen`.
+    //
+    // It does NOT leave a row with no pane behind it, which is what this
+    // comment claimed until 2026-08-05, when it was measured against
+    // `tabsOfProject` and `paneGroups` rather than reasoned about: both rows
+    // carry the same id, so clicking either selects the same pane and shows the
+    // same group. What it leaves is two rows that do the same thing and may say
+    // different things, each rendering from its own record while the one box
+    // that exists is built from the first. See `paneRows` in `store.ts`.
     const first = {
       id: 'a1b2c3d4e5f60718',
       projectSlug: 'lumio',

@@ -157,7 +157,18 @@ function normalisePane(pane: PaneRecord): PaneRecord {
  * hand-edited file has no checks at all. What it costs is not cosmetic.
  * `state.panes` is the list the tab bar maps over, keyed by pane id, so a
  * duplicate is two React children under one key; `paneGroups` then boxes only
- * the first, by `seen`, and the bar carries a row with no pane behind it.
+ * the first, by `seen`.
+ *
+ * What that leaves is NOT a row with no pane behind it, which is what this
+ * comment claimed until it was measured. Both rows carry the same id, so
+ * clicking either selects the same pane and shows the same group. The cost is
+ * two rows that DO the same thing while being free to SAY different things,
+ * since each renders from its own object: measured 2026-08-05 against
+ * `tabsOfProject` and `paneGroups`, two rows titled `first` and `second`
+ * produced two bar rows with those titles, one group, and that group's box
+ * built from `first`. So the bar can offer a row labelled from the second
+ * record over a pane drawn from the first, and there is no gesture that
+ * reaches the second one's pane, because there is only ever one.
  */
 function paneRows(value: unknown): PaneRecord[] {
   if (!Array.isArray(value)) return []

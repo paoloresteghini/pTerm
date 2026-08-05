@@ -107,8 +107,10 @@ export function FileView({ projectId, relPath }: { projectId: string; relPath: s
       // six at 7.89:1, so a right-clicked editor pane is covered by a ratio
       // somebody already worked out.
       //
-      // `editor-missing` above deliberately stays `text-faint`: a message about
-      // an absent file is secondary text, and it is right as it is.
+      // `editor-missing` above carries this same colour, and for a different
+      // reason: it is a departure from the `text-faint` convention rather than
+      // the ordinary use of a content colour, so the argument for it is written
+      // at that element instead of repeated here.
       className="scroll-thin h-full overflow-auto p-3 font-mono text-[11px] leading-relaxed text-term-fg"
     >
       {text ?? ''}
