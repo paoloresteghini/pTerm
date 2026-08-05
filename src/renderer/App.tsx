@@ -7,14 +7,16 @@ import { Sidebar } from './Sidebar'
 import { RightPanel } from './RightPanel'
 import { NotesPanel } from './NotesPanel'
 import { AddProjectDialog } from './AddProjectDialog'
+import { ConfirmClosePane } from './ConfirmClosePane'
 import { SettingsPane } from './SettingsPane'
 import { TitleBar } from './TitleBar'
 import { Welcome } from './Welcome'
 import { CommandPalette, type PaletteSession } from './CommandPalette'
-import { FileView } from './FileView'
+import { FileView, saveEditorPane } from './FileView'
 import { cn } from './lib/cn'
 import { tabLabel } from './lib/tabLabel'
 import { relativeToProject } from './lib/relativeToProject'
+import { markDirty, forgetPane, type DirtyPanes } from './lib/dirtyPanes'
 import {
   INITIAL_WORKSPACE_STATE,
   activeProject,
@@ -72,6 +74,19 @@ export function App() {
   // which the mute toggle treats as "nothing to toggle yet" rather than
   // guessing at a shape it has not seen.
   const [notifications, setNotifications] = useState<NotificationConfig | null>(null)
+  // Which editor panes have unsaved edits, renderer-only and never persisted
+  // (see `dirtyPanes.ts`). Keyed by pane id rather than tab id: `TabBar` maps
+  // a tab to its one pane before reading this.
+  const [dirty, setDirtyPanes] = useState<DirtyPanes>({})
+  // The pane `ConfirmClosePane` is asking about, or null when it is not open.
+  // Only ever set by `requestClosePane` below, and only for a dirty pane.
+  const [pendingClose, setPendingClose] = useState<string | null>(null)
+  // Stable across renders on purpose: `FileView` puts this in its
+  // view-building effect's dependency array, and a new function each render
+  // would rebuild the `EditorView` (and drop the cursor) on every keystroke.
+  const onDirtyChange = useCallback((paneId: string, isDirty: boolean) => {
+    setDirtyPanes((was) => markDirty(was, paneId, isDirty))
+  }, [])
 
   const fail = useCallback((reason: unknown) => {
     setError(reason instanceof Error ? reason.message : String(reason))
@@ -176,6 +191,35 @@ export function App() {
     },
     [fail],
   )
+
+  // The prompt is only for a pane with unsaved edits. A terminal pane is never
+  // in this map, so this is not a kind test wearing a dirtiness costume: a
+  // terminal closing has always been immediate and stays that way.
+  const requestClosePane = useCallback(
+    (paneId: string) => {
+      if (dirty[paneId] === true) {
+        setPendingClose(paneId)
+        return
+      }
+      closePane(paneId)
+    },
+    [dirty, closePane],
+  )
+
+  const cancelClose = useCallback(() => setPendingClose(null), [])
+
+  // Discarding drops the id from the dirty map itself: `closePane`'s async
+  // round trip through the channel would clear it too, once the pane actually
+  // unmounts (see `FileView`'s build-effect cleanup), but that only runs on
+  // success. Clearing it here is what keeps the dot from surviving a click
+  // the user already answered.
+  const discardClose = useCallback(() => {
+    if (pendingClose) {
+      closePane(pendingClose)
+      setDirtyPanes((was) => forgetPane(was, pendingClose))
+    }
+    setPendingClose(null)
+  }, [pendingClose, closePane])
 
   /**
    * Add a pane beside the active one, along `dir`.
@@ -563,8 +607,8 @@ export function App() {
             return
           case 'closePane':
             // Same guard the ⌘W handler applies: with no pane there is nothing
-            // to close, and closePane(null) is not a thing to ask for.
-            if (activePaneId) closePane(activePaneId)
+            // to close, and requestClosePane(null) is not a thing to ask for.
+            if (activePaneId) requestClosePane(activePaneId)
             return
           case 'splitRight':
             splitActive('row')
@@ -591,7 +635,7 @@ export function App() {
             setSettingsOpen(true)
         }
       }),
-    [activePaneId, openTab, closePane, splitActive, focusPane],
+    [activePaneId, openTab, requestClosePane, splitActive, focusPane],
   )
 
   useEffect(() => {
@@ -620,7 +664,15 @@ export function App() {
       }
       if (event.code === 'KeyW' && !event.altKey && activePaneId) {
         event.preventDefault()
-        closePane(activePaneId)
+        requestClosePane(activePaneId)
+        return
+      }
+      // `saveEditorPane` is a no-op for a pane that is not an editor (or not
+      // mounted at all), so this needs no check of the pane's kind: a ⌘S
+      // typed at a terminal pane reaches here and does nothing.
+      if (event.code === 'KeyS' && !event.altKey && activePaneId) {
+        event.preventDefault()
+        saveEditorPane(activePaneId).catch(fail)
         return
       }
       // Both here rather than as registered menu accelerators, for the reason
@@ -687,7 +739,7 @@ export function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [activePaneId, currentTabs, state.projects, openTab, closePane, splitActive, focusPane])
+  }, [activePaneId, currentTabs, state.projects, openTab, requestClosePane, splitActive, focusPane, fail])
 
   /**
    * Where an editor pane's file sits relative to its own project, or null when
@@ -795,8 +847,9 @@ export function App() {
             activeId={currentTabId}
             status={state.status}
             dead={state.dead}
+            dirty={dirty}
             onActivate={(id) => dispatch({ type: 'activatedTab', id })}
-            onClose={closePane}
+            onClose={requestClosePane}
             onRestart={restartTab}
             onDismiss={dismissTab}
             onNew={openTab}
@@ -910,6 +963,9 @@ export function App() {
                       <FileView
                         projectId={projectIdForTab(state.projects, box.pane)}
                         relPath={editorRelPath(box.pane)}
+                        color={box.pane.color ?? PANE_COLOR_DEFAULT}
+                        paneId={box.pane.id}
+                        onDirtyChange={onDirtyChange}
                       />
                     ) : (
                       <Terminal
@@ -1081,6 +1137,8 @@ export function App() {
           notifications={notifications}
           onNotificationsChange={setNotifications}
         />
+
+        <ConfirmClosePane open={pendingClose !== null} onCancel={cancelClose} onDiscard={discardClose} />
       </div>
     </div>
   )

@@ -42,6 +42,7 @@ export const CHANNELS = {
   notesWrite: 'prcli:notesWrite',
   fsList: 'prcli:fsList',
   fsRead: 'prcli:fsRead',
+  fsWrite: 'prcli:fsWrite',
   openEditor: 'prcli:openEditor',
 } as const
 
@@ -161,6 +162,17 @@ export interface FileContents {
   text: string
   mtimeMs: number
 }
+
+/**
+ * What a write did.
+ *
+ * Declared here rather than only in `src/main/files/tree.ts` for the reason
+ * `FileContents` gives: the renderer draws this. A refusal is data, because
+ * the pane says what happened instead of the app failing.
+ */
+export type WriteResult =
+  | { ok: true; mtimeMs: number }
+  | { ok: false; reason: 'changed' | 'missing' | 'failed' }
 
 export interface TabDescriptor {
   id: string
@@ -614,6 +626,21 @@ export interface PrcliApi {
    * rather than rejecting.
    */
   fsRead(projectId: string, relPath: string): Promise<FileContents | null>
+  /**
+   * Write one file of one project, refusing if it changed since it was read.
+   *
+   * `relPath` is relative to the project's own `cwd` and resolved against it
+   * in main: no absolute path crosses this boundary. `expectedMtimeMs` is the
+   * mtime the text on screen was read at. A path that would leave the project,
+   * a directory, a missing file and a changed file all resolve to an `ok:
+   * false` result rather than rejecting.
+   */
+  fsWrite(
+    projectId: string,
+    relPath: string,
+    text: string,
+    expectedMtimeMs: number,
+  ): Promise<WriteResult>
   /**
    * Open one file of one project in an editor pane of its own, in a new tab.
    *

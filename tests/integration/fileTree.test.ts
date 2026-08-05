@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { listDir, readFileInside } from '../../src/main/files/tree'
+import { listDir, readFileInside, writeFileInside, type WriteResult } from '../../src/main/files/tree'
 
 /**
  * The handler's own logic, exercised without Electron: resolve a project id
@@ -75,5 +75,36 @@ describe('the fsRead handler', () => {
 
   it('will not read outside the project it names', async () => {
     await expect(handleRead([{ id: 'p1', cwd: root }], 'p1', '../../etc/hosts')).resolves.toBeNull()
+  })
+})
+
+async function handleWrite(
+  projects: { id: string; cwd: string }[],
+  projectId: string,
+  relPath: string,
+  text: string,
+  expectedMtimeMs: number,
+): Promise<WriteResult> {
+  const project = projects.find((row) => row.id === projectId)
+  if (!project) return { ok: false, reason: 'failed' }
+  return writeFileInside(project.cwd, relPath, text, expectedMtimeMs)
+}
+
+describe('the fsWrite handler', () => {
+  it('writes a file of the named project', async () => {
+    const before = await readFileInside(root, 'README.md')
+    const result = await handleWrite([{ id: 'p1', cwd: root }], 'p1', 'README.md', '# two', before!.mtimeMs)
+    expect(result.ok).toBe(true)
+    expect((await readFileInside(root, 'README.md'))?.text).toBe('# two')
+  })
+
+  it('resolves an unknown project to a refusal rather than throwing', async () => {
+    const result = await handleWrite([{ id: 'p1', cwd: root }], 'nope', 'README.md', 'x', 0)
+    expect(result).toEqual({ ok: false, reason: 'failed' })
+  })
+
+  it('will not write outside the project it names', async () => {
+    const result = await handleWrite([{ id: 'p1', cwd: root }], 'p1', '../../tmp/escaped.txt', 'x', 0)
+    expect(result).toEqual({ ok: false, reason: 'failed' })
   })
 })

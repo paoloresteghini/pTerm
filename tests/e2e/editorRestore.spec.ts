@@ -228,3 +228,59 @@ test('the editor pane comes back after a relaunch', async () => {
     .toEqual({ sentinel: false, filePath: seededFile })
   await second.close()
 })
+
+// The spec's own acceptance test for this slice: open a file, edit, save,
+// relaunch, and find the edit. Note what it does NOT assert: that the pane
+// was still dirty. Dirtiness is renderer state and is deliberately not
+// persisted, so a pane that was dirty at quit reopens clean against what is
+// on disk, which is what the next test pins.
+test('an edit saved before a relaunch is there afterwards', async () => {
+  const first = await launch()
+  const opened = await first.firstWindow()
+  await expect(opened.getByTestId('pane-e1')).toBeVisible({ timeout: 20_000 })
+  const content = opened.getByTestId('editor-content')
+  await content.locator('.cm-content').click()
+  await opened.keyboard.type('// edited\n')
+  await opened.keyboard.press('Meta+s')
+  await expect(opened.getByTestId('editor-dirty-e1')).toHaveCount(0)
+  await first.close()
+
+  // `app.close()` here, and everywhere else this file relaunches: a real
+  // quit with unsaved work is a case this slice does not handle. Nothing
+  // prompts on window close, only on pane close (Task 5). That gap is known
+  // and deliberately out of scope for this task.
+  const second = await launch()
+  const reopened = await second.firstWindow()
+  await expect(reopened.getByTestId('editor-content')).toContainText('// edited', {
+    timeout: 10_000,
+  })
+  await second.close()
+})
+
+test('an unsaved edit is gone after a relaunch, and the tab is clean', async () => {
+  const first = await launch()
+  const opened = await first.firstWindow()
+  await expect(opened.getByTestId('pane-e1')).toBeVisible({ timeout: 20_000 })
+  const content = opened.getByTestId('editor-content')
+  await content.locator('.cm-content').click()
+  await opened.keyboard.type('// not saved')
+  await expect(opened.getByTestId('editor-dirty-e1')).toBeAttached()
+  await first.close()
+
+  const second = await launch()
+  const reopened = await second.firstWindow()
+  // The load, anchored POSITIVELY before either negative below is read, and it
+  // is the whole point of this line. `editor-content` is the host div: it is on
+  // screen from the first paint, before `fsRead` resolves and before CodeMirror
+  // builds anything under it, and it has a non-zero box, so a `toBeVisible`
+  // here is satisfied by an EMPTY editor. Both assertions below are negatives,
+  // and both pass against an empty editor too. Anchoring on the seeded bytes,
+  // which are on disk and unchanged, is what makes the two of them wait for a
+  // document to actually be there before they say anything about it.
+  await expect(reopened.getByTestId('editor-content')).toContainText('const seeded = 1', {
+    timeout: 10_000,
+  })
+  await expect(reopened.getByTestId('editor-content')).not.toContainText('// not saved')
+  await expect(reopened.getByTestId('editor-dirty-e1')).toHaveCount(0)
+  await second.close()
+})

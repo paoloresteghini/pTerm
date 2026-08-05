@@ -1,4 +1,5 @@
-import { readdir, readFile, realpath, stat } from 'node:fs/promises'
+import { readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
+import type { Stats } from 'node:fs'
 import { isAbsolute, join, resolve, sep } from 'node:path'
 
 /**
@@ -158,6 +159,73 @@ export async function readFileInside(root: string, relPath: string): Promise<Fil
     return { text: await readFile(realTarget, 'utf8'), mtimeMs: info.mtimeMs }
   } catch {
     return null
+  }
+}
+
+/**
+ * What a write did, as data rather than as an exception.
+ *
+ * A refusal is an ordinary answer here: the caller is a React key handler and
+ * "the file moved under you" is the case this whole channel exists to catch,
+ * not an error condition. `changed` and `missing` are distinct because the
+ * pane offers a reload for the first and cannot for the second.
+ */
+export type WriteResult =
+  | { ok: true; mtimeMs: number }
+  | { ok: false; reason: 'changed' | 'missing' | 'failed' }
+
+/**
+ * Write one file of one project, refusing if it changed since it was read.
+ *
+ * The same containment guard `readFileInside` uses, by the same two halves:
+ * `resolveInside` for the path the renderer spelled, and a `realpath` re-check
+ * for the one it did not, since `writeFile` follows a symlink exactly as
+ * `readFile` does.
+ *
+ * `expectedMtimeMs` is the mtime the text on screen was read at, which is why
+ * `fsRead` has carried one since B1. A mismatch refuses and writes nothing.
+ *
+ * **This is check-then-write, not an atomic compare-and-swap.** A change
+ * landing between the `stat` and the `writeFile` is not caught, and there is
+ * no way to catch it with POSIX file APIs. The window is sub-millisecond and
+ * the alternative (a lock file, or a temp-and-rename that would replace a
+ * symlink the user deliberately made) is worse than the race. Said plainly
+ * here so the next reader does not assume a guarantee that is not there.
+ *
+ * Never throws, like its sibling.
+ */
+export async function writeFileInside(
+  root: string,
+  relPath: string,
+  text: string,
+  expectedMtimeMs: number,
+): Promise<WriteResult> {
+  const target = resolveInside(root, relPath)
+  if (target === null) return { ok: false, reason: 'failed' }
+  let realTarget: string
+  let info: Stats
+  try {
+    const realRoot = await realpath(root)
+    realTarget = await realpath(target)
+    if (!isInside(realRoot, realTarget)) return { ok: false, reason: 'failed' }
+    info = await stat(realTarget)
+  } catch {
+    // A catch-all, not only "nothing at the end of the path": ENOENT is the
+    // common case and the one the caller means by `missing`, but EACCES on a
+    // directory in the path or ELOOP would land here too, and are reported
+    // the same way even though the file is not actually gone. Not split out
+    // by error code today; if a caller ever needs to tell those apart, this
+    // is where that check would go.
+    return { ok: false, reason: 'missing' }
+  }
+  if (!info.isFile()) return { ok: false, reason: 'failed' }
+  if (info.mtimeMs !== expectedMtimeMs) return { ok: false, reason: 'changed' }
+  try {
+    await writeFile(realTarget, text, 'utf8')
+    const written = await stat(realTarget)
+    return { ok: true, mtimeMs: written.mtimeMs }
+  } catch {
+    return { ok: false, reason: 'failed' }
   }
 }
 

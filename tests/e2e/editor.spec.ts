@@ -47,6 +47,9 @@ import { UNSORTED_ID } from '../../src/shared/ipc'
 
 const SOCKET = 'prcli-e2e-editor'
 
+/** Seeded as both `src/app.ts` and `notes.txt`. See `beforeAll`. */
+const TYPESCRIPT_BYTES = 'export const answer = 42\n'
+
 let app: ElectronApplication
 let page: Page
 let userDataDir: string
@@ -68,7 +71,12 @@ test.beforeAll(async () => {
 
   projectCwd = join(projectsRoot, 'demo')
   await mkdir(join(projectCwd, 'src'), { recursive: true })
-  await writeFile(join(projectCwd, 'src', 'app.ts'), 'export const answer = 42\n')
+  await writeFile(join(projectCwd, 'src', 'app.ts'), TYPESCRIPT_BYTES)
+  // The same bytes under a name no grammar claims, which is the control for
+  // the syntax highlighting test: written from one constant rather than two
+  // literals so the two files cannot drift apart and quietly turn that test
+  // into a comparison of two different documents.
+  await writeFile(join(projectCwd, 'notes.txt'), TYPESCRIPT_BYTES)
   await writeFile(join(projectCwd, 'README.md'), '# demo\n')
 
   await writeFile(
@@ -139,6 +147,18 @@ test('the pane shows the file contents', async () => {
   await expect(visiblePane().getByTestId('editor-content')).toContainText('# demo')
 })
 
+// The fourth caller of `tabLabel`, alongside the bar, the sidebar and a dead
+// pane's chrome. `tabs.spec.ts` pins this for a terminal tab; nothing pinned
+// it for an editor one, whose label comes from a file's basename instead of
+// a slug and id.
+test('the command palette names an editor tab the way the tab bar does', async () => {
+  const editorTab = await tabIdFor('README.md')
+  await page.keyboard.press('Meta+k')
+  await expect(page.getByTestId(`palette-session-${editorTab}`)).toContainText('README.md')
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('command-palette')).toBeHidden()
+})
+
 // A second file gets a second tab, which is this slice's ruling: one tab per
 // file, rather than one editor tab that swaps its contents.
 test('a second file opens a second tab', async () => {
@@ -146,6 +166,186 @@ test('a second file opens a second tab', async () => {
   await page.getByTestId('tree-row-src').click()
   await page.getByTestId('tree-row-src/app.ts').click()
   await expect(page.locator('[data-testid^="tab-"]')).toHaveCount(before + 1)
+  await expect(visiblePane().getByTestId('editor-content')).toContainText(
+    'export const answer = 42',
+  )
+})
+
+/**
+ * The two tests below sit HERE rather than at the end of the file, which is
+ * where the plan put them, and both positions are forced.
+ *
+ * Not after the last test: it removes the project, which sends every pane to
+ * Unsorted and leaves no tree to click a file in. Not after the next test
+ * either: that one deletes `src/app.ts`, and the highlighted half of the pair
+ * needs it. So they go after the tab `src/app.ts` opened and before it is
+ * taken away.
+ *
+ * Neither test may re-click a tree row for a file that is already open.
+ * `openEditor` mints a fresh pane and a fresh tab on every call (there is no
+ * dedup by path), so a second click on `README.md` would put a second tab of
+ * that name in the bar, and `tabIdFor` below is a strict-mode locator that
+ * would then match two elements and fail three later tests. Clicking the
+ * existing TAB is how you get back to a file.
+ */
+
+// Deliberately says nothing about disk, even though ⌘S now writes: this is the
+// keystroke reaching the document and nothing else. What typing then goes on to
+// do is `Cmd+S writes the file and clears the dot`'s to assert, and it reads
+// the bytes rather than the screen.
+test('the editor takes typing', async () => {
+  const content = visiblePane().getByTestId('editor-content')
+  await expect(content).toContainText('export const answer = 42', { timeout: 10_000 })
+
+  // `.cm-content` clicked directly, and never `toBeVisible` on the pane: this
+  // project has had a `toBeVisible` pass on an element painted behind the
+  // terminal, so the click is the assertion. It has to land on the editable
+  // element for the keystroke to have anywhere to go.
+  await content.locator('.cm-content').click()
+  await page.keyboard.press('ControlOrMeta+End')
+  await page.keyboard.type('X')
+
+  // Both halves. The first alone would pass if typing had replaced the
+  // document, and the second alone would pass if the keystroke had gone
+  // nowhere and `X` had come from somewhere else on the page.
+  await expect(content).toContainText('X')
+  await expect(content).toContainText('export const answer = 42')
+})
+
+/**
+ * Typing marks the tab dirty, and undoing back to what was read clears it.
+ *
+ * Switches to the existing README tab rather than its tree row, per the note
+ * above: `openEditor` mints a fresh pane per click, so a second click on an
+ * already-open README would add a second tab and break `tabIdFor`'s
+ * strict-mode locator for every test after this one.
+ */
+test('typing marks the tab dirty and undoing marks it clean', async () => {
+  const paneId = await tabIdFor('README.md')
+  await page.getByTestId(`tab-${paneId}`).click()
+  const content = visiblePane().getByTestId('editor-content')
+  await expect(content).toContainText('# demo', { timeout: 10_000 })
+
+  await content.locator('.cm-content').click()
+  await page.keyboard.type('X')
+  await expect(page.getByTestId(`editor-dirty-${paneId}`)).toBeAttached()
+
+  // Back to what was read, so the dot goes. Dirty means "differs from disk",
+  // not "was typed in", and this is the assertion that tells the two apart.
+  await page.keyboard.press('Meta+z')
+  await expect(page.getByTestId(`editor-dirty-${paneId}`)).toHaveCount(0)
+
+  // Back to the app.ts tab: the recolouring test right after this one reads
+  // the visible pane without switching tabs first and expects that file.
+  await page.getByTestId(`tab-${await tabIdFor('app.ts')}`).click()
+  await expect(visiblePane().getByTestId('editor-content')).toContainText(
+    'export const answer = 42',
+  )
+})
+
+/**
+ * Recolouring a pane must not throw away what is in its editor.
+ *
+ * **This pins a fix, and it caught a real defect on the way in.** The pane's
+ * colour is a prop, and the first version of `FileView` had it in the view's
+ * dependency array, so a recolour destroyed the `EditorView` and rebuilt it
+ * from the text last read off disk. Everything typed since went with it,
+ * silently, and the pane looked fine afterwards. The theme now lives in a
+ * `Compartment` that is reconfigured in place instead.
+ *
+ * It is asserted here rather than deferred to the task that adds saving,
+ * because nothing about the loss is visible: there is no error, no dirty mark
+ * to go stale, just a pane that quietly says what the file used to say.
+ *
+ * Uses the pane's own right-click menu rather than reaching into state, which
+ * is the route a user actually has. `swatch-<paneId>-<hex without #>` is the
+ * same locator shape `splits.spec.ts` recolours through.
+ */
+test('recolouring a pane keeps what was typed into it', async () => {
+  const editorTab = await tabIdFor('app.ts')
+  const content = visiblePane().getByTestId('editor-content')
+
+  await content.locator('.cm-content').click()
+  await page.keyboard.press('ControlOrMeta+End')
+  await page.keyboard.type('KEEPME')
+  await expect(content).toContainText('KEEPME')
+
+  await page.getByTestId(`pane-${editorTab}`).click({ button: 'right' })
+  await page.getByTestId(`swatch-${editorTab}-232326`).click()
+
+  // The recolour landed. Without this the assertions below would also pass on
+  // a menu that never opened, which is the same shape of hole the pane-menu
+  // test further down guards against.
+  await expect(page.getByTestId(`pane-${editorTab}`)).toHaveCSS(
+    'background-color',
+    'rgb(35, 35, 38)',
+  )
+
+  // And the EDITOR heard about it, which the line above does not say: that
+  // background is painted inline on the pane box by `App.tsx` and would be
+  // right even if the compartment reconfigure did nothing at all. The gutter
+  // is the one surface CodeMirror paints itself from the theme, so it is the
+  // only thing on screen that can report whether the reconfigure landed.
+  //
+  // Measured 2026-08-05, both halves, with `themes` changed from a `useRef` to
+  // a per-render `{ current: new Compartment() }` and nothing else touched:
+  //
+  // - with this assertion present, THIS line is where the run reds, `Expected
+  //   "rgb(35, 35, 38)" Received "rgb(9, 9, 11)"`. Everything above it in this
+  //   test passed, the `pane-` box assertion included, so the box really does
+  //   go on reporting a recolour the editor never heard about;
+  // - with this one line commented out and the mutation still in place, the
+  //   whole file passed, 12 of 12. Nothing else in the suite sees it.
+  //
+  // A reconfigure aimed at a compartment the state has never seen is discarded
+  // silently, so the editor sits on the colour it was built with.
+  await expect(content.locator('.cm-gutters')).toHaveCSS('background-color', 'rgb(35, 35, 38)')
+
+  // And the document is untouched: the typed text AND the file's own, so a
+  // rebuild that happened to re-read the same file could not pass this.
+  await expect(content).toContainText('KEEPME')
+  await expect(content).toContainText('export const answer = 42')
+
+  // Put it back, so the pane-menu test below opens on a pane in the state it
+  // was written against.
+  await page.getByTestId(`pane-${editorTab}`).click({ button: 'right' })
+  await page.getByTestId(`swatch-${editorTab}-09090b`).click()
+})
+
+/**
+ * A grammar was applied, asserted against the same bytes with no grammar.
+ *
+ * Measured 2026-08-05 rather than assumed, because the plan offered the
+ * mechanism as a hypothesis. `src/app.ts` renders
+ * `<span class="ͼa">export</span> <span class="ͼa">const</span> <span
+ * class="ͼf">answer</span> = <span class="ͼc">42</span>`, four token spans;
+ * `notes.txt`, byte for byte the same file, renders a bare `<div
+ * class="cm-line">export const answer = 42</div>` with none. So the spans are
+ * real and the difference is real.
+ *
+ * Their presence is asserted rather than their count or their classes. The
+ * classes are generated names (`ͼa`) that belong to CodeMirror's own style
+ * module, and the count is how the JavaScript grammar happens to tokenise one
+ * line: pinning either would red on a dependency bump that broke nothing. What
+ * this pins is that a language ran at all, and the plain file is what stops
+ * that from being vacuous.
+ */
+test('a javascript file is syntax highlighted and a plain one is not', async () => {
+  const highlighted = visiblePane().getByTestId('editor-content')
+  await expect(highlighted).toContainText('export const answer = 42', { timeout: 10_000 })
+  await expect(highlighted.locator('.cm-content span').first()).toBeAttached()
+
+  await page.getByTestId('tree-row-notes.txt').click()
+  const plain = visiblePane().getByTestId('editor-content')
+  // The text first. Without it, zero spans is also what an editor that never
+  // loaded looks like.
+  await expect(plain).toContainText('export const answer = 42', { timeout: 10_000 })
+  await expect(plain.locator('.cm-content span')).toHaveCount(0)
+
+  // Back to the `app.ts` tab, because the next test reads the visible pane and
+  // expects that file's. Its own tab rather than its tree row, per the note
+  // above.
+  await page.getByTestId(`tab-${await tabIdFor('app.ts')}`).click()
   await expect(visiblePane().getByTestId('editor-content')).toContainText(
     'export const answer = 42',
   )
@@ -302,6 +502,136 @@ test('closing an editor tab kills no session, and says nothing', async () => {
     .toEqual({ pane: false, tab: false })
 })
 
+/**
+ * Closing a pane with unsaved edits asks first; closing a clean one does not.
+ *
+ * Placed here, between the "closing an editor tab" test above and the Cmd+S
+ * test below, because it is the one window in this file where README.md is
+ * both UNOPENED (the test above closed the tab test 1 opened for it) and
+ * UNMODIFIED on disk: still `# demo\n`, since nothing has written to it yet.
+ * The Cmd+S test below is the first thing in the file that does, so these
+ * four have to run before it or the fixture their assertions rely on is
+ * already gone. Every open below is by tree row, which is only safe because
+ * no README tab is open going in, and each of the four leaves none open
+ * coming out, so the Cmd+S test's own tree-row click still mints a fresh tab
+ * rather than a second one beside an existing README.
+ */
+test('closing a dirty editor pane asks first, and cancelling keeps it', async () => {
+  await page.getByTestId('tree-row-README.md').click()
+  const content = visiblePane().getByTestId('editor-content')
+  await expect(content).toContainText('# demo', { timeout: 10_000 })
+  const tabId = await page.locator('[data-testid^="tab-"]').last().getAttribute('data-testid')
+  const paneId = tabId!.replace('tab-', '')
+
+  await content.locator('.cm-content').click()
+  await page.keyboard.type('Z')
+  await page.getByTestId(`close-${paneId}`).click()
+
+  await expect(page.getByTestId('confirm-close')).toBeVisible()
+  await page.getByTestId('confirm-close-cancel').click()
+  // Still open, still dirty, still holding the edit.
+  await expect(page.getByTestId(`tab-${paneId}`)).toHaveCount(1)
+  await expect(page.getByTestId(`editor-dirty-${paneId}`)).toBeAttached()
+})
+
+test('confirming the prompt closes it and loses the edit', async () => {
+  const tabId = await page.locator('[data-testid^="tab-"]').last().getAttribute('data-testid')
+  const paneId = tabId!.replace('tab-', '')
+  await page.getByTestId(`close-${paneId}`).click()
+  await page.getByTestId('confirm-close-discard').click()
+  await expect(page.getByTestId(`tab-${paneId}`)).toHaveCount(0)
+  // The file on disk never had the edit, and still does not.
+  expect(await readFile(join(projectCwd, 'README.md'), 'utf8')).not.toContain('Z')
+})
+
+test('closing a clean editor pane does not ask', async () => {
+  // The control. Without it, a prompt that appeared for every pane would pass
+  // both tests above.
+  await page.getByTestId('tree-row-README.md').click()
+  await expect(visiblePane().getByTestId('editor-content')).toContainText('# demo', {
+    timeout: 10_000,
+  })
+  const tabId = await page.locator('[data-testid^="tab-"]').last().getAttribute('data-testid')
+  const paneId = tabId!.replace('tab-', '')
+  await page.getByTestId(`close-${paneId}`).click()
+  await expect(page.getByTestId('confirm-close')).toHaveCount(0)
+  await expect(page.getByTestId(`tab-${paneId}`)).toHaveCount(0)
+})
+
+test('closing a terminal pane does not ask', async () => {
+  // The other control, and the one that catches a prompt keyed on the wrong
+  // thing: a terminal is never dirty, so it must never be asked about.
+  await page.getByTestId('new-tab').click()
+  await expect(page.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
+  const tabId = await page.locator('[data-testid^="tab-"]').last().getAttribute('data-testid')
+  const paneId = tabId!.replace('tab-', '')
+  await page.getByTestId(`close-${paneId}`).click()
+  await expect(page.getByTestId('confirm-close')).toHaveCount(0)
+  await expect(page.getByTestId(`tab-${paneId}`)).toHaveCount(0)
+})
+
+/**
+ * ⌘S writes the pane's document to disk and clears the dirty dot.
+ *
+ * `tree-row-README.md` is safe to click here: none of the four pane-close
+ * tests above leave a README tab open, whichever one of them ran last.
+ */
+test('Cmd+S writes the file and clears the dot', async () => {
+  await page.getByTestId('tree-row-README.md').click()
+  const content = visiblePane().getByTestId('editor-content')
+  await expect(content).toContainText('# demo', { timeout: 10_000 })
+  const paneId = await tabIdFor('README.md')
+
+  await content.locator('.cm-content').click()
+  await page.keyboard.type('X')
+  await page.keyboard.press('Meta+s')
+
+  await expect(page.getByTestId(`editor-dirty-${paneId}`)).toHaveCount(0)
+  // The assertion this test exists for: what is on DISK, not what is on
+  // screen. A save that cleared the dot without writing would pass every
+  // visual assertion here.
+  await expect
+    .poll(async () => readFile(join(projectCwd, 'README.md'), 'utf8'), { timeout: 5_000 })
+    .toContain('X')
+})
+
+/**
+ * A file changed underneath the pane refuses the save, and a reload picks up
+ * what is actually there.
+ *
+ * Reached through the tab the test above left open, not a second click on
+ * `tree-row-README.md`: that tab is still open, and a second click on the
+ * tree row would mint a duplicate and break `tabIdFor('README.md')`'s
+ * strict-mode locator.
+ */
+test('a file changed underneath the pane refuses the save and offers a reload', async () => {
+  const paneId = await tabIdFor('README.md')
+  await page.getByTestId(`tab-${paneId}`).click()
+  const content = visiblePane().getByTestId('editor-content')
+  await content.locator('.cm-content').click()
+  await page.keyboard.type('Y')
+
+  // Somebody else, which on this machine is the normal case.
+  await writeFile(join(projectCwd, 'README.md'), '# theirs\n')
+
+  await page.keyboard.press('Meta+s')
+  await expect(visiblePane().getByTestId('editor-refused')).toBeVisible({ timeout: 10_000 })
+
+  // Refused means refused: their text is still on disk.
+  expect(await readFile(join(projectCwd, 'README.md'), 'utf8')).toBe('# theirs\n')
+
+  await visiblePane().getByTestId('editor-reload').click()
+  await expect(content).toContainText('# theirs')
+  await expect(visiblePane().getByTestId('editor-refused')).toHaveCount(0)
+
+  // Closed rather than left open: the last test in this file finds "the
+  // terminal tab" as whichever tab is last in the bar, an assumption laid
+  // down before this pair of tests existed. Leaving this one open would put
+  // it there instead of the shell tab that test expects.
+  await page.getByTestId(`close-${paneId}`).click()
+  await expect(page.getByTestId(`tab-${paneId}`)).toHaveCount(0)
+})
+
 test('the pane menu on an editor offers colours and nothing else', async () => {
   // The second editor tab, the one whose file was deleted in the fourth test.
   // It is still a pane and still right-clickable; what it is showing does not
@@ -339,6 +669,16 @@ test('the pane menu on an editor offers colours and nothing else', async () => {
  * not. It is a dead key: nothing appears, nothing is thrown, nothing is
  * painted. Deferred to B2 deliberately, by Paolo's ruling during B1's Task 6,
  * rather than left unnoticed.
+ *
+ * **Amended 2026-08-05, when CodeMirror landed.** It is a dead key only while
+ * the editor does not hold keyboard focus, which is the case this test is in:
+ * it clicks the TAB, and `document.activeElement` measured as that button
+ * rather than `.cm-content`. Measured with `.cm-content` focused instead, ⌘D
+ * selects the word under the cursor and `window.getSelection()` goes from
+ * empty to that word, because `@codemirror/search`'s `searchKeymap` binds
+ * `Mod-d` to `selectNextOccurrence` with `preventDefault: true`. So whoever
+ * implements the split inherits a third thing to settle alongside the two
+ * below: the editor swallows the chord whenever the user is typing in it.
  *
  * **Two blockers, measured, not one:**
  *
@@ -406,6 +746,198 @@ test('⌘D on an editor pane does nothing, which is deferred rather than intende
   // defect this one paints nothing, which is what made it worth a test rather
   // than a bug report.
   await expect(page.getByTestId('startup-error')).toHaveCount(0)
+})
+
+/**
+ * Two editor panes open on the SAME file, in two different tabs. The mtime
+ * check exists for exactly this case, and this is where it is caught doing
+ * its job inside one running app rather than only against an outside writer.
+ *
+ * A file of its own (`dual.txt`), written and cleaned up by this test alone,
+ * so it cannot collide with any fixture another test in this file depends on.
+ * Both tabs it opens are closed before the test ends, so the tab count and
+ * the `.last()` tab assumptions later tests make are undisturbed.
+ *
+ * Opened by two clicks on the same tree row, which is the only way to get
+ * two tabs of one file: `openEditor` mints a fresh pane per call with no
+ * dedup by path (see the note above `tabIdFor`), so nothing stops it.
+ */
+test('two editor panes on one file: a save from one refuses the other, and neither silently shows stale text', async () => {
+  const dualFile = join(projectCwd, 'dual.txt')
+  await writeFile(dualFile, 'original\n')
+  await page.getByTestId('tree-refresh').click()
+
+  // Waited for by count, not read off `.last()` straight after the click:
+  // `openEditor` is an IPC round trip, and reading `.last()` before the new
+  // tab has actually rendered grabs whichever tab was last BEFORE the click,
+  // one of the terminal tabs earlier tests in this file leave open.
+  const beforeA = await page.locator('[data-testid^="tab-"]').count()
+  await page.getByTestId('tree-row-dual.txt').click()
+  await expect(page.locator('[data-testid^="tab-"]')).toHaveCount(beforeA + 1)
+  const paneA = (
+    (await page.locator('[data-testid^="tab-"]').last().getAttribute('data-testid')) ?? ''
+  ).replace('tab-', '')
+  await expect(visiblePane().getByTestId('editor-content')).toContainText('original', {
+    timeout: 10_000,
+  })
+
+  const beforeB = await page.locator('[data-testid^="tab-"]').count()
+  await page.getByTestId('tree-row-dual.txt').click()
+  await expect(page.locator('[data-testid^="tab-"]')).toHaveCount(beforeB + 1)
+  const paneB = (
+    (await page.locator('[data-testid^="tab-"]').last().getAttribute('data-testid')) ?? ''
+  ).replace('tab-', '')
+  expect(paneB).not.toBe(paneA)
+  await expect(visiblePane().getByTestId('editor-content')).toContainText('original', {
+    timeout: 10_000,
+  })
+
+  // Edit and save from A.
+  await page.getByTestId(`tab-${paneA}`).click()
+  const contentA = visiblePane().getByTestId('editor-content')
+  await contentA.locator('.cm-content').click()
+  await page.keyboard.press('ControlOrMeta+End')
+  await page.keyboard.type('\nfrom A')
+  await page.keyboard.press('Meta+s')
+  await expect(page.getByTestId(`editor-dirty-${paneA}`)).toHaveCount(0)
+  await expect.poll(() => readFile(dualFile, 'utf8'), { timeout: 5_000 }).toContain('from A')
+
+  // B, not silently refreshed: it is still showing what it read at open,
+  // which predates A's write.
+  await page.getByTestId(`tab-${paneB}`).click()
+  const contentB = visiblePane().getByTestId('editor-content')
+  await expect(contentB).toContainText('original')
+  await expect(contentB).not.toContainText('from A')
+
+  // B's own save now refuses: its mtime is the one it opened with, and the
+  // file's mtime moved when A wrote it.
+  await contentB.locator('.cm-content').click()
+  await page.keyboard.type('from B')
+  await page.keyboard.press('Meta+s')
+  await expect(visiblePane().getByTestId('editor-refused')).toBeVisible({ timeout: 10_000 })
+  expect(await readFile(dualFile, 'utf8')).not.toContain('from B')
+
+  // Both tabs closed, so nothing this test opened is left for a later test's
+  // `.last()` tab to trip over. B is still dirty (the refused save did not
+  // clear it), so its close asks first; A saved clean, so its close does not.
+  await page.getByTestId(`close-${paneB}`).click()
+  await expect(page.getByTestId('confirm-close')).toBeVisible()
+  await page.getByTestId('confirm-close-discard').click()
+  await expect(page.getByTestId(`tab-${paneB}`)).toHaveCount(0)
+
+  await page.getByTestId(`tab-${paneA}`).click()
+  await page.getByTestId(`close-${paneA}`).click()
+  await expect(page.getByTestId(`tab-${paneA}`)).toHaveCount(0)
+})
+
+/**
+ * A keystroke that lands while a save is in flight, and the dot afterwards.
+ *
+ * `save` snapshots the document, then awaits an IPC round trip, a disk write
+ * and a `stat`. Nothing blocks input during that await, so a character typed
+ * inside it is in the document and on no disk. Concluding "clean" from the
+ * fact of having written is what made that lossy: the dot went out, and
+ * `requestClosePane` then took its no-prompt branch and destroyed the
+ * character without asking. Type, ⌘S, type one more, stop, close.
+ *
+ * **The race is placed rather than raced for**, and that is the only reason
+ * this test is worth anything. The ⌘S and the keystroke go out in ONE
+ * `page.evaluate`, which is one synchronous task in the renderer:
+ * `saveEditorPane` runs inside `dispatchEvent`, so the snapshot is taken and
+ * the IPC is in flight before that call returns, and the `execCommand` on the
+ * next line cannot be beaten by a reply that needs a later task to arrive.
+ * The keystroke lands inside the await every run, with no timing to tune.
+ *
+ * Two things this trades away, both deliberately. The ⌘S is a synthetic
+ * `keydown` on `window`, where `Cmd+S writes the file and clears the dot`
+ * above presses the real key through the same handler, so the real route is
+ * covered and this one is not asserting it. And `execCommand('insertText')`
+ * is how the character is typed, which is checked twice rather than assumed:
+ * its return value, and `toContainText('savedz')` on the pane. An insert that
+ * quietly did nothing reds there rather than leaving a clean pane to agree
+ * with a broken one.
+ *
+ * **The settle is a `waitForTimeout` and it cannot be anything better.** What
+ * has to be waited out is the save's own continuation, which paints nothing
+ * of its own: with the defect present the dot goes out only when it runs, so
+ * an assertion made a moment too early passes against the bug. Nothing else
+ * in the pane moves at that instant: `setRefused(null)` is invisible and the
+ * new `mtime` is only observable through another save, which would clear the
+ * dot itself and destroy the thing being measured. Holding the write open from
+ * the page, which would have given an exact marker, was tried and is not
+ * available: measured 2026-08-05, `contextBridge` hands the renderer a frozen
+ * object, `window.prcli` is `writable: false, configurable: false` and so is
+ * `fsWrite` on it, and both a plain assignment and `defineProperty` are refused
+ * (the assignment silently). The continuation is triggered by the same IPC
+ * reply the disk write precedes, so once the bytes below are on disk it is one
+ * message-loop hop away; two seconds is the same kind of margin the ⌘D test
+ * above waits out for the same kind of reason.
+ *
+ * **Mutation measured 2026-08-05**: `FileView.tsx`'s `onDirtyChange(paneId,
+ * current.state.doc.toString() !== baseline.current)` put back to
+ * `onDirtyChange(paneId, false)`, the line this test exists for. Reverted
+ * after measuring; the result is recorded at the assertion it failed on.
+ */
+test('a keystroke typed while a save is in flight leaves the pane dirty, and closing it still asks', async () => {
+  const raceFile = join(projectCwd, 'race.txt')
+  await writeFile(raceFile, 'original\n')
+  await page.getByTestId('tree-refresh').click()
+
+  // By count and not off `.last()` straight after the click, for the reason
+  // the test above spells out.
+  const before = await page.locator('[data-testid^="tab-"]').count()
+  await page.getByTestId('tree-row-race.txt').click()
+  await expect(page.locator('[data-testid^="tab-"]')).toHaveCount(before + 1)
+  const paneId = (
+    (await page.locator('[data-testid^="tab-"]').last().getAttribute('data-testid')) ?? ''
+  ).replace('tab-', '')
+  const content = visiblePane().getByTestId('editor-content')
+  await expect(content).toContainText('original', { timeout: 10_000 })
+
+  await content.locator('.cm-content').click()
+  await page.keyboard.press('ControlOrMeta+End')
+  await page.keyboard.type('\nsaved')
+  await expect(page.getByTestId(`editor-dirty-${paneId}`)).toBeAttached()
+
+  // The whole race, in one task. `code: 'KeyS'` because the handler reads
+  // `event.code`, and on `window` because that is where it is registered and
+  // because a target that is not an Element passes its `data-shortcuts` guard.
+  const typed = await page.evaluate(() => {
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'KeyS', metaKey: true, bubbles: true, cancelable: true }),
+    )
+    return document.execCommand('insertText', false, 'z')
+  })
+  expect(typed).toBe(true)
+
+  // The two halves of the race, each read where it landed: the character is in
+  // the document, and the bytes on disk are the snapshot from before it.
+  await expect(content).toContainText('savedz', { timeout: 10_000 })
+  await expect.poll(() => readFile(raceFile, 'utf8'), { timeout: 10_000 }).toContain('saved')
+  expect(await readFile(raceFile, 'utf8')).not.toContain('savedz')
+
+  await page.waitForTimeout(2000)
+
+  // **Mutation measured 2026-08-05**, with `onDirtyChange(paneId, false)` put
+  // back: FAILED here with
+  //
+  //     expect(locator).toBeAttached() failed
+  //     Locator: getByTestId('editor-dirty-2c94a2074efc0d3e')
+  //     Error: element(s) not found
+  //
+  // which is the dot going out over a document holding a character that is on
+  // no disk.
+  await expect(page.getByTestId(`editor-dirty-${paneId}`)).toBeAttached()
+
+  // And what the dot is FOR. With the same mutation still in and the assertion
+  // above commented out to see the rest of the path, this FAILED too, with
+  // `expect(locator).toBeVisible() failed / Locator: getByTestId('confirm-close')
+  // / Error: element(s) not found`: the tab closed with no prompt at all, which
+  // is the data loss itself rather than a signal of it.
+  await page.getByTestId(`close-${paneId}`).click()
+  await expect(page.getByTestId('confirm-close')).toBeVisible()
+  await page.getByTestId('confirm-close-discard').click()
+  await expect(page.getByTestId(`tab-${paneId}`)).toHaveCount(0)
 })
 
 /**

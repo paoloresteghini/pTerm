@@ -11,6 +11,7 @@ export function TabBar({
   activeId,
   status,
   dead,
+  dirty,
   onActivate,
   onClose,
   onRestart,
@@ -24,6 +25,7 @@ export function TabBar({
   activeId: string | null
   status: Record<string, TabState>
   dead: Record<string, number>
+  dirty: Record<string, boolean>
   onActivate: (id: string) => void
   onClose: (id: string) => void
   onRestart: (tab: TabDescriptor) => void
@@ -128,6 +130,19 @@ export function TabBar({
         // adding one of those, this line stops being unfalsifiable and should
         // get a test in the same commit.
         const tombstoned = canHaveSession(tab) && dead[tab.id] !== undefined
+        // `dirty` is keyed by PANE id, and so is every row this bar renders,
+        // unconditionally rather than only while tabs hold one pane each.
+        // `App.tsx` passes `tabsOfProject`, which is a filter over the flat
+        // `state.panes` array (`workspace.ts`), so each `tab` here IS a pane
+        // and `tab.id` IS its pane id. `tabs.spec.ts` says the same thing in
+        // its own words: "A tab here is a pane wearing a tab's name."
+        //
+        // Which settles what ⌘D on an editor pane will need, since an earlier
+        // version of this comment predicted the opposite: a split adds a pane
+        // to `state.panes`, so it adds a row of its own here with its own id,
+        // exactly as a terminal split does. Nothing has to ask whether ANY pane
+        // of a tab is dirty, and this line does not change.
+        const unsaved = dirty[tab.id] === true
         return (
           <div
             key={tab.id}
@@ -223,6 +238,13 @@ export function TabBar({
                 />
               </div>
             ) : null}
+            {unsaved && (
+              <span
+                data-testid={`editor-dirty-${tab.id}`}
+                title="Unsaved changes"
+                className="mr-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-fg"
+              />
+            )}
             {tombstoned ? (
               <>
                 {/* A dead tab keeps its scrollback and offers the two things
