@@ -1,5 +1,8 @@
-import { compareVersions, parseRelease, type UpdateInfo } from './check'
+import { compareVersions, parseRelease } from './check'
 import { readSkipped } from './store'
+import type { UpdateCheckResult, UpdateStatus } from '../../shared/ipc'
+
+export type { UpdateCheckResult, UpdateStatus }
 
 /**
  * The public, unauthenticated releases endpoint.
@@ -14,20 +17,6 @@ export const RELEASES_URL = 'https://api.github.com/repos/paoloresteghini/PRCLI/
 const USER_AGENT = 'PRCLI-update-check'
 
 const TIMEOUT_MS = 10_000
-
-export type UpdateStatus = 'available' | 'current' | 'skipped' | 'failed'
-
-export interface UpdateCheckResult {
-  status: UpdateStatus
-  /**
-   * The release, when there is one to name. Present for `skipped` as well as
-   * `available`, so Settings can say what was skipped; only the background
-   * push looks at `status` to decide whether to show a bar.
-   */
-  info: UpdateInfo | null
-  /** Why it failed, for Settings alone. Never shown by the bar. */
-  message: string | null
-}
 
 export interface UpdateDeps {
   currentVersion: string

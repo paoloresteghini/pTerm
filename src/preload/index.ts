@@ -8,6 +8,8 @@ import {
   type PrcliApi,
   type StatusEvent,
   type TabDescriptor,
+  type UpdateCheckResult,
+  type UpdateInfo,
 } from '../shared/ipc'
 
 const api: PrcliApi = {
@@ -73,6 +75,13 @@ const api: PrcliApi = {
   fsWrite: (projectId, relPath, text, expectedMtimeMs) =>
     ipcRenderer.invoke(CHANNELS.fsWrite, projectId, relPath, text, expectedMtimeMs),
   openEditor: (projectId, relPath) => ipcRenderer.invoke(CHANNELS.openEditor, projectId, relPath),
+  onUpdateAvailable: (listener: (info: UpdateInfo) => void) => {
+    const handler = (_event: IpcRendererEvent, payload: UpdateInfo): void => listener(payload)
+    ipcRenderer.on(CHANNELS.updateAvailable, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.updateAvailable, handler)
+  },
+  checkForUpdate: (): Promise<UpdateCheckResult> => ipcRenderer.invoke(CHANNELS.checkForUpdate),
+  skipUpdate: (version: string): Promise<void> => ipcRenderer.invoke(CHANNELS.skipUpdate, version),
 }
 
 contextBridge.exposeInMainWorld('prcli', api)

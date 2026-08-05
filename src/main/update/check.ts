@@ -6,18 +6,9 @@
  * object.
  */
 
-/**
- * What the renderer is told about an available release: the version to name
- * and the page to open.
- *
- * Declared here rather than imported for now. Task 4 moves it to
- * `src/shared/ipc.ts`, where the renderer can see it too, and replaces this
- * with an import.
- */
-export interface UpdateInfo {
-  version: string
-  url: string
-}
+import type { UpdateInfo } from '../../shared/ipc'
+
+export type { UpdateInfo }
 
 /** Exactly `major.minor.patch`, with an optional leading `v`. Nothing else. */
 const VERSION = /^v?(\d+)\.(\d+)\.(\d+)$/

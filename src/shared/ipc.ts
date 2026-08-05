@@ -44,6 +44,9 @@ export const CHANNELS = {
   fsRead: 'prcli:fsRead',
   fsWrite: 'prcli:fsWrite',
   openEditor: 'prcli:openEditor',
+  updateAvailable: 'prcli:updateAvailable',
+  checkForUpdate: 'prcli:checkForUpdate',
+  skipUpdate: 'prcli:skipUpdate',
 } as const
 
 /**
@@ -481,6 +484,28 @@ export interface RestoreResult {
   status: Record<string, TabState>
 }
 
+/** A release newer than the running app: the version to name, the page to open. */
+export interface UpdateInfo {
+  version: string
+  url: string
+}
+
+/**
+ * Why a check produced no bar, kept apart so Settings can say which.
+ *
+ * `failed` folds four unrelated nothings together (no network, rate limited,
+ * an unreadable release tag, an unreadable running version) because the bar
+ * treats them identically: it does not appear. The distinction that matters
+ * to a user is `failed` against `current`, and that one is kept.
+ */
+export type UpdateStatus = 'available' | 'current' | 'skipped' | 'failed'
+
+export interface UpdateCheckResult {
+  status: UpdateStatus
+  info: UpdateInfo | null
+  message: string | null
+}
+
 export interface PrcliApi {
   open(request: OpenRequest): Promise<TabDescriptor>
   list(): Promise<TabDescriptor[]>
@@ -656,4 +681,22 @@ export interface PrcliApi {
    * the renderer select the new tab by the pane it was handed.
    */
   openEditor(projectId: string, relPath: string): Promise<TabDescriptor | null>
+  /**
+   * A release newer than this build, pushed by main when it finds one.
+   *
+   * Push rather than poll: the check runs on main's own schedule, and the
+   * renderer has nothing useful to ask before then. Returns an unsubscribe
+   * function, like `onData` and `onExit`.
+   */
+  onUpdateAvailable(listener: (info: UpdateInfo) => void): () => void
+  /**
+   * Check right now and report everything, failures included.
+   *
+   * The one place an update failure is allowed to be visible: Settings' button
+   * is the user asking, and a button that answers nothing reads as broken.
+   * Ignores a previously skipped version for the same reason.
+   */
+  checkForUpdate(): Promise<UpdateCheckResult>
+  /** Never mention this version again. Persisted outside the workspace config. */
+  skipUpdate(version: string): Promise<void>
 }
