@@ -42,7 +42,7 @@ import { hookPaths, installHooks, readHooksState, uninstallHooks } from '../hook
 import { drainSpool } from '../hooks/spool'
 import { listSkills } from '../skills/scan'
 import { readNote, writeNote } from '../notes/store'
-import { listDir, readFileInside, resolveInside } from '../files/tree'
+import { listDir, readFileInside, resolveInside, writeFileInside } from '../files/tree'
 import { newSessionId } from '../tmux/names'
 import {
   addProject,
@@ -1371,6 +1371,20 @@ export function registerIpc(
     if (!project) return null
     return readFileInside(project.cwd, relPath)
   })
+
+  // Beside `fsRead` and outside `serialise` for the same reason: it touches
+  // the filesystem and writes no config. Two saves of one file racing is the
+  // user's own doing and the mtime check is what makes the second one refuse,
+  // which is a better answer than a queue that would let it clobber silently.
+  ipcMain.handle(
+    CHANNELS.fsWrite,
+    async (_event, projectId: string, relPath: string, text: string, expectedMtimeMs: number) => {
+      const config = await store.read()
+      const project = config.projects.find((row) => row.id === projectId)
+      if (!project) return { ok: false, reason: 'failed' }
+      return writeFileInside(project.cwd, relPath, text, expectedMtimeMs)
+    },
+  )
 
   // Inside `serialise`, unlike `fsList` and `fsRead` just above: this one
   // writes a pane row and a tab row, and two of them racing would interleave

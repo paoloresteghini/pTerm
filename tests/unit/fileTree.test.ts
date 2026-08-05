@@ -20,12 +20,34 @@
 // and the absolute-path case) pass unchanged, because resolveInside's own
 // checks catch those before this guard is ever reached; only the symlink
 // case depends on this half. Tests observed on 2026-08-04.
+//
+// Mutation 4: writeFileInside's mtime check.
+// Changed: if (info.mtimeMs !== expectedMtimeMs) return { ok: false, reason:
+// 'changed' }   to:   line removed entirely
+// Observed: 1 test fails, "refuses when the file changed since it was read"
+// (actual result became { ok: true, mtimeMs: ... } instead of the expected
+// refusal). "writes a file under the root and answers with its new mtime"
+// still passes, because its expectedMtimeMs is genuinely current so removing
+// the check does not change that test's outcome. Tests observed on 2026-08-05.
+//
+// Mutation 5: writeFileInside's realpath containment check.
+// Changed: if (!isInside(realRoot, realTarget)) return { ok: false, reason:
+// 'failed' }   to:   if (false) return { ok: false, reason: 'failed' }
+// Observed: 1 test fails, "refuses to write through a symlink pointing
+// outside", but not with the naive guess of ok: true. The actual result was
+// { ok: false, reason: 'changed' }: with the containment check disabled,
+// realpath still follows the symlink to the file outside the root, stat
+// succeeds, and the mtime check (expectedMtimeMs: 0 in this test) catches it
+// instead and reports the wrong reason. Both "refuses to write outside the
+// root" cases (.. and absolute path) pass unchanged because resolveInside
+// catches those before this guard runs, the same asymmetry mutation 3 found
+// for readFileInside. Tests observed on 2026-08-05.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { resolveInside, listDir, readFileInside } from '../../src/main/files/tree'
+import { resolveInside, listDir, readFileInside, writeFileInside } from '../../src/main/files/tree'
 
 let root: string
 let outside: string
@@ -217,5 +239,61 @@ describe('readFileInside', () => {
 
   it('refuses a relPath that is not a string', async () => {
     await expect(readFileInside(root, 42 as unknown as string)).resolves.toBeNull()
+  })
+})
+
+describe('writeFileInside', () => {
+  it('writes a file under the root and answers with its new mtime', async () => {
+    const before = await readFileInside(root, 'app.ts')
+    const result = await writeFileInside(root, 'app.ts', 'changed\n', before!.mtimeMs)
+    expect(result.ok).toBe(true)
+    const after = await readFileInside(root, 'app.ts')
+    expect(after?.text).toBe('changed\n')
+    if (result.ok) expect(result.mtimeMs).toBe(after?.mtimeMs)
+  })
+
+  // The reason `fsRead` carries an mtime at all. A file that moved under the
+  // pane is the normal case here, not the exotic one: Claude is editing the
+  // same tree.
+  it('refuses when the file changed since it was read', async () => {
+    const before = await readFileInside(root, 'src/nested.ts')
+    const result = await writeFileInside(root, 'src/nested.ts', 'mine\n', before!.mtimeMs - 1000)
+    expect(result).toEqual({ ok: false, reason: 'changed' })
+    // And it did not write. A refusal that still wrote is worse than no check.
+    const after = await readFileInside(root, 'src/nested.ts')
+    expect(after?.text).toBe('const x = 1\n')
+  })
+
+  // The same boundary `readFileInside` has, reached through the other verb.
+  // A guard on the read and not the write is not a guard.
+  it('refuses to write outside the root', async () => {
+    const attempts = ['../../tmp/escaped.txt', '/tmp/escaped.txt']
+    for (const relPath of attempts) {
+      expect(await writeFileInside(root, relPath, 'x', 0)).toEqual({ ok: false, reason: 'failed' })
+    }
+  })
+
+  // The half `..` cannot express, which the listing and the read both cover.
+  it('refuses to write through a symlink pointing outside', async () => {
+    const result = await writeFileInside(root, 'escape/secret.txt', 'x', 0)
+    expect(result).toEqual({ ok: false, reason: 'failed' })
+  })
+
+  // B2 writes over a file that exists and does nothing else. A file that is
+  // gone is a distinct answer from one that changed, because Task 4 draws
+  // them differently: one offers a reload, the other cannot.
+  it('answers missing for a file that is no longer there', async () => {
+    const result = await writeFileInside(root, 'nope.ts', 'x', 0)
+    expect(result).toEqual({ ok: false, reason: 'missing' })
+  })
+
+  it('refuses a directory rather than throwing', async () => {
+    const result = await writeFileInside(root, 'src', 'x', 0)
+    expect(result).toEqual({ ok: false, reason: 'failed' })
+  })
+
+  it('refuses a relPath that is not a string', async () => {
+    const result = await writeFileInside(root, 42 as unknown as string, 'x', 0)
+    expect(result).toEqual({ ok: false, reason: 'failed' })
   })
 })
