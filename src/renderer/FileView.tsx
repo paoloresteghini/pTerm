@@ -64,7 +64,30 @@ export function FileView({ projectId, relPath }: { projectId: string; relPath: s
   return (
     <pre
       data-testid="editor-content"
-      className="scroll-thin h-full overflow-auto p-3 font-mono text-[11px] leading-relaxed"
+      // `text-term-fg` because an editor pane sits in the same pane row as the
+      // terminals, in the same window, showing the same kind of monospace
+      // content, so it should read as the same surface: #d4d4d8 is literally
+      // what xterm is given as its foreground (`Terminal.tsx`, which repeats
+      // the value by hand because a canvas cannot read a CSS variable).
+      //
+      // A colour here at all, rather than an inherited one, is the point.
+      // Measured 2026-08-04 with no class: `getComputedStyle(pre).color` was
+      // `rgb(0, 0, 0)` over a `rgb(9, 9, 11)` pane, about 1.06:1, which is not
+      // dim text but invisible text. Nothing between this element and `<html>`
+      // sets `color`, so it was falling all the way back to the initial value.
+      // `text-term-fg` measures 13.5:1 against that background; `text-fg`
+      // (#fafafa) would be 19.1:1 and is the app's CHROME colour, used for tab
+      // labels and the like, which file contents are not.
+      //
+      // Matching the terminal also settles the recoloured case for free, which
+      // picking any other light grey would not: `PANE_COLORS` were chosen
+      // against this exact foreground and its own doc records the worst of the
+      // six at 7.89:1, so a right-clicked editor pane is covered by a ratio
+      // somebody already worked out.
+      //
+      // `editor-missing` above deliberately stays `text-faint`: a message about
+      // an absent file is secondary text, and it is right as it is.
+      className="scroll-thin h-full overflow-auto p-3 font-mono text-[11px] leading-relaxed text-term-fg"
     >
       {text ?? ''}
     </pre>
