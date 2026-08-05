@@ -1,12 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { EditorState } from '@codemirror/state'
+import { EditorView, keymap, lineNumbers, highlightActiveLine } from '@codemirror/view'
+import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
+import { syntaxHighlighting, defaultHighlightStyle } from '@codemirror/language'
+import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
+import { languageForPath } from './lib/languageForPath'
+import { PANE_COLOR_DEFAULT, type PaneColor } from '../shared/paneColors'
 
 /**
- * One file, read-only.
- *
- * A `<pre>` rather than an editor: CodeMirror is slice B2, and this slice is
- * the pane model and the restore path. What is here has to be real content
- * rather than a placeholder, because the relaunch test's whole value is
- * asserting a file's text came back.
+ * One file, in an editor.
  *
  * The read happens here rather than in `App.tsx` so a pane fetches its own
  * file when it mounts, including after a relaunch, where nothing else knows
@@ -17,10 +19,22 @@ import { useEffect, useState } from 'react'
  * `relativeToProject`. Null is that conversion failing (no `filePath` on the
  * pane, or one that does not sit inside its project), and it draws the same
  * thing a deleted file does, since from here they are the same sentence.
+ *
+ * Nothing saves yet. Typing reaches the document and goes no further.
  */
-export function FileView({ projectId, relPath }: { projectId: string; relPath: string | null }) {
+export function FileView({
+  projectId,
+  relPath,
+  color = PANE_COLOR_DEFAULT,
+}: {
+  projectId: string
+  relPath: string | null
+  color?: PaneColor
+}) {
   const [text, setText] = useState<string | null>(null)
   const [missing, setMissing] = useState(false)
+  const host = useRef<HTMLDivElement | null>(null)
+  const view = useRef<EditorView | null>(null)
 
   useEffect(() => {
     if (relPath === null) {
@@ -56,6 +70,115 @@ export function FileView({ projectId, relPath }: { projectId: string; relPath: s
     }
   }, [projectId, relPath])
 
+  /**
+   * The editor, built once per file and destroyed on unmount.
+   *
+   * `text` is the INITIAL document and nothing else. Re-running this effect
+   * rebuilds the view from scratch, which throws away whatever is in it, so
+   * nothing may set `text` again after the first read while a pane is open:
+   * doing so would wipe the user's typing mid-keystroke. The fetch effect
+   * above only writes it once per `relPath`, and Task 3's dirty tracking has
+   * to keep it that way.
+   *
+   * `color` is in the dependencies for the same reason it is in the theme,
+   * and it carries the same cost: recolouring a pane from its right-click
+   * menu rebuilds the view and drops the document back to what was read from
+   * disk. Harmless today, because nothing here is saved and a rebuild only
+   * costs the user a re-read. It stops being harmless once there is unsaved
+   * work to lose, so whichever task introduces that has to move the theme
+   * into a `Compartment` and reconfigure it instead.
+   */
+  useEffect(() => {
+    if (text === null || host.current === null) return
+    const state = EditorState.create({
+      doc: text,
+      extensions: [
+        lineNumbers(),
+        highlightActiveLine(),
+        highlightSelectionMatches(),
+        history(),
+        // **`defaultHighlightStyle` is CodeMirror's LIGHT-background palette,
+        // and it is a legibility regression on this app's panes.** Measured
+        // 2026-08-05 by reading `getComputedStyle(span).color` off the real
+        // token spans in a running window: keywords come out `rgb(119, 0, 136)`,
+        // definitions `rgb(0, 0, 255)`, literals `rgb(17, 102, 68)`, strings
+        // `rgb(170, 17, 17)`. Against `#09090b` those are 2.03:1, 2.32:1,
+        // 2.85:1 and 2.65:1, and against `PANE_COLORS`' lightest `#38383d`
+        // they are 1.19:1, 1.36:1, 1.67:1 and 1.55:1. The worst entry in the
+        // style, `local(variableName)` `#30a`, is 1.05:1 on that pane.
+        //
+        // For scale: the plain `#d4d4d8` below is 13.46:1 and 7.89:1 on those
+        // same two, so EVERY token is harder to read coloured than it would be
+        // uncoloured, and `editor-missing` records this repo rejecting a colour
+        // at 1.9:1 as invisible. Kept anyway because the fix is a decision
+        // rather than a correction: `@codemirror/language` exports no dark
+        // style and does not re-export `tags`, so a hand-written
+        // `HighlightStyle` needs `@lezer/highlight` declared as an eighth
+        // dependency (it is on disk transitively, but importing it from `src/`
+        // undeclared would be a hidden dependency that `check-deps` cannot
+        // see), and `@codemirror/theme-one-dark` is a whole package for a
+        // palette nobody has chosen. Raised with the numbers above rather than
+        // settled here.
+        syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
+        ...languageForPath(relPath ?? ''),
+        // Every entry below was measured 2026-08-05 by building the app with
+        // the entry removed and reading `getComputedStyle` off the real
+        // elements in a running window. None of them is decoration.
+        //
+        // `color: '#d4d4d8'` on `&`. Without it the content computes
+        // `rgb(0, 0, 0)` over a `rgb(9, 9, 11)` pane, about 1.06:1, which is
+        // not dim text but invisible text: CodeMirror's base theme sets no
+        // foreground at all, and nothing between this element and `<html>`
+        // does either. #d4d4d8 is what xterm is handed as its foreground
+        // (`Terminal.tsx` repeats the value by hand because a canvas cannot
+        // read a CSS variable), so an editor pane and a terminal pane in one
+        // row read as the same surface. It is hardcoded rather than taken
+        // from `color` because `PANE_COLORS` were chosen against this exact
+        // value: its own doc records the worst of the six at 7.89:1, so a
+        // recoloured editor pane is covered by a ratio somebody already
+        // worked out.
+        //
+        // `backgroundColor` on `.cm-gutters`, and NOT on `&`. The pane box in
+        // `App.tsx` already paints itself `pane.color`, so `&` needs nothing:
+        // measured without it, `.cm-editor` is `rgba(0, 0, 0, 0)` and the box
+        // shows through correctly. The gutter is the opposite case, because
+        // CodeMirror paints it itself: measured without this line it is
+        // `rgb(245, 245, 245)`, a near-white strip down the left of a
+        // near-black pane.
+        //
+        // `{ dark: true }` picks the base theme's `&dark` rules over its
+        // `&light` ones, which is a legibility fix and not a naming
+        // preference. Measured under `&light`: the caret computes
+        // `rgb(0, 0, 0)` on the same near-black pane, so the editor you can
+        // type into has a cursor you cannot see, and ⌘F's search panel opens
+        // `rgb(245, 245, 245)` with black text. Under `&dark` those are
+        // `rgb(255, 255, 255)` and `rgb(51, 51, 56)` with white text.
+        EditorView.theme(
+          {
+            '&': { color: '#d4d4d8', height: '100%' },
+            '.cm-content': {
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+              fontSize: '11px',
+            },
+            '.cm-gutters': { backgroundColor: color, color: '#3f3f46', border: 'none' },
+            // The base theme's own focus ring is `1px dotted #212121`, which
+            // this app marks a focused pane differently from (`App.tsx` draws
+            // an inset accent ring on the box).
+            '&.cm-focused': { outline: 'none' },
+          },
+          { dark: true },
+        ),
+      ],
+    })
+    const created = new EditorView({ state, parent: host.current })
+    view.current = created
+    return () => {
+      created.destroy()
+      view.current = null
+    }
+  }, [text, relPath, color])
+
   if (missing) {
     return (
       <div
@@ -83,37 +206,14 @@ export function FileView({ projectId, relPath }: { projectId: string; relPath: s
     )
   }
 
-  return (
-    <pre
-      data-testid="editor-content"
-      // `text-term-fg` because an editor pane sits in the same pane row as the
-      // terminals, in the same window, showing the same kind of monospace
-      // content, so it should read as the same surface: #d4d4d8 is literally
-      // what xterm is given as its foreground (`Terminal.tsx`, which repeats
-      // the value by hand because a canvas cannot read a CSS variable).
-      //
-      // A colour here at all, rather than an inherited one, is the point.
-      // Measured 2026-08-04 with no class: `getComputedStyle(pre).color` was
-      // `rgb(0, 0, 0)` over a `rgb(9, 9, 11)` pane, about 1.06:1, which is not
-      // dim text but invisible text. Nothing between this element and `<html>`
-      // sets `color`, so it was falling all the way back to the initial value.
-      // `text-term-fg` measures 13.5:1 against that background; `text-fg`
-      // (#fafafa) would be 19.1:1 and is the app's CHROME colour, used for tab
-      // labels and the like, which file contents are not.
-      //
-      // Matching the terminal also settles the recoloured case for free, which
-      // picking any other light grey would not: `PANE_COLORS` were chosen
-      // against this exact foreground and its own doc records the worst of the
-      // six at 7.89:1, so a right-clicked editor pane is covered by a ratio
-      // somebody already worked out.
-      //
-      // `editor-missing` above carries this same colour, and for a different
-      // reason: it is a departure from the `text-faint` convention rather than
-      // the ordinary use of a content colour, so the argument for it is written
-      // at that element instead of repeated here.
-      className="scroll-thin h-full overflow-auto p-3 font-mono text-[11px] leading-relaxed text-term-fg"
-    >
-      {text ?? ''}
-    </pre>
-  )
+  // `editor-content` is on the host rather than on anything CodeMirror makes,
+  // because CodeMirror owns everything under here and replaces it freely. The
+  // testid is the same one the `<pre>` carried and B1's e2e still reads text
+  // off it: measured 2026-08-05, `textContent` here is the gutter's line
+  // numbers followed by the document, so a `toContainText` on a file's text
+  // still passes. Only for a document that fits on screen, though: CodeMirror
+  // renders a window rather than the whole file, and a seeded 4000-line file
+  // measured 80 lines and 1012 characters in the DOM. Every fixture in this
+  // suite is two lines, so nothing asserts past that today.
+  return <div data-testid="editor-content" ref={host} className="scroll-thin h-full overflow-auto" />
 }

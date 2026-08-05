@@ -47,6 +47,9 @@ import { UNSORTED_ID } from '../../src/shared/ipc'
 
 const SOCKET = 'prcli-e2e-editor'
 
+/** Seeded as both `src/app.ts` and `notes.txt`. See `beforeAll`. */
+const TYPESCRIPT_BYTES = 'export const answer = 42\n'
+
 let app: ElectronApplication
 let page: Page
 let userDataDir: string
@@ -68,7 +71,12 @@ test.beforeAll(async () => {
 
   projectCwd = join(projectsRoot, 'demo')
   await mkdir(join(projectCwd, 'src'), { recursive: true })
-  await writeFile(join(projectCwd, 'src', 'app.ts'), 'export const answer = 42\n')
+  await writeFile(join(projectCwd, 'src', 'app.ts'), TYPESCRIPT_BYTES)
+  // The same bytes under a name no grammar claims, which is the control for
+  // the syntax highlighting test: written from one constant rather than two
+  // literals so the two files cannot drift apart and quietly turn that test
+  // into a comparison of two different documents.
+  await writeFile(join(projectCwd, 'notes.txt'), TYPESCRIPT_BYTES)
   await writeFile(join(projectCwd, 'README.md'), '# demo\n')
 
   await writeFile(
@@ -146,6 +154,84 @@ test('a second file opens a second tab', async () => {
   await page.getByTestId('tree-row-src').click()
   await page.getByTestId('tree-row-src/app.ts').click()
   await expect(page.locator('[data-testid^="tab-"]')).toHaveCount(before + 1)
+  await expect(visiblePane().getByTestId('editor-content')).toContainText(
+    'export const answer = 42',
+  )
+})
+
+/**
+ * The two tests below sit HERE rather than at the end of the file, which is
+ * where the plan put them, and both positions are forced.
+ *
+ * Not after the last test: it removes the project, which sends every pane to
+ * Unsorted and leaves no tree to click a file in. Not after the next test
+ * either: that one deletes `src/app.ts`, and the highlighted half of the pair
+ * needs it. So they go after the tab `src/app.ts` opened and before it is
+ * taken away.
+ *
+ * Neither test may re-click a tree row for a file that is already open.
+ * `openEditor` mints a fresh pane and a fresh tab on every call (there is no
+ * dedup by path), so a second click on `README.md` would put a second tab of
+ * that name in the bar, and `tabIdFor` below is a strict-mode locator that
+ * would then match two elements and fail three later tests. Clicking the
+ * existing TAB is how you get back to a file.
+ */
+
+// Nothing saves in this slice, so this asserts the keystroke reached the
+// document and nothing about where it went afterwards.
+test('the editor takes typing', async () => {
+  const content = visiblePane().getByTestId('editor-content')
+  await expect(content).toContainText('export const answer = 42', { timeout: 10_000 })
+
+  // `.cm-content` clicked directly, and never `toBeVisible` on the pane: this
+  // project has had a `toBeVisible` pass on an element painted behind the
+  // terminal, so the click is the assertion. It has to land on the editable
+  // element for the keystroke to have anywhere to go.
+  await content.locator('.cm-content').click()
+  await page.keyboard.press('ControlOrMeta+End')
+  await page.keyboard.type('X')
+
+  // Both halves. The first alone would pass if typing had replaced the
+  // document, and the second alone would pass if the keystroke had gone
+  // nowhere and `X` had come from somewhere else on the page.
+  await expect(content).toContainText('X')
+  await expect(content).toContainText('export const answer = 42')
+})
+
+/**
+ * A grammar was applied, asserted against the same bytes with no grammar.
+ *
+ * Measured 2026-08-05 rather than assumed, because the plan offered the
+ * mechanism as a hypothesis. `src/app.ts` renders
+ * `<span class="ͼa">export</span> <span class="ͼa">const</span> <span
+ * class="ͼf">answer</span> = <span class="ͼc">42</span>`, four token spans;
+ * `notes.txt`, byte for byte the same file, renders a bare `<div
+ * class="cm-line">export const answer = 42</div>` with none. So the spans are
+ * real and the difference is real.
+ *
+ * Their presence is asserted rather than their count or their classes. The
+ * classes are generated names (`ͼa`) that belong to CodeMirror's own style
+ * module, and the count is how the JavaScript grammar happens to tokenise one
+ * line: pinning either would red on a dependency bump that broke nothing. What
+ * this pins is that a language ran at all, and the plain file is what stops
+ * that from being vacuous.
+ */
+test('a javascript file is syntax highlighted and a plain one is not', async () => {
+  const highlighted = visiblePane().getByTestId('editor-content')
+  await expect(highlighted).toContainText('export const answer = 42', { timeout: 10_000 })
+  await expect(highlighted.locator('.cm-content span').first()).toBeAttached()
+
+  await page.getByTestId('tree-row-notes.txt').click()
+  const plain = visiblePane().getByTestId('editor-content')
+  // The text first. Without it, zero spans is also what an editor that never
+  // loaded looks like.
+  await expect(plain).toContainText('export const answer = 42', { timeout: 10_000 })
+  await expect(plain.locator('.cm-content span')).toHaveCount(0)
+
+  // Back to the `app.ts` tab, because the next test reads the visible pane and
+  // expects that file's. Its own tab rather than its tree row, per the note
+  // above.
+  await page.getByTestId(`tab-${await tabIdFor('app.ts')}`).click()
   await expect(visiblePane().getByTestId('editor-content')).toContainText(
     'export const answer = 42',
   )
@@ -339,6 +425,16 @@ test('the pane menu on an editor offers colours and nothing else', async () => {
  * not. It is a dead key: nothing appears, nothing is thrown, nothing is
  * painted. Deferred to B2 deliberately, by Paolo's ruling during B1's Task 6,
  * rather than left unnoticed.
+ *
+ * **Amended 2026-08-05, when CodeMirror landed.** It is a dead key only while
+ * the editor does not hold keyboard focus, which is the case this test is in:
+ * it clicks the TAB, and `document.activeElement` measured as that button
+ * rather than `.cm-content`. Measured with `.cm-content` focused instead, ⌘D
+ * selects the word under the cursor and `window.getSelection()` goes from
+ * empty to that word, because `@codemirror/search`'s `searchKeymap` binds
+ * `Mod-d` to `selectNextOccurrence` with `preventDefault: true`. So whoever
+ * implements the split inherits a third thing to settle alongside the two
+ * below: the editor swallows the chord whenever the user is typing in it.
  *
  * **Two blockers, measured, not one:**
  *

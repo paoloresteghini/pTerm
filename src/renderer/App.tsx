@@ -910,6 +910,7 @@ export function App() {
                       <FileView
                         projectId={projectIdForTab(state.projects, box.pane)}
                         relPath={editorRelPath(box.pane)}
+                        color={box.pane.color ?? PANE_COLOR_DEFAULT}
                       />
                     ) : (
                       <Terminal
