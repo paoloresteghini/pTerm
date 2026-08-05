@@ -14,6 +14,7 @@ import { ConfigStore } from './state/store'
 import { HookServer } from './hooks/server'
 import { hookPaths, writeScript } from './hooks/install'
 import { CHANNELS, type MenuCommand } from '../shared/ipc'
+import { scheduleUpdateChecks } from './update/schedule'
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string
 declare const MAIN_WINDOW_VITE_NAME: string
@@ -359,6 +360,7 @@ app.whenReady().then(async () => {
     router.refreshBadge(),
   )
   createWindow()
+  scheduleUpdateChecks(() => mainWindow)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

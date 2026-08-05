@@ -1,4 +1,4 @@
-import { dialog, ipcMain, type BrowserWindow } from 'electron'
+import { app, dialog, ipcMain, type BrowserWindow } from 'electron'
 import {
   CHANNELS,
   canHaveSession,
@@ -42,6 +42,8 @@ import { hookPaths, installHooks, readHooksState, uninstallHooks } from '../hook
 import { drainSpool } from '../hooks/spool'
 import { listSkills } from '../skills/scan'
 import { readNote, writeNote } from '../notes/store'
+import { realUpdateService } from '../update/service'
+import { writeSkipped } from '../update/store'
 import { listDir, readFileInside, resolveInside, writeFileInside } from '../files/tree'
 import { newSessionId } from '../tmux/names'
 import {
@@ -1330,6 +1332,14 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.hooksState, () => readHooksState())
   ipcMain.handle(CHANNELS.installHooks, () => installHooks())
   ipcMain.handle(CHANNELS.uninstallHooks, () => uninstallHooks())
+
+  // Explicitly ignores a previous skip: the user pressed a button, and the
+  // answer they get must be about the release, not about a decision they made
+  // last month. The background check in `schedule.ts` is the one that respects it.
+  ipcMain.handle(CHANNELS.checkForUpdate, () =>
+    realUpdateService(app.getVersion()).check({ respectSkip: false }),
+  )
+  ipcMain.handle(CHANNELS.skipUpdate, (_event, version: string) => writeSkipped(version))
 
   // Deliberately not inside `serialise`: this reads `~/.claude`, never PRCLI's
   // own config file, so it has nothing to serialise against — the same
