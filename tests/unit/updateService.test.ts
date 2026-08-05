@@ -10,11 +10,12 @@ const service = (options: {
   currentVersion?: string
   fetchLatest?: () => Promise<unknown>
   skipped?: string | null
+  readSkipped?: () => Promise<string | null>
 }) =>
   createUpdateService({
     currentVersion: options.currentVersion ?? '0.1.0',
     fetchLatest: options.fetchLatest ?? (() => Promise.resolve(release('v0.2.0'))),
-    readSkipped: () => Promise.resolve(options.skipped ?? null),
+    readSkipped: options.readSkipped ?? (() => Promise.resolve(options.skipped ?? null)),
   })
 
 describe('the feed url', () => {
@@ -110,5 +111,37 @@ describe('check', () => {
     await expect(
       service({ fetchLatest: () => Promise.reject(new Error('boom')) }).check(),
     ).resolves.toMatchObject({ status: 'failed' })
+  })
+
+  it('never rejects, even if readSkipped throws', async () => {
+    const result = await service({
+      readSkipped: () => Promise.reject(new Error('disk read failed')),
+    }).check()
+    expect(result.status).toBe('failed')
+    expect(result.message).toContain('disk read failed')
+  })
+
+  // A corrupted or migrated skip string that cannot be parsed. The `?? -1`
+  // default should treat it as "not skipped" and offer the update, rather than
+  // silencing it forever based on an unreadable value.
+  it('offers an update when the skipped version is unparseable', async () => {
+    const result = await service({
+      currentVersion: '0.1.0',
+      skipped: 'garbage-not-semver',
+    }).check()
+    expect(result.status).toBe('available')
+  })
+
+  // When a version is skipped and then a yanked release (older than the skip)
+  // arrives as latest, the skip should still apply. This tests the >= 0 logic:
+  // skip 0.3.0, see 0.2.0 as latest, and stay silent.
+  it('stays quiet when a yanked release matches a skip', async () => {
+    const result = await service({
+      currentVersion: '0.1.0',
+      skipped: '0.3.0',
+      fetchLatest: () => Promise.resolve(release('v0.2.0')),
+    }).check()
+    expect(result.status).toBe('skipped')
+    expect(result.info?.version).toBe('0.2.0')
   })
 })

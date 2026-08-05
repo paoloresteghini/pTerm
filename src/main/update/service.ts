@@ -80,9 +80,17 @@ export function createUpdateService(deps: UpdateDeps): {
       if (order <= 0) return { status: 'current', info: null, message: null }
 
       if (respectSkip) {
-        const skipped = await deps.readSkipped()
+        let skipped: string | null
+        try {
+          skipped = await deps.readSkipped()
+        } catch (error) {
+          return failure(error instanceof Error ? error.message : String(error))
+        }
         // `>= 0`, not `=== 0`: skipping 0.3.0 and then seeing 0.2.0 arrive as
-        // latest (a yanked release) should stay quiet too.
+        // latest (a yanked release) should stay quiet too. The `?? -1` default
+        // handles a corrupted skip string: if we cannot parse what was skipped,
+        // we offer the update rather than silencing it forever based on an
+        // unreadable value.
         if (skipped !== null && (compareVersions(skipped, info.version) ?? -1) >= 0) {
           return { status: 'skipped', info, message: null }
         }
