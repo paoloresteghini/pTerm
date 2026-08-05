@@ -46,7 +46,7 @@ export async function readSkipped(): Promise<string | null> {
  *
  * A torn write means `readSkipped` returns null, the update bar shows again
  * the next time the app checks, and the user sees a banner they have already
- * dismissed. Unlike `notes/store.ts`, which holds user text and justifies
+ * seen. Unlike `notes/store.ts`, which holds user text and justifies
  * atomicity, this holds recoverable state: the blast radius does not warrant
  * temp-then-rename complexity.
  */
