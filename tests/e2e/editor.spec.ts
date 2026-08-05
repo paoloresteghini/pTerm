@@ -489,12 +489,78 @@ test('closing an editor tab kills no session, and says nothing', async () => {
 })
 
 /**
+ * Closing a pane with unsaved edits asks first; closing a clean one does not.
+ *
+ * Placed here, between the "closing an editor tab" test above and the Cmd+S
+ * test below, because it is the one window in this file where README.md is
+ * both UNOPENED (the test above closed the tab test 1 opened for it) and
+ * UNMODIFIED on disk: still `# demo\n`, since nothing has written to it yet.
+ * The Cmd+S test below is the first thing in the file that does, so these
+ * four have to run before it or the fixture their assertions rely on is
+ * already gone. Every open below is by tree row, which is only safe because
+ * no README tab is open going in, and each of the four leaves none open
+ * coming out, so the Cmd+S test's own tree-row click still mints a fresh tab
+ * rather than a second one beside an existing README.
+ */
+test('closing a dirty editor pane asks first, and cancelling keeps it', async () => {
+  await page.getByTestId('tree-row-README.md').click()
+  const content = visiblePane().getByTestId('editor-content')
+  await expect(content).toContainText('# demo', { timeout: 10_000 })
+  const tabId = await page.locator('[data-testid^="tab-"]').last().getAttribute('data-testid')
+  const paneId = tabId!.replace('tab-', '')
+
+  await content.locator('.cm-content').click()
+  await page.keyboard.type('Z')
+  await page.getByTestId(`close-${paneId}`).click()
+
+  await expect(page.getByTestId('confirm-close')).toBeVisible()
+  await page.getByTestId('confirm-close-cancel').click()
+  // Still open, still dirty, still holding the edit.
+  await expect(page.getByTestId(`tab-${paneId}`)).toHaveCount(1)
+  await expect(page.getByTestId(`editor-dirty-${paneId}`)).toBeAttached()
+})
+
+test('confirming the prompt closes it and loses the edit', async () => {
+  const tabId = await page.locator('[data-testid^="tab-"]').last().getAttribute('data-testid')
+  const paneId = tabId!.replace('tab-', '')
+  await page.getByTestId(`close-${paneId}`).click()
+  await page.getByTestId('confirm-close-discard').click()
+  await expect(page.getByTestId(`tab-${paneId}`)).toHaveCount(0)
+  // The file on disk never had the edit, and still does not.
+  expect(await readFile(join(projectCwd, 'README.md'), 'utf8')).not.toContain('Z')
+})
+
+test('closing a clean editor pane does not ask', async () => {
+  // The control. Without it, a prompt that appeared for every pane would pass
+  // both tests above.
+  await page.getByTestId('tree-row-README.md').click()
+  await expect(visiblePane().getByTestId('editor-content')).toContainText('# demo', {
+    timeout: 10_000,
+  })
+  const tabId = await page.locator('[data-testid^="tab-"]').last().getAttribute('data-testid')
+  const paneId = tabId!.replace('tab-', '')
+  await page.getByTestId(`close-${paneId}`).click()
+  await expect(page.getByTestId('confirm-close')).toHaveCount(0)
+  await expect(page.getByTestId(`tab-${paneId}`)).toHaveCount(0)
+})
+
+test('closing a terminal pane does not ask', async () => {
+  // The other control, and the one that catches a prompt keyed on the wrong
+  // thing: a terminal is never dirty, so it must never be asked about.
+  await page.getByTestId('new-tab').click()
+  await expect(page.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
+  const tabId = await page.locator('[data-testid^="tab-"]').last().getAttribute('data-testid')
+  const paneId = tabId!.replace('tab-', '')
+  await page.getByTestId(`close-${paneId}`).click()
+  await expect(page.getByTestId('confirm-close')).toHaveCount(0)
+  await expect(page.getByTestId(`tab-${paneId}`)).toHaveCount(0)
+})
+
+/**
  * ⌘S writes the pane's document to disk and clears the dirty dot.
  *
- * `tree-row-README.md` is safe to click here: the "closing an editor tab"
- * test just above closed the tab test 1 opened for this file, so this mints
- * a fresh one rather than a second tab beside one already open (see the note
- * above `tabIdFor`).
+ * `tree-row-README.md` is safe to click here: none of the four pane-close
+ * tests above leave a README tab open, whichever one of them ran last.
  */
 test('Cmd+S writes the file and clears the dot', async () => {
   await page.getByTestId('tree-row-README.md').click()
