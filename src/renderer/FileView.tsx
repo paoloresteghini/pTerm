@@ -37,15 +37,25 @@ import { PANE_COLOR_DEFAULT, type PaneColor } from '../shared/paneColors'
  * one itself: measured without this line it is `rgb(245, 245, 245)`, a
  * near-white strip down the left of a near-black pane.
  *
- * **The font stack and size sit on `.cm-scroller`, which is the element the
- * base theme sets `fontFamily: monospace` on, and they have to name a real
- * family rather than the generic one.** With the size on the host `<div>` and
- * the family on `.cm-content` alone, the line numbers measured 13px generic
- * `monospace` beside 11px `ui-monospace` code: a different typeface 18 per
- * cent larger than the text it numbers. Generic `monospace` does not inherit
- * the surrounding font size, it triggers the browser's own default fixed
- * font, so setting a size further up does not reach it. Naming the stack on
- * the common ancestor is what fixes both halves at once.
+ * **The font stack and size sit on `.cm-scroller`, the element the base theme
+ * sets `fontFamily: monospace` on and the common ancestor of the content and
+ * the gutters. Naming a REAL family there is the half that matters.** Two
+ * configurations, both measured 2026-08-05 in a running window with one probe:
+ *
+ * - size and family on `.cm-content` alone, with nothing above it, which is
+ *   what this file shipped at first: `.cm-gutters` and the line numbers
+ *   computed 13px generic `monospace` beside 11px `ui-monospace` code, a
+ *   different typeface 18 per cent larger than the text it numbers;
+ * - the same, plus an explicit `font-size` on the host `<div>`, which is what
+ *   the plan's `text-[11px]` there would have done: `.cm-gutters` computed
+ *   11px generic `monospace`. The size matched. The typeface still did not.
+ *
+ * So generic `monospace` DOES inherit an ancestor's explicit size, and the
+ * 13px belongs to the first configuration rather than to the plan's. It shows
+ * up only when nothing above sets a size at all, because the initial `medium`
+ * then resolves against the browser's default FIXED font instead of its
+ * proportional one. Naming a real family on the common ancestor is what fixes
+ * the typeface; the size then comes along in the same declaration.
  *
  * `{ dark: true }` picks the base theme's `&dark` rules over its `&light`
  * ones, which is a legibility fix and not a naming preference. Measured under

@@ -228,13 +228,33 @@ test('recolouring a pane keeps what was typed into it', async () => {
   await page.getByTestId(`pane-${editorTab}`).click({ button: 'right' })
   await page.getByTestId(`swatch-${editorTab}-232326`).click()
 
-  // The recolour landed. Without this the assertion below would also pass on a
-  // menu that never opened, which is the same shape of hole the pane-menu test
-  // further down guards against.
+  // The recolour landed. Without this the assertions below would also pass on
+  // a menu that never opened, which is the same shape of hole the pane-menu
+  // test further down guards against.
   await expect(page.getByTestId(`pane-${editorTab}`)).toHaveCSS(
     'background-color',
     'rgb(35, 35, 38)',
   )
+
+  // And the EDITOR heard about it, which the line above does not say: that
+  // background is painted inline on the pane box by `App.tsx` and would be
+  // right even if the compartment reconfigure did nothing at all. The gutter
+  // is the one surface CodeMirror paints itself from the theme, so it is the
+  // only thing on screen that can report whether the reconfigure landed.
+  //
+  // Measured 2026-08-05, both halves, with `themes` changed from a `useRef` to
+  // a per-render `{ current: new Compartment() }` and nothing else touched:
+  //
+  // - with this assertion present, THIS line is where the run reds, `Expected
+  //   "rgb(35, 35, 38)" Received "rgb(9, 9, 11)"`. Everything above it in this
+  //   test passed, the `pane-` box assertion included, so the box really does
+  //   go on reporting a recolour the editor never heard about;
+  // - with this one line commented out and the mutation still in place, the
+  //   whole file passed, 12 of 12. Nothing else in the suite sees it.
+  //
+  // A reconfigure aimed at a compartment the state has never seen is discarded
+  // silently, so the editor sits on the colour it was built with.
+  await expect(content.locator('.cm-gutters')).toHaveCSS('background-color', 'rgb(35, 35, 38)')
 
   // And the document is untouched: the typed text AND the file's own, so a
   // rebuild that happened to re-read the same file could not pass this.
