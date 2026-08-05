@@ -113,10 +113,14 @@ export function FileView({
   projectId,
   relPath,
   color = PANE_COLOR_DEFAULT,
+  paneId,
+  onDirtyChange,
 }: {
   projectId: string
   relPath: string | null
   color?: PaneColor
+  paneId: string
+  onDirtyChange: (paneId: string, dirty: boolean) => void
 }) {
   const [text, setText] = useState<string | null>(null)
   const [missing, setMissing] = useState(false)
@@ -126,6 +130,13 @@ export function FileView({
   // is just a key that a state and a later reconfigure have to agree on, so it
   // has to outlive any single `EditorView` the pane builds.
   const themes = useRef(new Compartment())
+  // The document the view was BUILT with, not the current one: dirty is
+  // "differs from what was read", so this has to stay put while the document
+  // changes around it. Kept in step with `text` rather than read from it,
+  // because `text` itself must never be written again after the first read
+  // (see the build effect below) and this is the one place a new baseline
+  // (a successful save, Task 4) can land without disturbing that rule.
+  const baseline = useRef(text ?? '')
 
   useEffect(() => {
     if (relPath === null) {
@@ -182,9 +193,19 @@ export function FileView({
    * Reading `color` without depending on it is safe rather than stale: this
    * closure is the one from the render it runs in, so a build always uses the
    * current colour, and any LATER change arrives through the reconfigure.
+   *
+   * **`onDirtyChange` and `paneId` join the dependency list below, and the
+   * same rule as `color` almost bit this: an unstable `onDirtyChange` would
+   * rebuild the view, and therefore drop the cursor, on every render. Unlike
+   * `color` there is no compartment side-step available, because an update
+   * listener has to be part of the state a view is created with. So the fix
+   * here is at the caller: `App.tsx` wraps the handler in `useCallback` so it
+   * is the same function across renders and this effect only re-runs when the
+   * pane itself changes.
    */
   useEffect(() => {
     if (text === null || host.current === null) return
+    baseline.current = text
     const state = EditorState.create({
       doc: text,
       extensions: [
@@ -204,6 +225,15 @@ export function FileView({
         keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
         ...languageForPath(relPath ?? ''),
         themes.current.of(themeFor(color)),
+        // The baseline is the document the view was created with, so dirty is
+        // "differs from what was read", not "was typed in". Typing a
+        // character and deleting it again leaves the pane clean, which is
+        // what the dot has to mean for the close prompt (Task 5) to be worth
+        // showing.
+        EditorView.updateListener.of((update) => {
+          if (!update.docChanged) return
+          onDirtyChange(paneId, update.state.doc.toString() !== baseline.current)
+        }),
       ],
     })
     const created = new EditorView({ state, parent: host.current })
@@ -211,8 +241,13 @@ export function FileView({
     return () => {
       created.destroy()
       view.current = null
+      // A closed or replaced pane leaves nothing behind in the dirty map:
+      // without this, closing a dirty editor tab would leave its id in
+      // `App.tsx`'s map forever, since nothing else ever clears it for a
+      // pane that no longer exists.
+      onDirtyChange(paneId, false)
     }
-  }, [text, relPath])
+  }, [text, relPath, paneId, onDirtyChange])
 
   /**
    * A recolour, applied without rebuilding anything.

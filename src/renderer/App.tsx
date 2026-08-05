@@ -15,6 +15,7 @@ import { FileView } from './FileView'
 import { cn } from './lib/cn'
 import { tabLabel } from './lib/tabLabel'
 import { relativeToProject } from './lib/relativeToProject'
+import { markDirty, type DirtyPanes } from './lib/dirtyPanes'
 import {
   INITIAL_WORKSPACE_STATE,
   activeProject,
@@ -72,6 +73,16 @@ export function App() {
   // which the mute toggle treats as "nothing to toggle yet" rather than
   // guessing at a shape it has not seen.
   const [notifications, setNotifications] = useState<NotificationConfig | null>(null)
+  // Which editor panes have unsaved edits, renderer-only and never persisted
+  // (see `dirtyPanes.ts`). Keyed by pane id rather than tab id: `TabBar` maps
+  // a tab to its one pane before reading this.
+  const [dirty, setDirtyPanes] = useState<DirtyPanes>({})
+  // Stable across renders on purpose: `FileView` puts this in its
+  // view-building effect's dependency array, and a new function each render
+  // would rebuild the `EditorView` (and drop the cursor) on every keystroke.
+  const onDirtyChange = useCallback((paneId: string, isDirty: boolean) => {
+    setDirtyPanes((was) => markDirty(was, paneId, isDirty))
+  }, [])
 
   const fail = useCallback((reason: unknown) => {
     setError(reason instanceof Error ? reason.message : String(reason))
@@ -795,6 +806,7 @@ export function App() {
             activeId={currentTabId}
             status={state.status}
             dead={state.dead}
+            dirty={dirty}
             onActivate={(id) => dispatch({ type: 'activatedTab', id })}
             onClose={closePane}
             onRestart={restartTab}
@@ -911,6 +923,8 @@ export function App() {
                         projectId={projectIdForTab(state.projects, box.pane)}
                         relPath={editorRelPath(box.pane)}
                         color={box.pane.color ?? PANE_COLOR_DEFAULT}
+                        paneId={box.pane.id}
+                        onDirtyChange={onDirtyChange}
                       />
                     ) : (
                       <Terminal

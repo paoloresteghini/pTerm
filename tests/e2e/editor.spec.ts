@@ -199,6 +199,37 @@ test('the editor takes typing', async () => {
 })
 
 /**
+ * Typing marks the tab dirty, and undoing back to what was read clears it.
+ *
+ * Switches to the existing README tab rather than its tree row, per the note
+ * above: `openEditor` mints a fresh pane per click, so a second click on an
+ * already-open README would add a second tab and break `tabIdFor`'s
+ * strict-mode locator for every test after this one.
+ */
+test('typing marks the tab dirty and undoing marks it clean', async () => {
+  const paneId = await tabIdFor('README.md')
+  await page.getByTestId(`tab-${paneId}`).click()
+  const content = visiblePane().getByTestId('editor-content')
+  await expect(content).toContainText('# demo', { timeout: 10_000 })
+
+  await content.locator('.cm-content').click()
+  await page.keyboard.type('X')
+  await expect(page.getByTestId(`editor-dirty-${paneId}`)).toBeAttached()
+
+  // Back to what was read, so the dot goes. Dirty means "differs from disk",
+  // not "was typed in", and this is the assertion that tells the two apart.
+  await page.keyboard.press('Meta+z')
+  await expect(page.getByTestId(`editor-dirty-${paneId}`)).toHaveCount(0)
+
+  // Back to the app.ts tab: the recolouring test right after this one reads
+  // the visible pane without switching tabs first and expects that file.
+  await page.getByTestId(`tab-${await tabIdFor('app.ts')}`).click()
+  await expect(visiblePane().getByTestId('editor-content')).toContainText(
+    'export const answer = 42',
+  )
+})
+
+/**
  * Recolouring a pane must not throw away what is in its editor.
  *
  * **This pins a fix, and it caught a real defect on the way in.** The pane's

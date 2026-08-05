@@ -11,6 +11,7 @@ export function TabBar({
   activeId,
   status,
   dead,
+  dirty,
   onActivate,
   onClose,
   onRestart,
@@ -24,6 +25,7 @@ export function TabBar({
   activeId: string | null
   status: Record<string, TabState>
   dead: Record<string, number>
+  dirty: Record<string, boolean>
   onActivate: (id: string) => void
   onClose: (id: string) => void
   onRestart: (tab: TabDescriptor) => void
@@ -128,6 +130,13 @@ export function TabBar({
         // adding one of those, this line stops being unfalsifiable and should
         // get a test in the same commit.
         const tombstoned = canHaveSession(tab) && dead[tab.id] !== undefined
+        // An editor tab holds exactly one pane and its id IS the tab's id for
+        // a one-pane tab, which is every editor tab this slice can make. A
+        // split tab holding an edited editor is not reachable yet, because
+        // Cmd+D on an editor pane is still deferred. When it lands, this needs
+        // to ask whether ANY pane of the tab is dirty rather than the tab's own
+        // id, and the test below is what will fail.
+        const unsaved = dirty[tab.id] === true
         return (
           <div
             key={tab.id}
@@ -223,6 +232,13 @@ export function TabBar({
                 />
               </div>
             ) : null}
+            {unsaved && (
+              <span
+                data-testid={`editor-dirty-${tab.id}`}
+                title="Unsaved changes"
+                className="mr-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-fg"
+              />
+            )}
             {tombstoned ? (
               <>
                 {/* A dead tab keeps its scrollback and offers the two things
