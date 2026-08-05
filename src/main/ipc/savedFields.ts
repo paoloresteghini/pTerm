@@ -3,22 +3,38 @@ import type { PaneRecord } from '../sessions/manager'
 
 /**
  * Put the fields only config knows about back onto records built from live
- * tmux: the pane's title and its colour.
+ * tmux: the pane's title, its colour, and the file an editor pane is showing.
  *
- * `SessionManager` knows nothing about either and should not: a pane's session
- * is named `prcli-${slug}-${id}`, and that name is what restore matches saved
- * rows by. A title and a colour are display data stored beside it. So a record
- * the manager built carries neither, and both are reattached here rather than
- * threaded through `OpenInput` and back out again. A pane with no saved row,
- * or a row with neither field set, is returned exactly as it came in.
+ * `SessionManager` knows nothing about any of them and should not: a pane's
+ * session is named `prcli-${slug}-${id}`, and that name is what restore matches
+ * saved rows by. A title, a colour and a file path are display data stored
+ * beside it. So a record the manager built carries none of them, and all three
+ * are reattached here rather than threaded through `OpenInput` and back out
+ * again. A pane with no saved row, or a row with none of the fields set, is
+ * returned exactly as it came in.
  *
- * Both, in one pass, deliberately. This was `attachTitles` and carried only the
- * title, and adding the colour beside it as a second function is how a pane
- * would come back from a relaunch named but grey. That is not hypothetical: it
- * is what happened, and the e2e that caught it is
+ * All three, in one pass, deliberately. This was `attachTitles` and carried
+ * only the title, and adding the colour beside it as a second function is how a
+ * pane would come back from a relaunch named but grey. That is not
+ * hypothetical: it is what happened, and the e2e that caught it is
  * `right-clicking a pane recolours it` in `splits.spec.ts` — the colour was
- * correct on screen, correct on disk, and gone after `app.close()`. Anything
+ * correct on screen, correct on disk, and gone after `app.close()`. `filePath`
+ * joined them for the same reason and would fail the same way: an editor pane
+ * that reopens blank rather than on its file, with nothing thrown. Anything
  * added to `PaneRecord` that the manager cannot derive belongs in this map too.
+ *
+ * **`filePath` is the one of the three that nothing currently depends on this
+ * function for, and saying so is the point.** Measured 2026-08-04: deleting the
+ * `filePath` line and running `editorRestore.spec.ts` leaves all three tests
+ * passing. An editor pane reaches this function by a different route from the
+ * other two — it never had a session for `manager.open()` to build a record
+ * from, so it is not in `panes` at all until `mergeSessionlessPanes` puts the
+ * SAVED row itself there, `filePath` and all, with nothing for this map to put
+ * back. The line is kept because that is a property of today's one producer
+ * rather than of the field: any future path that hands restore a manager-built
+ * editor pane would arrive here stripped, exactly as a titled pane does, and
+ * the failure would be silent. It is defence, and it is not the thing under
+ * test — `mergeSessionlessPanes` is what carries the file path today.
  *
  * This is NOT a central solution, and reading it as one is how two handlers
  * came to write bare rows over saved ones. It has exactly two callers, and each
@@ -59,6 +75,7 @@ export function attachSavedFields(panes: TabDescriptor[], records: PaneRecord[])
     const next = { ...pane }
     if (row.title) next.title = row.title
     if (row.color) next.color = row.color
+    if (row.filePath) next.filePath = row.filePath
     return next
   })
 }
