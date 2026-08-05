@@ -44,11 +44,11 @@ export async function readSkipped(): Promise<string | null> {
 /**
  * Write the skipped version to disk.
  *
- * A torn write means `readSkipped` returns null, the update bar shows again,
- * and the app rediscovers the version from GitHub in six hours. That cost is
- * one banner the user has already seen. Unlike `notes/store.ts`, which holds
- * user text and justifies atomicity, this holds recoverable state: the
- * blast radius does not warrant temp-then-rename complexity.
+ * A torn write means `readSkipped` returns null, the update bar shows again
+ * the next time the app checks, and the user sees a banner they have already
+ * dismissed. Unlike `notes/store.ts`, which holds user text and justifies
+ * atomicity, this holds recoverable state: the blast radius does not warrant
+ * temp-then-rename complexity.
  */
 export async function writeSkipped(version: string): Promise<void> {
   const path = skipPath()
