@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { configRoot } from '../state/store'
 
@@ -41,17 +41,18 @@ export async function readSkipped(): Promise<string | null> {
   }
 }
 
-/** Atomic, the same temp-then-rename shape `notes/store.ts` uses. */
+/**
+ * Write the skipped version to disk.
+ *
+ * A torn write means `readSkipped` returns null, the update bar shows again,
+ * and the app rediscovers the version from GitHub in six hours. That cost is
+ * one banner the user has already seen. Unlike `notes/store.ts`, which holds
+ * user text and justifies atomicity, this holds recoverable state: the
+ * blast radius does not warrant temp-then-rename complexity.
+ */
 export async function writeSkipped(version: string): Promise<void> {
   const path = skipPath()
   await mkdir(dirname(path), { recursive: true })
-  const temp = `${path}.${process.pid}.tmp`
   const body: SkipFile = { skipped: version }
-  try {
-    await writeFile(temp, JSON.stringify(body), 'utf8')
-    await rename(temp, path)
-  } catch (error) {
-    await rm(temp, { force: true })
-    throw error
-  }
+  await writeFile(path, JSON.stringify(body), 'utf8')
 }
