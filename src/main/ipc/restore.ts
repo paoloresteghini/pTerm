@@ -445,7 +445,7 @@ export async function restoreWorkspace(
     // with nothing thrown. That is exactly how `b397216` lost a pane's colour.
     //
     // Before `describeProjects` rather than beside `attachSavedFields` below,
-    // and that is not tidiness — it is measured. `describeProjects` resolves
+    // and that is not tidiness. It is measured. `describeProjects` resolves
     // each project's `activeTabId` against the panes it is given, the renderer
     // shows the group that id lands in (`visibleGroupId` in `workspace.ts`),
     // and a project holding nothing but sessionless panes resolves to null.
@@ -502,7 +502,7 @@ export async function restoreWorkspace(
       panes: restored,
       // One row per tab that still holds a pane, holding the saved axis and
       // ratios wherever a saved row still describes panes that came back. A tab
-      // whose panes have all gone has no row here at all — dropped by having no
+      // whose panes have all gone has no row here at all, dropped by having no
       // entry in `held` rather than by anything filtering it out. "Still holds a
       // pane" rather than "live tmux still has": a tab holding only sessionless
       // panes has no tmux group and no entry in `held`, and keeps its row

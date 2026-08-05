@@ -25,10 +25,20 @@ const editor = (id: string, filePath = `/tmp/demo/${id}.ts`): PaneRecord => ({
  * `groupId` defaults to the row's own id, which is what every tab that has
  * never re-founded has.
  */
-const row = (id: string, kids: string[], ratio: number[]): TabRow => ({
+const row = (
+  id: string,
+  kids: string[],
+  ratio: number[],
+  // Defaulted, not fixed. A helper that always sets `activePaneId` to the first
+  // kid makes a live row and a saved row agree about the selection whatever the
+  // rule is, which is how a test can be written for the selection and still not
+  // be able to see it. The tests that care pass this.
+  activePaneId: string | null = kids[0] ?? null,
+  groupId: string = id,
+): TabRow => ({
   id,
-  groupId: id,
-  activePaneId: kids[0] ?? null,
+  groupId,
+  activePaneId,
   layout: { dir: 'row', ratio, kids },
 })
 
@@ -120,7 +130,7 @@ describe('mergeSessionlessPanes', () => {
     expect(result.panes.map((pane) => pane.id)).toEqual(['t1', 'e1', 't2'])
   })
 
-  // A pane tmux has that config never knew about — the first relaunch after a
+  // A pane tmux has that config never knew about: the first relaunch after a
   // split, which `tabRowFor` appends rather than ignores. Rebuilding a tab
   // from its saved kids alone would drop it out of the tab it is in.
   it('keeps a live kid the saved row never named', () => {
@@ -134,6 +144,59 @@ describe('mergeSessionlessPanes', () => {
     expect(result.tabs[0]?.layout.kids).toEqual(['t1', 'e1', 't2'])
     expect(result.tabs[0]?.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
     expect(result.tabs[0]?.layout.ratio).toHaveLength(3)
+  })
+
+  // `restoreWorkspace` writes what this returns straight to disk, so preferring
+  // the live row's selection does not merely mis-draw one run: it overwrites
+  // the user's choice. The live row cannot be the authority here, because
+  // `tabRowFor` resolved it against a pane set with no editor in it.
+  it('keeps a saved selection the live row could not have named', () => {
+    const result = mergeSessionlessPanes({
+      livePanes: [term('t1')],
+      liveTabs: [row('tabA', ['t1'], [1], 't1')],
+      savedPanes: [term('t1'), editor('e1')],
+      savedTabs: [row('tabA', ['t1', 'e1'], [0.5, 0.5], 'e1')],
+    })
+    expect(result.tabs[0]?.layout.kids).toEqual(['t1', 'e1'])
+    expect(result.tabs[0]?.activePaneId).toBe('e1')
+  })
+
+  // Two saved rows sharing one `groupId`. `store.read()` accepts this and
+  // `restore.ts`'s `savedByGroup` contemplates it outright ("First row wins").
+  // `tabRowFor` cannot produce a pane in two rows because it is called once per
+  // live group and filters against that group's panes; this function filters
+  // against every live pane, so it has to say so itself.
+  it('gives a pane to one row when two saved rows claim it', () => {
+    const result = mergeSessionlessPanes({
+      livePanes: [term('t1')],
+      liveTabs: [row('tabA', ['t1'], [1], 't1', 'g1')],
+      savedPanes: [term('t1'), editor('e1')],
+      savedTabs: [
+        row('tabA', ['t1', 'e1'], [0.5, 0.5], 't1', 'g1'),
+        row('tabB', ['t1'], [1], 't1', 'g1'),
+      ],
+    })
+    expect(result.tabs.map((tab) => tab.id)).toEqual(['tabA'])
+    expect(result.tabs[0]?.layout.kids).toEqual(['t1', 'e1'])
+  })
+
+  // The same invariant on the other loop: a saved row naming a pane that is
+  // live in a DIFFERENT group. The live group's row has no saved row of its
+  // own, so it is appended rather than matched, and it must not bring a second
+  // copy of the pane with it.
+  it('gives a pane to one row when a saved row and a live-only row claim it', () => {
+    const result = mergeSessionlessPanes({
+      livePanes: [term('t1')],
+      liveTabs: [row('t1', ['t1'], [1], 't1')],
+      savedPanes: [term('t1'), editor('e1')],
+      savedTabs: [row('tabOld', ['t1', 'e1'], [0.5, 0.5], 't1', 'gOld')],
+    })
+    expect(result.tabs.map((tab) => tab.id)).toEqual(['tabOld'])
+    expect(result.tabs[0]?.layout.kids).toEqual(['t1', 'e1'])
+    // Every pane is in exactly one row, which is what the two assertions above
+    // are really one half of each.
+    const everyKid = result.tabs.flatMap((tab) => tab.layout.kids)
+    expect(everyKid).toHaveLength(new Set(everyKid).size)
   })
 
   it('is a no-op when nothing saved is sessionless', () => {

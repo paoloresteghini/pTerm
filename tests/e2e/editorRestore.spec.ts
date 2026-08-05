@@ -9,7 +9,7 @@
  *
  * The seeded pane is the whole of the config: no terminal, no tmux session, and
  * so nothing on this file's socket for `findOrphanTabs` to find. That is the
- * case `restoreWorkspace` cannot answer on its own — it starts from live tmux,
+ * case `restoreWorkspace` cannot answer on its own. It starts from live tmux,
  * and live tmux has nothing to say about this pane.
  *
  * No relaunch pattern was invented for this. `launch.spec.ts`
@@ -20,7 +20,7 @@
  *
  * **Measured 2026-08-04, deleting the `mergeSessionlessPanes` call from
  * `restore.ts`: 3 failed.** All three at their `toBeVisible('pane-e1')` line,
- * and the call log says `element(s) not found` rather than `hidden` — with the
+ * and the call log says `element(s) not found` rather than `hidden`: with the
  * merge gone the pane is not in the reply at all, so no box is built for it.
  * The distinction is worth keeping, because the same three assertions failed
  * once during this task's own development with the element PRESENT and hidden:
@@ -35,7 +35,7 @@
  * pane row itself into `panes`, file path and all, so there is nothing for that
  * map to reattach. The line is kept as defence for a future path that hands
  * restore a manager-built editor pane (see its own docstring), and no test was
- * added to make it fail — that is Paolo's call, not this file's.
+ * added to make it fail. That is Paolo's call, not this file's.
  */
 import { test, expect, type ElectronApplication } from '@playwright/test'
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
@@ -60,12 +60,41 @@ let seededFile: string
 const launch = (): Promise<ElectronApplication> =>
   launchApp({ socket: SOCKET, configDir, projectsRoot, claudeSettings: claudeSettingsPath, claudeHome, userDataDir })
 
+/** Config as it stands on disk right now. */
+async function readConfig(): Promise<{
+  panes: { id: string; filePath?: string }[]
+  tabs: { id: string; layout: { kids: string[] } }[]
+}> {
+  return JSON.parse(await readFile(join(configDir, 'config.json'), 'utf8'))
+}
+
 /** The pane row as it stands on disk right now, or undefined if it has gone. */
 async function savedPane(): Promise<{ id: string; filePath?: string } | undefined> {
-  const written = JSON.parse(await readFile(join(configDir, 'config.json'), 'utf8')) as {
-    panes: { id: string; filePath?: string }[]
-  }
-  return written.panes.find((row) => row.id === 'e1')
+  return (await readConfig()).panes.find((row) => row.id === 'e1')
+}
+
+/**
+ * A pane row for a tmux session that does not exist, written between two
+ * launches so the NEXT restore has something to remove.
+ *
+ * The point is falsifiability, not the sentinel itself. Asserting the editor
+ * pane is on disk after a relaunch cannot fail on its own: the value is already
+ * in the file from the previous run, so the assertion passes whether the second
+ * launch wrote anything or not. Restore prunes a saved terminal whose session is
+ * gone, so this row is present before the relaunch and absent after it if and
+ * only if the second reconcile actually wrote the file.
+ */
+async function seedDeadTerminal(): Promise<void> {
+  const config = JSON.parse(await readFile(join(configDir, 'config.json'), 'utf8'))
+  config.panes.push({
+    id: 'sentinel',
+    projectSlug: 'demo',
+    cwd: projectCwd,
+    type: 'shell',
+    // Never created on this socket, so no restore can find it live.
+    tmuxSession: 'prcli-demo-sentinel',
+  })
+  await writeFile(join(configDir, 'config.json'), JSON.stringify(config), 'utf8')
 }
 
 test.beforeEach(async () => {
@@ -94,10 +123,14 @@ test.beforeEach(async () => {
       ],
       panes: [
         { id: 'e1', projectSlug: 'demo', cwd: projectCwd, type: 'editor', filePath: seededFile },
+        // See `seedDeadTerminal`. Present from the first launch so the disk
+        // assertions below can tell "restore wrote and kept the pane" from
+        // "restore never wrote and these are the bytes this file seeded".
+        { id: 'sentinel', projectSlug: 'demo', cwd: projectCwd, type: 'shell', tmuxSession: 'prcli-demo-sentinel' },
       ],
       // The real `TabRow`: `kids`, `ratio` and the axis under `layout`, with
       // `activePaneId` beside them. A flat row is not a lenient spelling of
-      // this one — `normaliseLayout` answers null for a missing `layout`, and
+      // this one: `normaliseLayout` answers null for a missing `layout`, and
       // `store.read()` then drops the whole row, taking the only tab that
       // holds the pane with it.
       tabs: [
@@ -133,11 +166,25 @@ test('restore does not write the editor pane away', async () => {
   // Polled, not read once: the render above proves the reply held the pane,
   // and the write that could drop it happens in the same reconcile but is not
   // what the screen is waiting on.
-  await expect.poll(async () => (await savedPane())?.filePath, { timeout: 10_000 }).toBe(seededFile)
+  //
+  // The sentinel is what makes this an assertion about the write rather than
+  // about the seed. Measured 2026-08-04: with `store.write` skipped, the
+  // `filePath` half alone still passed, because the value it reads is the one
+  // this file wrote in `beforeEach`.
+  await expect
+    .poll(
+      async () => {
+        const config = await readConfig()
+        return {
+          sentinel: config.panes.some((row) => row.id === 'sentinel'),
+          filePath: config.panes.find((row) => row.id === 'e1')?.filePath,
+        }
+      },
+      { timeout: 10_000 },
+    )
+    .toEqual({ sentinel: false, filePath: seededFile })
 
-  const written = JSON.parse(await readFile(join(configDir, 'config.json'), 'utf8')) as {
-    tabs: { id: string; layout: { kids: string[] } }[]
-  }
+  const written = await readConfig()
   const tab = written.tabs.find((row) => row.id === 'tabE')
   expect(tab).toBeDefined()
   // The tab, not merely a tab: a pane no tab holds cannot be reached, focused
@@ -153,12 +200,31 @@ test('the editor pane comes back after a relaunch', async () => {
   await expect.poll(async () => (await savedPane())?.filePath, { timeout: 10_000 }).toBe(seededFile)
   await first.close()
 
+  // See `seedDeadTerminal`: without it the disk assertion below reads the first
+  // run's bytes and passes whether or not the second run wrote at all.
+  await seedDeadTerminal()
+
   // The half no unit test reaches: the pane has to survive a whole second
   // reconcile, reading the file the first one wrote rather than the one this
   // spec seeded.
   const second = await launch()
   const reopened = await second.firstWindow()
   await expect(reopened.getByTestId('pane-e1')).toBeVisible({ timeout: 20_000 })
-  await expect.poll(async () => (await savedPane())?.filePath, { timeout: 10_000 }).toBe(seededFile)
+
+  // One poll over one read of the file, so the two facts are asserted about the
+  // same bytes: the sentinel gone is what proves this reconcile wrote, and the
+  // file path present is what the test is for.
+  await expect
+    .poll(
+      async () => {
+        const config = await readConfig()
+        return {
+          sentinel: config.panes.some((row) => row.id === 'sentinel'),
+          filePath: config.panes.find((row) => row.id === 'e1')?.filePath,
+        }
+      },
+      { timeout: 10_000 },
+    )
+    .toEqual({ sentinel: false, filePath: seededFile })
   await second.close()
 })
