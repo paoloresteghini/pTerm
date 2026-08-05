@@ -208,6 +208,21 @@ describe('StatusRegistry', () => {
     expect(registry.waitingCount()).toBe(1)
   })
 
+  // The dock badge's half of "neither `needsYou` nor the badge may count an
+  // editor pane". `needsYou` needed a guard; this needed none, and this test
+  // is here to say which of the two it is rather than to change anything.
+  it('does not count an editor pane, which opens with no state to count', () => {
+    const registry = new StatusRegistry()
+    registry.applyOpen(ID, 'editor')
+    registry.applyOpen(OTHER, 'claude')
+
+    // The claude pane is in the registry and merely not waiting, so a zero
+    // below is about the editor rather than about an empty registry.
+    expect(registry.get(OTHER)).toBe('unknown')
+    expect(registry.get(ID)).toBeNull()
+    expect(registry.waitingCount()).toBe(0)
+  })
+
   it('takes a dead tab out of the waiting count', () => {
     const registry = new StatusRegistry()
     registry.applyHook(hook(ID, 'Notification'))

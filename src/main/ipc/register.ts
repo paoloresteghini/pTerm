@@ -1,6 +1,7 @@
 import { dialog, ipcMain, type BrowserWindow } from 'electron'
 import {
   CHANNELS,
+  canHaveSession,
   type Candidate,
   type DataEvent,
   type ExitEvent,
@@ -1208,17 +1209,43 @@ export function registerIpc(
     // is a pane this process never held, which is a tab of one by definition.
     const tabId = manager.tabIdOf(paneId) ?? paneId
 
-    // Recorded before the first await inside `manager.kill()` can run, so it
-    // is always in place before the exit event it settles could possibly fire:
-    // that event is answered by asking this map, and it fires while the kill
-    // is still in flight. See `pendingKills`.
-    const outcome = manager.kill(paneId)
-    pendingKills.set(paneId, outcome)
-    try {
-      await outcome
-    } finally {
-      pendingKills.delete(paneId)
+    // Whether there is a session behind this pane at all, asked of the saved
+    // row rather than of the manager: the manager has no entry for an editor
+    // pane AND none for a terminal pane whose client has gone, and `kill`
+    // finds the second through `findOrphans`. Only the kind tells them apart.
+    //
+    // Outside `serialise`, like the tmux work below and for the same reason,
+    // and safe to read there because a pane's kind is fixed at creation: a
+    // stale read cannot answer this differently, only earlier. A row missing
+    // altogether is treated as a terminal, which is the same answer this
+    // handler gave before there were editor panes; it cannot be an editor
+    // whose write has not landed, because `openEditor` awaits its own
+    // `store.write` before the renderer ever learns the pane's id.
+    const saved = (await store.read()).panes.find((row) => row.id === paneId)
+    const sessionless = saved !== undefined && !canHaveSession(saved)
+
+    if (!sessionless) {
+      // Recorded before the first await inside `manager.kill()` can run, so it
+      // is always in place before the exit event it settles could possibly fire:
+      // that event is answered by asking this map, and it fires while the kill
+      // is still in flight. See `pendingKills`.
+      const outcome = manager.kill(paneId)
+      pendingKills.set(paneId, outcome)
+      try {
+        await outcome
+      } finally {
+        pendingKills.delete(paneId)
+      }
     }
+    // The four lines below are NOT inside that branch, deliberately. Each is a
+    // delete from a map an editor pane was never in, so all four are no-ops
+    // for one, and a second branch that has to stay in step with the first is
+    // the thing this file's own comments keep asking the next person not to
+    // write. Only the kill has to be skipped: it is the one call that rejects
+    // rather than shrugging when there is nothing there, which is how closing
+    // an editor tab painted `kill: no tmux session found for tab ...` into the
+    // pane the user had just clicked × on.
+    //
     // A killed pane is not restartable, so its state, the geometry a restart
     // would have attached at, the share a restart would have come back at and
     // the tab a restart would have rejoined all go together. See

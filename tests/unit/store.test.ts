@@ -247,6 +247,37 @@ describe('ConfigStore.read, hostile shapes', () => {
     await expect(store.read()).resolves.toMatchObject({ panes: [good] })
   })
 
+  it('keeps one pane row per id when the file names the same pane twice', async () => {
+    // Not a shape this app writes deliberately, and reachable anyway: nothing
+    // between `store.write` and the file dedupes `panes`, and `read()`'s own
+    // `paneRows` filters and normalises without ever looking at an id it has
+    // already seen. `tabRows` next door has deduped kids across rows since v5,
+    // through its shrinking `known` set, which is the rule copied here.
+    //
+    // The consequence is not cosmetic. `state.panes` is what the tab bar maps
+    // over, keyed by pane id, so a duplicate is two React children under one
+    // key; `paneGroups` then drops the second by `seen` and the tab bar draws
+    // a row that has no pane behind it.
+    const first = {
+      id: 'a1b2c3d4e5f60718',
+      projectSlug: 'lumio',
+      cwd: '/tmp',
+      tmuxSession: 'prcli-lumio-a1b2c3d4e5f60718',
+      type: 'shell',
+    }
+    const store = await storeWith({
+      version: 8,
+      projects: [],
+      activeProjectId: null,
+      tabs: [],
+      // The second copy differs, so the assertion below says WHICH one
+      // survived rather than only how many did. First wins, like `tabRows`.
+      panes: [first, { ...first, cwd: '/somewhere/else' }],
+    })
+
+    await expect(store.read()).resolves.toMatchObject({ panes: [first] })
+  })
+
   it('drops a v5 tab row of every wrong shape without throwing', async () => {
     const store = await storeWith({
       ...splitConfig,

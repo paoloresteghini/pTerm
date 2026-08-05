@@ -104,4 +104,14 @@ describe('stateForOpen', () => {
   it('gives a shell tab no state at all', () => {
     expect(stateForOpen('shell')).toBeNull()
   })
+
+  // The whole of why the dock badge cannot count an editor pane. `applyOpen`
+  // is the only call that would ever put one into the registry, `waitingCount`
+  // counts nothing else, and a null here means `applyOpen` records nothing at
+  // all. `openEditor` does not even call it, so this is the second of two
+  // reasons rather than the only one, and it is the one a future caller of
+  // `applyOpen` would still be covered by.
+  it('gives an editor pane no state at all, since it has no session to be waiting about', () => {
+    expect(stateForOpen('editor')).toBeNull()
+  })
 })

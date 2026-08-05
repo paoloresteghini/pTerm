@@ -1,5 +1,11 @@
 import { useRef, useState } from 'react'
-import { UNSORTED_ID, type ProjectDescriptor, type TabDescriptor, type TabState } from '../shared/ipc'
+import {
+  UNSORTED_ID,
+  canHaveSession,
+  type ProjectDescriptor,
+  type TabDescriptor,
+  type TabState,
+} from '../shared/ipc'
 import { cn } from './lib/cn'
 import { Button } from './ui/Button'
 import { NeedsYou } from './NeedsYou'
@@ -218,8 +224,25 @@ export function Sidebar({
                       </div>
                       {/* Rehoming: a stray must be filable, or Unsorted is a
                           place things can be seen but never leave. Renaming
-                          its tmux session is what actually moves it. */}
-                      {synthetic ? (
+                          its tmux session is what actually moves it.
+
+                          Which is exactly why a sessionless pane is not
+                          offered it. `manager.moveTabToProject` resolves the
+                          tab through `panesOfTab`, which reads live tmux, and
+                          an editor tab has nothing there: it threw
+                          `moveTabToProject: no session for tab <id>` and
+                          `fail` painted that string into `startup-error`.
+                          Rehoming one is not merely unimplemented, it has no
+                          good answer in B1 either. An editor pane's project
+                          membership is `PaneRecord.projectSlug` on disk rather
+                          than a tmux name, so the rename has nothing to do,
+                          but its `filePath` is ABSOLUTE inside the project it
+                          came from, so a move that "worked" would leave the
+                          pane reporting that its file is gone. A move that
+                          succeeds and then breaks the pane is worse than no
+                          move, so the affordance is withheld rather than the
+                          error being made prettier. */}
+                      {synthetic && canHaveSession(tab) ? (
                         <select
                           data-testid={`smove-${tab.id}`}
                           aria-label={`Move ${tab.id.slice(0, 6)} to a project`}

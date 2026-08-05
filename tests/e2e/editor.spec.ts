@@ -39,10 +39,11 @@
  * effect calls `fsRead` again, which now answers null.
  */
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchApp, killServer } from './harness'
+import { launchApp, killServer, sessionNames } from './harness'
+import { UNSORTED_ID } from '../../src/shared/ipc'
 
 const SOCKET = 'prcli-e2e-editor'
 
@@ -166,4 +167,288 @@ test('a file that cannot be read says so', async () => {
   // stopped holding, this test would fail rather than pass falsely, since the
   // element would be present but in a hidden group.
   await expect(visiblePane().getByTestId('editor-missing')).toBeVisible({ timeout: 10_000 })
+})
+
+/**
+ * The tab bar's id for the tab labelled `label`, which must be open.
+ *
+ * Read off the label span rather than tracked from the click that opened the
+ * tab: the id is a pane id main minted, and the label is the one thing on
+ * screen that says which file a tab is. Scoped to the tab bar because the tree
+ * row and the sidebar's own row for the tab carry the same string; see the
+ * first test's comment.
+ */
+async function tabIdFor(label: string): Promise<string> {
+  const testid = await page
+    .getByTestId('tabbar')
+    .getByText(label, { exact: true })
+    .getAttribute('data-testid')
+  const id = (testid ?? '').replace('tablabel-', '')
+  expect(id).not.toBe('')
+  return id
+}
+
+/** Config as it stands on disk right now, the way `editorRestore.spec.ts` reads it. */
+async function readConfig(): Promise<{
+  panes: { id: string; type: string }[]
+  tabs: { id: string; layout: { kids: string[] } }[]
+}> {
+  return JSON.parse(await readFile(join(configDir, 'config.json'), 'utf8'))
+}
+
+/**
+ * The four behaviours below are what the rest of the app assumed about a pane.
+ * Each was a silent wrong answer rather than a crash, except the close, which
+ * was neither silent nor quiet: it painted `kill: no tmux session found for
+ * tab <id>` into the pane, reported by a human running the built app.
+ *
+ * A claude tab is opened first and kept for the rest of the file. It is the
+ * positive control for two assertions that would otherwise pass on a page with
+ * nothing on it: it is the only tab here that draws a dot at all (`shell`
+ * opens with no state by design, so the `+` button could not provide one), and
+ * its tmux session is what the close test watches to see that closing an
+ * editor kills nothing.
+ */
+test('a claude tab draws a dot and an editor tab does not', async () => {
+  const editorTab = await tabIdFor('README.md')
+
+  // `preset-default-claude`, the same button `status.spec.ts` uses to reach a
+  // `claude` tab. It is the only kind that opens with a state, so it is the
+  // only way to have a dot on screen to compare against.
+  const before = await page.locator('[data-testid^="tab-"]').count()
+  await page.getByTestId('preset-default-claude').click()
+  await expect(page.locator('[data-testid^="tab-"]')).toHaveCount(before + 1, { timeout: 20_000 })
+  const claudeTab = (
+    (await page.locator('[data-testid^="tab-"]').last().getAttribute('data-testid')) ?? ''
+  ).replace('tab-', '')
+  expect(claudeTab).not.toBe('')
+
+  // The control. Without this the assertion below is satisfied by a locator
+  // that never matches anything, which is exactly what it looks like when a
+  // testid is renamed.
+  await expect(page.getByTestId(`dot-${claudeTab}`)).toHaveAttribute('data-state', 'unknown', {
+    timeout: 20_000,
+  })
+
+  // Scoped to the editor's own tab, not to the page: the claude tab beside it
+  // legitimately has one.
+  await expect(page.getByTestId(`dot-${editorTab}`)).toHaveCount(0)
+
+  // A live tab's chrome, which is what an editor tab must always wear: one ×
+  // that closes, and neither of the two buttons a tombstone puts there.
+  await expect(page.getByTestId(`close-${editorTab}`)).toBeVisible()
+  await expect(page.getByTestId(`restart-${editorTab}`)).toHaveCount(0)
+  await expect(page.getByTestId(`dismiss-${editorTab}`)).toHaveCount(0)
+})
+
+test('closing an editor tab kills no session, and says nothing', async () => {
+  const editorTab = await tabIdFor('README.md')
+
+  // Its own shell tab, rather than reusing the claude one above: a `claude`
+  // that is not installed on the machine running this exits at once, and its
+  // session would then disappear between the two reads below and be blamed on
+  // the close. A shell sits there.
+  await page.getByTestId('new-tab').click()
+  await expect(page.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
+  const shellTab = (
+    (await page.locator('[data-testid^="tab-"]').last().getAttribute('data-testid')) ?? ''
+  ).replace('tab-', '')
+  // Polled on the session, not on the pane being drawn. Measured: the box is
+  // on screen before tmux has the session, so reading the list here without
+  // this waits picked up ONE session and the read after the close picked up
+  // two, failing as though the close had opened something.
+  await expect
+    .poll(async () => (await sessionNames(SOCKET)).includes(`prcli-demo-${shellTab}`), {
+      timeout: 20_000,
+    })
+    .toBe(true)
+  const sessionsBefore = await sessionNames(SOCKET)
+  // If this is ever empty the "killed nothing" assertion has nothing to be
+  // about and would pass over an app that had killed everything.
+  expect(sessionsBefore.length).toBeGreaterThan(0)
+
+  await page.getByTestId(`close-${editorTab}`).click()
+
+  // Gone from the bar. `toHaveCount(0)` rather than `not.toBeVisible()`: a tab
+  // that stayed and went dead would be present and visible, and that is the
+  // failure mode next door to this one.
+  await expect(page.getByTestId(`tab-${editorTab}`)).toHaveCount(0, { timeout: 10_000 })
+
+  // The defect a human hit, asserted directly. `fail` renders a rejected IPC
+  // call into `startup-error`, and the message it painted was
+  // `Error invoking remote method 'prcli:closePane': Error: kill: no tmux
+  // session found for tab <id>`.
+  await expect(page.getByTestId('startup-error')).toHaveCount(0)
+
+  // Killed nothing. The set is compared whole rather than by length so a kill
+  // AND an open in the same window could not cancel out.
+  expect(await sessionNames(SOCKET)).toEqual(sessionsBefore)
+
+  // And gone from disk, both halves: the pane row and the tab row that named
+  // it. A pane row left behind comes back at the next relaunch, which is the
+  // one thing this slice's restore work exists to make true in the other
+  // direction.
+  await expect
+    .poll(
+      async () => {
+        const config = await readConfig()
+        return {
+          pane: config.panes.some((row) => row.id === editorTab),
+          tab: config.tabs.some((row) => row.layout.kids.includes(editorTab)),
+        }
+      },
+      { timeout: 10_000 },
+    )
+    .toEqual({ pane: false, tab: false })
+})
+
+test('the pane menu on an editor offers colours and nothing else', async () => {
+  // The second editor tab, the one whose file was deleted in the fourth test.
+  // It is still a pane and still right-clickable; what it is showing does not
+  // change what the menu may offer.
+  const editorTab = await tabIdFor('app.ts')
+  await page.getByTestId(`tab-${editorTab}`).click()
+  await expect(visiblePane().getByTestId('editor-missing')).toBeVisible({ timeout: 10_000 })
+
+  await page.getByTestId(`pane-${editorTab}`).click({ button: 'right' })
+  const menu = page.getByTestId(`pmenu-${editorTab}`)
+  await expect(menu).toBeVisible()
+
+  // What it DOES offer, asserted first so "no restart" cannot pass by the menu
+  // having failed to open.
+  await expect(menu.locator('[data-testid^="swatch-"]').first()).toBeVisible()
+  // And what it must not: no restart, under either of the two spellings the
+  // app uses for that button. Note that today no pane's menu offers one, live
+  // or dead, so this pins the surface rather than a branch: the restart the
+  // app really has is the tab bar's `restart-<id>`, asserted absent above, and
+  // the pane overlay's, which `paneGroups` decides and the unit tests cover.
+  await expect(menu.getByTestId(`restart-${editorTab}`)).toHaveCount(0)
+  await expect(menu.getByTestId(`pane-restart-${editorTab}`)).toHaveCount(0)
+
+  // Close it again so the next test starts on a page with no menu over it.
+  await page.getByTestId('tabbar').click()
+  await expect(menu).toHaveCount(0)
+})
+
+/**
+ * ⌘D on an editor pane does nothing, and the spec asks for the opposite.
+ *
+ * **This test pins a defect, not a design.** The spec
+ * (`docs/superpowers/specs/2026-08-04-file-tree-and-editor-design.md:132`) says
+ * "⌘D on an editor pane: allowed, and splits it like any other pane". It does
+ * not. It is a dead key: nothing appears, nothing is thrown, nothing is
+ * painted. Deferred to B2 deliberately, by Paolo's ruling during B1's Task 6,
+ * rather than left unnoticed.
+ *
+ * **Two blockers, measured, not one:**
+ *
+ * 1. Renderer. `App.tsx`'s `splitActive` opens with `paneGrid(activePaneId)`
+ *    and returns when it is null. It is null for an editor pane, because
+ *    `paneGrid` reads `Terminal.tsx`'s `mounted` map of live xterms and an
+ *    editor pane mounts a `FileView` instead. So the split is abandoned in the
+ *    renderer and main is never asked.
+ * 2. Main, which fails next when the renderer stops returning early. Measured,
+ *    not read: with `paneGrid` sabotaged to answer `{cols: 80, rows: 24}` for
+ *    an unmounted pane, so the renderer proceeds to IPC, this test failed at
+ *    the `startup-error` assertion below with the app painting
+ *
+ *        Error invoking remote method 'prcli:splitPane':
+ *        Error: splitTab: no pane 4faff38fe9376b03
+ *
+ *    which is `manager.splitTab`'s opening `this.entries.get(input.paneId)`.
+ *    Note the shape: the same raw-IPC-error-into-the-UI that closing an editor
+ *    tab produced before this task fixed it. Past that throw it would fail
+ *    again anyway, because `splitTab` derives the tmux group to join from the
+ *    sibling's own session (`groupNameOf`) and an editor tab has none: a pane
+ *    added there has to FOUND the tab's group rather than join it.
+ *
+ * So this is not a skip-site like the four above. It is "add a terminal pane to
+ * a tab with no tmux group", and it needs a shared-type decision as well:
+ * `SplitRequest` refuses `cols`/`rows` below 1, and an editor pane has no cell
+ * grid to halve. That guard exists because this repo has shipped the 80x24
+ * geometry defect twice, and relaxing it is not a thing to do in the corner of
+ * a sweep. The route sketched for whoever picks it up is in
+ * `.superpowers/sdd/2026-08-04-sessionless-panes-b1/task-6-report.md`.
+ *
+ * **When this test goes red, that is the good outcome.** It means someone
+ * implemented the split. Replace it with the positive assertion the spec asks
+ * for (pane count in the tab goes up, one new tmux session) rather than
+ * repairing it.
+ */
+test('⌘D on an editor pane does nothing, which is deferred rather than intended', async () => {
+  const editorTab = await tabIdFor('app.ts')
+  await page.getByTestId(`tab-${editorTab}`).click()
+
+  // `:scope >` inside the visible group, and never a bare
+  // `[data-testid^="pane-"]`: that prefix also matches `pane-divider` and the
+  // dead-pane chrome, and an unscoped count would be satisfied by a second TAB
+  // as readily as by a split. `splits.spec.ts` explains this at length.
+  const panes = visiblePane().locator(':scope > [data-testid^="pane-"]')
+  await expect(panes).toHaveCount(1)
+  const sessionsBefore = await sessionNames(SOCKET)
+
+  await page.keyboard.press('Meta+d')
+
+  // Waited out rather than re-read at once, which is the whole difficulty of
+  // asserting an absence. A split that DID work costs a tmux round trip to
+  // appear (`splits.spec.ts` polls up to 20s for its session), so an immediate
+  // re-read would pass over a split that was merely slow. `waitForTimeout` is
+  // the right tool exactly here and is used the same way in `filetree.spec.ts`
+  // and `skills.spec.ts`.
+  await page.waitForTimeout(3000)
+
+  await expect(panes).toHaveCount(1)
+  // The stronger half. A pane box could fail to appear for a rendering reason
+  // while main had happily made a session; comparing the whole set says no
+  // tmux work happened at all.
+  expect(await sessionNames(SOCKET)).toEqual(sessionsBefore)
+  // And silently. `splitActive` returns before any IPC, so unlike the close
+  // defect this one paints nothing, which is what made it worth a test rather
+  // than a bug report.
+  await expect(page.getByTestId('startup-error')).toHaveCount(0)
+})
+
+/**
+ * The move affordance is withheld from a sessionless tab.
+ *
+ * Not one of the spec's seven. Found by sweeping for the mechanical signature
+ * of the class the seven are drawn from (a call into `SessionManager` for a
+ * pane id it may not hold), and it is the same defect as closing was:
+ * `manager.moveTabToProject` throws `moveTabToProject: no session for tab
+ * <id>` from `panesOfTab` coming back empty, and `fail` paints that string
+ * into `startup-error`.
+ *
+ * Reachable only down this path, which is why it is the last test in the file:
+ * the select renders under `synthetic` alone, so a project has to be REMOVED
+ * before any tab of it can be moved, and removing it is destructive to every
+ * test after this one.
+ *
+ * See `Sidebar.tsx` for why the affordance is withheld rather than the move
+ * implemented: an editor pane's `filePath` is absolute inside the project it
+ * came from, so a move that succeeded would leave the pane saying its file was
+ * gone.
+ */
+test('an editor tab under Unsorted is not offered a move, where a terminal is', async () => {
+  const editorTab = await tabIdFor('app.ts')
+  const terminalTab = (
+    (await page.locator('[data-testid^="tab-"]').last().getAttribute('data-testid')) ?? ''
+  ).replace('tab-', '')
+  expect(terminalTab).not.toBe(editorTab)
+
+  // Removing the project is what sends every one of its panes to Unsorted.
+  // The sessions keep running; this only forgets the project row.
+  await page.getByTestId('pmenu-p1').click()
+  await page.getByTestId('premove-p1').click()
+
+  // Unsorted has to be the selected project before it lists its tabs at all:
+  // `Sidebar` renders the tab rows only for the `active` project.
+  await page.getByTestId(`project-${UNSORTED_ID}`).click({ timeout: 10_000 })
+
+  // The control, asserted first. A terminal pane under Unsorted still gets its
+  // select, so an absence below is about the editor rather than about the
+  // whole affordance having gone.
+  await expect(page.getByTestId(`smove-${terminalTab}`)).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByTestId(`smove-${editorTab}`)).toHaveCount(0)
+  // And it is still listed, so it is reachable and simply not movable.
+  await expect(page.getByTestId(`stab-${editorTab}`)).toBeVisible()
 })

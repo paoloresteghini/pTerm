@@ -83,6 +83,27 @@ export type MenuCommand =
  */
 export type TabType = 'claude' | 'preset' | 'shell' | 'editor'
 
+/**
+ * Whether a pane of this kind has a tmux session behind it.
+ *
+ * The one place the kinds are divided that way, so the several things that
+ * only make sense over a session (dying, being restarted, being counted as
+ * blocking a human, being killed on close) all ask the same question. Written
+ * as a predicate on the KIND rather than on `tmuxSession` being present,
+ * because the answer has to hold for a pane whose session is temporarily
+ * unknown: a `TabDescriptor` for a terminal reaches the renderer with its
+ * session, but a `died` pane and a pane mid-restart are still terminals and
+ * still restartable.
+ *
+ * Here rather than in `workspace.ts` so main can reach it too: `closePane` has
+ * the same question to answer before it kills anything, and two spellings of
+ * "is this a terminal" is how a pane comes to be killable on one side of the
+ * IPC boundary and not the other.
+ */
+export function canHaveSession(pane: { type: TabType }): boolean {
+  return pane.type !== 'editor'
+}
+
 /** A notification rule, exactly as it is stored. */
 export interface Rule {
   /** Absent matches every state. */

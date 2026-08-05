@@ -553,6 +553,83 @@ describe('a dead pane', () => {
 })
 
 /**
+ * An editor pane has no tmux session, so nothing that can happen to a session
+ * may be said about it.
+ *
+ * Both of the questions here are decided in pure code and nowhere else, which
+ * is why they are tested here and not through the DOM: `paneGroups` settles
+ * `dead` for every box down both of its branches, and `needsYou` is the only
+ * reader of `state.status` that produces the sidebar's list.
+ *
+ * The two inputs are deliberately different in kind. `state.dead` is what
+ * `PaneBox.dead` is actually read from, so an entry there is the real question.
+ * `state.status` is the one the plan named, and it is worth pinning too, but
+ * only after noticing it decides nothing about `dead` on its own: a test that
+ * seeded status alone would pass with the whole rule deleted.
+ */
+describe('an editor pane', () => {
+  /** A pane with a file and no session, as `openEditor` writes one. */
+  function editor(id: string, projectSlug = 'lumio'): TabDescriptor {
+    return { id, projectSlug, cwd: '/tmp', type: 'editor', filePath: `/tmp/${id}.md` }
+  }
+
+  it('is never marked dead, whatever a stale tombstone or status says', () => {
+    const state: WorkspaceState = {
+      projects: [project('p1', 'lumio', 'e1')],
+      panes: [editor('e1'), editor('e2')],
+      tabs: [],
+      activeProjectId: 'p1',
+      // Neither of these can be produced by an editor pane's own life: it has
+      // no session to exit and never enters main's status registry. Both are
+      // reachable anyway, from a stale config row or an event misrouted by an
+      // id collision, and the overlay they would raise offers a restart of
+      // nothing.
+      status: { e2: 'crashed' },
+      dead: { e1: 0, e2: 1 },
+    }
+
+    const boxes = paneGroups(state).flatMap((group) => group.panes)
+    expect(boxes.map((box) => box.pane.id)).toEqual(['e1', 'e2'])
+    expect(boxes.every((box) => !box.dead)).toBe(true)
+  })
+
+  it('is never marked dead inside a split tab either, where a terminal beside it still is', () => {
+    // The other branch: `boxesOfRow` rather than the stray-pane fallback. Both
+    // decide `dead`, and a fix applied to one of them only would leave an
+    // editor split off a terminal wearing the overlay.
+    const state: WorkspaceState = {
+      projects: [project('p1', 'lumio', 'aaa')],
+      panes: [tab('aaa'), editor('e1')],
+      tabs: [ratioRow('aaa', ['aaa', 'e1'], [0.5, 0.5])],
+      activeProjectId: 'p1',
+      status: {},
+      dead: { aaa: 0, e1: 0 },
+    }
+
+    const group = paneGroups(state).find((candidate) => candidate.id === 'aaa')
+    expect(group?.panes.map((box) => box.pane.id)).toEqual(['aaa', 'e1'])
+    // The terminal's own tombstone is untouched: this narrows the rule to the
+    // editor rather than turning `dead` off.
+    expect(group?.panes.map((box) => box.dead)).toEqual([true, false])
+  })
+
+  it('is not counted as needing you, even carrying a state it could not have earned', () => {
+    const state: WorkspaceState = {
+      projects: [project('p1', 'lumio', 'aaa')],
+      panes: [editor('e1'), editor('e2'), tab('aaa')],
+      tabs: [],
+      activeProjectId: 'p1',
+      status: { e1: 'waiting', e2: 'crashed', aaa: 'waiting' },
+      dead: {},
+    }
+
+    // The terminal is still listed: an empty list here would also be produced
+    // by a `needsYou` that had stopped working altogether.
+    expect(needsYou(state).map((pane) => pane.id)).toEqual(['aaa'])
+  })
+})
+
+/**
  * What a tab's dot says, and what a project's says over it.
  *
  * The failure these exist to prevent: a split tab whose second pane has

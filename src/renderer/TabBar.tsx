@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { TabDescriptor, TabState } from '../shared/ipc'
+import { canHaveSession, type TabDescriptor, type TabState } from '../shared/ipc'
 import { StatusDot } from './StatusDot'
 import { cn } from './lib/cn'
 import { tabLabel } from './lib/tabLabel'
@@ -106,6 +106,28 @@ export function TabBar({
     >
       {tabs.map((tab) => {
         const active = tab.id === activeId
+        // `paneGroups`'s `isDead`, applied to the other surface that offers a
+        // restart. The overlay reads `PaneBox.dead` and this bar reads the raw
+        // map, so without the kind test here the same tombstone would be
+        // refused over the pane and honoured in its tab: one ↻ offering to
+        // restart a file. The two are one rule through `canHaveSession`.
+        //
+        // **No test can fail on the `canHaveSession` half, and that is a fact
+        // about `state.dead` rather than a reason to drop it.** Measured while
+        // adding it: `state.dead` is written only by the `died` action, which
+        // `App.tsx` dispatches from main's pty exit event, and an editor pane
+        // has no pty to exit. So nothing reachable through the app can put an
+        // editor pane's id in that map, and a mutation of this line changes no
+        // observable behaviour. It is kept because one rule in `canHaveSession`
+        // beats two rules that agree by coincidence.
+        //
+        // What would make it reachable, and therefore worth a test: any path
+        // that writes `state.dead` from something other than a pane's own exit
+        // (a restore that replayed saved tombstones, an id collision between a
+        // pane and a tab, a future sessionless kind that CAN fail). If you are
+        // adding one of those, this line stops being unfalsifiable and should
+        // get a test in the same commit.
+        const tombstoned = canHaveSession(tab) && dead[tab.id] !== undefined
         return (
           <div
             key={tab.id}
@@ -163,7 +185,7 @@ export function TabBar({
                   event.stopPropagation()
                   startRename(tab)
                 }}
-                className={cn(dead[tab.id] !== undefined && 'line-through opacity-60')}
+                className={cn(tombstoned && 'line-through opacity-60')}
               >
                 {tabLabel(tab)}
               </span>
@@ -201,7 +223,7 @@ export function TabBar({
                 />
               </div>
             ) : null}
-            {dead[tab.id] !== undefined ? (
+            {tombstoned ? (
               <>
                 {/* A dead tab keeps its scrollback and offers the two things
                     worth doing with it. Restart recreates the session under

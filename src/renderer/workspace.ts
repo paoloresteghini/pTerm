@@ -1,5 +1,6 @@
 import {
   UNSORTED_ID,
+  canHaveSession,
   type ProjectDescriptor,
   type TabDescriptor,
   type TabRow,
@@ -251,6 +252,14 @@ export function stateOfProject(state: WorkspaceState, projectId: string): TabSta
  */
 export function needsYou(state: WorkspaceState): TabDescriptor[] {
   const ranked = state.panes.filter((tab) => {
+    // An editor pane cannot be blocking anyone: there is no process in it to
+    // ask a question or to crash. It has no state in main's registry either,
+    // so in a state assembled the ordinary way this filters nothing out and
+    // the guard is about what a stale config row or a misrouted event could
+    // put in `status`. Local here rather than left to main's registry never
+    // registering one, because the sidebar's list and the dock badge are the
+    // two things this app exists to keep honest.
+    if (!canHaveSession(tab)) return false
     const status = state.status[tab.id]
     return status === 'waiting' || status === 'crashed'
   })
@@ -596,9 +605,24 @@ function boxesOfRow(state: WorkspaceState, row: TabRow, claimed: Set<string>): P
       pane: entry.pane,
       share,
       style: { flexBasis: percent(share) },
-      dead: state.dead[entry.pane.id] !== undefined,
+      dead: isDead(state, entry.pane),
     }
   })
+}
+
+/**
+ * Whether this pane's session has died, which an editor pane's never can.
+ *
+ * One function for both of `paneGroups`'s branches. The kind test is not
+ * defensive tidying: `state.dead` is keyed by pane id and written by `died`,
+ * off main's exit event, and an id collision or a config row carrying a
+ * tombstone from before a pane was an editor puts an entry there for a pane
+ * that has nothing to exit. `DeadPane` is gated on this, so a wrong answer
+ * draws a Restart button over a file, and pressing it asks main to restart a
+ * session that never existed.
+ */
+function isDead(state: WorkspaceState, pane: TabDescriptor): boolean {
+  return canHaveSession(pane) && state.dead[pane.id] !== undefined
 }
 
 /**
@@ -678,7 +702,7 @@ export function paneGroups(state: WorkspaceState): PaneGroup[] {
     // once has its own id in `seen`, which is what was just checked.
     const panes = row
       ? boxesOfRow(state, row, claimed)
-      : [{ pane, share: 1, style: { flexBasis: '100%' }, dead: state.dead[pane.id] !== undefined }]
+      : [{ pane, share: 1, style: { flexBasis: '100%' }, dead: isDead(state, pane) }]
     // Only reachable from the same double-naming this guards: a row whose
     // kids were all boxed by rows processed before it has nothing left to
     // show, and an empty container is not a tab, it is a blank screen where

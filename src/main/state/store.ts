@@ -144,9 +144,31 @@ function normalisePane(pane: PaneRecord): PaneRecord {
   return { ...filed, type: filed.command === undefined ? 'shell' : 'preset' }
 }
 
-/** Every readable pane row, in file order. Anything else on the way out. */
+/**
+ * Every readable pane row, in file order, one per id. Anything else on the way
+ * out.
+ *
+ * The dedupe is `tabRows`' rule one level down: first wins, and a later row
+ * naming a pane already taken is dropped rather than merged, because there is
+ * no non-arbitrary way to choose between two rows claiming to be one pane.
+ *
+ * Not a shape this app writes on purpose, and reachable all the same: nothing
+ * between a handler's array-building and `store.write` checks for it, and a
+ * hand-edited file has no checks at all. What it costs is not cosmetic.
+ * `state.panes` is the list the tab bar maps over, keyed by pane id, so a
+ * duplicate is two React children under one key; `paneGroups` then boxes only
+ * the first, by `seen`, and the bar carries a row with no pane behind it.
+ */
 function paneRows(value: unknown): PaneRecord[] {
-  return Array.isArray(value) ? value.filter(isPane).map(normalisePane) : []
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const rows: PaneRecord[] = []
+  for (const candidate of value) {
+    if (!isPane(candidate) || seen.has(candidate.id)) continue
+    seen.add(candidate.id)
+    rows.push(normalisePane(candidate))
+  }
+  return rows
 }
 
 /**
