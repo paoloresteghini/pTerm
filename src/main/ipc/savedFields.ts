@@ -36,6 +36,15 @@ import type { PaneRecord } from '../sessions/manager'
  * the failure would be silent. It is defence, and it is not the thing under
  * test — `mergeSessionlessPanes` is what carries the file path today.
  *
+ * That defence is now specified rather than merely asserted:
+ * `tests/unit/savedFields.test.ts` calls this function directly with a record
+ * that has no `filePath`, which is what such a future producer would hand it,
+ * and measured 2026-08-04 the line's deletion fails it — `Expected
+ * "/tmp/demo/a.ts"`, `Received undefined`. Direct is load-bearing: the same
+ * assertion made through `restoreWorkspace` would pass with the line gone, for
+ * the reason the paragraph above gives, and would be a test of the merge under
+ * this function's name.
+ *
  * This is NOT a central solution, and reading it as one is how two handlers
  * came to write bare rows over saved ones. It has exactly two callers, and each
  * calls it once, on an array used for both the reply and the `store.write` that
