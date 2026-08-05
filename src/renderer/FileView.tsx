@@ -24,9 +24,10 @@ import { PANE_COLOR_DEFAULT, type PaneColor } from '../shared/paneColors'
  * over a `rgb(9, 9, 11)` pane, about 1.06:1, which is not dim text but
  * invisible text: CodeMirror's base theme sets no foreground at all, and
  * nothing between this element and `<html>` does either. #d4d4d8 is what xterm
- * is handed as its foreground (`Terminal.tsx` repeats the value by hand
- * because a canvas cannot read a CSS variable), so an editor pane and a
- * terminal pane in one row read as the same surface. It is hardcoded rather
+ * is handed as its foreground (`Terminal.tsx` repeats the value by hand; the
+ * reason it gives for that is written at its own `new Terminal` call, and is
+ * not restated here), so an editor pane and a terminal pane in one row read
+ * as the same surface. It is hardcoded rather
  * than derived from `color` because `PANE_COLORS` were chosen against this
  * exact value: its own doc records the worst of the six at 7.89:1.
  *
@@ -51,11 +52,22 @@ import { PANE_COLOR_DEFAULT, type PaneColor } from '../shared/paneColors'
  *   11px generic `monospace`. The size matched. The typeface still did not.
  *
  * So generic `monospace` DOES inherit an ancestor's explicit size, and the
- * 13px belongs to the first configuration rather than to the plan's. It shows
- * up only when nothing above sets a size at all, because the initial `medium`
- * then resolves against the browser's default FIXED font instead of its
- * proportional one. Naming a real family on the common ancestor is what fixes
- * the typeface; the size then comes along in the same declaration.
+ * 13px belongs to the first configuration rather than to the plan's.
+ *
+ * Where the 13px comes from was then probed on its own rather than reasoned
+ * about, by putting bare `<div>`s on the page with no `font-size` declared
+ * anywhere in their chain and reading what each computed:
+ *
+ * - `font-family: monospace` and nothing else: 13px
+ * - no family of its own: 16px
+ * - `font-family: ui-monospace, Menlo, monospace`: 16px
+ * - `font-family: monospace`, under an ancestor at `11px`: 11px
+ *
+ * So it is the BARE GENERIC family that pulls 13px, from the browser's
+ * fixed-font setting rather than its proportional one, and only while nothing
+ * above declares a size. A stack that merely ENDS in `monospace` does not do
+ * it. Which is why naming a real family here settles the size as well as the
+ * typeface, and why the base theme's lone `monospace` was the whole cause.
  *
  * `{ dark: true }` picks the base theme's `&dark` rules over its `&light`
  * ones, which is a legibility fix and not a naming preference. Measured under

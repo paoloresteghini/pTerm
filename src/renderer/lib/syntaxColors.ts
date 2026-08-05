@@ -20,12 +20,20 @@ import { tags } from '@lezer/highlight'
  * at 1.9:1 on exactly those grounds.
  *
  * **The bar is 4.5:1 against every entry in `PANE_COLORS`**, WCAG AA for
- * normal text, worst case the lightest pane `#38383d`. That is a stated
- * choice and not a measurement: plain text's 7.89:1 was considered and
- * rejected as the bar here, because forcing nine distinct hues that high on a
- * near-black background drives them towards a set of near-white pastels that
- * are hard to tell apart, and a palette whose colours are individually legible
- * but mutually indistinguishable does not highlight anything.
+ * normal text, worst case the lightest pane `#38383d`. Choosing it over the
+ * 7.89:1 `paneColors.test.ts` holds plain text to is a judgement, but the
+ * cost of the higher bar was computed rather than asserted: lifting each hue
+ * below, at its own hue and saturation, until it clears 7.89:1 moves seven of
+ * the nine hardly at all (`#5eead4` to `#60ead4`, `#6ee7b7` to `#7ae9bd`,
+ * `#fcd34d` not at all), so "a higher bar would flatten the palette into one
+ * pale wash" is NOT what the arithmetic says and is not the reason.
+ *
+ * The reason is one entry. `comment` at 7.89:1 lands on `#d5d5d9`, one step
+ * from the `#d4d4d8` that ordinary text is drawn in, so the colour that exists
+ * to be quieter than the code stops being distinguishable from it. The bar is
+ * 4.5 to keep one colour dim, not to keep nine colours apart, and if that
+ * entry ever moved the rest could be held higher.
+ *
  * `tests/unit/syntaxColors.test.ts` computes every colour against every pane
  * and is what fails when one is added below the bar.
  *
