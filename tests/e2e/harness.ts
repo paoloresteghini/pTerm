@@ -124,6 +124,20 @@ export async function launchApp(opts: {
       // it may simply mean AppKit ignores the argument domain for this prompt.
       '-ApplePersistenceIgnoreState',
       'YES',
+      // A run launches this app hundreds of times, and with no window shown
+      // the machine stays usable while it runs. See `createWindow`'s
+      // `background` for what the main process does with the env var below.
+      //
+      // These two switches are insurance against Chromium throttling a
+      // renderer nobody can see, which is every renderer this run opens. What
+      // was measured 2026-08-06 is only that a hidden window keeps painting
+      // WITH them (289 rAF callbacks in 2s, the same as a shown one). Whether
+      // it would still paint without them was not measured, so do not read
+      // their presence as proof they are load-bearing, or their removal as
+      // safe.
+      ...(process.env.PRCLI_E2E_VISIBLE === '1'
+        ? []
+        : ['--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding']),
     ],
     env: {
       ...process.env,
@@ -150,6 +164,10 @@ export async function launchApp(opts: {
       // paint a bar over whatever the spec was asserting on, nondeterministically
       // and in specs that have nothing to do with updates.
       PRCLI_UPDATE_CHECK: '0',
+      // On by default, because the default is a run that owns the screen for
+      // its whole length. `PRCLI_E2E_VISIBLE=1` puts the window back where a
+      // developer can watch it, which is what debugging a spec wants.
+      ...(process.env.PRCLI_E2E_VISIBLE === '1' ? {} : { PRCLI_BACKGROUND_WINDOW: '1' }),
       // Only set when a spec asks for it, so `readRc` in every other spec
       // still falls through to its own ENOENT-means-empty branch rather than
       // pointing at a path nothing wrote.

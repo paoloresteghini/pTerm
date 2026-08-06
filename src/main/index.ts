@@ -283,9 +283,26 @@ app.on('second-instance', () => {
 })
 
 function createWindow(): void {
+  // A full e2e run launches this app hundreds of times, and each launch
+  // otherwise opens in the middle of the developer's screen and takes key
+  // focus, which makes the machine unusable for the length of the run. The
+  // harness sets this so the window is never shown at all.
+  //
+  // Not moved off screen, which was tried first and does not work: macOS
+  // clamps a window's frame back onto a display. Measured 2026-08-06 on a
+  // 5120x1440 screen, created at y=1540 it came back at y=564, and
+  // `setPosition(-5000, 3000)` came back as x=-1240, y=1332, a window still
+  // showing a 40x800 sliver.
+  //
+  // A window that is never shown keeps painting: measured the same day,
+  // 289 `requestAnimationFrame` callbacks in 2s either way, with
+  // `document.visibilityState` still `visible`. That matters because xterm
+  // draws on rAF, and the specs read what it drew.
+  const background = process.env.PRCLI_BACKGROUND_WINDOW === '1'
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
+    show: !background,
     backgroundColor: '#09090b',
     titleBarStyle: 'hiddenInset',
     webPreferences: {
@@ -294,6 +311,10 @@ function createWindow(): void {
       nodeIntegration: false,
     },
   })
+
+  // No dock icon and no app switcher entry either: hundreds of launches
+  // bouncing in the dock is the other half of what makes a run unusable.
+  if (background) app.dock?.hide()
 
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     void mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL)
