@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { promisify } from 'node:util'
 import {
   historyPath,
   parseHistory,
@@ -9,6 +11,7 @@ import {
   selectHistory,
   type HistoryEntry,
 } from '../../src/main/shell/history'
+import { renderHistoryScript } from '../../src/main/shell/install'
 
 const entry = (over: Partial<HistoryEntry>): HistoryEntry => ({
   ts: 1,
@@ -130,4 +133,76 @@ describe('readHistory', () => {
     const got = await readHistory(3)
     expect(got.map((e) => e.cmd)).toEqual(['cmd7', 'cmd8', 'cmd9'])
   })
+})
+
+const run = promisify(execFile)
+
+/**
+ * Spawns zsh against a throwaway `$ZDOTDIR` and `$HISTFILE`, sources the
+ * rendered snippet in it, runs `command`, and returns whatever the snippet
+ * wrote.
+ *
+ * `-i` alone is not enough: measured directly, `zsh -i -c '...; some-command'`
+ * never calls `preexec` at all, because `-c` executes its argument as a
+ * single batch string rather than feeding it through the interactive
+ * read-eval loop that `preexec` hooks into. Feeding the source line and the
+ * command as lines on stdin instead (the way a real terminal would type
+ * them) does fire it, so that's what this does: `execFile`'s promisified
+ * form exposes the live child on `promise.child`, which is what lets stdin
+ * be written before the process has finished.
+ *
+ * Pointing `$ZDOTDIR` and `$HISTFILE` at a fresh temp directory keeps `-i`'s
+ * usual side effects, reading a startup file and appending to a history
+ * file, off the developer's real `~/.zshrc` and `~/.zsh_history`.
+ */
+async function recordViaZsh(command: string): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'prcli-hist-'))
+  const historyFile = join(dir, 'history.jsonl')
+  const scriptFile = join(dir, 'prcli-history.zsh')
+  await writeFile(scriptFile, renderHistoryScript(historyFile), 'utf8')
+  const spawned = run('zsh', ['-i'], {
+    env: {
+      ...process.env,
+      PRCLI_TAB_ID: 'tab-under-test',
+      ZDOTDIR: dir,
+      HISTFILE: join(dir, '.zsh_history'),
+    },
+  })
+  spawned.child.stdin?.end(`source ${scriptFile}\n${command}\nexit\n`)
+  await spawned
+  return readFile(historyFile, 'utf8')
+}
+
+describe('the zsh snippet', () => {
+  it('records a command as a parseable entry carrying cwd and tab id', async () => {
+    const written = await recordViaZsh('true')
+    const entries = parseHistory(written)
+    const recorded = entries.find((e) => e.cmd.includes('true'))
+    expect(recorded).toBeDefined()
+    expect(recorded?.tab).toBe('tab-under-test')
+    expect(recorded?.cwd).not.toBe('')
+    expect(recorded?.ts).toBeGreaterThan(0)
+  }, 20_000)
+
+  // What this guards against: an unescaped quote or backslash turns the
+  // written line into invalid JSON, so parseHistory silently drops it and
+  // the command never shows up in the overlay.
+  it('escapes double quotes and backslashes so the line stays parseable', async () => {
+    const written = await recordViaZsh(String.raw`echo "a\"b" > /dev/null`)
+    const entries = parseHistory(written)
+    expect(entries.some((e) => e.cmd.includes('echo'))).toBe(true)
+  }, 20_000)
+
+  it('records nothing when PRCLI_TAB_ID is absent', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'prcli-hist-'))
+    const historyFile = join(dir, 'history.jsonl')
+    const scriptFile = join(dir, 'prcli-history.zsh')
+    await writeFile(scriptFile, renderHistoryScript(historyFile), 'utf8')
+    const { PRCLI_TAB_ID: _unused, ...rest } = process.env
+    const env = { ...rest, ZDOTDIR: dir, HISTFILE: join(dir, '.zsh_history') }
+    const spawned = run('zsh', ['-i'], { env })
+    spawned.child.stdin?.end(`source ${scriptFile}\ntrue\nexit\n`)
+    await spawned
+    await expect(readFile(historyFile, 'utf8')).rejects.toThrow()
+  }, 20_000)
 })
