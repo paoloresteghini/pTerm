@@ -10,6 +10,7 @@ import type {
 import { Dialog, DialogContent, DialogTitle } from './ui/Dialog'
 import { Button } from './ui/Button'
 import { globalRuleOf, setGlobalRule } from './globalRule'
+import { StatusDot } from './StatusDot'
 import { updateResultText } from './lib/updateResultText'
 
 const STATES: TabState[] = ['waiting', 'crashed', 'idle', 'thinking', 'running', 'ended']
@@ -311,7 +312,12 @@ export function SettingsPane({
                 const rule = notifications ? globalRuleOf(notifications.rules, state) : undefined
                 return (
                   <tr key={state}>
-                    <td className="py-1 pr-2 text-muted">{state}</td>
+                    <td className="py-1 pr-2 text-muted">
+                      <span className="flex items-center gap-1.5">
+                        <StatusDot state={state} testid={`rule-dot-${state}`} />
+                        {state}
+                      </span>
+                    </td>
                     <td className="pr-2">
                       <input
                         type="checkbox"
