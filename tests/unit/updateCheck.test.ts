@@ -107,4 +107,28 @@ describe('parseRelease', () => {
     expect(parseRelease('a string')).toBeNull()
     expect(parseRelease(42)).toBeNull()
   })
+
+  // `html_url` crosses IPC and is meant for `shell.openExternal`, which will
+  // hand a `file:` or custom-scheme URL to whatever app claims it. The scheme
+  // is checked here, at the point the value enters the app, rather than left
+  // to whatever eventually calls openExternal.
+  it('accepts a normal https release url', () => {
+    expect(parseRelease(payload)?.url).toBe(payload.html_url)
+  })
+
+  it('refuses a plain http url', () => {
+    expect(parseRelease({ ...payload, html_url: 'http://github.com/paoloresteghini/PRCLI' })).toBeNull()
+  })
+
+  it('refuses a file url', () => {
+    expect(parseRelease({ ...payload, html_url: 'file:///Applications/Calculator.app' })).toBeNull()
+  })
+
+  it('refuses a custom-scheme url', () => {
+    expect(parseRelease({ ...payload, html_url: 'vscode://file/etc/passwd' })).toBeNull()
+  })
+
+  it('refuses a string that is not a url at all', () => {
+    expect(parseRelease({ ...payload, html_url: 'not a url' })).toBeNull()
+  })
 })

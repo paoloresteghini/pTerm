@@ -57,6 +57,12 @@ export function compareVersions(a: string, b: string): number | null {
  * A rate-limit response is the case worth naming. GitHub answers one with a
  * JSON object carrying `message` and no release fields, so it arrives here as
  * a well-formed body with nothing in it, and reads as "no release".
+ *
+ * `html_url` is also checked for an `https:` scheme here, at the point it
+ * enters the app. It crosses IPC to the renderer and is meant for
+ * `shell.openExternal`, which will hand a `file:` or a custom-scheme URL to
+ * whatever app claims it; rejecting anything else here means that invariant
+ * holds no matter what opens the URL later.
  */
 export function parseRelease(payload: unknown): UpdateInfo | null {
   if (typeof payload !== 'object' || payload === null) return null
@@ -66,5 +72,15 @@ export function parseRelease(payload: unknown): UpdateInfo | null {
   if (typeof tag !== 'string' || typeof url !== 'string') return null
   const version = parseVersion(tag)
   if (version === null) return null
+  if (!isHttpsUrl(url)) return null
   return { version: version.join('.'), url }
+}
+
+/** True for a well-formed URL whose scheme is `https:`. False for anything else, including a string that is not a URL at all. */
+function isHttpsUrl(url: string): boolean {
+  try {
+    return new URL(url).protocol === 'https:'
+  } catch {
+    return false
+  }
 }
