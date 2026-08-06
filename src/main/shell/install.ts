@@ -1,5 +1,6 @@
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { configRoot } from '../state/store'
 import { historyPath } from './history'
 
@@ -60,4 +61,121 @@ export function renderHistoryScript(historyFile: string): string {
     'add-zsh-hook preexec prcli_history_preexec',
     '',
   ].join('\n')
+}
+
+export interface ShellHistoryState {
+  installed: boolean
+  rcPath: string
+  scriptPath: string
+  /** The exact text an install would add, shown by Task 5's Settings row before the user commits to it. */
+  pending: string
+}
+
+export const MARKER_START = '# >>> prcli shell history >>>'
+export const MARKER_END = '# <<< prcli shell history <<<'
+
+/** The block `merge` appends to `~/.zshrc`, bounded by markers so `unmerge` can find and remove exactly this and nothing else. */
+export function block(scriptPath: string): string {
+  return [MARKER_START, `[ -f ${JSON.stringify(scriptPath)} ] && source ${JSON.stringify(scriptPath)}`, MARKER_END, ''].join('\n')
+}
+
+export function isInstalled(rc: string): boolean {
+  return rc.includes(MARKER_START)
+}
+
+/**
+ * Append the block to `rc`, or return `rc` unchanged if it is already there.
+ *
+ * A blank line always separates whatever was already in `rc` from the block,
+ * even when `rc` already ends in its own newline. That extra newline is what
+ * lets `unmerge` invert this exactly: a merged file always has the block
+ * preceded by (real content, then one blank line), and stripping one
+ * trailing newline off "real content" always undoes exactly what this added,
+ * with nothing left over to guess about. Without it, a single newline right
+ * before the block reads the same whether `rc` supplied it or `merge` did,
+ * and there is no way for `unmerge` to tell those two cases apart from the
+ * text alone.
+ */
+export function merge(rc: string, scriptPath: string): string {
+  if (isInstalled(rc)) return rc
+  const separator = rc === '' ? '' : '\n'
+  return `${rc}${separator}${block(scriptPath)}`
+}
+
+/**
+ * Remove exactly the block `merge` would add, restoring `rc` to what it was
+ * before, byte for byte.
+ *
+ * The one trailing newline stripped off the text before the block is the
+ * separator `merge` always inserts (see `merge`'s comment): never part of
+ * the caller's own content, because `merge` always adds it regardless of how
+ * `rc` already ended. The leading newline stripped off the text after the
+ * block is `block`'s own trailing blank line, not a separator at all.
+ */
+export function unmerge(rc: string): string {
+  const start = rc.indexOf(MARKER_START)
+  if (start === -1) return rc
+  const end = rc.indexOf(MARKER_END, start)
+  if (end === -1) return rc
+  let before = rc.slice(0, start)
+  if (before.endsWith('\n')) before = before.slice(0, -1)
+  const after = end + MARKER_END.length
+  return before + rc.slice(after).replace(/^\n/, '')
+}
+
+/**
+ * Read `rcPath`, or `''` when there is none.
+ *
+ * Only ENOENT counts as "no file". Anything else (permissions, a full disk,
+ * a path that is a directory) is rethrown rather than treated the same way:
+ * `merge`/`unmerge` build their write from this read, so mistaking "I could
+ * not read the real file" for "there is no file yet" would overwrite an
+ * existing, unreadable `~/.zshrc` with just the new block, discarding
+ * whatever it actually held. Mirrors `hooks/install.ts`'s `readSettings` for
+ * the same reason.
+ */
+/**
+ * Read `rcPath`, or `''` when there is none.
+ *
+ * Only ENOENT counts as "no file". Anything else (permissions, a full disk,
+ * a path that is a directory) is rethrown rather than treated the same way:
+ * `merge`/`unmerge` build their write from this read, so mistaking "I could
+ * not read the real file" for "there is no file yet" would overwrite an
+ * existing, unreadable `~/.zshrc` with just the new block, discarding
+ * whatever it actually held. Mirrors `hooks/install.ts`'s `readSettings` for
+ * the same reason.
+ */
+async function readRc(rcPath: string): Promise<string> {
+  try {
+    return await readFile(rcPath, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
+    throw error
+  }
+}
+
+export async function readShellHistoryState(): Promise<ShellHistoryState> {
+  const { rcPath, scriptPath } = shellPaths()
+  return {
+    installed: isInstalled(await readRc(rcPath)),
+    rcPath,
+    scriptPath,
+    pending: block(scriptPath),
+  }
+}
+
+/** Writes the snippet and appends the marker block to `~/.zshrc`. Safe to call repeatedly: `merge` is idempotent, and the script is rewritten every time so an upgrade cannot leave an older copy behind. */
+export async function installShellHistory(): Promise<ShellHistoryState> {
+  const { rcPath, scriptPath, historyFile } = shellPaths()
+  await mkdir(dirname(scriptPath), { recursive: true })
+  await writeFile(scriptPath, renderHistoryScript(historyFile), 'utf8')
+  await writeFile(rcPath, merge(await readRc(rcPath), scriptPath), 'utf8')
+  return readShellHistoryState()
+}
+
+/** Removes the marker block from `~/.zshrc`. The script itself is left on disk, same as `uninstallHooks` leaves its script: it does nothing once nothing sources it, and leaving it means a reinstall needs no rewrite. */
+export async function uninstallShellHistory(): Promise<ShellHistoryState> {
+  const { rcPath } = shellPaths()
+  await writeFile(rcPath, unmerge(await readRc(rcPath)), 'utf8')
+  return readShellHistoryState()
 }
