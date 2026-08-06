@@ -95,6 +95,39 @@ export async function launchApp(opts: {
   // developer's real ~/.zshrc. Checked under the temp root just the same
   // when a spec does pass it, so there is no way to pass it wrong.
   zshrc?: string
+  /*
+   * Where the shell inside a pane reads its startup files from, for a spec
+   * that cares what its panes' shell actually does.
+   *
+   * `PRCLI_ZSHRC` above is the file this APP edits; this is the directory the
+   * pane's zsh READS, and they are only the same file for a real user. A spec
+   * that sets this owns the pane's prompt and the pane's own command history
+   * instead of inheriting the developer's, which is what makes an assertion
+   * about either of them mean anything on a second machine.
+   *
+   * How it gets there was measured 2026-08-06 rather than assumed, and it is
+   * indirect: nothing in `SessionManager` passes it. Every `-e` it sends tmux
+   * carries `PRCLI_TAB_ID` and nothing else (`src/main/sessions/manager.ts`,
+   * four sites). What happens instead is that the tmux SERVER is started by
+   * this Electron process, inherits its environment into the server's global
+   * environment table, and hands that to the sessions it then creates:
+   * measured, a `new-session` run with `ZDOTDIR` set produced a pane whose
+   * prompt came from that directory's `.zshrc`.
+   *
+   * The consequence, which a spec using this has to know: it only reaches
+   * panes on a server THIS launch started. A server already running on the
+   * socket keeps whatever environment it was started with, so a spec must
+   * `killServer` before it launches. That is loud rather than silent when it
+   * goes wrong (the pane reads a directory that is gone, and the assertion
+   * about the prompt fails), which is why `openPane` in `history.spec.ts`
+   * waits for the prompt this directory produces before pressing anything.
+   *
+   * `HISTFILE` is deliberately NOT offered beside it. macOS's `/etc/zshrc`
+   * sets `HISTFILE=${ZDOTDIR:-$HOME}/.zsh_history` unconditionally, so an
+   * environment `HISTFILE` is overwritten before any user rc file runs, while
+   * `ZDOTDIR` both survives and redirects the history file with it.
+   */
+  zdotdir?: string
 }): Promise<ElectronApplication> {
   assertTestSocket(opts.socket)
   assertUnderTmp('configDir', opts.configDir)
@@ -103,6 +136,7 @@ export async function launchApp(opts: {
   assertUnderTmp('claudeHome', opts.claudeHome)
   assertUnderTmp('userDataDir', opts.userDataDir)
   if (opts.zshrc !== undefined) assertUnderTmp('zshrc', opts.zshrc)
+  if (opts.zdotdir !== undefined) assertUnderTmp('zdotdir', opts.zdotdir)
   return electron.launch({
     args: [
       '.vite/build/main.js',
@@ -172,6 +206,10 @@ export async function launchApp(opts: {
       // still falls through to its own ENOENT-means-empty branch rather than
       // pointing at a path nothing wrote.
       ...(opts.zshrc !== undefined ? { PRCLI_ZSHRC: opts.zshrc } : {}),
+      // Not a PRCLI_ variable: zsh's own, read by the shell in every pane
+      // this launch's tmux server starts. See the option's comment for the
+      // route it takes and for the one condition it depends on.
+      ...(opts.zdotdir !== undefined ? { ZDOTDIR: opts.zdotdir } : {}),
     },
   })
 }

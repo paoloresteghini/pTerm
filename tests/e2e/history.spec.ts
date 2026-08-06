@@ -29,42 +29,42 @@
  * token.
  *
  * The command texts are prefixed rather than a bare `older`/`newer` for a
- * related reason: a substring search runs against a screen that also holds the
- * shell's prompt, and what a prompt puts on screen is the developer's own
- * configuration rather than anything this suite chose. The one on this machine
- * abbreviates the cwd to its last component; one that printed the whole
- * `mkdtemp` path would put `/var/folders/` on the line, and
- * `'folders'.includes('older')` is true.
+ * related reason: half these assertions are substring searches against a whole
+ * screen, and a screen holds the shell's prompt as well as the test's own
+ * text. A prompt printing an unabbreviated `mkdtemp` path would put
+ * `/var/folders/` on the line, and `'folders'.includes('older')` is true.
+ *
+ * **Every pane in this file runs zsh against `PANE_RC`, not the developer's
+ * own dotfiles.** `ZDOTDIR` points at the temp directory below, so the prompt,
+ * the history file and everything else about the pane's shell is something
+ * this file wrote and can therefore assert on. Two things depend on that: the
+ * prompt is a fixed string, so `openPane` can wait for the shell to be READY
+ * rather than for the screen to be non-blank (a prompt that paints in two
+ * stages satisfies non-blank while the real prompt is still coming), and the
+ * pane's own command history holds exactly one line, which is what lets the
+ * passthrough test below assert on the text zsh recalls instead of on the fact
+ * that something changed.
  *
  * **What this file does NOT see:**
  *
  * - **the zsh hook actually recording anything.** Every entry here is written
  *   by the test. That the `preexec` hook produces this file's format is Task
  *   2's, proved by running zsh;
- * - **a `claude`, `preset` or `editor` pane passing Up through.** Only the
- *   `shell` branch and the empty-list branch of the passthrough rule are
- *   pressed here; the pane-type branch is read off `App.tsx` and not executed;
+ * - **a `claude` or `editor` pane passing Up through.** The pane-type branch of
+ *   the passthrough rule is executed here for `preset` panes, which take the
+ *   same branch and need no `claude` binary on the machine. An `editor` pane
+ *   has no terminal and no key handler to reach;
  * - **which unit a relative time picks.** A row's `2h ago` half is asserted
  *   here only for its shape, in the scope test. The boundaries at 60 seconds,
  *   60 minutes and 24 hours are `tests/unit/historyAgo.test.ts`, because the
  *   seconds either side of each of them are one apart and nothing that launches
- *   an app can pin a clock;
- * - **the content of the developer's real shell history.** The panes here run
- *   the machine's real login shell with the developer's own rc file, the way
- *   every other e2e spec's panes do. Nothing here submits a line to it: the one
- *   Enter pressed belongs to the overlay, and every marker typed afterwards is
- *   left sitting on the prompt unexecuted. The passthrough test below does
- *   depend on that history being non-empty: a real interactive shell recalls
- *   something onto the prompt when Up actually reaches it, and that is the
- *   only way this file can tell a passed-through Up from a swallowed one
- *   that also never opened an overlay. It never reads what gets recalled,
- *   though.
+ *   an app can pin a clock.
  */
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchApp, killServer, sessionNames, capturePane } from './harness'
+import { launchApp, killServer, sessionNames, capturePane, expandColumn } from './harness'
 
 const SOCKET = 'prcli-e2e-history'
 
@@ -80,6 +80,30 @@ const NEWER = 'echo hist-newer'
 const OLDER = 'echo hist-older'
 const BOTTOM = 'echo hist-bottom'
 
+/**
+ * The prompt every pane in this file draws, and the one command in every
+ * pane's own zsh history.
+ *
+ * `PANE_PROMPT` has no `%` escapes and no cwd in it, so the string on screen
+ * is this constant and nothing has to be predicted. `RECALLED` shares no
+ * substring with the `hist-` tokens above, because the passthrough test puts
+ * it on a prompt line and other assertions read whole screens.
+ */
+const PANE_PROMPT = 'PRCLIE2E$'
+const RECALLED = 'echo prcli-recall-probe'
+
+/**
+ * The rc file the pane's zsh reads, given `ZDOTDIR` points at its directory.
+ *
+ * `HISTFILE` is set here rather than passed in the environment because macOS's
+ * `/etc/zshrc` assigns `HISTFILE=${ZDOTDIR:-$HOME}/.zsh_history` before any
+ * user rc file runs, which would overwrite an environment value. Setting it in
+ * this file, which runs after `/etc/zshrc`, is what makes it stick. `HISTSIZE`
+ * has to be non-zero for zsh to read the file back at all.
+ */
+const PANE_RC = (historyFile: string): string =>
+  [`PS1='${PANE_PROMPT} '`, `HISTFILE=${historyFile}`, 'HISTSIZE=200', 'SAVEHIST=200', ''].join('\n')
+
 let userDataDir: string
 let configDir: string
 let projectsRoot: string
@@ -89,6 +113,7 @@ let claudeSettingsPath: string
 let claudeHome: string
 let zshrcDir: string
 let zshrcPath: string
+let paneHistoryPath: string
 
 const launch = (): Promise<ElectronApplication> =>
   launchApp({
@@ -102,7 +127,23 @@ const launch = (): Promise<ElectronApplication> =>
     // a requirement: the shell-history install lives one Settings click away
     // from every launch, and the cost of pointing it somewhere safe is a line.
     zshrc: zshrcPath,
+    // The same directory, because for a real user the file this app edits and
+    // the file their shell reads ARE one file. Pointing both here is what
+    // gives the panes a prompt and a command history this file owns; see the
+    // option's comment in `harness.ts` for how it reaches them.
+    zdotdir: zshrcDir,
   })
+
+/**
+ * The declared preset the pane-type passthrough test launches from.
+ *
+ * `echo` first so the pane has a readiness signal on screen, then `cat`, which
+ * lives until the pane is killed and echoes what is typed at it. tmux hands a
+ * session's command to `sh -c`, so this runs as written.
+ */
+const PRESET_LABEL = 'holdopen'
+const PRESET_READY = 'PRESETREADY'
+const PRESET_COMMAND = `echo ${PRESET_READY}; cat`
 
 /** Write a config holding one project, selected, and return its directory. */
 async function seedProject(): Promise<string> {
@@ -112,7 +153,18 @@ async function seedProject(): Promise<string> {
     JSON.stringify({
       version: 3,
       projects: [
-        { id: 'id-scratch', name: 'Scratch', slug: 'scratch', cwd, presets: [], activeTabId: null },
+        {
+          id: 'id-scratch',
+          name: 'Scratch',
+          slug: 'scratch',
+          cwd,
+          // Declared for every test in this file, though only the pane-type
+          // passthrough test clicks it. The Presets column is collapsed on a
+          // fresh profile, so an unclicked preset puts nothing on screen and
+          // costs the other tests no width.
+          presets: [{ id: 'preset-holdopen', label: PRESET_LABEL, command: PRESET_COMMAND }],
+          activeTabId: null,
+        },
       ],
       activeProjectId: 'id-scratch',
       tabs: [],
@@ -144,10 +196,14 @@ async function seedHistory(entries: { ts: number; cwd: string; cmd: string }[]):
  * assertion that the command never ran, because running `mecho hist-older`
  * prints `zsh: command not found` instead of `hist-older`.
  *
- * A blank pane is the state before the prompt and a non-blank one is the state
- * after it, so "has drawn anything at all" is the whole test. Spelled that way
- * rather than by matching prompt text, which is the developer's own and not
- * this suite's to predict.
+ * What it waits for is `PANE_PROMPT`, which this file's own `PANE_RC` sets, and
+ * that is doing two jobs. It is a readiness check that "the screen is not
+ * blank" cannot make: a prompt drawn in two passes, which several popular zsh
+ * prompt frameworks do, is non-blank while the real prompt is still on its way.
+ * It is also the proof that `ZDOTDIR` reached this pane at all. If it did not,
+ * the shell reads whatever rc file it would otherwise have read, every
+ * assertion downstream is about a machine's own configuration again, and this
+ * poll fails here rather than letting that happen quietly.
  */
 async function openPane(): Promise<{ app: ElectronApplication; window: Page; session: string }> {
   const app = await launch()
@@ -157,8 +213,8 @@ async function openPane(): Promise<{ app: ElectronApplication; window: Page; ses
   await expect.poll(async () => (await sessionNames(SOCKET)).length, { timeout: 20_000 }).toBe(1)
   const session = (await sessionNames(SOCKET))[0]
   await expect
-    .poll(async () => (await capturePane(SOCKET, session)).trim(), { timeout: 20_000 })
-    .not.toBe('')
+    .poll(async () => await capturePane(SOCKET, session), { timeout: 20_000 })
+    .toContain(PANE_PROMPT)
   return { app, window, session }
 }
 
@@ -177,7 +233,12 @@ test.beforeEach(async () => {
   claudeHome = await mkdtemp(join(tmpdir(), 'prcli-history-claude-'))
   zshrcDir = await mkdtemp(join(tmpdir(), 'prcli-history-zshrc-'))
   zshrcPath = join(zshrcDir, '.zshrc')
-  await writeFile(zshrcPath, '# left alone by every test in this file\n')
+  paneHistoryPath = join(zshrcDir, '.zsh_history')
+  await writeFile(zshrcPath, PANE_RC(paneHistoryPath))
+  // One line, so `Up` in a pane recalls a string this file chose. Written
+  // fresh per test: a pane that exits appends to this file, and the
+  // passthrough test asserts on what the FIRST press brings back.
+  await writeFile(paneHistoryPath, `${RECALLED}\n`)
   projectCwd = await seedProject()
 })
 
@@ -422,27 +483,127 @@ test('Up reaches the shell when there is no history to show', async () => {
   // never installed the shell integration.
   const { window, session } = await openPane()
 
-  // The overlay's absence, checked below, is only a third of this: it is
-  // exactly what a swallowed Up that never opened anything would also look
-  // like. Measured 2026-08-06 by sabotaging the passthrough guard to always
-  // report "handled": the overlay still never opened (there is nothing to
-  // show it), and this test stayed green with only the two checks that used
-  // to follow. What a swallowed Up cannot do, and a passed-through one can, is
-  // reach zsh's own line editor: this real login shell always has SOME native
-  // command history (unrelated to PRCLI's, which is empty here), so a
-  // passthrough Up recalls it onto the prompt and the pane's content changes.
-  const beforeUp = (await capturePane(SOCKET, session)).trimEnd()
-
   await window.keyboard.press('ArrowUp')
   await expect(window.getByTestId('history-overlay')).toHaveCount(0)
-  await expect
-    .poll(async () => (await capturePane(SOCKET, session)).trimEnd(), { timeout: 20_000 })
-    .not.toBe(beforeUp)
 
-  // Still not the whole story: this marker goes to the pty too, which it
-  // could not do if an overlay had opened and taken focus for its filter.
+  /*
+   * The assertion this test exists for, and the only one of the three here
+   * that separates the two states.
+   *
+   * An overlay that never opened is exactly what a SWALLOWED Up looks like
+   * too, since with nothing to show there is nothing for it to open. Measured
+   * 2026-08-06 by sabotaging the passthrough guard to always report "handled":
+   * the overlay still never appeared and the surrounding checks stayed green.
+   * What only a passed-through Up can do is reach zsh's line editor, and the
+   * one line `beforeEach` put in this pane's history file is what it brings
+   * back.
+   *
+   * Asserted as the exact line rather than as "the screen changed". A diff
+   * against an earlier capture is satisfied by anything that repaints the pane
+   * within the timeout, including a prompt that finishes drawing after the
+   * first read, with the key press contributing nothing.
+   */
+  await expect
+    .poll(async () => await paneLines(session), { timeout: 20_000 })
+    .toContain(`${PANE_PROMPT} ${RECALLED}`)
+
+  // And the keyboard is still the pane's: a marker typed now goes to the pty,
+  // which it could not do if an overlay had opened and taken focus for its
+  // filter.
   await window.keyboard.type('PASSTHROUGH')
   await expect
     .poll(async () => await capturePane(SOCKET, session), { timeout: 20_000 })
     .toContain('PASSTHROUGH')
+})
+
+/*
+ * The transition nothing else in this file crosses: empty to non-empty, in one
+ * running app.
+ *
+ * Every other test seeds `history.jsonl` before the app launches, so it starts
+ * on the non-empty side; the passthrough test starts on the empty side and
+ * stays there. The path a real user takes is neither. They launch with no
+ * history, install the integration from Settings, open a shell pane because
+ * that row tells them to, run a command, and press Up. If the answer fetched
+ * at launch is never asked again, that press and every press after it passes
+ * through, and the feature looks broken for the whole session with no way to
+ * tell it apart from the documented passthrough.
+ */
+test('history that appears after launch becomes reachable without a restart', async () => {
+  const { window } = await openPane()
+
+  // The empty side, pinned: this is a real starting state, not an assumption.
+  await window.keyboard.press('ArrowUp')
+  await expect(window.getByTestId('history-overlay')).toHaveCount(0)
+
+  // What installing the hook and running one command amounts to, with no
+  // project switch and no relaunch in between.
+  await seedHistory([{ ts: 1, cwd: projectCwd, cmd: NEWER }])
+
+  // Pressed in a loop because the press that finds the list empty is the one
+  // that asks for it again, and the answer arrives over IPC: it is the NEXT
+  // press that can open anything. A build that never re-asks stays at zero
+  // here however many times Up is pressed, which is the whole point.
+  await expect
+    .poll(async () => {
+      await window.keyboard.press('ArrowUp')
+      return await window.getByTestId('history-overlay').count()
+    }, { timeout: 20_000 })
+    .toBe(1)
+  await expect(window.getByTestId('history-row-0')).toHaveText(new RegExp(NEWER))
+})
+
+/*
+ * The pane-type half of the passthrough rule, which no test executed until
+ * now.
+ *
+ * `preset` rather than `claude`, so this needs no `claude` binary on the
+ * machine: both types take the identical branch in `requestHistory`, which
+ * asks only whether the pane's type is `shell`. The pane runs `cat`, which
+ * lives until it is killed and echoes what is typed at it, so the pty's own
+ * view of the keystrokes is readable from tmux.
+ *
+ * The seeded `history.jsonl` is what makes this discriminating rather than
+ * decorative: it holds an entry for this project, so the overlay has something
+ * to show and a build that stopped checking the pane's type would open it here.
+ */
+test('Up reaches a preset pane rather than opening the overlay', async () => {
+  await seedHistory([{ ts: 1, cwd: projectCwd, cmd: NEWER }])
+
+  const app = await launch()
+  const window = await app.firstWindow()
+  // Launched by clicking the preset rather than seeded into `config.json`.
+  // Restore only reattaches panes whose tmux session is live (`restore.ts`
+  // skips a saved row whose session is gone rather than reopening it), so a
+  // seeded `preset` row on a socket this test just killed would be pruned
+  // before anything rendered.
+  await expandColumn(window, 'presets')
+  await window.getByTestId(`preset-${PRESET_LABEL}`).click()
+  await expect(window.getByTestId('terminal-active')).toBeVisible()
+  await expect.poll(async () => (await sessionNames(SOCKET)).length, { timeout: 20_000 }).toBe(1)
+  const session = (await sessionNames(SOCKET))[0]
+  // `cat` draws no prompt, so the readiness signal is the echo in front of it.
+  // Without waiting for it, an Up pressed before the pty is attached is lost
+  // and the assertion below would fail for the wrong reason.
+  await expect
+    .poll(async () => await capturePane(SOCKET, session), { timeout: 20_000 })
+    .toContain(PRESET_READY)
+
+  await window.keyboard.press('ArrowUp')
+  await expect(window.getByTestId('history-overlay')).toHaveCount(0)
+
+  /*
+   * The Up itself, read off the pty rather than inferred from a later marker.
+   *
+   * `cat` leaves the tty in canonical mode with echo on, so the escape
+   * sequence xterm sends for Up is echoed back in caret notation. Measured
+   * 2026-08-06 against a tmux pane running `cat`: pressing Up then typing
+   * `PRESETMARKER` captured as `^[[APRESETMARKER`, on one line. That makes the
+   * marker do a second job, since it can only land on the same line as the
+   * arrow if the arrow got there first.
+   */
+  await window.keyboard.type('PRESETMARKER')
+  await expect
+    .poll(async () => await capturePane(SOCKET, session), { timeout: 20_000 })
+    .toContain('^[[APRESETMARKER')
 })
