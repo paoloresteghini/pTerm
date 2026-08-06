@@ -8,8 +8,6 @@
 
 import type { UpdateInfo } from '../../shared/ipc'
 
-export type { UpdateInfo }
-
 /** Exactly `major.minor.patch`, with an optional leading `v`. Nothing else. */
 const VERSION = /^v?(\d+)\.(\d+)\.(\d+)$/
 

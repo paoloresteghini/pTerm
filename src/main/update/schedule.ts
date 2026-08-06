@@ -23,26 +23,35 @@ const INTERVAL_MS = 6 * 60 * 60 * 1000
  *
  * **The scheduling here is not covered by any test.** The decision it wraps is
  * unit tested (`tests/unit/updateService.test.ts`). The bar it would feed is
- * not: the E2E spec that drives it is a later task, deferred while another
- * session rewrites `App.tsx` underneath it. The two timers, the env switch
- * and the `send` here are verified by reading only. That is a deliberate
- * trade: making them testable means injecting a clock and a sender through
- * main's startup, and the failure mode being bought off is "the bar never
- * appears", which is the same as not having built the feature.
+ * not: the E2E spec that drives it belongs to a later task and does not exist
+ * yet. The two timers, the env switch and the `send` here are verified by
+ * reading only. That is a deliberate trade: making them testable means
+ * injecting a clock and a sender through main's startup, and the failure mode
+ * being bought off is "the bar never appears", which is the same as not
+ * having built the feature.
  */
 export function scheduleUpdateChecks(window: () => BrowserWindow | null): void {
   if (process.env.PRCLI_UPDATE_CHECK === '0') return
 
   const service = realUpdateService(app.getVersion())
 
+  // `check` never rejects, but `webContents.send` can throw if the window's
+  // webContents has already been torn down (reachable: the timer keeps
+  // firing for the process lifetime, and a window close races it). The
+  // try/catch is what actually prevents an unhandled rejection out of the
+  // bare `void run()` below; nothing about the `await` alone would.
   const run = async (): Promise<void> => {
-    const result = await service.check()
-    if (result.status !== 'available' || result.info === null) return
-    window()?.webContents.send(CHANNELS.updateAvailable, result.info)
+    try {
+      const result = await service.check()
+      if (result.status !== 'available' || result.info === null) return
+      window()?.webContents.send(CHANNELS.updateAvailable, result.info)
+    } catch {
+      // Nothing to do: there is no user-facing surface for a background
+      // check's failure. The user finds out on the next successful poll, or
+      // never, which is the same silence `failed` already gets elsewhere.
+    }
   }
 
-  // `void`, and `check` never rejects, so neither of these can produce an
-  // unhandled rejection out of a timer.
   setTimeout(() => void run(), FIRST_DELAY_MS)
   setInterval(() => void run(), INTERVAL_MS)
 }

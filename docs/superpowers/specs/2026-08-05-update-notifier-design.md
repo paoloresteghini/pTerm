@@ -206,8 +206,11 @@ written as "stub the bridge, then assert" would pass against a broken
 implementation.
 
 No test performs a network request. The scheduled check reads an env var
-(`PRCLI_UPDATE_CHECK=0`) that the E2E harness sets, so the app never reaches
-api.github.com during a test run; the tests drive the push themselves.
+(`PRCLI_UPDATE_CHECK=0`, `src/main/update/schedule.ts`) for exactly this
+purpose, but nothing sets it yet: the E2E harness does not export it. Wiring
+`tests/e2e/harness.ts` to set it is outstanding and must land before this
+spec's E2E task is written, so the app never reaches api.github.com during a
+test run; the tests drive the push themselves.
 
 **Download** is asserted by intercepting `shell.openExternal` in main, not by
 watching for a browser to open.

@@ -1,15 +1,17 @@
 import { compareVersions, parseRelease } from './check'
 import { readSkipped } from './store'
-import type { UpdateCheckResult, UpdateStatus } from '../../shared/ipc'
-
-export type { UpdateCheckResult, UpdateStatus }
+import type { UpdateCheckResult } from '../../shared/ipc'
 
 /**
  * The public, unauthenticated releases endpoint.
  *
- * No token: the repo is public and the limit is 60 requests an hour per IP,
- * against a demand of roughly five a day. A token would be one more secret to
- * ship for no gain.
+ * No token: the limit is 60 requests an hour per IP, against a demand of
+ * roughly five a day, so a token would be one more secret to ship for no
+ * gain, *as long as the repo stays public*. An unauthenticated request to a
+ * private repo 404s; that reads as `failed`, which is silent by design (see
+ * `check` below), so if the repo is ever made private this stops working
+ * with nothing anywhere reporting why. The repo must be public for this to
+ * work at all.
  */
 export const RELEASES_URL = 'https://api.github.com/repos/paoloresteghini/PRCLI/releases/latest'
 
