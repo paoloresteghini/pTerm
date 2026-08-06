@@ -59,8 +59,8 @@ very next re-fire, about a minute later, is then a real `idle -> waiting` transi
 repeat, and would bring the row back with a toast, a sound and the badge, for a prompt the
 user already read and deliberately left alone. So the registry keeps a memo of acknowledged
 tab ids; while a tab's id is in it, a transition *to* `waiting` is dropped outright rather
-than merely deduped, and the tab stays `idle`. Any other transition for that tab — thinking,
-idling, dying, restarting, forgetting — clears the memo, because all of those are real
+than merely deduped, and the tab stays `idle`. Any other transition for that tab (thinking,
+idling, dying, restarting, forgetting) clears the memo, because all of those are real
 activity: a genuine new question that follows real activity comes back into the list
 normally.
 

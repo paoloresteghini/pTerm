@@ -72,10 +72,10 @@ export class StatusRegistry {
    * loud for a prompt the user already read and deliberately left alone. This
    * memo is what `set` checks instead: while a tab's id is in here, a
    * transition *to* `waiting` is dropped outright rather than merely
-   * deduped. Membership is cleared by any other transition for that tab —
-   * thinking, idling, dying, restarting, forgetting — because all of those
-   * are real activity, and a genuine new question that follows real activity
-   * has to be heard.
+   * deduped. Membership is cleared by any other transition for that tab:
+   * thinking, idling, dying, restarting, forgetting. All of those are real
+   * activity, and a genuine new question that follows real activity has to
+   * be heard.
    */
   private readonly acknowledged = new Set<string>()
 
