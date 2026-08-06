@@ -88,6 +88,11 @@ export class NotificationRouter {
   }
 
   private async notify(transition: StatusTransition): Promise<void> {
+    // A change the user asked for (see `StatusTransition.quiet`): the dot and
+    // the badge still move, via `handle`'s `finally`, but there is nothing to
+    // toast about, the user just dismissed the very thing a toast would say.
+    if (transition.quiet) return
+
     // `to: null` is a forget, not a state — dismissed, or killed on purpose.
     // There is nothing to describe in a toast; `handle`'s `finally` still
     // refreshes the badge for it.

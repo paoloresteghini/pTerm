@@ -167,6 +167,38 @@ describe('NotificationRouter', () => {
     expect(badges).toEqual([2])
   })
 
+  // The default rules toast on `idle`, so an acknowledgement of a `waiting`
+  // tab would fire a toast about the very thing the user just dismissed.
+  it('says nothing about a quiet transition', async () => {
+    const { router, toasts, sounds } = build()
+
+    await router.handle({ tabId: ID, from: 'waiting', to: 'idle', quiet: true })
+
+    expect(toasts).toEqual([])
+    expect(sounds).toEqual([])
+  })
+
+  // The count is about every other tab as much as this one, and the badge is
+  // the whole reason `quiet` is not `silent`.
+  it('still refreshes the badge for a quiet transition', async () => {
+    const { router, badges } = build({ waitingCount: () => 3 })
+
+    await router.handle({ tabId: ID, from: 'waiting', to: 'idle', quiet: true })
+
+    expect(badges).toEqual([3])
+  })
+
+  // The control: the same transition without the flag is a transition the
+  // router does describe, so the test above cannot pass by the rule for
+  // `idle` having been dropped.
+  it('still describes the same transition without the flag', async () => {
+    const { router, toasts } = build()
+
+    await router.handle({ tabId: ID, from: 'waiting', to: 'idle' })
+
+    expect(toasts).toHaveLength(1)
+  })
+
   it('survives a failure to read config without taking the transition down', async () => {
     const { router, badges } = build({
       readConfig: async () => {
