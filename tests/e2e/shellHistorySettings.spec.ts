@@ -112,18 +112,26 @@ test('names its rc and script, shows the real pending block, and round-trips the
    * asked for; none of it says that. This is the only screen in the app that
    * mentions the feature, and the pending block below it shows only the
    * `source` line, so a user reading the exact text on offer still would not
-   * find out. Three separate facts are checked because dropping any one of
-   * them leaves the row misleading rather than merely terse: where the record
-   * is kept, how to keep one command out of it, and that uninstalling is not
-   * deletion.
+   * find out. Four separate facts are checked because dropping any one of them
+   * leaves the row misleading rather than merely terse: where the record is
+   * kept, how to keep one command out of it, that uninstalling does not reach
+   * a pane that is already open, and that it is not deletion.
    *
-   * The path is the sharp end. It is this spec's own temp config directory,
-   * so no fixed string typed into the component could satisfy it.
+   * The third of those is the one with teeth. Uninstall rewrites `.zshrc` and
+   * touches nothing else, so a running pane keeps recording; a user who
+   * uninstalls to stop a secret being logged and then keeps typing in the pane
+   * they already had open gets it logged, having just read this screen. Copy
+   * that said "Uninstalling stops the recording" shipped here and was wrong.
+   *
+   * The path is the sharp end for a different reason. It is this spec's own
+   * temp config directory, so no fixed string typed into the component could
+   * satisfy it.
    */
   const disclosure = await page.getByTestId('shell-history-disclosure').innerText()
   expect(disclosure).toContain(join(configDir, 'history.jsonl'))
   expect(disclosure).toContain('leading space')
-  expect(disclosure).toContain('leaves the file')
+  expect(disclosure).toContain('keeps recording until you close and reopen it')
+  expect(disclosure).toContain('nothing in this app deletes it')
 
   // The pending block shown on screen is what `block()` actually produces
   // for that script path, not a lookalike string typed into the component.

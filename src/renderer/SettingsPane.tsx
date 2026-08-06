@@ -276,11 +276,27 @@ export function SettingsPane({
                   else: this row is the only screen in the app that mentions
                   the feature at all, and the pending block below shows only
                   the `source` line, so reading the exact text on offer does
-                  not reveal any of it either. */}
+                  not reveal any of it either.
+
+                  The sentence about uninstalling is the one to be careful
+                  with, because a user reading it has usually decided they do
+                  NOT want to be recorded, and the paragraph above states the
+                  same asymmetry for install. Uninstall rewrites .zshrc and
+                  nothing else; a pane already running has sourced the script
+                  and holds prcli_history_preexec in its own
+                  `preexec_functions`, with PRCLI_HISTORY_FILE already set as a
+                  shell variable. Measured 2026-08-06 against the real rendered
+                  script: a live interactive zsh went on recording after the
+                  script file was DELETED under it, which is stronger than
+                  uninstall, since uninstall deliberately leaves that file on
+                  disk. Nothing on disk can reach a shell that has already
+                  started. */}
               <p data-testid="shell-history-disclosure" className="mb-2 text-[11px] text-muted">
                 Records every command run in shell panes to {shellHistory.historyFile}, with no
                 size limit. A command typed with a leading space is not recorded. Uninstalling
-                stops the recording and leaves the file, which nothing in this app deletes.
+                only takes effect in panes opened after it, so a pane already open keeps
+                recording until you close and reopen it. The file is left behind either way, and
+                nothing in this app deletes it.
               </p>
 
               <pre
