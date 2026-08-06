@@ -1145,28 +1145,26 @@ export function registerIpc(
         // The pane the user just asked for is the one they are looking at.
         activePaneId: record.id,
         layout: {
-          // A tab's axis is set by the split that CREATES it, and a later
-          // split adds a pane along that axis instead of re-orienting the tab.
+          // The axis the caller asked for, always — a split re-orients the tab
+          // it lands in.
           //
-          // A RULING, not something the one-axis-per-tab rule forces — three
-          // answers are consistent with that rule and this is the chosen one,
-          // so it is written down rather than left to be re-derived. Applying
-          // the request every time was the other behaviour this had: it makes
-          // the axis always reflect the last split asked for, but the cost
-          // lands on panes the user did not touch, and with terminals a
-          // re-orientation is not cosmetic — every pane reflows and its real
-          // tmux session is resized. Refusing the split outright was the third,
-          // rejected as a dead key with no explanation. Ignoring is the only
-          // one that adds the pane the user asked for without moving panes
-          // they did not act on.
+          // A RULING, and the SECOND one here: until 2026-08-06 an already-split
+          // tab kept its own axis and the new pane joined it, so a request for
+          // the other direction added a pane without moving the ones already
+          // there. What that bought is real and is now given up deliberately:
+          // re-orienting is not cosmetic with terminals, since every pane in the
+          // tab reflows and its real tmux session is resized, including panes
+          // the user did not act on.
           //
-          // Gated on the tab actually being split, not merely on a row
-          // existing. Restore writes a row for every tab it brings back,
-          // one-pane tabs included, so keying off `saved` alone would make
-          // ⇧⌘D silently do ⌘D on any tab relaunched since it was opened — the
-          // dead-key failure the ruling exists to avoid, reached from the other
-          // side. A tab of one pane has no axis on screen to preserve.
-          dir: saved && siblings.length > 1 ? saved.layout.dir : dir,
+          // It is given up because the cost it charged was worse. A tab that had
+          // ever been split downward could not be split right again by any
+          // route — not ⌘D, not the menu, not after closing panes back down, as
+          // long as two remained — and nothing on screen explained the refusal,
+          // because there was no refusal to show: the split landed, just not
+          // where it was asked for. That reached real use as "split right is not
+          // working", and no amount of explanatory text would have given the
+          // user the layout they were asking for. See `SplitRequest.dir`.
+          dir,
           // See `carveRatio`'s own doc comment for what this does and does
           // not preserve — in particular, for the "dilutes every known share
           // evenly" case an unclaimed sibling produces, which is not a bug.

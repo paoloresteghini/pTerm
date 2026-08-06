@@ -200,29 +200,30 @@ describe('App.tsx keydown handler', () => {
     expect(app).toMatch(/splitActive\( ?event\.shiftKey \? 'col' : 'row'/)
   })
 
-  it('sends the axis the tab is drawn along, not the one the key asked for', () => {
-    // The ruling is main's — a tab keeps the axis of the split that created it
-    // — but main applies it by counting the kids on its own row, and its count
-    // and the user's disagree over a tombstone: main forgot that pane when it
-    // died. A tab drawn as two boxes, one live and one dead, reads as one pane
-    // on disk, so ⇧⌘D would re-orient a tab the user is looking at as split —
-    // reflowing panes they did not act on, which is the harm the ruling exists
-    // to prevent, reached from the side main cannot see.
-    //
-    // So the renderer decides it, where the boxes are, and sends an axis both
-    // sides agree on whichever way main counts.
-    expect(app).toMatch(/drawn\.length > 1 \? row\.layout\.dir : dir/)
-    expect(app).toMatch(/dir: axis/)
+  it('sends the axis the key asked for, and measures along that same axis', () => {
+    // This used to assert the opposite: the renderer read the tab's own axis
+    // off `state` and sent that, mirroring a ruling main applied by counting
+    // the kids on its saved row. The ruling was reversed on 2026-08-06 because
+    // it made a `col` tab impossible to split right ever again, silently. Both
+    // halves of the override are gone, so what is left to hold is that the
+    // request travels intact.
+    // The override is gone, stated as its absence: this is the assertion that
+    // fails if anyone reinstates it.
+    expect(app).not.toMatch(/row\.layout\.dir : dir/)
+    // And the request is forwarded as-is rather than through a local decision.
+    // `app` arrives with comments stripped and whitespace collapsed to single
+    // spaces, so this is one line here however the file is formatted.
+    expect(app).toMatch(/paneId: activePaneId, dir,/)
     // And the measurement has to follow the SAME axis it sends. Halving along
     // one axis while splitting along the other hands the new window a size
     // nobody drew — the geometry class this codebase has shipped three times.
-    expect(app).toMatch(/axis === 'row' \? half\(grid\.cols\)/)
-    expect(app).toMatch(/axis === 'col' \? half\(grid\.rows\)/)
-    // Measured rather than assumed: reverting either half of this — sending
-    // `dir` again, or measuring against `dir` while sending `axis` — fails
-    // here. Renaming `axis`, `drawn` or `row` fails it too without anything
-    // being wrong; re-point the assertion rather than loosening it, because
-    // naming both ends is the whole of what it says.
+    expect(app).toMatch(/dir === 'row' \? half\(grid\.cols\)/)
+    expect(app).toMatch(/dir === 'col' \? half\(grid\.rows\)/)
+    // Measured rather than assumed: reintroducing the override, or measuring
+    // against one axis while sending the other, fails here. Renaming `dir` or
+    // `grid` fails it too without anything being wrong; re-point the assertion
+    // rather than loosening it, because naming both ends is the whole of what
+    // it says.
   })
 
   it('keeps the ⌥ chords out of the bindings that are not ⌥ chords', () => {

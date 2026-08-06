@@ -83,10 +83,16 @@
  *   reflow poll is `toBeGreaterThan(colsBefore)`. A pane that grew by 160
  *   pixels and pushed tmux one column would satisfy it;
  * - **⇧⌘D, and the second axis of the split shortcut.** Every ⌘D here asks for
- *   `row`, so the ruling that a second split joins the tab's existing axis
- *   whichever shortcut asked is not exercised — `App.tsx:175` takes
- *   `row.layout.dir` only once a tab is `drawn.length > 1`, and no test here
- *   ever disagrees with it;
+ *   `row`, so nothing in this file ever presses the shortcut that produces a
+ *   `col` tab. The ruling this bullet used to describe — that a second split
+ *   joins the tab's existing axis whichever shortcut asked — was reversed on
+ *   2026-08-06 precisely because it was unreachable from here: it shipped a
+ *   `col` tab that could never be split right again, and this file could not
+ *   have caught it, because it never makes a `col` tab in the first place.
+ *   The re-orientation is covered end to end by
+ *   `persistence.test.ts` ("re-orients an already-split tab to the axis just
+ *   asked for"), which is main's half only; the renderer's half, that ⌘D on a
+ *   `col` tab lays its panes out left to right, is still uncovered here;
  * - **⌥⌘→/↑/↓.** Only `left` is pressed. `paneInDirection`'s cross-axis
  *   refusal (`workspace.ts:304`) and its no-wrap ends are covered by unit
  *   tests, not here;
@@ -445,6 +451,45 @@ test('⌘D splits the active tab into two panes, in one tab, with two sessions',
   // ⌥⌘← moves the selection back along the tab's axis.
   await window.keyboard.press('Alt+Meta+ArrowLeft')
   await expect(window.getByTestId(`pane-${after[0]}`)).toHaveAttribute('data-active', 'true')
+
+  await app.close()
+})
+
+// The regression test for the bug that reversed the axis ruling on 2026-08-06,
+// written at the layer it was actually experienced. Main's half is covered by
+// `persistence.test.ts`; what shipped broken was the pair, and the renderer had
+// its own copy of the override, so main's test alone would have stayed green
+// with the app still unusable.
+//
+// The failure was silent, which is why the assertions are on `flex-direction`
+// rather than on pane count: the old build DID add the third pane, and every
+// count assertion in this file would have passed while the user's ⌘D put the
+// pane somewhere they did not ask for.
+test('⌘D lays a tab out left to right even after ⇧⌘D stacked it', async () => {
+  const app = await launch()
+  const window = await app.firstWindow()
+  await window.getByTestId('new-tab').click()
+  await expect(window.getByTestId('terminal-active')).toBeVisible()
+  await expect.poll(async () => (await sessionNames(SOCKET)).length, { timeout: 20_000 }).toBe(1)
+
+  // ⇧⌘D first, which is the only way a `col` tab is ever made, and the state
+  // the old ruling made a one-way door.
+  await window.keyboard.press('Meta+Shift+d')
+  await expect(
+    window.getByTestId('terminal-active').locator(':scope > [data-testid^="pane-"]'),
+  ).toHaveCount(2)
+  // Asserted, not assumed: without this the test could pass on a tab that was
+  // never stacked in the first place, which is the whole precondition.
+  await expect(window.getByTestId('terminal-active')).toHaveCSS('flex-direction', 'column')
+
+  await window.keyboard.press('Meta+d')
+  await expect(
+    window.getByTestId('terminal-active').locator(':scope > [data-testid^="pane-"]'),
+  ).toHaveCount(3)
+
+  // The claim. Before the fix this stayed `column` forever.
+  await expect(window.getByTestId('terminal-active')).toHaveCSS('flex-direction', 'row')
+  await expect.poll(async () => (await sessionNames(SOCKET)).length, { timeout: 20_000 }).toBe(3)
 
   await app.close()
 })

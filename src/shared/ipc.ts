@@ -349,14 +349,17 @@ export interface SplitRequest {
   /** The pane the new one goes next to. Its tab is the tab they share. */
   paneId: string
   /**
-   * The axis to arrange the tab along — honoured only by the split that turns
-   * a single pane into a split tab.
+   * The axis to arrange the tab along. Always honoured, including on a tab
+   * that is already split: the split re-orients it.
    *
-   * A tab that is already split keeps the axis it has and the new pane joins
-   * it, so asking for the other direction adds a pane rather than re-orienting
-   * the panes already there. A ruling, not a consequence of one-axis-per-tab:
-   * re-orienting reflows every pane in the tab and resizes its tmux session,
-   * which is a cost paid by panes the user did not act on. See `splitPane`.
+   * A ruling, not a consequence of one-axis-per-tab, and the second one here.
+   * Until 2026-08-06 an already-split tab kept the axis it had and the new pane
+   * joined it, which spared every pane in the tab a reflow and its tmux session
+   * a resize for a split the user made elsewhere in the tab. That is a genuine
+   * cost, now paid on purpose, because the alternative cost more: a tab that had
+   * ever been split downward could not be split right again by any route, and
+   * nothing said so, since the split did land — just not on the asked-for axis.
+   * It reached real use as "split right is not working". See `splitPane`.
    */
   dir: 'row' | 'col'
   cols: number

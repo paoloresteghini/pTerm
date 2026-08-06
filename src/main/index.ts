@@ -232,18 +232,11 @@ function installMenu(): void {
           registerAccelerator: false,
           click: () => sendMenuCommand('splitDown'),
         },
-        {
-          // Not a command — a disabled line of explanation, because on a tab
-          // that is already split these two items do exactly the same thing
-          // and there is nowhere else to say why. A tab's axis is set by the
-          // split that creates it, so ⇧⌘D on a row tab adds a pane along the
-          // row. Re-orienting instead would reflow every pane in the tab and
-          // resize the real tmux session behind each one, for panes the user
-          // did not act on. See `SplitRequest.dir`.
-          id: 'split-axis-note',
-          label: 'A tab keeps the axis of its first split',
-          enabled: false,
-        },
+        // A disabled line used to sit here reading "A tab keeps the axis of its
+        // first split". It existed because the two items above did the same
+        // thing on an already-split tab and there was nowhere else to say so.
+        // Both items now do what they say on every tab, so the explanation has
+        // nothing left to explain. See `SplitRequest.dir`.
         { type: 'separator' },
         {
           id: 'focus-left',

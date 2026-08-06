@@ -31,7 +31,6 @@ import {
   needsYou,
   paneGroups,
   paneInDirection,
-  panesOfTab,
   projectIdForTab,
   resizeKids,
   stateOfProject,
@@ -347,54 +346,37 @@ export function App() {
       // new pane's Terminal fits itself to its own box the moment it mounts
       // and sends the size it really got.
       const half = (cells: number): number => Math.max(1, Math.floor(cells / 2))
-      // A tab keeps the axis of the split that created it, and main applies that
-      // ruling by counting the kids on its own row. Its count and the user's
-      // disagree over a tombstone: main forgot that pane at its death, so a tab
-      // drawn as two boxes — one live, one dead — reads as one pane there and
-      // ⇧⌘D would silently re-orient a tab the user is looking at as split.
-      // Asking here instead, where the boxes actually are, and sending the axis
-      // already on screen. Still only ever honoured by a split that CREATES a
-      // split tab; see `SplitRequest.dir`.
+      // The axis the user asked for, sent as asked. Main writes the same value
+      // (`register.ts`, `layout.dir`), so there is one rule and one authority
+      // for it rather than a local computation main can override.
       //
-      // Two computations of one rule, but NOT two authorities — which is the
-      // thing that made `tabIdOf` and `tabIdFromGroupName` dangerous, and the
-      // reason to say why it does not apply here. Main can only ever OVERRIDE
-      // what is sent, with `saved.layout.dir`, and only when its own row has
-      // more than one kid; so the value below decides the axis exactly when
-      // main declines to. When main does not decline, the two agree by
-      // provenance rather than by luck: `row` came from main's own reply (or
-      // from `tabRowFor`), and `withKeptPanes` spreads `...next.layout`, so
-      // `row.layout.dir` IS main's `dir` travelled back.
-      const row = tabOfPane(state, activePaneId)
-      const drawn = row ? panesOfTab(state, row.id) : []
-      const axis = row && drawn.length > 1 ? row.layout.dir : dir
+      // This used to read the tab's own axis off `state` whenever the tab was
+      // drawn as more than one box, mirroring a ruling main applied by counting
+      // the kids on its saved row. Both halves are gone with that ruling: a
+      // split now re-orients the tab it lands in. See `SplitRequest.dir` for
+      // what that costs and why it is paid.
+      //
       // Refused here rather than in main, because this is where the only
-      // cell-accurate numbers are: main has no idea what a column is. Checked
-      // against `axis`, not the requested `dir` — a split on a tab already
-      // split with more than one pane is added along the tab's OWN axis
-      // regardless of which shortcut asked for it (the ruling just above), so
-      // `dir` alone can name the wrong dimension: a tab split `row` and then
-      // asked for ⇧⌘D (`dir` = `col`) still carves along `row`, and a check
-      // against `dir` would test `grid.rows` against `MIN_PANE_ROWS` while the
-      // carve that actually happens tests `grid.cols` against
-      // `MIN_PANE_COLS` — the wrong pair, in both directions: a genuinely
-      // too-narrow carve could pass unrefused, and a genuinely fine one could
-      // be refused for a floor that was never in play. A split that cannot
-      // give the new pane its floor would produce a pane too small to use,
-      // which is 2b's "sliver of a sliver" answered before it happens rather
-      // than tolerated after.
-      const wouldBe = axis === 'row' ? half(grid.cols) : half(grid.rows)
-      const floor = axis === 'row' ? MIN_PANE_COLS : MIN_PANE_ROWS
+      // cell-accurate numbers are: main has no idea what a column is. `dir` is
+      // the dimension the carve actually happens along, now that nothing
+      // overrides it, so it is the one to measure against: a check on the other
+      // axis could refuse a fine split for a floor that was never in play, and
+      // let a genuinely too-narrow one through. A split that cannot give the new
+      // pane its floor would produce a pane too small to use, which is 2b's
+      // "sliver of a sliver" answered before it happens rather than tolerated
+      // after.
+      const wouldBe = dir === 'row' ? half(grid.cols) : half(grid.rows)
+      const floor = dir === 'row' ? MIN_PANE_COLS : MIN_PANE_ROWS
       if (wouldBe < floor) {
-        setError(`Not enough room to split: a pane needs at least ${floor} ${axis === 'row' ? 'columns' : 'rows'}`)
+        setError(`Not enough room to split: a pane needs at least ${floor} ${dir === 'row' ? 'columns' : 'rows'}`)
         return
       }
       window.prcli
         .splitPane({
           paneId: activePaneId,
-          dir: axis,
-          cols: axis === 'row' ? half(grid.cols) : grid.cols,
-          rows: axis === 'col' ? half(grid.rows) : grid.rows,
+          dir,
+          cols: dir === 'row' ? half(grid.cols) : grid.cols,
+          rows: dir === 'col' ? half(grid.rows) : grid.rows,
         })
         .then((shape) => {
           dispatch({ type: 'split', shape })
@@ -405,7 +387,10 @@ export function App() {
         })
         .catch(fail)
     },
-    [state, activePaneId, fail],
+    // No `state`: the axis no longer comes from the tab's own row, so nothing
+    // here reads the workspace. Leaving it in would rebuild this callback on
+    // every status tick for no reason.
+    [activePaneId, fail],
   )
 
   /** Make `paneId` the pane the keyboard talks to, and record it on its tab. */

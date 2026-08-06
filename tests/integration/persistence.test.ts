@@ -1286,11 +1286,15 @@ describe('splitPane and closePane', () => {
     expect(shape.tabs).toEqual([row])
   })
 
-  // The ruling: a tab's axis is set by the split that creates it, and a later
-  // split adds a pane along that axis rather than re-orienting every pane in
-  // the tab — which with terminals means reflowing them and resizing their
-  // real tmux sessions, a cost paid by panes the user did not act on.
-  it("adds a pane along an already-split tab's axis rather than re-orienting it", async () => {
+  // The ruling REVERSED, 2026-08-06. A tab used to keep the axis of the split
+  // that created it, and a later split joined that axis whichever shortcut
+  // asked. The cost that bought — no reflow of panes the user did not act on —
+  // turned out to be smaller than the cost it charged: a tab that had ever been
+  // split downward could never be split right again, by any route, and nothing
+  // on screen said why. Reported from real use as "split right is not working".
+  // Re-orienting is now honoured; the reflow and the tmux resize it triggers
+  // are the accepted price.
+  it('re-orients an already-split tab to the axis just asked for', async () => {
     const { founder } = await splitOnce('row')
 
     const shape = await invoke<TabShape>(CHANNELS.splitPane, {
@@ -1304,12 +1308,15 @@ describe('splitPane and closePane', () => {
 
     const config = await written()
     expect(config.tabs).toHaveLength(1)
-    // The axis the tab was created with, not the one just asked for.
-    expect(config.tabs[0].layout.dir).toBe('row')
-    // And the pane did land — this is "ignored the direction", not "ignored
-    // the split", which was the other candidate and was rejected.
+    // The axis just asked for, not the one the tab was created with.
+    expect(config.tabs[0].layout.dir).toBe('col')
+    // And the pane still lands, which the old behaviour also guaranteed: this
+    // change is about the direction, and must not cost the split itself.
     expect(config.tabs[0].layout.kids).toHaveLength(3)
     expect(config.tabs[0].layout.kids).toContain(shape.panes[1].id)
+    // The reply agrees with the file, rather than being a second opinion about
+    // it — the failure this suite has caught twice before.
+    expect(shape.tabs).toEqual(config.tabs)
   })
 
   // The gate is "already split", not "a row exists". Restore writes a row for
