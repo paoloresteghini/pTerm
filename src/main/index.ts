@@ -21,6 +21,16 @@ declare const MAIN_WINDOW_VITE_NAME: string
 
 let mainWindow: BrowserWindow | null = null
 
+/**
+ * Set by the e2e harness, and by nothing else.
+ *
+ * A run launches this app 130+ times. With this on, none of those launches
+ * shows a window, takes an icon in the dock, or posts a notification, so a
+ * suite can run while its developer keeps working. Read once here rather than
+ * per call: the harness sets it before launch and nothing changes it after.
+ */
+const backgroundWindow = process.env.PRCLI_BACKGROUND_WINDOW === '1'
+
 // `PRCLI_TMUX_SOCKET` exists so tests run against their own tmux server and can
 // never see, adopt or kill the user's real sessions.
 // tmux is resolved to an absolute path because a Finder/Dock launch inherits
@@ -95,6 +105,22 @@ const router = new NotificationRouter({
   // which at twelve sessions is the common case.
   isAttended: (tabId) => mainWindow?.isFocused() === true && attendedTabId === tabId,
   showToast: (toast) => {
+    // Nothing a test run does may interrupt the developer it is running on.
+    // The window is hidden for a run, so `isAttended` is false for every tab
+    // and the mute rules that would normally swallow these no longer fire: a
+    // suite that drives dozens of `waiting` transitions would otherwise post
+    // dozens of real banners over whatever they are working on.
+    //
+    // Measured 2026-08-06 by counting calls on both sides of this line during
+    // one run of `status.spec.ts`: 10 toasts attempted, 0 shown. Thirteen
+    // tests in one of twenty spec files, so the suite was posting real
+    // banners by the hundred.
+    //
+    // The cost, stated rather than glossed: `notification.show()` and the
+    // click handler below are then unreached in e2e. No spec asserted either
+    // (the suite reads the dock badge, never a toast), so nothing loses
+    // coverage it had, but nothing gains it here either.
+    if (backgroundWindow) return
     const notification = new Notification({
       title: toast.title,
       body: toast.body,
@@ -113,6 +139,11 @@ const router = new NotificationRouter({
     notification.show()
   },
   playSound: (sound) => {
+    // Same reason as `showToast` above. Sounds are off in the default rules a
+    // spec seeds, so today this guard is belt and braces rather than the thing
+    // that keeps a run quiet, but a spec that seeds a rule with a sound would
+    // otherwise play it out loud on the developer's machine.
+    if (backgroundWindow) return
     // Fire and forget: a missing sound file must not throw into a transition.
     execFile('/usr/bin/afplay', [`/System/Library/Sounds/${sound}.aiff`], () => undefined)
   },
@@ -298,11 +329,10 @@ function createWindow(): void {
   // 289 `requestAnimationFrame` callbacks in 2s either way, with
   // `document.visibilityState` still `visible`. That matters because xterm
   // draws on rAF, and the specs read what it drew.
-  const background = process.env.PRCLI_BACKGROUND_WINDOW === '1'
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
-    show: !background,
+    show: !backgroundWindow,
     backgroundColor: '#09090b',
     titleBarStyle: 'hiddenInset',
     webPreferences: {
@@ -314,7 +344,7 @@ function createWindow(): void {
 
   // No dock icon and no app switcher entry either: hundreds of launches
   // bouncing in the dock is the other half of what makes a run unusable.
-  if (background) app.dock?.hide()
+  if (backgroundWindow) app.dock?.hide()
 
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     void mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL)
