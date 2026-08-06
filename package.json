@@ -1,7 +1,7 @@
 {
   "name": "prcli",
   "productName": "PRCLI",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Electron desktop app for managing many terminal sessions (Claude Code, dev servers, shells) backed by tmux",
   "main": ".vite/build/main.js",
   "private": true,
