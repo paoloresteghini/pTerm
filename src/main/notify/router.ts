@@ -88,9 +88,11 @@ export class NotificationRouter {
   }
 
   private async notify(transition: StatusTransition): Promise<void> {
-    // A change the user asked for (see `StatusTransition.quiet`): the dot and
-    // the badge still move, via `handle`'s `finally`, but there is nothing to
-    // toast about, the user just dismissed the very thing a toast would say.
+    // A change the user asked for (see `StatusTransition.quiet`): the badge
+    // still moves, via `handle`'s `finally`, and the dot still moves too, via
+    // the separate `statusChanged` broadcast in `src/main/ipc/register.ts`'s
+    // `onTransition` listener. There is nothing to toast about, though: the
+    // user just dismissed the very thing a toast would say.
     if (transition.quiet) return
 
     // `to: null` is a forget, not a state — dismissed, or killed on purpose.
