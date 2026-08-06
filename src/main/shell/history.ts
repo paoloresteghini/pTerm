@@ -6,7 +6,7 @@ export interface HistoryEntry {
   /** Epoch seconds, as written by the zsh preexec hook. */
   ts: number
   cwd: string
-  /** The pane's PRCLI_TAB_ID at the time the command ran. */
+  /** Which pane ran the command, taken from that pane's PRCLI_TAB_ID at the time. */
   tab: string
   cmd: string
 }
@@ -73,9 +73,12 @@ function inProject(cwd: string, projectCwd: string): boolean {
 /**
  * Scope, filter, dedupe and cap a list of history entries for display.
  *
- * Walks newest-first and keeps the first (most recent) occurrence of each
- * command text, so a command run repeatedly appears once, at its latest
- * timestamp, rather than cluttering the list with repeats.
+ * Requires `entries` to already be ordered oldest-to-newest, which is what
+ * `parseHistory` produces: this function walks the array backward to get
+ * newest-first output, it does not sort. Keeps the first (most recent)
+ * occurrence of each command text, so a command run repeatedly appears
+ * once, at its latest timestamp, rather than cluttering the list with
+ * repeats.
  */
 export function selectHistory(entries: HistoryEntry[], options: SelectOptions): HistoryEntry[] {
   const { scope, projectCwd, filter, limit = 500 } = options
@@ -95,8 +98,12 @@ export function selectHistory(entries: HistoryEntry[], options: SelectOptions): 
 }
 
 /**
- * Read and parse the history file, or return an empty list if it doesn't
- * exist yet (no command has ever been recorded).
+ * Read and parse the history file, bounded to its trailing `limit` lines.
+ *
+ * Returns an empty list for any failure to read the file, not only a
+ * missing one: a permissions error or a transient I/O error should not
+ * crash a caller that is just populating a history dropdown, so this
+ * treats every read failure the same as "no history yet".
  *
  * `limit` bounds how many trailing lines are parsed, not how many entries
  * are returned: it exists so a very large history file doesn't have to be
@@ -110,5 +117,10 @@ export async function readHistory(limit = 5000): Promise<HistoryEntry[]> {
     return []
   }
   const lines = text.split('\n')
+  // Every line the hook appends ends in its own newline, so splitting on
+  // '\n' leaves one trailing empty string that is not a line at all. Left
+  // in, it would occupy one of the `limit` slots below and cost the read
+  // its oldest real line.
+  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
   return parseHistory(lines.slice(Math.max(0, lines.length - limit)).join('\n'))
 }

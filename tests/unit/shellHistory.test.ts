@@ -1,5 +1,14 @@
-import { describe, expect, it } from 'vitest'
-import { parseHistory, selectHistory, type HistoryEntry } from '../../src/main/shell/history'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import {
+  historyPath,
+  parseHistory,
+  readHistory,
+  selectHistory,
+  type HistoryEntry,
+} from '../../src/main/shell/history'
 
 const entry = (over: Partial<HistoryEntry>): HistoryEntry => ({
   ts: 1,
@@ -88,5 +97,37 @@ describe('selectHistory', () => {
   it('caps the result at the limit', () => {
     const many = Array.from({ length: 10 }, (_, i) => entry({ ts: i, cmd: `cmd${i}` }))
     expect(selectHistory(many, { scope: 'all', projectCwd: project, limit: 3 })).toHaveLength(3)
+  })
+})
+
+describe('readHistory', () => {
+  // configRoot() reads PRCLI_CONFIG_DIR at call time, the same seam
+  // notes.test.ts and prompts.test.ts use to keep this test off the real
+  // ~/.prcli.
+  let dir: string
+  let previousConfigDir: string | undefined
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'prcli-history-'))
+    previousConfigDir = process.env.PRCLI_CONFIG_DIR
+    process.env.PRCLI_CONFIG_DIR = dir
+  })
+
+  afterEach(async () => {
+    if (previousConfigDir === undefined) delete process.env.PRCLI_CONFIG_DIR
+    else process.env.PRCLI_CONFIG_DIR = previousConfigDir
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  it('returns an empty array when the history file does not exist', async () => {
+    expect(await readHistory()).toEqual([])
+  })
+
+  it('bounds the read to the trailing limit lines', async () => {
+    const lines = Array.from({ length: 10 }, (_, i) => JSON.stringify(entry({ ts: i, cmd: `cmd${i}` })))
+    await writeFile(historyPath(), `${lines.join('\n')}\n`, 'utf8')
+
+    const got = await readHistory(3)
+    expect(got.map((e) => e.cmd)).toEqual(['cmd7', 'cmd8', 'cmd9'])
   })
 })
