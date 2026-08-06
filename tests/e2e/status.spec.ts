@@ -319,6 +319,41 @@ test('the tick clears a waiting tab, out of the list and off the badge', async (
   await app.close()
 })
 
+// Finding 1 of the whole-branch review: acknowledging writes `idle`, which
+// disarms the registry's own re-fire dedupe (`from === to`). Claude re-fires
+// `Notification` roughly once a minute while a prompt sits unanswered, so
+// without the acknowledged-tab memo, the row came back with a toast, a sound
+// and the badge for a prompt the user had already read and left alone.
+test('a re-fire behind the tick does not bring the row back', async () => {
+  const alpha = await candidate('alpha')
+  await seed(
+    [{ id: 'id-alpha', name: 'Alpha', slug: 'alpha', cwd: alpha, presets: [], activeTabId: null }],
+    'id-alpha',
+  )
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  const id = await openTab(window)
+  await injectHook(id, 'Notification')
+  await expect(window.getByTestId(`dot-${id}`)).toHaveAttribute('data-state', 'waiting')
+
+  await window.getByTestId(`ack-${id}`).click()
+  await expect(window.getByTestId(`dot-${id}`)).toHaveAttribute('data-state', 'idle')
+  await expect(window.getByTestId('needs-you')).toHaveCount(0)
+
+  // Exactly what Claude's own re-fire looks like: the same event again, with
+  // nothing else having happened to the tab in between.
+  await injectHook(id, 'Notification')
+
+  // Nothing to poll toward for a negative assertion: give the async apply a
+  // moment, then assert the row is still gone and the dot has not moved.
+  await window.waitForTimeout(500)
+  await expect(window.getByTestId('needs-you')).toHaveCount(0)
+  await expect(window.getByTestId(`dot-${id}`)).toHaveAttribute('data-state', 'idle')
+
+  await app.close()
+})
+
 // The row and the tick are two buttons in one container now. A click handler
 // on the container, or a tick that does not stop at itself, would make one of
 // these two do the other's job.

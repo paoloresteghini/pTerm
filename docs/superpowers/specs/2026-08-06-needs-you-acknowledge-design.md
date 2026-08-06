@@ -49,10 +49,20 @@ apart in meaning and easy to confuse, so each one's comment must say what the ot
 for.
 
 Nothing is persisted. The registry is in memory, and `drainSpool` rotates the spool at
-launch, so a relaunch cannot replay the acknowledged event and resurrect the row. An
-acknowledged tab that goes `waiting` again (a real new question from that session) comes
-back into the list, which is correct: the ack was about the question you read, not about
-the tab forever.
+launch, so a relaunch cannot replay the acknowledged event and resurrect the row.
+
+An acknowledgement sticks until the session actually moves, rather than clearing on the
+next `waiting`. Claude re-fires `Notification` roughly once a minute while a prompt sits
+unanswered (measured), and the registry's only defence against that repeat is its
+`from === to` dedupe in `set`. Acknowledging writes `idle`, which disarms that dedupe: the
+very next re-fire, about a minute later, is then a real `idle -> waiting` transition, not a
+repeat, and would bring the row back with a toast, a sound and the badge, for a prompt the
+user already read and deliberately left alone. So the registry keeps a memo of acknowledged
+tab ids; while a tab's id is in it, a transition *to* `waiting` is dropped outright rather
+than merely deduped, and the tab stays `idle`. Any other transition for that tab — thinking,
+idling, dying, restarting, forgetting — clears the memo, because all of those are real
+activity: a genuine new question that follows real activity comes back into the list
+normally.
 
 ## Design
 

@@ -61,6 +61,23 @@ export class StatusRegistry {
    * and must not be allowed to overwrite the answer with `ended`.
    */
   private readonly explained = new Set<string>()
+  /**
+   * Tabs whose Needs You row has been ticked off and has not yet had a
+   * reason to come back.
+   *
+   * `acknowledge` writes `idle` (or `ended`), which disarms the `from === to`
+   * dedupe below: Claude re-fires `Notification` roughly once a minute while
+   * a prompt sits unanswered, so about a minute after a tick the next re-fire
+   * is a real `idle -> waiting` transition, not a repeat, and would come back
+   * loud for a prompt the user already read and deliberately left alone. This
+   * memo is what `set` checks instead: while a tab's id is in here, a
+   * transition *to* `waiting` is dropped outright rather than merely
+   * deduped. Membership is cleared by any other transition for that tab —
+   * thinking, idling, dying, restarting, forgetting — because all of those
+   * are real activity, and a genuine new question that follows real activity
+   * has to be heard.
+   */
+  private readonly acknowledged = new Set<string>()
 
   private set(
     tabId: string,
@@ -68,6 +85,16 @@ export class StatusRegistry {
     options: { silent?: boolean; tab?: TabDescriptor; quiet?: boolean } = {},
   ): void {
     const from = this.states.get(tabId) ?? null
+    if (to === 'waiting') {
+      // See `acknowledged`: a re-fire behind a tick must not resurrect the
+      // row, and the tab stays exactly where the tick left it.
+      if (this.acknowledged.has(tabId)) return
+    } else {
+      // Any other state is real activity, which releases the tab: it may ask
+      // a genuine new question next, and that has to come back into the
+      // list.
+      this.acknowledged.delete(tabId)
+    }
     // Claude re-fires Notification while a prompt sits unanswered. Emitting on
     // every repeat would be a toast a minute for a session you already know
     // about, so only changes are transitions.
@@ -146,6 +173,7 @@ export class StatusRegistry {
    */
   forget(tabId: string): void {
     this.explained.delete(tabId)
+    this.acknowledged.delete(tabId)
     const from = this.states.get(tabId)
     if (from === undefined) return
     this.states.delete(tabId)
@@ -168,6 +196,10 @@ export class StatusRegistry {
     const from = this.states.get(tabId)
     if (from !== 'waiting' && from !== 'crashed') return
     this.set(tabId, from === 'crashed' ? 'ended' : 'idle', { quiet: true })
+    // After `set`, not before: `set` clears `acknowledged` for any non-waiting
+    // `to`, including the `idle`/`ended` this call just wrote, so the memo
+    // this acknowledgement is creating must be added once that call returns.
+    this.acknowledged.add(tabId)
   }
 
   get(tabId: string): TabState | null {

@@ -378,4 +378,94 @@ describe('StatusRegistry', () => {
     expect(registry.get(OTHER)).toBeNull()
     expect(seen).toEqual([])
   })
+
+  // Finding 1 of the whole-branch review: acknowledging disarms the
+  // from===to dedupe above (it writes `idle`), so without this the next
+  // Notification re-fire, roughly a minute later, was a real `idle ->
+  // waiting` transition and came back loud for a prompt the user had already
+  // read and deliberately left alone.
+  it('ignores a re-fire behind an acknowledgement, staying idle and silent', () => {
+    const registry = new StatusRegistry()
+    registry.applyHook(hook(ID, 'Notification'))
+    registry.acknowledge(ID)
+    expect(registry.get(ID)).toBe('idle')
+    const seen: StatusTransition[] = []
+    registry.onTransition((transition) => seen.push(transition))
+
+    // Exactly what Claude's own re-fire looks like: the same event again,
+    // with nothing else having happened in between.
+    registry.applyHook(hook(ID, 'Notification'))
+
+    expect(registry.get(ID)).toBe('idle')
+    expect(seen).toEqual([])
+  })
+
+  it('lets a genuine new question through once real activity follows the tick', () => {
+    const registry = new StatusRegistry()
+    registry.applyHook(hook(ID, 'Notification'))
+    registry.acknowledge(ID)
+    const seen: StatusTransition[] = []
+    registry.onTransition((transition) => seen.push(transition))
+
+    // The user typed something new into that session: real activity, so the
+    // acknowledgement is released.
+    registry.applyHook(hook(ID, 'UserPromptSubmit'))
+    registry.applyHook(hook(ID, 'Notification'))
+
+    expect(registry.get(ID)).toBe('waiting')
+    expect(seen).toEqual([
+      { tabId: ID, from: 'idle', to: 'thinking', tab: undefined, quiet: undefined },
+      { tabId: ID, from: 'thinking', to: 'waiting', tab: undefined, quiet: undefined },
+    ])
+  })
+
+  it('starts a restarted tab fresh, with no acknowledgement left over', () => {
+    const registry = new StatusRegistry()
+    registry.applyOpen(ID, 'preset')
+    registry.applyExit(ID, 1)
+    expect(registry.get(ID)).toBe('crashed')
+    registry.acknowledge(ID)
+    expect(registry.get(ID)).toBe('ended')
+
+    // Restart reuses the id. The stale acknowledgement must not linger and
+    // swallow this new life's first Notification.
+    registry.applyOpen(ID, 'preset')
+    registry.applyHook(hook(ID, 'Notification'))
+
+    expect(registry.get(ID)).toBe('waiting')
+  })
+
+  it('forgetting an acknowledged tab drops the memo along with everything else', () => {
+    const registry = new StatusRegistry()
+    registry.applyHook(hook(ID, 'Notification'))
+    registry.acknowledge(ID)
+
+    registry.forget(ID)
+    // A fresh open under the same id must not inherit an acknowledgement
+    // from a tab that no longer exists.
+    registry.applyOpen(ID, 'claude')
+    registry.applyHook(hook(ID, 'Notification'))
+
+    expect(registry.get(ID)).toBe('waiting')
+  })
+
+  it('still marks a crash explained after acknowledging it, with the memo in place', () => {
+    const registry = new StatusRegistry()
+    registry.applyDead(ID, { status: 3 })
+    registry.acknowledge(ID)
+    expect(registry.get(ID)).toBe('ended')
+
+    // The late client exit that always follows a pane death still has
+    // nothing to say, acknowledged or not.
+    registry.applyExit(ID, 0)
+    expect(registry.get(ID)).toBe('ended')
+
+    // And the crash path's own re-fire guard still holds: nothing about the
+    // crash case bypasses it.
+    const seen: StatusTransition[] = []
+    registry.onTransition((transition) => seen.push(transition))
+    registry.applyHook(hook(ID, 'Notification'))
+    expect(registry.get(ID)).toBe('ended')
+    expect(seen).toEqual([])
+  })
 })
