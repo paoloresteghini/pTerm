@@ -282,7 +282,10 @@ export function App() {
    * UNDER-TRIGGERING: for the first moment after a project is selected, before
    * its fetch resolves, this holds no entries and Up goes to the shell. That is
    * exactly what a project with no history does, which is the documented
-   * passthrough, so this direction is indistinguishable from correct.
+   * passthrough, so a single such press is indistinguishable from correct. What
+   * that argument does NOT excuse is staying wrong: an empty answer has to
+   * expire, or the app serves it for the rest of the session. `historyNonce`
+   * below is what expires it.
    *
    * OVER-TRIGGERING: the answer comes from the last fetch, so if the file has
    * been emptied or rewritten since, Up can swallow the key on a list that has
@@ -295,6 +298,20 @@ export function App() {
   const [historyPane, setHistoryPane] = useState<string | null>(null)
   const [historyScope, setHistoryScope] = useState<HistoryScope>('project')
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([])
+  /*
+   * A counter with no meaning of its own, bumped by `requestHistory` below to
+   * ask the effect for a fresh answer.
+   *
+   * Every other input to that effect is something the user changed on screen,
+   * and none of them move when the history FILE changes underneath a running
+   * app. Installing the shell integration and then running the first command
+   * is exactly that: the list goes from empty to non-empty with the project,
+   * the scope, the pane and the overlay all untouched. Without something to
+   * change, the effect would keep serving the empty answer it fetched at
+   * launch, and Up would keep passing through, for as long as the app stayed
+   * open on that project.
+   */
+  const [historyNonce, setHistoryNonce] = useState(0)
 
   /**
    * Refetch on every input the answer depends on.
@@ -303,6 +320,9 @@ export function App() {
    * overlay opens and again when it closes: a command run in a pane since the
    * last fetch should be in the list the next Up produces. `historyScope` is
    * one because widening the scope with Tab IS this call, made again.
+   * `activePaneId` is one so moving between panes picks up whatever the pane
+   * being left has run, which is the cheapest refresh point there is.
+   * `historyNonce` is the one input the user cannot see; see its declaration.
    */
   useEffect(() => {
     const cwd = project?.cwd
@@ -325,7 +345,7 @@ export function App() {
     return () => {
       cancelled = true
     }
-  }, [project?.cwd, historyScope, historyPane])
+  }, [project?.cwd, historyScope, historyPane, activePaneId, historyNonce])
 
   /**
    * Put the overlay away and give the keyboard back to the pane.
@@ -355,7 +375,17 @@ export function App() {
       if (historyPane !== null) return false
       const pane = state.panes.find((candidate) => candidate.id === paneId)
       if (pane?.type !== 'shell') return false
-      if (historyEntries.length === 0) return false
+      if (historyEntries.length === 0) {
+        // Declining is correct, and on its own it is also a dead end. Nothing
+        // else asks again once the list is empty: the overlay never opens, so
+        // `historyPane` never moves, and a user who has just installed the
+        // integration and run a command would press Up forever against the
+        // answer this app fetched before either of those happened. Bumping the
+        // nonce makes the refusal itself the trigger, so the press after this
+        // one is asking about the file as it is now.
+        setHistoryNonce((count) => count + 1)
+        return false
+      }
       setHistoryPane(paneId)
       return true
     },
