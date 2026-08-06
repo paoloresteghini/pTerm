@@ -77,7 +77,7 @@ import { mkdtemp, rm, writeFile, mkdir, appendFile, readFile } from 'node:fs/pro
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { connect } from 'node:net'
-import { launchApp, killServer, sessionNames } from './harness'
+import { launchApp, killServer, sessionNames, expandColumn } from './harness'
 import { formatHookLine } from '../../src/main/hooks/protocol'
 import { HOOK_EVENTS, type HookEvent } from '../../src/main/status/machine'
 import { DEFAULT_NOTIFICATIONS } from '../../src/main/state/store'
@@ -208,6 +208,7 @@ test('a claude tab starts hollow, not silent', async () => {
   const app = await launch()
   const window = await app.firstWindow()
 
+  await expandColumn(window, 'presets')
   const before = await window.locator('[data-testid^="tab-"]').count()
   await window.getByTestId('preset-default-claude').click()
   await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })

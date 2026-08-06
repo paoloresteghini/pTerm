@@ -464,9 +464,12 @@ test('⌘D on a pane too narrow to halve is refused, and says why', async () => 
   // a pixel width maps to a column count. See `windowCols` for why tmux's
   // `#{window_width}` IS that reported geometry and not a second opinion on it.
   //
-  // 560px: the sidebar and the right panel are `w-52 shrink-0` a side
-  // (`Sidebar.tsx:78`, `RightPanel.tsx:13`), so ~416px never reaches the
-  // terminal and the pane is left a strip far narrower than 40 columns. The
+  // 560px: the sidebar is 208px wide by default (`COLUMN_WIDTH_DEFAULT` in
+  // `lib/columnWidth.ts`, since the columns became draggable) and the four
+  // collapsible columns are `w-6` strips on a fresh profile, which every test
+  // here launches with (`App.tsx`'s collapse defaults), so ~330px never
+  // reaches the terminal and the pane is left a strip far narrower than 40
+  // columns. The
   // poll below is what makes the test depend on the column count rather than
   // on that arithmetic being right.
   //

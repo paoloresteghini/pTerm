@@ -40,6 +40,9 @@ export const CHANNELS = {
   skills: 'prcli:skills',
   notesRead: 'prcli:notesRead',
   notesWrite: 'prcli:notesWrite',
+  promptsList: 'prcli:promptsList',
+  promptsAdd: 'prcli:promptsAdd',
+  promptsRemove: 'prcli:promptsRemove',
   fsList: 'prcli:fsList',
   fsRead: 'prcli:fsRead',
   fsWrite: 'prcli:fsWrite',
@@ -48,6 +51,8 @@ export const CHANNELS = {
   checkForUpdate: 'prcli:checkForUpdate',
   skipUpdate: 'prcli:skipUpdate',
   appVersion: 'prcli:appVersion',
+  gitStatus: 'prcli:gitStatus',
+  gitSync: 'prcli:gitSync',
 } as const
 
 /**
@@ -438,6 +443,24 @@ export interface SkillEntry {
   source: SkillOrigin
 }
 
+/**
+ * One saved prompt, global to the app rather than owned by a project.
+ *
+ * Global because the prompts users keep are ways of working ("give me a
+ * handover prompt for a fresh context window"), not facts about one
+ * repository, and a per-project copy of each would be five copies to edit.
+ *
+ * `id` is minted by main (`randomUUID`), never by the renderer: it is the
+ * handle a delete names, and two prompts sharing a label is ordinary.
+ */
+export interface PromptEntry {
+  id: string
+  /** What the row in the panel reads. */
+  label: string
+  /** The text typed into the active pane when the row is clicked. */
+  body: string
+}
+
 export interface ProjectDescriptor {
   id: string
   name: string
@@ -506,6 +529,27 @@ export interface UpdateCheckResult {
   info: UpdateInfo | null
   message: string | null
 }
+
+/**
+ * What the status bar knows about a project's checkout.
+ *
+ * `branch` and the counts are independently absent. A repository always has a
+ * branch (or a detached HEAD, abbreviated); it has counts only once the branch
+ * has an upstream to be counted against, which a freshly created branch does
+ * not. The bar shows the branch either way and the sync control only when there
+ * is something for it to sync with.
+ *
+ * `behind` is as old as the last fetch. Nothing here fetches on a timer, so it
+ * moves when the user presses Sync and not before.
+ */
+export interface GitStatus {
+  branch: string | null
+  behind: number | null
+  ahead: number | null
+}
+
+/** Whether a sync got all the way through, and git's own words if it did not. */
+export type GitSyncResult = { ok: true } | { ok: false; error: string }
 
 export interface PrcliApi {
   open(request: OpenRequest): Promise<TabDescriptor>
@@ -617,6 +661,17 @@ export interface PrcliApi {
    * screen and this panel is not where transport faults get reported.
    */
   notesWrite(projectId: string, text: string): Promise<void>
+  /** Every saved prompt, oldest first. Resolves to `[]` when none are saved. */
+  promptsList(): Promise<PromptEntry[]>
+  /**
+   * Save a prompt and resolve to the whole list as it now stands on disk.
+   *
+   * The list rather than the new entry, so the panel replaces its state with
+   * what was written instead of guessing where the entry landed.
+   */
+  promptsAdd(label: string, body: string): Promise<PromptEntry[]>
+  /** Delete one prompt by id and resolve to what is left. Unknown ids are a no-op. */
+  promptsRemove(id: string): Promise<PromptEntry[]>
   /**
    * Persist a tab's ratios after a drag. Fire-and-forget: the renderer already
    * has the layout on screen, and a failed write costs a ratio, not a session.
@@ -711,4 +766,21 @@ export interface PrcliApi {
    * app comparing releases against a version it is not.
    */
   appVersion(): Promise<string>
+  /**
+   * A project's branch and how far it is from its upstream, or null when its
+   * cwd is not inside a git repository (and when the id names no project).
+   *
+   * Keyed by project id rather than by a path, like `fsList` and the notes
+   * channels: main resolves the id to a cwd, so the renderer never hands main a
+   * directory of its own choosing.
+   */
+  gitStatus(projectId: string): Promise<GitStatus | null>
+  /**
+   * Fetch, fast-forward and push the project's branch.
+   *
+   * The one channel here that writes to a user's repository. It refuses to
+   * merge: a branch that has diverged comes back as an error rather than a
+   * merge commit nobody asked for.
+   */
+  gitSync(projectId: string): Promise<GitSyncResult>
 }

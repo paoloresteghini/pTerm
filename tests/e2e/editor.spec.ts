@@ -42,7 +42,7 @@ import { test, expect, type ElectronApplication, type Page } from '@playwright/t
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchApp, killServer, sessionNames } from './harness'
+import { launchApp, killServer, sessionNames, expandColumn } from './harness'
 import { UNSORTED_ID } from '../../src/shared/ipc'
 
 const SOCKET = 'prcli-e2e-editor'
@@ -106,6 +106,11 @@ test.beforeAll(async () => {
     userDataDir,
   })
   page = await app.firstWindow()
+  // Both columns this file drives start collapsed on a fresh profile: the
+  // tree it opens files from, and the presets column one test launches a
+  // claude tab out of.
+  await expandColumn(page, 'files')
+  await expandColumn(page, 'presets')
 })
 
 test.afterAll(async () => {

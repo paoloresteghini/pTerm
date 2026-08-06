@@ -107,7 +107,7 @@ import { promisify } from 'node:util'
 import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchApp, killServer, sessionNames } from './harness'
+import { launchApp, killServer, sessionNames, expandColumn } from './harness'
 
 const run = promisify(execFile)
 const SOCKET = 'prcli-e2e-projects'
@@ -289,6 +289,9 @@ test('a preset declared by the repository launches its command', async () => {
   const app = await launch()
   const window = await app.firstWindow()
 
+  // The presets column starts collapsed on a fresh profile, and this test
+  // launches one.
+  await expandColumn(window, 'presets')
   await window.getByTestId('preset-marker').click()
   await expect(window.getByTestId('terminal-active')).toContainText('preset-ran', {
     timeout: 20_000,
@@ -525,6 +528,44 @@ test('the welcome page goes when a session opens and returns when it closes', as
   await expect(window.getByTestId('welcome')).toContainText('Cmd+D')
   await expect(window.getByTestId('welcome')).toContainText('Cmd+Shift+D')
   await expect(window.getByTestId('welcome-hint')).toContainText('press Cmd+T to start a session')
+
+  // The mark behind the copy: large, faint, and BEHIND. Each of those three is
+  // read as a property rather than as a class name, because a class list can
+  // be right while the mark is a solid square over the text.
+  //
+  // `toBeVisible()` is deliberately not the test. It passes for an element
+  // painted underneath something opaque (this suite has been fooled by exactly
+  // that before), which is the state a mark like this fails into.
+  const mark = window.getByTestId('welcome-mark')
+  const markStyle = await mark.evaluate((node) => {
+    const own = getComputedStyle(node)
+    const parent = getComputedStyle(node.parentElement!)
+    return {
+      opacity: Number(own.opacity),
+      zIndex: Number(own.zIndex),
+      mask: own.maskImage,
+      maskMode: own.maskMode,
+      // `isolate` on the parent is what keeps that negative z-index inside
+      // this page. Without it the mark paints behind the pane area's own
+      // background and disappears completely.
+      isolation: parent.isolation,
+      height: node.getBoundingClientRect().height,
+    }
+  })
+  // Faded: the copy has to win. 0.07 today; the bar is "clearly not solid".
+  expect(markStyle.opacity).toBeGreaterThan(0)
+  expect(markStyle.opacity).toBeLessThan(0.2)
+  // Behind, and confined.
+  expect(markStyle.zIndex).toBeLessThan(0)
+  expect(markStyle.isolation).toBe('isolate')
+  // The mark is a luminance mask over a filled box, not an image: the asset is
+  // white on opaque black with no alpha, and every other way of using it puts
+  // a rectangle on screen. Both halves asserted, because `mask-image` alone
+  // with the default `alpha` mode paints a solid square.
+  expect(markStyle.mask).toContain('url(')
+  expect(markStyle.maskMode).toBe('luminance')
+  // Large. The window is 1280x800, so `min(420px, 52vmin)` is 416.
+  expect(markStyle.height).toBeGreaterThan(300)
 
   await window.getByTestId('new-tab').click()
   await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })

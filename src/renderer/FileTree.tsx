@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { FileEntry } from '../shared/ipc'
 import { readExpanded, writeExpanded, toggled } from './lib/treeState'
 import { cn } from './lib/cn'
+import { PanelHeading } from './ui/Panel'
 
 /**
  * The active project's working tree.
@@ -21,8 +22,11 @@ import { cn } from './lib/cn'
 export function FileTree({
   projectId,
   onOpenFile,
+  onToggle,
 }: {
   projectId: string | undefined
+  /** Collapses the column this tree fills. Owned by `FilesPanel`'s caller. */
+  onToggle: () => void
   /**
    * A file row that was clicked, by its path relative to the project. A
    * directory row never reaches this: expanding one is all a directory click
@@ -118,8 +122,6 @@ export function FileTree({
     for (const path of expanded) load(projectId, path)
   }
 
-  if (!projectId) return null
-
   /** One directory's rows, then each expanded child's, depth first. */
   const rows = (parent: string, depth: number): ReactNode[] =>
     (loaded[parent] ?? []).flatMap((entry) => {
@@ -145,8 +147,11 @@ export function FileTree({
 
   return (
     <>
-      <div className="flex items-center justify-between px-2.5 pb-1 pt-3 text-[10px] uppercase tracking-wider text-faint">
-        <span>Files</span>
+      {/* The heading and the refresh control are siblings, not nested: a
+          `<button>` inside a `<button>` is invalid HTML and the inner one's
+          click would still bubble out to collapse the column. */}
+      <div className="flex items-center justify-between pr-2.5">
+        <PanelHeading testid="files-toggle" label="Files" onClick={onToggle} />
         <button
           data-testid="tree-refresh"
           aria-label="Refresh files"
@@ -158,14 +163,47 @@ export function FileTree({
       </div>
       <div
         data-testid="tree-scroll"
-        // Capped at 40% of the column rather than `flex-1`: an even split
-        // with the projects list above starved it whenever the tree had more
-        // than a couple of rows open. No `flex-1` here either, so a small
-        // tree takes only the height its rows need; the cap only bites once
-        // it grows past that.
-        className="scroll-thin max-h-[40%] overflow-y-auto font-mono text-[11px]"
+        // `flex-1` and the whole column's height. The old `max-h-[40%]` cap was
+        // there because this list shared the sidebar with the projects list and
+        // an even split starved it; in its own column there is nothing to split
+        // with.
+        className="scroll-thin min-h-0 flex-1 overflow-y-auto font-mono text-[11px]"
       >
-        {rows('', 0)}
+        {!projectId ? (
+          // Reached where the old component returned null: this now owns a
+          // column of its own, and a column that renders nothing would take its
+          // width and offer no way to collapse it.
+          <div data-testid="tree-noproject" className="px-2.5 py-1 text-muted">
+            No project selected.
+          </div>
+        ) : loaded[''] !== undefined && loaded[''].length === 0 ? (
+          <div
+            data-testid="tree-empty"
+            // Gated on `!== undefined` and not on a falsy check: the root's
+            // entry list is undefined while the first read is in flight AND
+            // after one that failed, since `load`'s `.catch` swallows it. Only
+            // an empty ARRAY is a directory that read fine and holds nothing,
+            // and saying "nothing here" during a read would be wrong twice a
+            // second on a slow disk.
+            //
+            // "Nothing to show" rather than "this folder is empty" because
+            // `fsList` filters `node_modules` and friends, so a directory full
+            // of ignored entries arrives here as an empty array and calling it
+            // empty would be a lie the user can see through.
+            //
+            // `text-muted` at a measured 4.044:1 on this panel's `bg-surface`
+            // (#71717a on #0c0c0e). `text-faint`, which the file rows use, is
+            // 1.871:1 here and is the ratio B1 rejected for exactly this kind
+            // of string. 4.5 is not demanded the way it is of the editor's
+            // gutter: this background is fixed chrome the user cannot recolour,
+            // so 4.044 is the worst case rather than the best of six.
+            className="px-2.5 py-1 text-muted"
+          >
+            Nothing to show
+          </div>
+        ) : (
+          rows('', 0)
+        )}
       </div>
     </>
   )

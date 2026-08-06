@@ -4,12 +4,16 @@ import { PaneDivider } from './PaneDivider'
 import { TabBar } from './TabBar'
 import { DeadPane } from './DeadPane'
 import { Sidebar } from './Sidebar'
-import { RightPanel } from './RightPanel'
+import { FilesPanel } from './FilesPanel'
+import { SkillsPanel } from './SkillsPanel'
+import { PresetsPanel } from './PresetsPanel'
+import { PromptsPanel } from './PromptsPanel'
 import { NotesPanel } from './NotesPanel'
 import { AddProjectDialog } from './AddProjectDialog'
 import { ConfirmClosePane } from './ConfirmClosePane'
 import { SettingsPane } from './SettingsPane'
 import { TitleBar } from './TitleBar'
+import { StatusBar } from './StatusBar'
 import { Welcome } from './Welcome'
 import { CommandPalette, type PaletteSession } from './CommandPalette'
 import { FileView, saveEditorPane } from './FileView'
@@ -59,12 +63,38 @@ import { SEVERITY } from '../shared/status'
 const MIN_PANE_COLS = 20
 const MIN_PANE_ROWS = 5
 
+/**
+ * Collapse state for the four collapsible columns, in the same shape
+ * `NotesPanel` stores its own: '0' means expanded, anything else (including
+ * absent) means collapsed.
+ *
+ * **Every one of them defaults collapsed**, so a fresh profile shows the
+ * projects sidebar and the terminal and nothing else. Each expanded column
+ * costs 208px, and four of them plus the sidebar leave under 420px of terminal
+ * on the 1280px window `src/main/index.ts` opens, narrower than two splittable
+ * panes. The state persists per column, so this is the first run only.
+ */
+const SKILLS_KEY = 'prcli:skillsCollapsed'
+const PRESETS_KEY = 'prcli:presetsCollapsed'
+const FILES_KEY = 'prcli:filesCollapsed'
+const PROMPTS_KEY = 'prcli:promptsCollapsed'
+
+/** Reads one of those keys, with the default applied when nothing is stored. */
+function storedCollapsed(key: string, fallback: boolean): boolean {
+  const stored = localStorage.getItem(key)
+  if (stored === null) return fallback
+  return stored !== '0'
+}
+
 export function App() {
   const [state, dispatch] = useReducer(workspaceReducer, INITIAL_WORKSPACE_STATE)
   const [error, setError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [panelOpen, setPanelOpen] = useState(true)
+  const [skillsCollapsed, setSkillsCollapsed] = useState(() => storedCollapsed(SKILLS_KEY, true))
+  const [presetsCollapsed, setPresetsCollapsed] = useState(() => storedCollapsed(PRESETS_KEY, true))
+  const [filesCollapsed, setFilesCollapsed] = useState(() => storedCollapsed(FILES_KEY, true))
+  const [promptsCollapsed, setPromptsCollapsed] = useState(() => storedCollapsed(PROMPTS_KEY, true))
   const [paletteOpen, setPaletteOpen] = useState(false)
   // Set once the workspace exists. Until then this window knows nothing about
   // what is selected and must not say anything about it — see the effects.
@@ -92,6 +122,51 @@ export function App() {
     setError(reason instanceof Error ? reason.message : String(reason))
   }, [])
 
+  // Clicking a column's own heading or strip moves only that column. The
+  // localStorage write sits in the updater the way `NotesPanel`'s does; it is
+  // idempotent, so StrictMode's double invocation costs nothing.
+  const toggleSkills = useCallback(() => {
+    setSkillsCollapsed((was) => {
+      localStorage.setItem(SKILLS_KEY, was ? '0' : '1')
+      return !was
+    })
+  }, [])
+  const togglePrompts = useCallback(() => {
+    setPromptsCollapsed((was) => {
+      localStorage.setItem(PROMPTS_KEY, was ? '0' : '1')
+      return !was
+    })
+  }, [])
+  const toggleFiles = useCallback(() => {
+    setFilesCollapsed((was) => {
+      localStorage.setItem(FILES_KEY, was ? '0' : '1')
+      return !was
+    })
+  }, [])
+  const togglePresets = useCallback(() => {
+    setPresetsCollapsed((was) => {
+      localStorage.setItem(PRESETS_KEY, was ? '0' : '1')
+      return !was
+    })
+  }, [])
+
+  /**
+   * ⇧\ and the Presets menu item, which move both columns together because
+   * that is what the one panel they were split out of did.
+   *
+   * "Collapse unless both are already collapsed" rather than inverting each
+   * column separately: with one open and one shut, a per-column invert would
+   * swap them and leave the same amount of screen taken, which is not what
+   * anybody presses this for.
+   */
+  const toggleSidePanels = useCallback(() => {
+    const collapsed = !(skillsCollapsed && presetsCollapsed)
+    localStorage.setItem(SKILLS_KEY, collapsed ? '1' : '0')
+    localStorage.setItem(PRESETS_KEY, collapsed ? '1' : '0')
+    setSkillsCollapsed(collapsed)
+    setPresetsCollapsed(collapsed)
+  }, [skillsCollapsed, presetsCollapsed])
+
   const project = activeProject(state)
   const currentTabId = activeTabId(state)
   const currentTabs = state.activeProjectId ? tabsOfProject(state, state.activeProjectId) : []
@@ -110,7 +185,7 @@ export function App() {
   // `command` — it decides the launch state a fresh dot starts in
   // (`stateForOpen` in src/main/status/machine.ts) and, for `claude`, gives a
   // broken hook install a hollow dot to show instead of nothing. It must be
-  // named by the caller: `RightPanel`'s dedicated `claude` button passes
+  // named by the caller: `PresetsPanel`'s dedicated `claude` button passes
   // `'claude'`, a repository or user preset passes `'preset'`, and a bare
   // ⌘T/+ shell defaults to `'shell'`.
   const launch = useCallback(
@@ -149,7 +224,21 @@ export function App() {
       window.prcli
         .openEditor(project.id, relPath)
         .then((tab) => {
-          if (tab) dispatch({ type: 'opened', tab })
+          if (tab) {
+            dispatch({ type: 'opened', tab })
+            return
+          }
+          // A null answer is a refusal, and it used to be silent: the click
+          // did nothing and said nothing. Routed through `fail` because that
+          // is already this call's `.catch`, so a refusal main returns and a
+          // fault main throws reach the user the same way, which is what they
+          // are from the outside.
+          //
+          // The reason is deliberately not named. Main answers null for an
+          // unknown project, a path that would leave the project, and a file
+          // it cannot read, and the renderer cannot tell those apart from a
+          // null. Naming one would be a guess.
+          fail(`Could not open ${relPath}`)
         })
         .catch(fail)
     },
@@ -629,13 +718,13 @@ export function App() {
             focusPane('down')
             return
           case 'togglePresets':
-            setPanelOpen((open) => !open)
+            toggleSidePanels()
             return
           case 'settings':
             setSettingsOpen(true)
         }
       }),
-    [activePaneId, openTab, requestClosePane, splitActive, focusPane],
+    [activePaneId, openTab, requestClosePane, splitActive, focusPane, toggleSidePanels],
   )
 
   useEffect(() => {
@@ -711,7 +800,7 @@ export function App() {
       }
       if (event.code === 'Backslash' && event.shiftKey) {
         event.preventDefault()
-        setPanelOpen((open) => !open)
+        toggleSidePanels()
         return
       }
       if (event.code === 'Comma') {
@@ -739,7 +828,17 @@ export function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [activePaneId, currentTabs, state.projects, openTab, requestClosePane, splitActive, focusPane, fail])
+  }, [
+    activePaneId,
+    currentTabs,
+    state.projects,
+    openTab,
+    requestClosePane,
+    splitActive,
+    focusPane,
+    fail,
+    toggleSidePanels,
+  ])
 
   /**
    * Where an editor pane's file sits relative to its own project, or null when
@@ -785,6 +884,15 @@ export function App() {
       <TitleBar />
 
       <div className="flex min-h-0 flex-1">
+        {/* Left of the sidebar, so the tree reads as the outermost thing and
+            gets the full window height. */}
+        <FilesPanel
+          projectId={state.activeProjectId ?? undefined}
+          onOpenFile={openFile}
+          collapsed={filesCollapsed}
+          onToggle={toggleFiles}
+        />
+
         <Sidebar
           projects={state.projects}
           activeProjectId={state.activeProjectId}
@@ -801,7 +909,6 @@ export function App() {
           onToggleMute={toggleMute}
           onSelectProject={(id) => dispatch({ type: 'activatedProject', id })}
           onSelectTab={(id) => dispatch({ type: 'activatedTab', id })}
-          onOpenFile={openFile}
           onAdd={() => setAdding(true)}
           onOpenSettings={() => setSettingsOpen(true)}
           onMoveTab={(tabId, projectId) => {
@@ -1082,21 +1189,42 @@ export function App() {
           </div>
         ) : null}
 
-        {panelOpen ? (
-          <RightPanel
-            project={project}
-            onRun={(command, type) => launch(command, type)}
-            // No trailing `\r`: this types the invocation and leaves the user
-            // to decide, per the spec. A submitted `/name` would run a skill
-            // nobody had finished choosing.
-            onInsert={(name) => {
-              if (activePaneId) window.prcli.input(activePaneId, `/${name}`)
-            }}
-          />
-        ) : null}
+        {/* Three independently collapsible columns. Each renders its own
+            vertical strip when collapsed, so none of them can vanish without
+            leaving a way back. */}
+        <SkillsPanel
+          project={project}
+          collapsed={skillsCollapsed}
+          onToggle={toggleSkills}
+          // No trailing `\r`: this types the invocation and leaves the user
+          // to decide, per the spec. A submitted `/name` would run a skill
+          // nobody had finished choosing.
+          onInsert={(name) => {
+            if (activePaneId) window.prcli.input(activePaneId, `/${name}`)
+          }}
+        />
 
-        {/* Deliberately outside the `panelOpen` conditional: the notes column
-            and the Skills/Presets column open and close independently. */}
+        <PresetsPanel
+          project={project}
+          collapsed={presetsCollapsed}
+          onToggle={togglePresets}
+          onRun={(command, type) => launch(command, type)}
+        />
+
+        {/* Global, unlike every other column here: the prompts a user keeps
+            are ways of working rather than facts about a repository, so this
+            takes no project. */}
+        <PromptsPanel
+          collapsed={promptsCollapsed}
+          onToggle={togglePrompts}
+          canInsert={activePaneId !== null}
+          // Typed, never submitted, exactly like a skill. `input` is the same
+          // channel the skills list uses.
+          onInsert={(body) => {
+            if (activePaneId) window.prcli.input(activePaneId, body)
+          }}
+        />
+
         <NotesPanel project={project} />
 
         <CommandPalette
@@ -1140,6 +1268,10 @@ export function App() {
 
         <ConfirmClosePane open={pendingClose !== null} onCancel={cancelClose} onDiscard={discardClose} />
       </div>
+
+      {/* Below the columns rather than inside one, so it spans the window and
+          belongs to the project as a whole rather than to any panel. */}
+      <StatusBar projectId={state.activeProjectId ?? undefined} />
     </div>
   )
 }

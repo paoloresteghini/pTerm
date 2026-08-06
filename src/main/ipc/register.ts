@@ -44,7 +44,10 @@ import { listSkills } from '../skills/scan'
 import { readNote, writeNote } from '../notes/store'
 import { realUpdateService } from '../update/service'
 import { writeSkipped } from '../update/store'
+import { addPrompt, readPrompts, removePrompt } from '../prompts/store'
 import { listDir, readFileInside, resolveInside, writeFileInside } from '../files/tree'
+import { readBranch } from '../git/branch'
+import { readCounts, syncBranch } from '../git/sync'
 import { newSessionId } from '../tmux/names'
 import {
   addProject,
@@ -1357,6 +1360,16 @@ export function registerIpc(
     writeNote(projectId, text),
   )
 
+  // Outside `serialise` for the same reason as notes: prompts live in
+  // `prompts.json` beside config.json and never inside it. The store has a
+  // queue of its own, because add and remove are read-modify-write and this
+  // one is the only thing standing between two quick clicks and a lost entry.
+  ipcMain.handle(CHANNELS.promptsList, () => readPrompts())
+  ipcMain.handle(CHANNELS.promptsAdd, (_event, label: string, body: string) =>
+    addPrompt(label, body),
+  )
+  ipcMain.handle(CHANNELS.promptsRemove, (_event, id: string) => removePrompt(id))
+
   // Like `skills` and the notes channels above, deliberately not inside
   // `serialise`: this reads the filesystem and never writes config, so there
   // is nothing to serialise against.
@@ -1366,6 +1379,33 @@ export function registerIpc(
   // directory it is given, so a renderer-supplied absolute path would be a
   // general directory-listing primitive. Here the renderer chooses a project
   // and a path within it, and main decides what that resolves to.
+  // Outside `serialise` like the filesystem channels below it: this reads a
+  // repository and never touches PRCLI's config. Polled by the status bar, so
+  // going through that queue would put a tick of it in front of every write the
+  // user's own clicks are waiting on.
+  ipcMain.handle(CHANNELS.gitStatus, async (_event, projectId: string) => {
+    const config = await store.read()
+    const project = config.projects.find((row) => row.id === projectId)
+    if (!project) return null
+    const branch = await readBranch(project.cwd)
+    if (branch === null) return null
+    // Only asked for once the checkout is known to be one: `readCounts` runs
+    // git, and there is no point spawning it for a directory that has no `.git`
+    // above it at all.
+    const counts = await readCounts(project.cwd)
+    return { branch, behind: counts?.behind ?? null, ahead: counts?.ahead ?? null }
+  })
+
+  // The only channel in this file that writes to a user's repository. Outside
+  // `serialise` for the same reason as the read above, and unqueued against
+  // itself: the button that calls it disables while it is in flight.
+  ipcMain.handle(CHANNELS.gitSync, async (_event, projectId: string) => {
+    const config = await store.read()
+    const project = config.projects.find((row) => row.id === projectId)
+    if (!project) return { ok: false as const, error: 'No project' }
+    return syncBranch(project.cwd)
+  })
+
   ipcMain.handle(CHANNELS.fsList, async (_event, projectId: string, relPath: string) => {
     const config = await store.read()
     const project = config.projects.find((row) => row.id === projectId)

@@ -134,8 +134,14 @@ test('the toggle collapses the panel to a strip and expands it back', async () =
 test('⌘W typed into the notes textarea does not destroy a pane', async () => {
   // Same guard as the skills filter, same reason, same shape of test.
   await page.getByTestId('new-tab').click()
-  const before = await page.locator('[data-testid^="tab-"]').count()
-  expect(before).toBeGreaterThan(0)
+  // Polled, not read once. The click starts a tmux session and the row it
+  // adds arrives a frame or more later, so the bare `count()` this used to do
+  // read 0 whenever it lost that race, the file's long-standing "known
+  // flake", reproduced again on 2026-08-05 at `Expected: > 0, Received: 0`.
+  // Every other spec that clicks `new-tab` waits for something first.
+  const tabs = page.locator('[data-testid^="tab-"]')
+  await expect.poll(() => tabs.count(), { timeout: 20_000 }).toBeGreaterThan(0)
+  const before = await tabs.count()
   const textarea = page.getByTestId('notes-textarea')
   await textarea.click()
   await textarea.pressSequentially('mid-note ')

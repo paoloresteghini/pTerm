@@ -11,7 +11,8 @@ import { Button } from './ui/Button'
 import { NeedsYou } from './NeedsYou'
 import { StatusDot } from './StatusDot'
 import { tabLabel } from './lib/tabLabel'
-import { FileTree } from './FileTree'
+import { useColumnWidth } from './lib/columnWidth'
+import { ColumnResizer } from './ui/Panel'
 
 export function Sidebar({
   projects,
@@ -26,7 +27,6 @@ export function Sidebar({
   onToggleMute,
   onSelectProject,
   onSelectTab,
-  onOpenFile,
   onRename,
   onMove,
   onRemove,
@@ -46,8 +46,6 @@ export function Sidebar({
   onToggleMute: (projectId: string) => void
   onSelectProject: (id: string) => void
   onSelectTab: (id: string) => void
-  /** A file row clicked in the tree, by its path relative to the project. */
-  onOpenFile: (relPath: string) => void
   onRename: (id: string, name: string) => void
   onMove: (id: string, direction: -1 | 1) => void
   onRemove: (id: string) => void
@@ -55,6 +53,10 @@ export function Sidebar({
   onAdd: () => void
   onOpenSettings: () => void
 }) {
+  // Resizable like every other column, though this one never collapses:
+  // it is the only way to reach a project, and a workspace with no visible
+  // project list is a window with nothing to do.
+  const { width, set, commit } = useColumnWidth('prcli:sidebarWidth')
   const [menuFor, setMenuFor] = useState<string | null>(null)
   // Renaming happens in the row itself. `window.prompt` is not implemented in
   // Electron — it *throws* ("prompt() is not supported."), so the rename it
@@ -86,11 +88,17 @@ export function Sidebar({
   return (
     <div
       data-testid="sidebar"
-      className="flex w-52 shrink-0 flex-col border-r border-border bg-surface font-mono text-[11px] select-none"
+      className="relative flex shrink-0 flex-col border-r border-border bg-surface font-mono text-[11px] select-none"
+      style={{ width }}
     >
       <NeedsYou tabs={needsYou} projects={projects} status={status} onSelect={onSelectNeedy} />
 
-      <div className="px-2.5 pb-1 pt-3 text-[10px] uppercase tracking-wider text-faint">
+      {/* `text-label` like the collapsible columns' headings, not the
+          `text-faint` this used to be: same kind of label, same 4.5:1 rule
+          (`tests/unit/labelContrast.test.ts`). Not a `PanelHeading`, because
+          this column does not collapse and a heading that looked clickable
+          without being clickable is worse than a plain one. */}
+      <div className="px-2.5 pb-1 pt-3 text-[10px] uppercase tracking-wider text-label">
         Projects
       </div>
 
@@ -270,8 +278,6 @@ export function Sidebar({
         })}
       </div>
 
-      <FileTree projectId={activeProjectId ?? undefined} onOpenFile={onOpenFile} />
-
       <div className="flex flex-col gap-1 border-t border-border p-2">
         <Button data-testid="add-project" variant="ghost" onClick={onAdd} className="w-full">
           + Add project
@@ -285,6 +291,13 @@ export function Sidebar({
           Settings…
         </Button>
       </div>
+      <ColumnResizer
+        testid="resize-sidebar"
+        side="left"
+        width={width}
+        onResize={set}
+        onCommit={commit}
+      />
     </div>
   )
 }

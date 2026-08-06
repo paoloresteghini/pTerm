@@ -11,7 +11,7 @@
  * `the panel and the terminal both scroll on the styled bar`, each failing
  * only its own assertion. Dropping `.xterm-viewport` from the rule in
  * `index.css` leaves the panel at 8 and returns the terminal to 15; dropping
- * `scroll-thin` from the skills container in `RightPanel.tsx` does the
+ * `scroll-thin` from the skills container in `SkillsPanel.tsx` does the
  * reverse; recolouring the thumb to `--color-danger` leaves both widths at 8
  * and fails on `rgb(248, 113, 113)`. The 15 in the first two is the platform
  * bar this rule replaces, so a revert is a visible number here and not a zero.
@@ -28,7 +28,7 @@ import { test, expect, type ElectronApplication, type Page } from '@playwright/t
 import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchApp, killServer } from './harness'
+import { launchApp, killServer, expandColumn } from './harness'
 
 const SOCKET = 'prcli-e2e-skills'
 
@@ -107,6 +107,10 @@ test.beforeAll(async () => {
     userDataDir,
   })
   page = await app.firstWindow()
+  // Collapsed on a fresh profile, and every launch here is one. The whole
+  // file reads this column, so it is opened once for all of it rather than
+  // per test.
+  await expandColumn(page, 'skills')
 })
 
 test.afterAll(async () => {
@@ -324,11 +328,13 @@ test('the panel and the terminal both scroll on the styled bar, at its width', a
   await page.getByTestId('skills-filter').fill('')
   await expect(page.locator('[data-testid^="skill-"]')).toHaveCount(4)
 
-  // 240px, measured: at 360 the four skills and the Presets header still fit
-  // in the 153px the panel gets, so nothing overflowed and the bar was never
-  // laid out. At 240 the list is 98px of content in a 73px box.
+  // 180px, measured 2026-08-05. It was 240 while Skills and Presets shared one
+  // column and the skills list was `flex-[2]` of it; Skills has its own column
+  // now and its list takes the whole height, so at 240 the four rows fit and
+  // nothing overflowed. The rule is unchanged: this height has to leave the
+  // list smaller than its content or there is no bar to measure.
   await app.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows()[0].setSize(760, 240)
+    BrowserWindow.getAllWindows()[0].setSize(760, 180)
   })
 
   const gutter = async (selector: string): Promise<number> =>

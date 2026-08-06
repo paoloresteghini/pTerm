@@ -1,24 +1,38 @@
 import { useEffect, useState } from 'react'
-import type { ProjectDescriptor, SkillEntry, TabType } from '../shared/ipc'
+import type { ProjectDescriptor, SkillEntry } from '../shared/ipc'
 import { filterEntries } from './lib/match'
+import { useColumnWidth } from './lib/columnWidth'
+import { ColumnResizer, PanelHeading, PanelStrip } from './ui/Panel'
 
-export function RightPanel({
+/**
+ * Was the top half of `RightPanel`, which owned Skills and Presets in one
+ * column and collapsed only as a pair. They are two columns now so either can
+ * be given up for terminal width on its own.
+ *
+ * `collapsed` is a prop rather than this component's own state, unlike
+ * `NotesPanel`: ⇧\ collapses this column and the presets column together, and
+ * a keystroke in `App` cannot reach state that lives down here.
+ */
+export function SkillsPanel({
   project,
-  onRun,
   onInsert,
+  collapsed,
+  onToggle,
 }: {
   project: ProjectDescriptor | undefined
-  onRun: (command: string, type: TabType) => void
   onInsert: (name: string) => void
+  collapsed: boolean
+  onToggle: () => void
 }) {
   const [skills, setSkills] = useState<SkillEntry[] | null>(null)
   const [query, setQuery] = useState('')
+  const { width, set, commit } = useColumnWidth('prcli:skillsWidth')
   const cwd = project?.cwd
 
-  // `App` renders this component only while the panel is open, so mounting is
-  // the panel opening. Re-reading on open therefore falls out of this effect
-  // rather than out of a cache anyone has to remember to invalidate. Keyed on
-  // `cwd` so switching project re-reads too.
+  // Keyed on `cwd`, so switching project re-reads. Also re-reads when the
+  // column is expanded, because collapsing unmounts this component entirely
+  // and expanding mounts a fresh one: the read falls out of that rather than
+  // out of a cache anyone has to remember to invalidate.
   useEffect(() => {
     if (!cwd) {
       setSkills([])
@@ -44,14 +58,18 @@ export function RightPanel({
 
   const matched = filterEntries(query, skills ?? [])
 
+  if (collapsed) {
+    return <PanelStrip testid="skills-toggle" label="Skills" onClick={onToggle} />
+  }
+
   return (
     <div
-      data-testid="rightpanel"
-      className="flex w-52 shrink-0 flex-col border-l border-border bg-surface font-mono text-[11px] select-none"
+      data-testid="skills-panel"
+      // `relative` for the resizer over this column's left border.
+      className="relative flex shrink-0 flex-col border-l border-border bg-surface font-mono text-[11px] select-none"
+      style={{ width }}
     >
-      <div className="px-2.5 pb-1 pt-3 text-[10px] uppercase tracking-wider text-faint">
-        Skills
-      </div>
+      <PanelHeading testid="skills-toggle" label="Skills" onClick={onToggle} />
       <input
         data-testid="skills-filter"
         // Load-bearing, not decoration. Without it ⌘W typed while filtering
@@ -68,7 +86,7 @@ export function RightPanel({
           listed in `tests/e2e/`, and `[data-testid^="skill-"]` counts the rows
           in this very list. A testid called `skills-scroll` would be counted as
           a fifth skill by assertions that name four. */}
-      <div data-testid="scroll-skills" className="scroll-thin min-h-0 flex-[2] overflow-y-auto">
+      <div data-testid="scroll-skills" className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         {skills === null ? (
           <p data-testid="skills-loading" className="px-2.5 py-1 text-faint">
             …
@@ -98,43 +116,13 @@ export function RightPanel({
           ))
         )}
       </div>
-
-      <div className="px-2.5 pb-1 pt-3 text-[10px] uppercase tracking-wider text-faint">
-        Presets
-      </div>
-      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-        {/* Not `preset-claude`: a repository declaring a preset labelled
-            `claude` would otherwise produce two elements with that testid. */}
-        <button
-          data-testid="preset-default-claude"
-          disabled={!project || !project.available}
-          onClick={() => onRun('claude', 'claude')}
-          className="w-full cursor-default border-none bg-transparent px-2.5 py-1 text-left text-muted hover:text-fg disabled:opacity-40"
-        >
-          claude
-        </button>
-        {(project?.presets ?? []).map((preset) => (
-          <button
-            key={preset.id}
-            data-testid={`preset-${preset.label}`}
-            disabled={!project?.available}
-            onClick={() => onRun(preset.command, 'preset')}
-            title={preset.command}
-            className="flex w-full cursor-default items-baseline gap-2 border-none bg-transparent px-2.5 py-1 text-left text-muted hover:text-fg disabled:opacity-40"
-          >
-            <span className="flex-1 truncate">{preset.label}</span>
-            {/* Provenance, so it is obvious which came from the repository. */}
-            {preset.origin === 'repo' ? <span className="text-faint">repo</span> : null}
-          </button>
-        ))}
-        {/* "declared": the `claude` button above is always there, so the panel
-            is never actually empty. */}
-        {project && project.presets.length === 0 ? (
-          <p className="px-2.5 py-1 text-faint">
-            No declared presets. Add a .prcli.json to the repository.
-          </p>
-        ) : null}
-      </div>
+      <ColumnResizer
+        testid="resize-skills"
+        side="right"
+        width={width}
+        onResize={set}
+        onCommit={commit}
+      />
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { _electron as electron, type ElectronApplication } from '@playwright/test'
+import { _electron as electron, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { execFile } from 'node:child_process'
 import { realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -175,4 +175,33 @@ export async function sessionNames(socket: string): Promise<string[]> {
   } catch {
     return []
   }
+}
+
+/**
+ * Expand one of the collapsible columns, which every profile starts without.
+ *
+ * `App.tsx` collapses Files, Skills, Presets, Notes and Prompts on a fresh
+ * profile, and every spec here launches against a fresh `mkdtemp` userDataDir,
+ * so a spec that wants to click a skill, a preset or a tree row has to open
+ * that column first. Idempotent, so it can be called from a `beforeEach` that
+ * shares a page with a test that already opened it.
+ *
+ * The click is guarded by the panel's own absence rather than by the strip's
+ * presence: the strip and the expanded column share a testid on purpose (they
+ * are the same control), so clicking it blind would close a column a previous
+ * test had opened.
+ */
+export async function expandColumn(
+  page: Page,
+  name: 'files' | 'skills' | 'presets' | 'notes' | 'prompts',
+): Promise<void> {
+  // Wait for the app to have painted BEFORE reading the panel's absence.
+  // Without this the count is 0 on a window that has not rendered yet, and on
+  // a relaunch, where the collapse state is restored from localStorage and
+  // the column may already be open, the click then CLOSES it. Measured: that
+  // is exactly how `prompts.spec.ts`'s relaunch test first failed.
+  await expect(page.getByTestId(`${name}-toggle`)).toBeVisible()
+  if ((await page.getByTestId(`${name}-panel`).count()) > 0) return
+  await page.getByTestId(`${name}-toggle`).click()
+  await expect(page.getByTestId(`${name}-panel`)).toBeVisible()
 }

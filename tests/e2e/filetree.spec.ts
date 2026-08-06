@@ -97,7 +97,7 @@ import { test, expect, type ElectronApplication, type Page } from '@playwright/t
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchApp, killServer } from './harness'
+import { launchApp, killServer, expandColumn } from './harness'
 
 const SOCKET = 'prcli-e2e-filetree'
 
@@ -163,6 +163,9 @@ test.beforeAll(async () => {
     userDataDir,
   })
   page = await app.firstWindow()
+  // The tree has its own column now, collapsed on a fresh profile. Opened
+  // once for the file, which shares one page across every test.
+  await expandColumn(page, 'files')
 })
 
 test.afterAll(async () => {

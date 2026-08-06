@@ -3,6 +3,8 @@ import {
   CHANNELS,
   type DataEvent,
   type ExitEvent,
+  type GitStatus,
+  type GitSyncResult,
   type MenuCommand,
   type OpenRequest,
   type PrcliApi,
@@ -70,6 +72,9 @@ const api: PrcliApi = {
   skills: (projectCwd) => ipcRenderer.invoke(CHANNELS.skills, projectCwd),
   notesRead: (projectId) => ipcRenderer.invoke(CHANNELS.notesRead, projectId),
   notesWrite: (projectId, text) => ipcRenderer.invoke(CHANNELS.notesWrite, projectId, text),
+  promptsList: () => ipcRenderer.invoke(CHANNELS.promptsList),
+  promptsAdd: (label, body) => ipcRenderer.invoke(CHANNELS.promptsAdd, label, body),
+  promptsRemove: (id) => ipcRenderer.invoke(CHANNELS.promptsRemove, id),
   fsList: (projectId, relPath) => ipcRenderer.invoke(CHANNELS.fsList, projectId, relPath),
   fsRead: (projectId, relPath) => ipcRenderer.invoke(CHANNELS.fsRead, projectId, relPath),
   fsWrite: (projectId, relPath, text, expectedMtimeMs) =>
@@ -83,6 +88,10 @@ const api: PrcliApi = {
   checkForUpdate: (): Promise<UpdateCheckResult> => ipcRenderer.invoke(CHANNELS.checkForUpdate),
   skipUpdate: (version: string): Promise<void> => ipcRenderer.invoke(CHANNELS.skipUpdate, version),
   appVersion: (): Promise<string> => ipcRenderer.invoke(CHANNELS.appVersion),
+  gitStatus: (projectId: string): Promise<GitStatus | null> =>
+    ipcRenderer.invoke(CHANNELS.gitStatus, projectId),
+  gitSync: (projectId: string): Promise<GitSyncResult> =>
+    ipcRenderer.invoke(CHANNELS.gitSync, projectId),
 }
 
 contextBridge.exposeInMainWorld('prcli', api)
