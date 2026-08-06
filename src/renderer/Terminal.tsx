@@ -27,6 +27,23 @@ export function paneGrid(tabId: string): { cols: number; rows: number } | null {
   return term ? { cols: term.cols, rows: term.rows } : null
 }
 
+/**
+ * Put the keyboard back on `tabId`'s terminal.
+ *
+ * For the history overlay, which takes DOM focus for its filter box and has to
+ * hand it back when it closes. Nothing else would: the `focused` prop below
+ * only moves focus when it CHANGES, and opening an overlay on the active pane
+ * does not change which pane is active, so the effect that normally does this
+ * never re-runs. Without this call a dismissed overlay leaves focus on `body`
+ * and the pane stops answering the keyboard.
+ *
+ * Silent for a tab with no terminal mounted, the way `paneGrid` returns null
+ * for one: an editor pane has no xterm and asking it for focus is not an error.
+ */
+export function focusTerminal(tabId: string): void {
+  mounted.get(tabId)?.focus()
+}
+
 export function Terminal({
   tabId,
   visible,
@@ -34,15 +51,30 @@ export function Terminal({
   focused,
   /** This pane's background. `PANE_COLOR_DEFAULT` when it has none of its own. */
   color,
+  /**
+   * Offer this pane's Up to the history overlay. `true` means the overlay took
+   * it and xterm must not also send `\x1b[A`; `false` means it declined and
+   * this pane's Up belongs to the shell exactly as it always has.
+   */
+  onHistoryRequested,
 }: {
   tabId: string
   visible: boolean
   focused: boolean
   color: PaneColor
+  onHistoryRequested: (paneId: string) => boolean
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const fitRef = useRef<(() => void) | null>(null)
   const termRef = useRef<XTerm | null>(null)
+  // Read through a ref by the key handler below, so a new callback identity on
+  // a parent render cannot land in the mount effect's dependencies. That effect
+  // builds the xterm; re-running it would dispose this pane's terminal and take
+  // its scrollback with it.
+  const historyRef = useRef(onHistoryRequested)
+  useEffect(() => {
+    historyRef.current = onHistoryRequested
+  }, [onHistoryRequested])
 
   useEffect(() => {
     const container = containerRef.current
@@ -70,6 +102,19 @@ export function Terminal({
     term.open(container)
     termRef.current = term
     mounted.set(tabId, term)
+
+    // The only key this app takes off xterm, and it takes it only when there is
+    // something to put in its place. Returning `true` is xterm's untouched
+    // behaviour, so every branch that is not "a bare Up that opened the
+    // overlay" leaves this terminal exactly as it was before this handler
+    // existed. A modified Up in particular is left alone: ⌥⌘↑ is the app's own
+    // pane navigation and ⇧↑ is xterm's selection.
+    term.attachCustomKeyEventHandler((event) => {
+      if (event.type !== 'keydown') return true
+      if (event.key !== 'ArrowUp') return true
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return true
+      return !historyRef.current(tabId)
+    })
 
     const offData = window.prcli.onData(({ id, data }) => {
       if (id === tabId) term.write(data)

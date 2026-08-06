@@ -196,6 +196,39 @@ export async function sessionNames(socket: string): Promise<string[]> {
 }
 
 /**
+ * The visible text of `session`'s current pane, or `''` when it cannot be read.
+ *
+ * The DOM cannot answer the question the history overlay exists to settle.
+ * `Enter` is supposed to put a command ON the prompt without running it, and an
+ * overlay that submitted the command would leave the same React tree behind as
+ * one that did not. The shell's own screen is the only witness, and this is how
+ * a test reads it.
+ *
+ * `-p` writes the capture to stdout rather than to a paste buffer. What comes
+ * back is one line per pane row joined by newlines, padded out to the pane's
+ * full height, so a caller comparing against it should split on `'\n'` and
+ * reason about lines rather than searching the blob for a substring: measured
+ * 2026-08-06, a prompt line holding typed-but-unrun text ends in a newline
+ * exactly like a line of output does.
+ *
+ * The socket is checked for the reason `sessionNames` checks it: this is
+ * read-only and destroys nothing, but a wrong socket would answer a test's
+ * question with the contents of the developer's real panes.
+ */
+export async function capturePane(socket: string, session: string): Promise<string> {
+  assertTestSocket(socket)
+  // Empty for "no server or no such session yet", which is the normal state
+  // while a pane is still coming up, and is what lets a caller poll this. It
+  // is not a way of passing: '' contains nothing a caller asserts for.
+  try {
+    const { stdout } = await run('tmux', ['-L', socket, 'capture-pane', '-p', '-t', session])
+    return stdout
+  } catch {
+    return ''
+  }
+}
+
+/**
  * Expand one of the collapsible columns, which every profile starts without.
  *
  * `App.tsx` collapses Files, Skills, Presets, Notes and Prompts on a fresh

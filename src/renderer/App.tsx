@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
-import { Terminal, paneGrid } from './Terminal'
+import { Terminal, paneGrid, focusTerminal } from './Terminal'
+import { HistoryOverlay } from './HistoryOverlay'
 import { PaneDivider } from './PaneDivider'
 import { TabBar } from './TabBar'
 import { DeadPane } from './DeadPane'
@@ -46,6 +47,8 @@ import { PANE_COLOR_DEFAULT, type PaneColor } from '../shared/paneColors'
 import { ColorSwatches } from './ColorSwatches'
 import {
   UNSORTED_ID,
+  type HistoryEntry,
+  type HistoryScope,
   type NotificationConfig,
   type TabDescriptor,
   type TabType,
@@ -261,6 +264,102 @@ export function App() {
   // which pane is active writes it, so the tab bar's highlight, the focused
   // xterm and what `setActive` tells main are one fact and cannot drift apart.
   const activePaneId = currentTabId
+
+  /*
+   * The history overlay, in three pieces of state.
+   *
+   * `historyPane` is which pane is showing it, or null for none. `historyScope`
+   * and `historyEntries` are what it is showing, held HERE rather than in the
+   * overlay because of a timing constraint the overlay cannot satisfy:
+   * `attachCustomKeyEventHandler` in `Terminal.tsx` has to answer "is this Up
+   * mine?" with a boolean, on the spot, while reading the history file is an
+   * IPC round trip. So the list for the current project is kept fetched, and
+   * the synchronous answer is a length check on something already in hand.
+   *
+   * The cost of that is honest and worth stating: for the first moment after a
+   * project is selected, before its fetch resolves, this holds no entries and
+   * Up goes to the shell. That is the same behaviour as a project with no
+   * history, which is the documented passthrough, so the failure mode of the
+   * race is the safe direction.
+   */
+  const [historyPane, setHistoryPane] = useState<string | null>(null)
+  const [historyScope, setHistoryScope] = useState<HistoryScope>('project')
+  const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([])
+
+  /**
+   * Refetch on every input the answer depends on.
+   *
+   * `historyPane` is a dependency so the list is refreshed each time the
+   * overlay opens and again when it closes: a command run in a pane since the
+   * last fetch should be in the list the next Up produces. `historyScope` is
+   * one because widening the scope with Tab IS this call, made again.
+   */
+  useEffect(() => {
+    const cwd = project?.cwd
+    if (cwd === undefined) {
+      setHistoryEntries([])
+      return
+    }
+    let cancelled = false
+    window.prcli
+      .historyList(cwd, historyScope)
+      .then((found) => {
+        if (!cancelled) setHistoryEntries(found)
+      })
+      .catch(() => {
+        // Swallowed rather than routed to `fail`: a history file that cannot be
+        // read is a reason to leave Up to the shell, not a startup error banner
+        // across an app that is otherwise working.
+        if (!cancelled) setHistoryEntries([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [project?.cwd, historyScope, historyPane])
+
+  /**
+   * Put the overlay away and give the keyboard back to the pane.
+   *
+   * The scope goes back to `project` with it. The spec's default is the current
+   * project, and resetting here is what makes that true of every opening rather
+   * than only the first: it also means the length check in `requestHistory`
+   * below is always asking about the scope the overlay is about to open at.
+   */
+  const closeHistory = useCallback((paneId: string) => {
+    setHistoryPane(null)
+    setHistoryScope('project')
+    focusTerminal(paneId)
+  }, [])
+
+  /**
+   * Answer one pane's Up. `true` means the overlay took it.
+   *
+   * Every `false` here is a case from the spec's passthrough rule, and the rule
+   * is that Up must reach zsh rather than open an empty list. "Shell
+   * integration is not installed" needs no test of its own: without the hook
+   * there is no history file, `historyList` returns nothing, and the length
+   * check below is already the answer.
+   */
+  const requestHistory = useCallback(
+    (paneId: string): boolean => {
+      if (historyPane !== null) return false
+      const pane = state.panes.find((candidate) => candidate.id === paneId)
+      if (pane?.type !== 'shell') return false
+      if (historyEntries.length === 0) return false
+      setHistoryPane(paneId)
+      return true
+    },
+    [historyPane, state.panes, historyEntries],
+  )
+
+  // Switching pane or tab takes the overlay with it. It is anchored inside one
+  // pane's box and is unmounted the moment that pane stops being the active
+  // one, so leaving `historyPane` set would make the next Up on it a no-op:
+  // `requestHistory` reads a non-null `historyPane` as "already open".
+  useEffect(() => {
+    setHistoryPane(null)
+    setHistoryScope('project')
+  }, [activePaneId])
 
   /**
    * Close one pane, and the tab with it when it was the last one.
@@ -1098,8 +1197,29 @@ export function App() {
                         // Never for a tab that is off screen: taking focus into one
                         // would move typing to a terminal the user cannot see.
                         focused={group.visible && box.pane.id === activePaneId}
+                        onHistoryRequested={requestHistory}
                       />
                     )}
+                    {/* Inside the pane box, which is the whole point: it rises
+                        from the bottom edge of the pane the Up was typed at,
+                        not from the window. Only ever one at a time, and only
+                        ever on the active pane: `requestHistory` sets this to
+                        the pane that asked, and the effect beside it clears it
+                        as soon as the selection moves elsewhere. */}
+                    {historyPane === box.pane.id ? (
+                      <HistoryOverlay
+                        entries={historyEntries}
+                        scope={historyScope}
+                        onScopeChange={setHistoryScope}
+                        onDismiss={() => closeHistory(box.pane.id)}
+                        // Typed, never submitted, on the same channel the
+                        // skills and prompts columns insert with.
+                        onPick={(cmd) => {
+                          window.prcli.input(box.pane.id, cmd)
+                          closeHistory(box.pane.id)
+                        }}
+                      />
+                    ) : null}
                     {/* Only the pane's session has died — the box, the xterm and
                         the scrollback in it are all still here, which is why this
                         draws over the pane instead of collapsing it. See
