@@ -49,11 +49,15 @@
  *   60 minutes and 24 hours are `tests/unit/historyAgo.test.ts`, because the
  *   seconds either side of each of them are one apart and nothing that launches
  *   an app can pin a clock;
- * - **anything about the developer's real shell history.** The panes here run
+ * - **the content of the developer's real shell history.** The panes here run
  *   the machine's real login shell with the developer's own rc file, the way
  *   every other e2e spec's panes do. Nothing here submits a line to it: the one
  *   Enter pressed belongs to the overlay, and every marker typed afterwards is
- *   left sitting on the prompt unexecuted.
+ *   left sitting on the prompt unexecuted. The passthrough test below does
+ *   depend on that history being non-empty — a real interactive shell recalls
+ *   something onto the prompt when Up actually reaches it, and that is the
+ *   only way this file can tell a passed-through Up from a swallowed one that
+ *   also never opened an overlay — but it never reads what gets recalled.
  */
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -417,12 +421,25 @@ test('Up reaches the shell when there is no history to show', async () => {
   // never installed the shell integration.
   const { window, session } = await openPane()
 
+  // The overlay's absence, checked below, is only a third of this: it is
+  // exactly what a swallowed Up that never opened anything would also look
+  // like. Measured 2026-08-06 by sabotaging the passthrough guard to always
+  // report "handled" — the overlay still never opened (there is nothing to
+  // show it), and this test stayed green with only the two checks that used
+  // to follow. What a swallowed Up cannot do, and a passed-through one can, is
+  // reach zsh's own line editor: this real login shell always has SOME native
+  // command history (unrelated to PRCLI's, which is empty here), so a
+  // passthrough Up recalls it onto the prompt and the pane's content changes.
+  const beforeUp = (await capturePane(SOCKET, session)).trimEnd()
+
   await window.keyboard.press('ArrowUp')
   await expect(window.getByTestId('history-overlay')).toHaveCount(0)
+  await expect
+    .poll(async () => (await capturePane(SOCKET, session)).trimEnd(), { timeout: 20_000 })
+    .not.toBe(beforeUp)
 
-  // The absence of an overlay is only half of it, and on its own it would pass
-  // for a key that never arrived anywhere. This marker goes to the pty, which
-  // it could not do if an overlay had opened and taken focus for its filter.
+  // Still not the whole story: this marker goes to the pty too, which it
+  // could not do if an overlay had opened and taken focus for its filter.
   await window.keyboard.type('PASSTHROUGH')
   await expect
     .poll(async () => await capturePane(SOCKET, session), { timeout: 20_000 })
