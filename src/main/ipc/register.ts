@@ -1053,6 +1053,10 @@ export function registerIpc(
     manager.forgetPane(id)
   })
 
+  ipcMain.on(CHANNELS.acknowledgeTab, (_event, id: string) => {
+    registry.acknowledge(id)
+  })
+
   ipcMain.handle(CHANNELS.splitPane, async (_event, request: SplitRequest): Promise<TabShape> => {
     const { paneId, dir, cols, rows } = request
     // Refused, not defaulted. `splitTab` falls back to 80×24 and then resizes

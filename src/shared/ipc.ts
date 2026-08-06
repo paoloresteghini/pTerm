@@ -27,6 +27,7 @@ export const CHANNELS = {
   statusChanged: 'prcli:statusChanged',
   restartTab: 'prcli:restartTab',
   dismissTab: 'prcli:dismissTab',
+  acknowledgeTab: 'prcli:acknowledgeTab',
   splitPane: 'prcli:splitPane',
   closePane: 'prcli:closePane',
   focusTab: 'prcli:focusTab',
@@ -654,6 +655,14 @@ export interface PrcliApi {
   restartTab(request: RestartRequest): Promise<TabDescriptor>
   /** Stop tracking a dead tab: the renderer has dropped its tombstone. */
   dismissTab(id: string): void
+  /**
+   * Mark a tab actioned: `waiting` becomes `idle`, `crashed` becomes `ended`.
+   *
+   * Fire and forget. The new state arrives back through `onStatus` like every
+   * other state change, so the renderer never has to hold an opinion of its
+   * own about what it just asked for.
+   */
+  acknowledgeTab(id: string): void
   /**
    * Add a pane to the tab that already holds `request.paneId`, beside it.
    *

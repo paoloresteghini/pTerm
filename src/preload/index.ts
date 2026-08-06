@@ -51,6 +51,7 @@ const api: PrcliApi = {
   },
   restartTab: (request) => ipcRenderer.invoke(CHANNELS.restartTab, request),
   dismissTab: (id) => ipcRenderer.send(CHANNELS.dismissTab, id),
+  acknowledgeTab: (id) => ipcRenderer.send(CHANNELS.acknowledgeTab, id),
   splitPane: (request) => ipcRenderer.invoke(CHANNELS.splitPane, request),
   closePane: (paneId) => ipcRenderer.invoke(CHANNELS.closePane, paneId),
   onFocusTab: (listener: (tabId: string) => void) => {
