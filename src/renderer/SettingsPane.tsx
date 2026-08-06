@@ -291,6 +291,18 @@ export function SettingsPane({
             >
               {checking ? 'Checking…' : 'Check now'}
             </Button>
+
+            {/* Only a successful check with a release to open has anywhere
+                to send this: `current` and `failed` both leave `info` null,
+                and a button with nothing behind it is worse than no button. */}
+            {updateResult?.info ? (
+              <Button
+                data-testid="update-download-settings"
+                onClick={() => void window.prcli.openExternal(updateResult.info!.url)}
+              >
+                Download
+              </Button>
+            ) : null}
           </div>
         </section>
       </DialogContent>

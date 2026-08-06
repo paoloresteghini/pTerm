@@ -103,4 +103,13 @@ test('settings names the version and answers a check', async () => {
   await expect(page.getByTestId('update-check-result')).toHaveText(
     /is available|up to date|Could not check/,
   )
+
+  // The Download button exists only when the check actually found a release
+  // to open. Which branch that is depends on the real network response and
+  // the version this source tree carries, so this asserts the conditional
+  // rather than a fixed outcome: present exactly when the result text says
+  // one is available, absent otherwise.
+  const resultText = await page.getByTestId('update-check-result').innerText()
+  const expectedCount = /is available/.test(resultText) ? 1 : 0
+  await expect(page.getByTestId('update-download-settings')).toHaveCount(expectedCount)
 })
