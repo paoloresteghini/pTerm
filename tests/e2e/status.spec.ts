@@ -156,6 +156,64 @@ async function openTab(window: Page): Promise<string> {
   return id
 }
 
+/**
+ * Whether `text` is present in `rowTestId`'s DOM but visually clipped off by
+ * an ancestor's `overflow: hidden` (a Tailwind `truncate` box).
+ *
+ * `toContainText`/`textContent` cannot see this: CSS `text-overflow:
+ * ellipsis` never removes the underlying text node, so a row whose id has
+ * been scrolled clean off screen still contains the id string as far as the
+ * DOM is concerned, and a text-content assertion passes either way,
+ * regardless of the project name's length. Measured directly: with
+ * `NeedsYou.tsx`'s old single-span markup and a name long enough to
+ * overflow, `toContainText(idText)` still passed.
+ *
+ * This instead locates the text node holding `text`, gets its true laid-out
+ * position with `Range.getBoundingClientRect()` (unaffected by clipping,
+ * since `overflow: hidden` only stops painting, it doesn't move layout), and
+ * compares that against the actual painted boundary of the nearest
+ * `overflow: hidden` ancestor, which is a real box edge. If the text's
+ * layout position falls past that edge, it is not painted, i.e. invisible.
+ */
+async function idIsClipped(window: Page, rowTestId: string, text: string): Promise<boolean> {
+  return window.evaluate(
+    ({ rowTestId, text }) => {
+      const row = document.querySelector(`[data-testid="${rowTestId}"]`)
+      if (!row) throw new Error(`row not found: ${rowTestId}`)
+      const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT)
+      let target: Text | null = null
+      let offset = -1
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const idx = (node.textContent ?? '').indexOf(text)
+        if (idx !== -1) {
+          target = node as Text
+          offset = idx
+          break
+        }
+      }
+      if (!target) throw new Error(`text not found in row: ${text}`)
+      const range = document.createRange()
+      range.setStart(target, offset)
+      range.setEnd(target, offset + text.length)
+      const textRect = range.getBoundingClientRect()
+      // Walk up from the text node looking for the box that actually clips
+      // paint. `row.parentElement` bounds the walk so a clipping ancestor
+      // further up the sidebar tree (not part of this row) is never blamed.
+      let el: HTMLElement | null = target.parentElement
+      while (el && el !== row.parentElement) {
+        const style = getComputedStyle(el)
+        if (style.overflowX === 'hidden' || style.overflow === 'hidden') {
+          const clipRect = el.getBoundingClientRect()
+          return textRect.right > clipRect.right + 0.5 || textRect.width === 0
+        }
+        el = el.parentElement
+      }
+      return false
+    },
+    { rowTestId, text },
+  )
+}
+
 test.beforeEach(async () => {
   await killServer(SOCKET)
   userDataDir = await mkdtemp(join(tmpdir(), 'prcli-status-user-'))
@@ -253,7 +311,13 @@ test('Needs You lists it, and clicking it lands on the tab', async () => {
   await seed(
     [
       { id: 'id-alpha', name: 'Alpha', slug: 'alpha', cwd: alpha, presets: [], activeTabId: null },
-      { id: 'id-beta', name: 'Beta', slug: 'beta', cwd: beta, presets: [], activeTabId: null },
+      // Beta's display name is long enough to overflow the row at the
+      // sidebar's default 208px width (measured in the built app, commit
+      // e291d7b): "WP Migration Plugin" is the name that reproduced the
+      // original bug, where the tick's width pushed the id off the row
+      // entirely. The slug stays a short, plain word because
+      // `encodeSessionName` rejects anything outside `[a-z0-9_]+`.
+      { id: 'id-beta', name: 'WP Migration Plugin', slug: 'beta', cwd: beta, presets: [], activeTabId: null },
     ],
     'id-alpha',
   )
@@ -279,8 +343,13 @@ test('Needs You lists it, and clicking it lands on the tab', async () => {
   // and every other assertion in this file addresses elements by testid,
   // never rendered text, so a build that truncated the id clean off the row
   // passed the whole suite. The id is what tells two tabs of the same
-  // project apart, so it has to actually be on the row.
-  await expect(window.getByTestId(`needs-${needy}`)).toContainText(needy.slice(0, 6))
+  // project apart, so it has to actually be visible on the row, not merely
+  // present in the DOM: `toContainText` reads `textContent`, which CSS
+  // ellipsis truncation never touches, so it cannot see this bug at any
+  // name length (see `idIsClipped`'s doc comment, measured). Beta's long
+  // name, above, is what gives the row anything to truncate in the first
+  // place at the sidebar's default width.
+  expect(await idIsClipped(window, `needs-${needy}`, needy.slice(0, 6))).toBe(false)
   await window.getByTestId(`needs-${needy}`).click()
 
   await expect(window.getByTestId('project-id-beta')).toHaveAttribute('data-active', 'true')
