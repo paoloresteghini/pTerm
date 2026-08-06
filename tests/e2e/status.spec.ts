@@ -283,6 +283,69 @@ test('Needs You lists it, and clicking it lands on the tab', async () => {
   await app.close()
 })
 
+test('the tick clears a waiting tab, out of the list and off the badge', async () => {
+  const alpha = await candidate('alpha')
+  await seed(
+    [{ id: 'id-alpha', name: 'Alpha', slug: 'alpha', cwd: alpha, presets: [], activeTabId: null }],
+    'id-alpha',
+  )
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  const id = await openTab(window)
+  await injectHook(id, 'Notification')
+  await expect(window.getByTestId(`dot-${id}`)).toHaveAttribute('data-state', 'waiting')
+  await expect(window.getByTestId('needs-you-count')).toHaveText('1')
+  await expect
+    .poll(async () => app.evaluate(({ app: electronApp }) => electronApp.dock?.getBadge()))
+    .toBe('1')
+
+  await window.getByTestId(`ack-${id}`).click()
+
+  // The dot is the assertion that separates this from a `forget`: the tab
+  // keeps a state, and that state is `idle`.
+  await expect(window.getByTestId(`dot-${id}`)).toHaveAttribute('data-state', 'idle')
+  await expect(window.getByTestId('needs-you')).toHaveCount(0)
+  await expect
+    .poll(async () => app.evaluate(({ app: electronApp }) => electronApp.dock?.getBadge()))
+    .toBe('')
+
+  await app.close()
+})
+
+// The row and the tick are two buttons in one container now. A click handler
+// on the container, or a tick that does not stop at itself, would make one of
+// these two do the other's job.
+test('clicking the row still only jumps, and does not acknowledge', async () => {
+  const alpha = await candidate('alpha')
+  const beta = await candidate('beta')
+  await seed(
+    [
+      { id: 'id-alpha', name: 'Alpha', slug: 'alpha', cwd: alpha, presets: [], activeTabId: null },
+      { id: 'id-beta', name: 'Beta', slug: 'beta', cwd: beta, presets: [], activeTabId: null },
+    ],
+    'id-alpha',
+  )
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  await openTab(window)
+  await window.getByTestId('project-id-beta').click()
+  const needy = await openTab(window)
+  await injectHook(needy, 'Notification')
+  await expect(window.getByTestId(`dot-${needy}`)).toHaveAttribute('data-state', 'waiting')
+
+  await window.getByTestId('project-id-alpha').click()
+  await window.getByTestId(`needs-${needy}`).click()
+
+  await expect(window.getByTestId(`tab-${needy}`)).toHaveAttribute('data-active', 'true')
+  // Still listed, still waiting: a jump is not an acknowledgement.
+  await expect(window.getByTestId('needs-you-count')).toHaveText('1')
+  await expect(window.getByTestId(`dot-${needy}`)).toHaveAttribute('data-state', 'waiting')
+
+  await app.close()
+})
+
 test('the board survives a reload', async () => {
   const alpha = await candidate('alpha')
   await seed(
