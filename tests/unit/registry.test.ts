@@ -317,4 +317,65 @@ describe('StatusRegistry', () => {
     // about the truth the dot has to show.
     expect(registry.get(ID)).toBe('waiting')
   })
+
+  it('acknowledging a waiting tab leaves it idle, and says so', () => {
+    const registry = new StatusRegistry()
+    const seen: StatusTransition[] = []
+    registry.applyHook(hook(ID, 'Notification'))
+    registry.onTransition((transition) => seen.push(transition))
+
+    registry.acknowledge(ID)
+
+    expect(registry.get(ID)).toBe('idle')
+    expect(seen).toEqual([{ tabId: ID, from: 'waiting', to: 'idle', quiet: true }])
+  })
+
+  it('acknowledging a crashed tab leaves it ended, not idle', () => {
+    const registry = new StatusRegistry()
+    const seen: StatusTransition[] = []
+    registry.applyDead(ID, { status: 3 })
+    expect(registry.get(ID)).toBe('crashed')
+    registry.onTransition((transition) => seen.push(transition))
+
+    registry.acknowledge(ID)
+
+    expect(registry.get(ID)).toBe('ended')
+    expect(seen).toEqual([{ tabId: ID, from: 'crashed', to: 'ended', quiet: true }])
+  })
+
+  // The pane is still dead and a client exit that lands after it still says
+  // nothing, so the verdict that death recorded has to outrank a late
+  // `applyExit` exactly as it did before the acknowledgement.
+  it('keeps a dead pane explained after its crash is acknowledged', () => {
+    const registry = new StatusRegistry()
+    registry.applyDead(ID, { status: 3 })
+    registry.acknowledge(ID)
+
+    registry.applyExit(ID, 0)
+
+    expect(registry.get(ID)).toBe('ended')
+  })
+
+  it('acknowledging a tab that is not blocking anyone changes nothing', () => {
+    const registry = new StatusRegistry()
+    const seen: StatusTransition[] = []
+    registry.applyHook(hook(ID, 'UserPromptSubmit'))
+    registry.onTransition((transition) => seen.push(transition))
+
+    registry.acknowledge(ID)
+
+    expect(registry.get(ID)).toBe('thinking')
+    expect(seen).toEqual([])
+  })
+
+  it('acknowledging a tab it has never seen emits nothing', () => {
+    const registry = new StatusRegistry()
+    const seen: StatusTransition[] = []
+    registry.onTransition((transition) => seen.push(transition))
+
+    registry.acknowledge(OTHER)
+
+    expect(registry.get(OTHER)).toBeNull()
+    expect(seen).toEqual([])
+  })
 })

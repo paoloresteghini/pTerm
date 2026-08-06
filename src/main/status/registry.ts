@@ -21,6 +21,16 @@ export interface StatusTransition {
    * timing of two independent config-file operations.
    */
   tab?: TabDescriptor
+  /**
+   * Emit this transition, but do not announce it.
+   *
+   * Distinct from `set`'s `silent`, which emits nothing at all: a silent
+   * change never reaches the renderer or the dock badge, which is right for a
+   * spool replay and wrong for a user action. `quiet` is for a change the user
+   * asked for, where the dot and the badge must move and a toast about it
+   * would be noise.
+   */
+  quiet?: boolean
 }
 
 /**
@@ -55,7 +65,7 @@ export class StatusRegistry {
   private set(
     tabId: string,
     to: TabState,
-    options: { silent?: boolean; tab?: TabDescriptor } = {},
+    options: { silent?: boolean; tab?: TabDescriptor; quiet?: boolean } = {},
   ): void {
     const from = this.states.get(tabId) ?? null
     // Claude re-fires Notification while a prompt sits unanswered. Emitting on
@@ -69,7 +79,8 @@ export class StatusRegistry {
     // in a tight loop at startup is not a notification, it is a re-narration
     // of the weekend. `silent` lets the caller apply the state without one.
     if (options.silent) return
-    for (const listener of this.listeners) listener({ tabId, from, to, tab: options.tab })
+    for (const listener of this.listeners)
+      listener({ tabId, from, to, tab: options.tab, quiet: options.quiet })
   }
 
   /** A tab has been opened, or restarted under the same id. */
@@ -139,6 +150,24 @@ export class StatusRegistry {
     if (from === undefined) return
     this.states.delete(tabId)
     for (const listener of this.listeners) listener({ tabId, from, to: null })
+  }
+
+  /**
+   * The user has dealt with this tab, without the session having said so.
+   *
+   * `waiting` becomes `idle` (alive, not blocking you) and `crashed` becomes
+   * `ended` (dead, and `idle` would be a lie about it). Every other state is
+   * left alone: an acknowledgement that raced a real state change must not
+   * invent one.
+   *
+   * `explained` is deliberately untouched. A crash that has been acknowledged
+   * is still a crash, so the late client exit that always follows a pane death
+   * still has nothing to say.
+   */
+  acknowledge(tabId: string): void {
+    const from = this.states.get(tabId)
+    if (from !== 'waiting' && from !== 'crashed') return
+    this.set(tabId, from === 'crashed' ? 'ended' : 'idle', { quiet: true })
   }
 
   get(tabId: string): TabState | null {
