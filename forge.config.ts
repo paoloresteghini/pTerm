@@ -1,11 +1,15 @@
-import { cp, mkdir } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { cp, mkdir, readdir } from 'node:fs/promises';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import type { ForgeConfig } from '@electron-forge/shared-types';
 import { MakerZIP } from '@electron-forge/maker-zip';
 import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
 import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-natives';
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Runtime dependencies the Vite bundle deliberately does NOT bundle, and which
@@ -21,6 +25,48 @@ import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-nati
  * `node-addon-api` is node-pty's own runtime dependency.
  */
 const EXTERNAL_RUNTIME_DEPS = ['node-pty', 'node-addon-api'];
+
+/**
+ * Ad-hoc re-signs a packaged .app bundle, nested code first, so that
+ * `codesign --verify --deep --strict` passes on the result. See the
+ * `postPackage` hook below for why this has to run, and why it has to run
+ * there specifically.
+ *
+ * This app has no Apple Developer Program membership, so this is an ad-hoc
+ * signature (`--sign -`): it proves the bundle hasn't been tampered with
+ * since packaging, not who built it. That's enough for Gatekeeper to offer
+ * "Open Anyway" instead of refusing outright with no path forward.
+ *
+ * Nested code (the four Electron helper apps and five frameworks under
+ * Contents/Frameworks, confirmed by inspecting a packaged build) is signed
+ * individually before the outer bundle, rather than via `codesign --deep`
+ * on the outer bundle alone. Apple's own codesign documentation deprecates
+ * `--deep` for signing (as opposed to verifying): it walks the bundle by
+ * convention rather than by manifest, and can sign nested code in the wrong
+ * order or skip it in unusual layouts. Electron's layout here nests only
+ * one level deep (no framework or helper app embeds further nested code),
+ * so signing that level and then the outer bundle covers every Mach-O
+ * binary with the same result --deep would give, without relying on
+ * --deep's own bundle-walking to get it right. Verified both ways: a full
+ * `codesign --sign - --force --deep` re-sign at this same point in the
+ * hook also passes `--verify --deep --strict`, but the inside-out form is
+ * the one Apple recommends, so that's what ships.
+ */
+async function adHocSign(appPath: string): Promise<void> {
+  const frameworksDir = path.join(appPath, 'Contents', 'Frameworks');
+  let nestedCode: string[] = [];
+  try {
+    nestedCode = await readdir(frameworksDir);
+  } catch {
+    // No Frameworks directory: nothing nested to sign ahead of the app itself.
+  }
+  for (const entry of nestedCode) {
+    if (entry.endsWith('.framework') || entry.endsWith('.app')) {
+      await execFileAsync('codesign', ['--sign', '-', '--force', path.join(frameworksDir, entry)]);
+    }
+  }
+  await execFileAsync('codesign', ['--sign', '-', '--force', appPath]);
+}
 
 const config: ForgeConfig = {
   packagerConfig: {
@@ -49,6 +95,50 @@ const config: ForgeConfig = {
           recursive: true,
           filter: (source) => !source.includes(`${path.sep}prebuilds${path.sep}`),
         });
+      }
+    },
+    /**
+     * Re-signs the packaged app after everything else has touched it.
+     *
+     * `FusesPlugin` below flips the security fuses baked into the Electron
+     * binary, and (on darwin/arm64, with no `osxSign` config, which is this
+     * app's case) also ad-hoc re-signs the bundle for exactly the reason
+     * this hook exists: flipping fuses rewrites the Electron binary, which
+     * invalidates Packager's own initial ad-hoc signature. But that re-sign
+     * runs inside the `packageAfterCopy` hook phase, and packaging keeps
+     * modifying the bundle after that phase ends: `asar: true` below packs
+     * `Contents/Resources/app.asar`, and `AutoUnpackNativesPlugin` then
+     * pulls `node-pty` back out into `app.asar.unpacked`. Both run after
+     * `packageAfterCopy`, so both invalidate the fuses plugin's re-sign too.
+     * The result, confirmed with `codesign --verify --deep --strict` on a
+     * real `npm run package` output: an adhoc signature that fails
+     * verification with "invalid Info.plist (plist or signature have been
+     * modified)". That failure is invisible in local dev or in this repo's
+     * E2E suite, because Gatekeeper only enforces a signature on a file
+     * carrying the quarantine attribute (set when a file arrives via
+     * download, not when it's built locally). A user who downloads the
+     * zipped app gets "PRCLI.app is damaged and can't be opened", with no
+     * "Open Anyway" fallback.
+     *
+     * `postPackage` is the only hook that fires after electron-packager's
+     * `packager()` promise has resolved, i.e. after every packaging step
+     * (copy, prune, asar, fuses) is done, confirmed by instrumenting this
+     * hook and inspecting `packageResult` on a real package run. That makes
+     * it the only hook where a re-sign here actually survives to the built
+     * output, rather than being invalidated by a later packaging step the
+     * way the fuses plugin's own re-sign is.
+     */
+    postPackage: async (_forgeConfig, packageResult) => {
+      if (packageResult.platform !== 'darwin') {
+        return;
+      }
+      for (const outputPath of packageResult.outputPaths) {
+        const entries = await readdir(outputPath);
+        for (const entry of entries) {
+          if (entry.endsWith('.app')) {
+            await adHocSign(path.join(outputPath, entry));
+          }
+        }
       }
     },
   },
