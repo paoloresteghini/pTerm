@@ -5,6 +5,8 @@ import {
   type Candidate,
   type DataEvent,
   type ExitEvent,
+  type HistoryEntry,
+  type HistoryScope,
   type NotificationConfig,
   type OpenRequest,
   type Preset,
@@ -40,6 +42,12 @@ import { isDirectory } from '../fsutil'
 import { scanCandidates } from '../projects/discovery'
 import { hookPaths, installHooks, readHooksState, uninstallHooks } from '../hooks/install'
 import { drainSpool } from '../hooks/spool'
+import { readHistory, selectHistory } from '../shell/history'
+import {
+  installShellHistory,
+  readShellHistoryState,
+  uninstallShellHistory,
+} from '../shell/install'
 import { listSkills } from '../skills/scan'
 import { readNote, writeNote } from '../notes/store'
 import { realUpdateService } from '../update/service'
@@ -1334,6 +1342,18 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.hooksState, () => readHooksState())
   ipcMain.handle(CHANNELS.installHooks, () => installHooks())
   ipcMain.handle(CHANNELS.uninstallHooks, () => uninstallHooks())
+
+  // Read fresh on every call, like hooksState above: another window, or the
+  // user's own shell, can append to the history file while an overlay built
+  // on this is open.
+  ipcMain.handle(
+    CHANNELS.historyList,
+    async (_event, projectCwd: string, scope: HistoryScope): Promise<HistoryEntry[]> =>
+      selectHistory(await readHistory(), { scope, projectCwd }),
+  )
+  ipcMain.handle(CHANNELS.shellHistoryState, () => readShellHistoryState())
+  ipcMain.handle(CHANNELS.installShellHistory, () => installShellHistory())
+  ipcMain.handle(CHANNELS.uninstallShellHistory, () => uninstallShellHistory())
 
   // Explicitly ignores a previous skip: the user pressed a button, and the
   // answer they get must be about the release, not about a decision they made

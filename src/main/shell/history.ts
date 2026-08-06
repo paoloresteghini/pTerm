@@ -1,17 +1,12 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { configRoot } from '../state/store'
+import { type HistoryEntry, type HistoryScope } from '../../shared/ipc'
 
-export interface HistoryEntry {
-  /** Epoch seconds, as written by the zsh preexec hook. */
-  ts: number
-  cwd: string
-  /** Which pane ran the command, taken from that pane's PRCLI_TAB_ID at the time. */
-  tab: string
-  cmd: string
-}
-
-export type HistoryScope = 'project' | 'all'
+// Declared in shared/ipc.ts, not here: the renderer draws these and cannot
+// import from src/main. Re-exported so this module's own callers keep
+// importing them from where the rest of the shell-history code lives.
+export type { HistoryEntry, HistoryScope }
 
 export interface SelectOptions {
   scope: HistoryScope

@@ -35,6 +35,10 @@ export const CHANNELS = {
   hooksState: 'prcli:hooksState',
   installHooks: 'prcli:installHooks',
   uninstallHooks: 'prcli:uninstallHooks',
+  historyList: 'prcli:historyList',
+  shellHistoryState: 'prcli:shellHistoryState',
+  installShellHistory: 'prcli:installShellHistory',
+  uninstallShellHistory: 'prcli:uninstallShellHistory',
   menuCommand: 'prcli:menuCommand',
   setLayout: 'prcli:setLayout',
   skills: 'prcli:skills',
@@ -149,6 +153,39 @@ export interface HooksState {
   /** The JSON that would be added, for the screen to show before it happens. */
   pending: string
   collisions: { event: string; command: string }[]
+}
+
+/**
+ * One command a `shell` pane ran, as the zsh preexec hook recorded it.
+ *
+ * Declared here rather than only in `src/main/shell/history.ts`, which now
+ * imports and re-exports it, for the same reason `HooksState` is: the
+ * overlay draws these and cannot import from `src/main`.
+ */
+export interface HistoryEntry {
+  /** Epoch seconds, from the shell's own clock at the moment the command ran. */
+  ts: number
+  cwd: string
+  /** The pane that ran the command, identified by its PRCLI_TAB_ID. */
+  tab: string
+  cmd: string
+}
+
+/** `'project'` scopes to the current project's cwd; `'all'` does not. */
+export type HistoryScope = 'project' | 'all'
+
+/**
+ * What the settings pane needs to draw the shell-history row, before and
+ * after the install gesture. Declared here rather than in
+ * `src/main/shell/install.ts`, which now imports it, for the same reason
+ * `HooksState` is.
+ */
+export interface ShellHistoryState {
+  installed: boolean
+  rcPath: string
+  scriptPath: string
+  /** The exact text an install would add, for the screen to show before it happens. */
+  pending: string
 }
 
 /**
@@ -651,6 +688,20 @@ export interface PrcliApi {
   installHooks(): Promise<HooksState>
   /** Removes only PRCLI's own hook groups, restoring the file it found. */
   uninstallHooks(): Promise<HooksState>
+  /**
+   * Past commands a `shell` pane ran, newest first, scoped to `projectCwd`
+   * (`'project'`) or across every project (`'all'`).
+   *
+   * Read fresh on each call, like `hooksState`: the history file is
+   * appended to by a live shell the whole time an overlay might be open.
+   */
+  historyList(projectCwd: string, scope: HistoryScope): Promise<HistoryEntry[]>
+  /** Whether PRCLI's shell-history hook is installed, and what installing would add. */
+  shellHistoryState(): Promise<ShellHistoryState>
+  /** Writes the snippet and merges it into `~/.zshrc`. */
+  installShellHistory(): Promise<ShellHistoryState>
+  /** Removes only PRCLI's own marker block, restoring the file it found. */
+  uninstallShellHistory(): Promise<ShellHistoryState>
   /**
    * Every skill and command available to the project at `projectCwd`.
    *

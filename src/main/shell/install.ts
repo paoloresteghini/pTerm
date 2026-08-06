@@ -3,6 +3,12 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { configRoot } from '../state/store'
 import { historyPath } from './history'
+import { type ShellHistoryState } from '../../shared/ipc'
+
+// Declared in shared/ipc.ts, not here, for the same reason history.ts
+// re-exports HistoryEntry and HistoryScope from there: Settings (Task 5)
+// draws this shape and cannot import from src/main.
+export type { ShellHistoryState }
 
 /**
  * The three paths Task 3's install/uninstall step needs: where the marker
@@ -61,14 +67,6 @@ export function renderHistoryScript(historyFile: string): string {
     'add-zsh-hook preexec prcli_history_preexec',
     '',
   ].join('\n')
-}
-
-export interface ShellHistoryState {
-  installed: boolean
-  rcPath: string
-  scriptPath: string
-  /** The exact text an install would add, shown by Task 5's Settings row before the user commits to it. */
-  pending: string
 }
 
 export const MARKER_START = '# >>> prcli shell history >>>'
