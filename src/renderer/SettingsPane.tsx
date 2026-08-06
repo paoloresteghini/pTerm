@@ -1,5 +1,12 @@
 import { useEffect, useState } from 'react'
-import type { HooksState, NotificationConfig, Rule, TabState, UpdateCheckResult } from '../shared/ipc'
+import type {
+  HooksState,
+  NotificationConfig,
+  Rule,
+  ShellHistoryState,
+  TabState,
+  UpdateCheckResult,
+} from '../shared/ipc'
 import { Dialog, DialogContent, DialogTitle } from './ui/Dialog'
 import { Button } from './ui/Button'
 import { globalRuleOf, setGlobalRule } from './globalRule'
@@ -30,6 +37,12 @@ export function SettingsPane({
   // the whole app.
   const [hooksError, setHooksError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [shellHistory, setShellHistory] = useState<ShellHistoryState | null>(null)
+  // Its own error, separate from hooksError above and notifError below: a
+  // rc file this app cannot read (permissions, say) must say so here rather
+  // than under an Install button that only this row owns.
+  const [shellHistoryError, setShellHistoryError] = useState<string | null>(null)
+  const [shellBusy, setShellBusy] = useState(false)
   // Its own error, separate from the hooks one above: a failed notification
   // write must say so rather than leaving an unhandled rejection and a
   // checkbox that silently reverts the next time this pane opens.
@@ -69,7 +82,10 @@ export function SettingsPane({
   }, [open])
 
   // Refetched every time the pane opens: another PRCLI window, or a hand
-  // edit, could have changed the file since it was last read.
+  // edit, could have changed either file since it was last read. Both reads
+  // share this one effect and its `cancelled` flag, but keep separate state
+  // and error variables: settings.json and the rc file fail independently of
+  // each other, and one row going red must not blank out the other.
   useEffect(() => {
     if (!open) return
     let cancelled = false
@@ -83,6 +99,18 @@ export function SettingsPane({
         if (!cancelled) {
           setHooks(null)
           setHooksError(errorMessage(reason))
+        }
+      })
+    setShellHistoryError(null)
+    window.prcli
+      .shellHistoryState()
+      .then((state) => {
+        if (!cancelled) setShellHistory(state)
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) {
+          setShellHistory(null)
+          setShellHistoryError(errorMessage(reason))
         }
       })
     return () => {
@@ -99,6 +127,17 @@ export function SettingsPane({
       })
       .catch((reason: unknown) => setHooksError(errorMessage(reason)))
       .finally(() => setBusy(false))
+  }
+
+  const runShellHistoryAction = (action: () => Promise<ShellHistoryState>): void => {
+    setShellBusy(true)
+    action()
+      .then((state) => {
+        setShellHistory(state)
+        setShellHistoryError(null)
+      })
+      .catch((reason: unknown) => setShellHistoryError(errorMessage(reason)))
+      .finally(() => setShellBusy(false))
   }
 
   const updateRule = (state: TabState, patch: Partial<Rule>): void => {
@@ -186,6 +225,66 @@ export function SettingsPane({
             </>
           ) : !hooksError ? (
             <p className="text-[11px] text-muted">Reading ~/.claude/settings.json…</p>
+          ) : null}
+        </section>
+
+        <section className="mb-4 border-b border-border pb-3">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-[11px] uppercase tracking-wider text-faint">Shell history</span>
+            <span data-testid="shell-history-status" className="text-[11px] text-muted">
+              {shellHistory ? (shellHistory.installed ? 'installed' : 'not installed') : '…'}
+            </span>
+          </div>
+
+          {shellHistoryError ? (
+            <p data-testid="shell-history-error" className="mb-2 text-[11px] text-danger">
+              {shellHistoryError}
+            </p>
+          ) : null}
+
+          {shellHistory ? (
+            <>
+              <p data-testid="shell-history-paths" className="mb-2 text-[11px] text-muted">
+                Adds a line to {shellHistory.rcPath} that sources {shellHistory.scriptPath}.
+              </p>
+
+              {/* Required copy: without it, the first thing a user sees after
+                  installing is an empty overlay in every pane they already
+                  had open, which reads as the feature being broken. It is
+                  true because a running pane's shell already read .zshrc,
+                  once, before this line existed to source; only a pane
+                  started after this line lands sources it. */}
+              <p className="mb-2 text-[11px] text-muted">
+                Only takes effect in shell panes opened after you install it. Panes already open
+                will not record anything until you close and reopen them.
+              </p>
+
+              <pre
+                data-testid="shell-history-pending"
+                className="scroll-thin mb-2 max-h-40 overflow-auto whitespace-pre-wrap break-all border border-border bg-bg p-1.5 text-[10px] text-muted"
+              >
+                {shellHistory.pending}
+              </pre>
+
+              <div className="flex gap-2">
+                <Button
+                  data-testid="shell-history-install"
+                  disabled={shellBusy || shellHistory.installed}
+                  onClick={() => runShellHistoryAction(() => window.prcli.installShellHistory())}
+                >
+                  Install
+                </Button>
+                <Button
+                  data-testid="shell-history-uninstall"
+                  disabled={shellBusy || !shellHistory.installed}
+                  onClick={() => runShellHistoryAction(() => window.prcli.uninstallShellHistory())}
+                >
+                  Uninstall
+                </Button>
+              </div>
+            </>
+          ) : !shellHistoryError ? (
+            <p className="text-[11px] text-muted">Reading shell config…</p>
           ) : null}
         </section>
 

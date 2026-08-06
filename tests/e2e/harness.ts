@@ -90,6 +90,11 @@ export async function launchApp(opts: {
   claudeSettings: string
   claudeHome: string
   userDataDir: string
+  // Optional, unlike the five above: most specs never touch a shell's rc
+  // file, and only the one that does needs to redirect it away from the
+  // developer's real ~/.zshrc. Checked under the temp root just the same
+  // when a spec does pass it, so there is no way to pass it wrong.
+  zshrc?: string
 }): Promise<ElectronApplication> {
   assertTestSocket(opts.socket)
   assertUnderTmp('configDir', opts.configDir)
@@ -97,6 +102,7 @@ export async function launchApp(opts: {
   assertUnderTmp('claudeSettings', opts.claudeSettings)
   assertUnderTmp('claudeHome', opts.claudeHome)
   assertUnderTmp('userDataDir', opts.userDataDir)
+  if (opts.zshrc !== undefined) assertUnderTmp('zshrc', opts.zshrc)
   return electron.launch({
     args: [
       '.vite/build/main.js',
@@ -144,6 +150,10 @@ export async function launchApp(opts: {
       // paint a bar over whatever the spec was asserting on, nondeterministically
       // and in specs that have nothing to do with updates.
       PRCLI_UPDATE_CHECK: '0',
+      // Only set when a spec asks for it, so `readRc` in every other spec
+      // still falls through to its own ENOENT-means-empty branch rather than
+      // pointing at a path nothing wrote.
+      ...(opts.zshrc !== undefined ? { PRCLI_ZSHRC: opts.zshrc } : {}),
     },
   })
 }
