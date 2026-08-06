@@ -112,4 +112,8 @@ test('settings names the version and answers a check', async () => {
   const resultText = await page.getByTestId('update-check-result').innerText()
   const expectedCount = /is available/.test(resultText) ? 1 : 0
   await expect(page.getByTestId('update-download-settings')).toHaveCount(expectedCount)
+
+  // Skip renders under the same condition as Download, for the same reason:
+  // nothing to skip without a named release.
+  await expect(page.getByTestId('update-skip-settings')).toHaveCount(expectedCount)
 })

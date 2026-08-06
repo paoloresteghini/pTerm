@@ -52,6 +52,7 @@ export const CHANNELS = {
   checkForUpdate: 'prcli:checkForUpdate',
   skipUpdate: 'prcli:skipUpdate',
   appVersion: 'prcli:appVersion',
+  skippedVersion: 'prcli:skippedVersion',
   gitStatus: 'prcli:gitStatus',
   gitSync: 'prcli:gitSync',
 } as const
@@ -765,6 +766,16 @@ export interface PrcliApi {
   checkForUpdate(): Promise<UpdateCheckResult>
   /** Never mention this version again. Persisted outside the workspace config. */
   skipUpdate(version: string): Promise<void>
+  /**
+   * The version `skipUpdate` was last called with, or null when none is
+   * skipped.
+   *
+   * Read fresh rather than cached, like `hooksState`: another PRCLI window
+   * can skip a version while this one's Settings pane is open. What lets
+   * Settings say a result was already skipped, since `checkForUpdate` itself
+   * always ignores the skip and reports the release either way.
+   */
+  skippedVersion(): Promise<string | null>
   /**
    * The running build's version, from `package.json` by way of
    * `app.getVersion()`.

@@ -37,6 +37,7 @@ export function SettingsPane({
   const [version, setVersion] = useState<string | null>(null)
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null)
   const [checking, setChecking] = useState(false)
+  const [skippedVersion, setSkippedVersion] = useState<string | null>(null)
 
   useEffect(() => {
     // Unlike the hooks read just below, this swallows its error rather than
@@ -48,6 +49,24 @@ export function SettingsPane({
       .then(setVersion)
       .catch(() => undefined)
   }, [])
+
+  // Shared by the effect just below and the Skip button further down, so a
+  // successful Skip updates the result line without the user closing and
+  // reopening the dialog.
+  const refreshSkipped = (): void => {
+    window.prcli
+      .skippedVersion()
+      .then(setSkippedVersion)
+      .catch(() => undefined)
+  }
+
+  // Refetched every time the pane opens, like `hooksState` just below: another
+  // PRCLI window's Skip button, or a hand edit of update.json, could have
+  // changed what is skipped since this pane last read it.
+  useEffect(() => {
+    if (!open) return
+    refreshSkipped()
+  }, [open])
 
   // Refetched every time the pane opens: another PRCLI window, or a hand
   // edit, could have changed the file since it was last read.
@@ -266,7 +285,7 @@ export function SettingsPane({
               and a button that answers nothing reads as broken. */}
           {updateResult ? (
             <p data-testid="update-check-result" className="mb-2 text-[11px] text-muted">
-              {updateResultText(updateResult)}
+              {updateResultText(updateResult, skippedVersion)}
             </p>
           ) : null}
 
@@ -301,6 +320,21 @@ export function SettingsPane({
                 onClick={() => void window.prcli.openExternal(updateResult.info!.url)}
               >
                 Download
+              </Button>
+            ) : null}
+
+            {/* Same condition as Download: nothing to skip without a named
+                release. Settings' own check always ignores a skip (see
+                `register.ts`), so this button silences only the bar; the
+                "(skipped)" suffix above is what makes that visible here. */}
+            {updateResult?.info ? (
+              <Button
+                data-testid="update-skip-settings"
+                onClick={() => {
+                  void window.prcli.skipUpdate(updateResult.info!.version).then(refreshSkipped)
+                }}
+              >
+                Skip this version
               </Button>
             ) : null}
           </div>

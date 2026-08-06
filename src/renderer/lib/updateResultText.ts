@@ -17,12 +17,22 @@ import type { UpdateCheckResult } from '../../shared/ipc'
  * fifth status is ever added and left unhandled here. That is a stronger
  * guarantee than a runtime fallback string would give for a status that can
  * only exist if `src/main/update/service.ts` starts producing one.
+ *
+ * `skippedVersion` is optional so every existing single-argument caller keeps
+ * compiling unchanged. Passed, it names the version Settings' own Skip button
+ * last recorded, and when the result names that same version the line gets a
+ * "(skipped)" suffix. That is the only visible effect a Skip in Settings has:
+ * `checkForUpdate` itself always ignores the skip (`respectSkip: false` in
+ * `register.ts`), so without this suffix the result would say a skipped
+ * release "is available" with nothing to show the skip took.
  */
-export function updateResultText(result: UpdateCheckResult): string {
+export function updateResultText(result: UpdateCheckResult, skippedVersion?: string | null): string {
   switch (result.status) {
     case 'available':
-    case 'skipped':
-      return `PRCLI ${result.info?.version} is available`
+    case 'skipped': {
+      const text = `PRCLI ${result.info?.version} is available`
+      return result.info !== null && result.info.version === skippedVersion ? `${text} (skipped)` : text
+    }
     case 'current':
       return 'PRCLI is up to date'
     case 'failed':

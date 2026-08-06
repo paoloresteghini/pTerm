@@ -43,7 +43,7 @@ import { drainSpool } from '../hooks/spool'
 import { listSkills } from '../skills/scan'
 import { readNote, writeNote } from '../notes/store'
 import { realUpdateService } from '../update/service'
-import { writeSkipped } from '../update/store'
+import { readSkipped, writeSkipped } from '../update/store'
 import { isOpenable } from '../update/openable'
 import { addPrompt, readPrompts, removePrompt } from '../prompts/store'
 import { listDir, readFileInside, resolveInside, writeFileInside } from '../files/tree'
@@ -1345,6 +1345,7 @@ export function registerIpc(
   )
   ipcMain.handle(CHANNELS.skipUpdate, (_event, version: string) => writeSkipped(version))
   ipcMain.handle(CHANNELS.appVersion, () => app.getVersion())
+  ipcMain.handle(CHANNELS.skippedVersion, () => readSkipped())
 
   // The URL came off the network by way of the renderer, which any renderer
   // code could invoke this with. `parseRelease` already checks the scheme

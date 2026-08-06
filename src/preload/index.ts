@@ -89,6 +89,7 @@ const api: PrcliApi = {
   checkForUpdate: (): Promise<UpdateCheckResult> => ipcRenderer.invoke(CHANNELS.checkForUpdate),
   skipUpdate: (version: string): Promise<void> => ipcRenderer.invoke(CHANNELS.skipUpdate, version),
   appVersion: (): Promise<string> => ipcRenderer.invoke(CHANNELS.appVersion),
+  skippedVersion: (): Promise<string | null> => ipcRenderer.invoke(CHANNELS.skippedVersion),
   gitStatus: (projectId: string): Promise<GitStatus | null> =>
     ipcRenderer.invoke(CHANNELS.gitStatus, projectId),
   gitSync: (projectId: string): Promise<GitSyncResult> =>
