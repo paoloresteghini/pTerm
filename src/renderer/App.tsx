@@ -1030,6 +1030,7 @@ export function App() {
             dispatch({ type: 'activatedProject', id: projectIdForTab(state.projects, tab) })
             dispatch({ type: 'activatedTab', id: tab.id })
           }}
+          onAcknowledgeNeedy={(tab) => window.prcli.acknowledgeTab(tab.id)}
           muted={muted}
           onToggleMute={toggleMute}
           onSelectProject={(id) => dispatch({ type: 'activatedProject', id })}

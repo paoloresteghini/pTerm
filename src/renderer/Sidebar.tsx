@@ -23,6 +23,7 @@ export function Sidebar({
   projectStateOf,
   needsYou,
   onSelectNeedy,
+  onAcknowledgeNeedy,
   muted,
   onToggleMute,
   onSelectProject,
@@ -42,6 +43,7 @@ export function Sidebar({
   projectStateOf: (projectId: string) => TabState | null
   needsYou: TabDescriptor[]
   onSelectNeedy: (tab: TabDescriptor) => void
+  onAcknowledgeNeedy: (tab: TabDescriptor) => void
   muted: (projectId: string) => boolean
   onToggleMute: (projectId: string) => void
   onSelectProject: (id: string) => void
@@ -91,7 +93,13 @@ export function Sidebar({
       className="relative flex shrink-0 flex-col border-r border-border bg-surface font-mono text-[11px] select-none"
       style={{ width }}
     >
-      <NeedsYou tabs={needsYou} projects={projects} status={status} onSelect={onSelectNeedy} />
+      <NeedsYou
+        tabs={needsYou}
+        projects={projects}
+        status={status}
+        onSelect={onSelectNeedy}
+        onAcknowledge={onAcknowledgeNeedy}
+      />
 
       {/* `text-label` like the collapsible columns' headings, not the
           `text-faint` this used to be: same kind of label, same 4.5:1 rule
