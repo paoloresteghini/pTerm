@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtemp, rm, readFile, writeFile, chmod } from 'node:fs/promises'
+import { mkdtemp, rm, readdir, readFile, stat, writeFile, chmod } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -99,6 +99,98 @@ describe('uninstallShellHistory', () => {
     const before = await readFile(rc, 'utf8')
     await uninstallShellHistory()
     expect(await readFile(rc, 'utf8')).toBe(before)
+  })
+})
+
+/** Every `<rc>.<timestamp>.bak` sitting beside the temp rc file. */
+async function backups(): Promise<string[]> {
+  return (await readdir(dir)).filter((name) => name.startsWith('.zshrc.') && name.endsWith('.bak'))
+}
+
+/*
+ * `~/.zshrc` is a hand-tuned file that a user may have carried between
+ * machines for years, and this app rewrites it whole. `writeFile` truncates
+ * before it writes, so an interruption between those two leaves a shell that
+ * no longer starts. The hooks module has taken this precaution since it was
+ * written; the design doc says this module was modelled on it, and until now
+ * this was the one part of that shape it did not copy.
+ */
+describe('the rc file is copied aside before it is rewritten', () => {
+  it('keeps what the rc file held before an install', async () => {
+    await installShellHistory()
+
+    const found = await backups()
+    expect(found).toHaveLength(1)
+    expect(await readFile(join(dir, found[0]), 'utf8')).toBe('export PATH=/usr/bin\n')
+  })
+
+  it('keeps what the rc file held before an uninstall', async () => {
+    await installShellHistory()
+    const installed = await readFile(rc, 'utf8')
+
+    await uninstallShellHistory()
+
+    // Asked as "is the installed text in one of these" rather than by counting
+    // or by picking the newest. `backupIfPresent` names its copy after
+    // `Date.now()`, and an install followed immediately by an uninstall can
+    // land in the same millisecond, in which case the second copy replaces the
+    // first instead of joining it. The claim being made here survives that;
+    // an assertion on the count would fail once in a while for a reason that
+    // has nothing to do with what it is testing.
+    const contents = await Promise.all(
+      (await backups()).map((name) => readFile(join(dir, name), 'utf8')),
+    )
+    expect(contents).toContain(installed)
+  })
+
+  // Without this, every click of a disabled-looking Install button would drop
+  // another copy of an unchanged file into the user's home directory. It also
+  // pins that the backup is tied to the WRITE and not to the call.
+  it('writes no backup when the rc file already says what it would say', async () => {
+    await installShellHistory()
+    const afterInstall = (await backups()).sort()
+    // Non-vacuous: the repeat assertions below would be satisfied by a build
+    // that never backed anything up at all.
+    expect(afterInstall).toHaveLength(1)
+
+    await installShellHistory()
+    expect((await backups()).sort()).toEqual(afterInstall)
+
+    await uninstallShellHistory()
+    const afterUninstall = (await backups()).sort()
+
+    await uninstallShellHistory()
+    expect((await backups()).sort()).toEqual(afterUninstall)
+  })
+})
+
+/*
+ * The history file records every command run in every shell pane, so it holds
+ * whatever those commands held: tokens, connection strings, a one-off
+ * `export SECRET=...`. zsh keeps its own `~/.zsh_history` at 0600 for that
+ * reason. The hook creates this file by `>>` redirection, which lands at
+ * `0666 & ~umask`, so on the default macOS `umask 022` it would otherwise be
+ * 0644 and readable by every other account on the machine.
+ */
+describe('the history file is not left readable by other accounts', () => {
+  const modeOf = async (path: string): Promise<number> => (await stat(path)).mode & 0o777
+
+  it('creates it at 0600 so the hook has nothing to choose', async () => {
+    const state = await installShellHistory()
+    expect(await modeOf(state.historyFile)).toBe(0o600)
+  })
+
+  // The upgrade path: a file an earlier build left at 0644 is already on disk
+  // and no amount of correct creation will fix it.
+  it('tightens a file an earlier version left readable, keeping its contents', async () => {
+    const { historyFile } = await readShellHistoryState()
+    await writeFile(historyFile, '{"ts":1,"cwd":"/a","tab":"t","cmd":"ls"}\n', { mode: 0o644 })
+    await chmod(historyFile, 0o644)
+
+    await installShellHistory()
+
+    expect(await modeOf(historyFile)).toBe(0o600)
+    expect(await readFile(historyFile, 'utf8')).toContain('"cmd":"ls"')
   })
 })
 

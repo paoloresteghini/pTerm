@@ -185,6 +185,15 @@ export interface ShellHistoryState {
   installed: boolean
   rcPath: string
   scriptPath: string
+  /**
+   * Where the recorded commands are kept.
+   *
+   * Carried to the renderer so the Settings row can name it. Installing this
+   * starts a permanent log of every command run in a shell pane, and a user
+   * cannot decline something they were never told about; the row is the only
+   * screen in the app where that decision is made.
+   */
+  historyFile: string
   /** The exact text an install would add, for the screen to show before it happens. */
   pending: string
 }

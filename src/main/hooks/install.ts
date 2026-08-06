@@ -394,17 +394,22 @@ export async function readHooksState(): Promise<HooksState> {
 }
 
 /**
- * Back up `settingsPath` before it is about to be overwritten.
+ * Back up a user's config file before it is about to be overwritten.
  *
  * ENOENT is the one failure this tolerates: it means there was no file to
  * lose, which is exactly the "creates a settings file when there is none"
- * path. Anything else — permissions, a full disk, a path that is a directory
- * — must abort the install rather than be swallowed, because the very next
- * line would otherwise overwrite the original with nothing backing it up.
+ * path. Anything else (permissions, a full disk, a path that is a directory)
+ * must abort the install rather than be swallowed, because the very next line
+ * would otherwise overwrite the original with nothing backing it up.
+ *
+ * Exported because `src/main/shell/install.ts` edits `~/.zshrc` and takes the
+ * same precaution. That module was written to this one's shape deliberately,
+ * so a user's config is modified one way in this app rather than two, and a
+ * second copy of these six lines is how that stops being true.
  */
-async function backupIfPresent(settingsPath: string): Promise<void> {
+export async function backupIfPresent(path: string): Promise<void> {
   try {
-    await copyFile(settingsPath, `${settingsPath}.${Date.now()}.bak`)
+    await copyFile(path, `${path}.${Date.now()}.bak`)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
     throw error

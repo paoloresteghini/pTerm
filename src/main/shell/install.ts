@@ -1,7 +1,8 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { configRoot } from '../state/store'
+import { backupIfPresent } from '../hooks/install'
 import { historyPath } from './history'
 import { type ShellHistoryState } from '../../shared/ipc'
 
@@ -37,6 +38,16 @@ export function shellPaths(): { rcPath: string; scriptPath: string; historyFile:
  * with, so it writes nothing rather than appending an entry an overlay can
  * never scope back to a tab.
  *
+ * A command line beginning with a space is dropped, which is what
+ * `HIST_IGNORE_SPACE` does for zsh's own history file. `preexec` runs before
+ * and independently of that option, so without this the one gesture people
+ * use to keep a password or a token out of a log would keep it out of
+ * `~/.zsh_history` and write it here instead. Done unconditionally rather than
+ * behind a `setopt hist_ignore_space` test, because the cost of honouring it
+ * for someone who did not ask is one missing entry and the cost of the other
+ * mistake is a recorded secret. Measured 2026-08-06: `preexec`'s `$1` is the
+ * line as typed, leading space and all, so this can see it.
+ *
  * The command text is escaped by hand rather than handed to `jq` or another
  * external tool: backslashes first, then quotes, so a literal backslash in
  * the command doesn't get counted twice once the quote-escaping adds more
@@ -53,6 +64,7 @@ export function renderHistoryScript(historyFile: string): string {
     '',
     'prcli_history_preexec() {',
     '  [ -n "$PRCLI_TAB_ID" ] || return 0',
+    "  [[ $1 == ' '* ]] && return 0",
     '  local cmd=$1',
     '  cmd=${cmd//\\\\/\\\\\\\\}',
     '  cmd=${cmd//\\"/\\\\\\"}',
@@ -142,27 +154,70 @@ async function readRc(rcPath: string): Promise<string> {
 }
 
 export async function readShellHistoryState(): Promise<ShellHistoryState> {
-  const { rcPath, scriptPath } = shellPaths()
+  const { rcPath, scriptPath, historyFile } = shellPaths()
   return {
     installed: isInstalled(await readRc(rcPath)),
     rcPath,
     scriptPath,
+    historyFile,
     pending: block(scriptPath),
   }
+}
+
+/**
+ * Replace `rcPath` with `next`, keeping a dated copy of what was there.
+ *
+ * Both of this module's writes go through here, and neither writes at all
+ * when `next` already matches what is on disk. That is what keeps a reinstall
+ * from leaving a `.bak` behind every time it is clicked, and it is why the
+ * backups that DO exist each mark a real change to the file.
+ *
+ * The timestamp in the name is `backupIfPresent`'s, and the reason is the one
+ * given where `installHooks` calls it: a second install months later must not
+ * overwrite the copy that predates PRCLI touching this file at all.
+ */
+async function writeRc(rcPath: string, current: string, next: string): Promise<void> {
+  if (next === current) return
+  await backupIfPresent(rcPath)
+  await writeFile(rcPath, next, 'utf8')
+}
+
+/**
+ * Create the history file, or tighten an existing one, at 0600.
+ *
+ * The hook appends with `>>`, and a file the shell creates that way lands at
+ * `0666 & ~umask`: measured on macOS with the default `umask 022`, that is
+ * 0644. Every local account on a Mac is in group `staff`, so 0644 means the
+ * other accounts on the machine can read a verbatim log of every command run
+ * in every PRCLI shell pane. zsh does not leave its own `~/.zsh_history` that
+ * way, and this file holds the same commands.
+ *
+ * Creating it here means the hook's first append inherits this mode rather
+ * than choosing one. `flag: 'a'` makes the create a no-op when the file is
+ * already there, and `mode` applies only when a file is created, so the
+ * `chmod` is what fixes a file an earlier version of this app left at 0644.
+ */
+async function secureHistoryFile(historyFile: string): Promise<void> {
+  await mkdir(dirname(historyFile), { recursive: true })
+  await writeFile(historyFile, '', { flag: 'a', mode: 0o600 })
+  await chmod(historyFile, 0o600)
 }
 
 /** Writes the snippet and appends the marker block to `~/.zshrc`. Safe to call repeatedly: `merge` is idempotent, and the script is rewritten every time so an upgrade cannot leave an older copy behind. */
 export async function installShellHistory(): Promise<ShellHistoryState> {
   const { rcPath, scriptPath, historyFile } = shellPaths()
+  const current = await readRc(rcPath)
   await mkdir(dirname(scriptPath), { recursive: true })
   await writeFile(scriptPath, renderHistoryScript(historyFile), 'utf8')
-  await writeFile(rcPath, merge(await readRc(rcPath), scriptPath), 'utf8')
+  await secureHistoryFile(historyFile)
+  await writeRc(rcPath, current, merge(current, scriptPath))
   return readShellHistoryState()
 }
 
 /** Removes the marker block from `~/.zshrc`. The script itself is left on disk, same as `uninstallHooks` leaves its script: it does nothing once nothing sources it, and leaving it means a reinstall needs no rewrite. */
 export async function uninstallShellHistory(): Promise<ShellHistoryState> {
   const { rcPath } = shellPaths()
-  await writeFile(rcPath, unmerge(await readRc(rcPath)), 'utf8')
+  const current = await readRc(rcPath)
+  await writeRc(rcPath, current, unmerge(current))
   return readShellHistoryState()
 }

@@ -155,7 +155,7 @@ const run = promisify(execFile)
  * usual side effects, reading a startup file and appending to a history
  * file, off the developer's real `~/.zshrc` and `~/.zsh_history`.
  */
-async function recordViaZsh(command: string): Promise<string> {
+async function recordViaZsh(commands: string[]): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'prcli-hist-'))
   const historyFile = join(dir, 'history.jsonl')
   const scriptFile = join(dir, 'prcli-history.zsh')
@@ -168,14 +168,14 @@ async function recordViaZsh(command: string): Promise<string> {
       HISTFILE: join(dir, '.zsh_history'),
     },
   })
-  spawned.child.stdin?.end(`source ${scriptFile}\n${command}\nexit\n`)
+  spawned.child.stdin?.end(`source ${scriptFile}\n${commands.join('\n')}\nexit\n`)
   await spawned
   return readFile(historyFile, 'utf8')
 }
 
 describe('the zsh snippet', () => {
   it('records a command as a parseable entry carrying cwd and tab id', async () => {
-    const written = await recordViaZsh('true')
+    const written = await recordViaZsh(['true'])
     const entries = parseHistory(written)
     const recorded = entries.find((e) => e.cmd.includes('true'))
     expect(recorded).toBeDefined()
@@ -188,9 +188,30 @@ describe('the zsh snippet', () => {
   // written line into invalid JSON, so parseHistory silently drops it and
   // the command never shows up in the overlay.
   it('escapes double quotes and backslashes so the line stays parseable', async () => {
-    const written = await recordViaZsh(String.raw`echo "a\"b" > /dev/null`)
+    const written = await recordViaZsh([String.raw`echo "a\"b" > /dev/null`])
     const entries = parseHistory(written)
     expect(entries.some((e) => e.cmd.includes('echo'))).toBe(true)
+  }, 20_000)
+
+  /*
+   * The one gesture people use to keep a secret out of a shell log.
+   *
+   * `preexec` fires for every interactive command, before and independently of
+   * whether zsh will store it, so `HIST_IGNORE_SPACE` has no effect on what
+   * this hook writes. Without the guard the hook now carries, a command
+   * deliberately typed with a leading space would be absent from
+   * `~/.zsh_history` and present in `history.jsonl`.
+   *
+   * Both commands run in one shell, and the plain one is asserted present. A
+   * test that only checked for the absence of the spaced command would pass on
+   * a hook that recorded nothing at all, which is a state this file has to be
+   * able to tell apart from a working one.
+   */
+  it('does not record a command typed with a leading space', async () => {
+    const written = await recordViaZsh([' echo prcli-spaced', 'echo prcli-plain'])
+    const recorded = parseHistory(written).map((e) => e.cmd)
+    expect(recorded).toContain('echo prcli-plain')
+    expect(recorded.filter((cmd) => cmd.includes('prcli-spaced'))).toEqual([])
   }, 20_000)
 
   it('records nothing when PRCLI_TAB_ID is absent', async () => {
