@@ -136,6 +136,14 @@ export async function launchApp(opts: {
       // but a suite resolving against the real one asserts against whatever
       // was installed that week.
       PRCLI_CLAUDE_HOME: opts.claudeHome,
+      // Off in every spec. `scheduleUpdateChecks` otherwise fires ten seconds
+      // after each launch, and every spec here launches a real app, so the
+      // suite would put a request on api.github.com per launch and its
+      // behaviour would depend on GitHub being reachable and on the 60/hour
+      // rate limit. Once the update bar exists, an `available` reply would also
+      // paint a bar over whatever the spec was asserting on, nondeterministically
+      // and in specs that have nothing to do with updates.
+      PRCLI_UPDATE_CHECK: '0',
     },
   })
 }
