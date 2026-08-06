@@ -103,6 +103,28 @@ test('names its rc and script, shows the real pending block, and round-trips the
   const scriptPath = pathsText.match(/sources (\S+prcli-history\.zsh)\.$/)?.[1]
   if (!scriptPath) throw new Error(`could not extract scriptPath from "${pathsText}"`)
 
+  /*
+   * The consent copy, and the reason it is asserted here rather than left to a
+   * reader of the component.
+   *
+   * Installing starts a permanent record of every command typed in a shell
+   * pane. Everything else on this row describes edits to two files the user
+   * asked for; none of it says that. This is the only screen in the app that
+   * mentions the feature, and the pending block below it shows only the
+   * `source` line, so a user reading the exact text on offer still would not
+   * find out. Three separate facts are checked because dropping any one of
+   * them leaves the row misleading rather than merely terse: where the record
+   * is kept, how to keep one command out of it, and that uninstalling is not
+   * deletion.
+   *
+   * The path is the sharp end. It is this spec's own temp config directory,
+   * so no fixed string typed into the component could satisfy it.
+   */
+  const disclosure = await page.getByTestId('shell-history-disclosure').innerText()
+  expect(disclosure).toContain(join(configDir, 'history.jsonl'))
+  expect(disclosure).toContain('leading space')
+  expect(disclosure).toContain('leaves the file')
+
   // The pending block shown on screen is what `block()` actually produces
   // for that script path, not a lookalike string typed into the component.
   await expect(page.getByTestId('shell-history-pending')).toHaveText(block(scriptPath))

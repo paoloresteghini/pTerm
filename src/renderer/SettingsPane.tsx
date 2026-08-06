@@ -166,7 +166,15 @@ export function SettingsPane({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent data-testid="settings-pane">
+      {/* Bounded and scrollable, which it was not until the shell-history row
+          grew its disclosure paragraph. `DialogContent` centres itself with a
+          -50% translate and sets no height, so a dialog taller than the window
+          hangs off both ends with no way to reach either: measured 2026-08-06,
+          the Updates row's `Check now` button went out of the viewport and
+          Playwright's own scroll-into-view could not bring it back, because
+          there was no scroll container to scroll. Five sections is already
+          more than a short window holds, so this is not about one paragraph. */}
+      <DialogContent data-testid="settings-pane" className="scroll-thin max-h-[85vh] overflow-y-auto">
         <DialogTitle className="mb-3 text-xs uppercase tracking-wider text-faint">
           Settings
         </DialogTitle>
@@ -258,6 +266,21 @@ export function SettingsPane({
               <p className="mb-2 text-[11px] text-muted">
                 Only takes effect in shell panes opened after you install it. Panes already open
                 will not record anything until you close and reopen them.
+              </p>
+
+              {/* The consent copy. Everything above this describes what the
+                  install does to two files the user already knows about; this
+                  is the part that says a new file starts being written, what
+                  goes into it, how to keep one command out of it, and what
+                  Uninstall does not do. Written here because there is nowhere
+                  else: this row is the only screen in the app that mentions
+                  the feature at all, and the pending block below shows only
+                  the `source` line, so reading the exact text on offer does
+                  not reveal any of it either. */}
+              <p data-testid="shell-history-disclosure" className="mb-2 text-[11px] text-muted">
+                Records every command run in shell panes to {shellHistory.historyFile}, with no
+                size limit. A command typed with a leading space is not recorded. Uninstalling
+                stops the recording and leaves the file, which nothing in this app deletes.
               </p>
 
               <pre
