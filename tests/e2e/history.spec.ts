@@ -2,7 +2,7 @@
  * The history overlay, from the one key that opens it to what ends up on the
  * shell's prompt.
  *
- * Four tests on the `prcli-e2e-history` socket, each launching its own app so
+ * Five tests on the `prcli-e2e-history` socket, each launching its own app so
  * no test inherits a page another one typed into. Every one of them seeds
  * `history.jsonl` directly rather than running commands in a pane: the file is
  * what the zsh hook writes, the overlay reads nothing else, and seeding it
@@ -44,10 +44,11 @@
  * - **a `claude`, `preset` or `editor` pane passing Up through.** Only the
  *   `shell` branch and the empty-list branch of the passthrough rule are
  *   pressed here; the pane-type branch is read off `App.tsx` and not executed;
- * - **the relative timestamps.** Rows are matched by command text, so the
- *   `2h ago` half of a row is drawn here and never asserted on. `historyAgo`
- *   in `HistoryOverlay.tsx` is a pure function of two numbers and has no test
- *   anywhere as of this file being written;
+ * - **which unit a relative time picks.** A row's `2h ago` half is asserted
+ *   here only for its shape, in the scope test. The boundaries at 60 seconds,
+ *   60 minutes and 24 hours are `tests/unit/historyAgo.test.ts`, because the
+ *   seconds either side of each of them are one apart and nothing that launches
+ *   an app can pin a clock;
  * - **anything about the developer's real shell history.** The panes here run
  *   the machine's real login shell with the developer's own rc file, the way
  *   every other e2e spec's panes do. Nothing here submits a line to it: the one
@@ -62,9 +63,17 @@ import { launchApp, killServer, sessionNames, capturePane } from './harness'
 
 const SOCKET = 'prcli-e2e-history'
 
-/** The command texts the seeds use. See the header for why they are prefixed. */
-const OLDER = 'echo hist-older'
+/**
+ * The command texts the seeds use. See the header for why they are prefixed.
+ *
+ * `BOTTOM` exists so the list is three rows deep rather than two, which is what
+ * lets the clamp be tested by a press that MOVES the selection. No token is a
+ * substring of another, because half the assertions here are substring searches
+ * against a whole screen.
+ */
 const NEWER = 'echo hist-newer'
+const OLDER = 'echo hist-older'
+const BOTTOM = 'echo hist-bottom'
 
 let userDataDir: string
 let configDir: string
@@ -184,8 +193,9 @@ test.afterEach(async () => {
 
 test('Up opens history, arrows move, and Enter types the command without running it', async () => {
   await seedHistory([
-    { ts: 1, cwd: projectCwd, cmd: OLDER },
-    { ts: 2, cwd: projectCwd, cmd: NEWER },
+    { ts: 1, cwd: projectCwd, cmd: BOTTOM },
+    { ts: 2, cwd: projectCwd, cmd: OLDER },
+    { ts: 3, cwd: projectCwd, cmd: NEWER },
   ])
   const { window, session } = await openPane()
 
@@ -196,13 +206,37 @@ test('Up opens history, arrows move, and Enter types the command without running
   await expect(window.getByTestId('history-row-0')).toHaveAttribute('data-selected', 'true')
   await expect(window.getByTestId('history-row-0')).toHaveText(new RegExp(NEWER))
   await expect(window.getByTestId('history-row-1')).toHaveText(new RegExp(OLDER))
+  await expect(window.getByTestId('history-row-2')).toHaveText(new RegExp(BOTTOM))
 
   // A real change to wait on: row 1 reads `false` until this press.
   await window.keyboard.press('ArrowDown')
   await expect(window.getByTestId('history-row-1')).toHaveAttribute('data-selected', 'true')
   await expect(window.getByTestId('history-row-0')).toHaveAttribute('data-selected', 'false')
 
-  // Clamped at the end rather than wrapping back to the top.
+  await window.keyboard.press('ArrowDown')
+  await expect(window.getByTestId('history-row-2')).toHaveAttribute('data-selected', 'true')
+
+  /*
+   * Both clamps, each proved by a press that MOVES the selection.
+   *
+   * Asserting the clamp directly cannot work: a clamp is a non-change, so
+   * `toHaveAttribute` after the clamping press would already hold before it and
+   * an auto-retrying assertion would satisfy itself without waiting for
+   * anything. This asks the question one press later instead. From the bottom
+   * row, an extra Down and then an Up must land on row 1; a wrap would have
+   * taken the extra Down to row 0 and the Up would have stayed there, so the
+   * final press is the one that changes row 1 from `false` to `true` and the
+   * two implementations disagree about the row it changes.
+   */
+  await window.keyboard.press('ArrowDown')
+  await window.keyboard.press('ArrowUp')
+  await expect(window.getByTestId('history-row-1')).toHaveAttribute('data-selected', 'true')
+
+  // The same shape at the top, which nothing tested before: up to row 0, one
+  // more Up that must do nothing, then a Down that must reach row 1. A wrap at
+  // the top would be at row 2 by then and the Down would clamp there.
+  await window.keyboard.press('ArrowUp')
+  await window.keyboard.press('ArrowUp')
   await window.keyboard.press('ArrowDown')
   await expect(window.getByTestId('history-row-1')).toHaveAttribute('data-selected', 'true')
 
@@ -222,13 +256,30 @@ test('Up opens history, arrows move, and Enter types the command without running
   // pick left behind.
   expect(await paneLines(session)).not.toContain('hist-older')
 
-  // Half three: the pane can be typed at again. Without this, an overlay that
-  // took focus on mount and never gave it back would satisfy everything above
-  // and leave a pane the keyboard could not reach.
+  /*
+   * Half three: the pane can be typed at again, and the screen is still clean
+   * one keystroke later.
+   *
+   * The order of these three is deliberate and was arrived at by running the
+   * sabotage. The weak marker poll goes FIRST because it is the only one of the
+   * three that a submitted command would not also break, so it is what lets
+   * execution reach the reading below it. The exact-line reading then runs
+   * against a screen the marker proves is strictly later than the first
+   * reading's. The strong same-line form goes last, where nothing depends on
+   * reaching it.
+   */
   await window.keyboard.type('REFOCUSED')
   await expect
     .poll(async () => await capturePane(SOCKET, session), { timeout: 20_000 })
-    .toContain(`${OLDER}REFOCUSED`)
+    .toContain('REFOCUSED')
+
+  // Still not run, on that later screen.
+  expect(await paneLines(session)).not.toContain('hist-older')
+
+  // And the marker landed on the SAME line as the picked command, which is a
+  // stronger claim than either of the two above: it says the prompt was never
+  // submitted AND that the keyboard came back to the pane it was taken from.
+  expect(await capturePane(SOCKET, session)).toContain(`${OLDER}REFOCUSED`)
 })
 
 test('Esc dismisses without typing anything', async () => {
@@ -251,6 +302,67 @@ test('Esc dismisses without typing anything', async () => {
     .poll(async () => await capturePane(SOCKET, session), { timeout: 20_000 })
     .toContain('DISMISSED')
   expect(await capturePane(SOCKET, session)).not.toContain('hist-')
+})
+
+/*
+ * The mouse, which nothing touched until this test and which is how the
+ * overlay's worst state was reached.
+ *
+ * Every key the overlay handles arrives through a React `onKeyDown` on its own
+ * container, so it only fires for events targeted at that container or inside
+ * it. A click on a row or on the padding used to land on a non-focusable
+ * element, sending DOM focus to `body`, which is an ancestor rather than a
+ * descendant: from there Escape did nothing, the arrows did nothing, and a
+ * second Up was refused because the overlay was already open. The list sat over
+ * the pane and the only way out was to switch tab.
+ */
+test('a click keeps the keyboard, a click on a row picks it, and a click on the terminal dismisses', async () => {
+  await seedHistory([
+    { ts: 1, cwd: projectCwd, cmd: OLDER },
+    { ts: 2, cwd: projectCwd, cmd: NEWER },
+  ])
+  const { window, session } = await openPane()
+
+  await window.keyboard.press('ArrowUp')
+  await expect(window.getByTestId('history-overlay')).toBeVisible()
+
+  // A click on a part of the overlay that is not a row must leave the keyboard
+  // where it was. The arrow afterwards is the proof: it can only move the
+  // selection if the keydown still reaches the container's handler.
+  await window.getByTestId('history-scope').click()
+  await window.keyboard.press('ArrowDown')
+  await expect(window.getByTestId('history-row-1')).toHaveAttribute('data-selected', 'true')
+
+  // And the exit still works after a click, which is the part that made the old
+  // state a trap rather than a nuisance.
+  await window.keyboard.press('Escape')
+  await expect(window.getByTestId('history-overlay')).toBeHidden()
+
+  // Clicking a row picks that row, not the selected one: this reopens at row 0
+  // and clicks row 1.
+  await window.keyboard.press('ArrowUp')
+  await expect(window.getByTestId('history-overlay')).toBeVisible()
+  await expect(window.getByTestId('history-row-0')).toHaveAttribute('data-selected', 'true')
+  await window.getByTestId('history-row-1').click()
+  await expect(window.getByTestId('history-overlay')).toBeHidden()
+  await expect
+    .poll(async () => await capturePane(SOCKET, session), { timeout: 20_000 })
+    .toContain(OLDER)
+
+  // The one way focus can leave the overlay that no mousedown of its own can
+  // stop: a click on the part of the terminal still showing above it. xterm
+  // takes focus, so this counts as dismissing the overlay rather than stranding
+  // it. Positioned near the top corner because the overlay owns the bottom.
+  await window.keyboard.press('ArrowUp')
+  await expect(window.getByTestId('history-overlay')).toBeVisible()
+  await window.getByTestId('terminal').click({ position: { x: 20, y: 8 } })
+  await expect(window.getByTestId('history-overlay')).toBeHidden()
+
+  // And the pane is live, so the dismissal did not leave the keyboard nowhere.
+  await window.keyboard.type('AFTERCLICK')
+  await expect
+    .poll(async () => await capturePane(SOCKET, session), { timeout: 20_000 })
+    .toContain('AFTERCLICK')
 })
 
 test('typing filters the list, and Tab widens the scope to every project', async () => {

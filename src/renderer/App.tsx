@@ -276,11 +276,21 @@ export function App() {
    * IPC round trip. So the list for the current project is kept fetched, and
    * the synchronous answer is a length check on something already in hand.
    *
-   * The cost of that is honest and worth stating: for the first moment after a
-   * project is selected, before its fetch resolves, this holds no entries and
-   * Up goes to the shell. That is the same behaviour as a project with no
-   * history, which is the documented passthrough, so the failure mode of the
-   * race is the safe direction.
+   * The cost of that is honest and worth stating, and it runs in both
+   * directions.
+   *
+   * UNDER-TRIGGERING: for the first moment after a project is selected, before
+   * its fetch resolves, this holds no entries and Up goes to the shell. That is
+   * exactly what a project with no history does, which is the documented
+   * passthrough, so this direction is indistinguishable from correct.
+   *
+   * OVER-TRIGGERING: the answer comes from the last fetch, so if the file has
+   * been emptied or rewritten since, Up can swallow the key on a list that has
+   * gone, open, and then draw the empty row once the refetch lands. That is the
+   * state the spec's third passthrough rule exists to prevent. It needs the
+   * history file to lose every entry for this project between two Ups, and the
+   * only alternative is to make Up wait on IPC before deciding, which would put
+   * a round trip in front of a keystroke the shell may be about to receive.
    */
   const [historyPane, setHistoryPane] = useState<string | null>(null)
   const [historyScope, setHistoryScope] = useState<HistoryScope>('project')

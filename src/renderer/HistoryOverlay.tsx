@@ -1,27 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from './lib/cn'
+import { historyAgo } from './lib/historyAgo'
 import type { HistoryEntry, HistoryScope } from '../shared/ipc'
-
-/**
- * How long ago `ts` happened, in the coarsest unit that still says something.
- *
- * `ts` is epoch SECONDS, which is what the zsh hook writes, while `now` is
- * epoch milliseconds because that is what `Date.now()` returns; the conversion
- * is here so no caller has to remember which side it is on.
- *
- * A `ts` in the future reads as `just now` rather than as a negative age. The
- * clock that wrote it is the shell's and the clock reading it is this window's,
- * and they are allowed to disagree by a second or two.
- */
-export function historyAgo(ts: number, now: number): string {
-  const seconds = Math.floor(now / 1000) - ts
-  if (seconds < 60) return 'just now'
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  return `${Math.floor(hours / 24)}d ago`
-}
 
 /**
  * The list of past commands, rising from the bottom edge of one pane.
@@ -77,6 +57,13 @@ export function HistoryOverlay({
   // `entries` would yank the selection back to the top under a user who had
   // already pressed Down. Scope and filter are the only two things that
   // actually replace the list, and filter resets at the keystroke below.
+  //
+  // The accepted cost, since it is not free: `selected` is a position, so if a
+  // refetch lands with a NEW entry at the front, the highlight stays on the
+  // same row number and is now pointing at a different command. That needs a
+  // command to be recorded in the second or so the overlay is open, and the
+  // alternative is a selection that jumps under the user on every refetch,
+  // which happens on every single open.
   useEffect(() => {
     setSelected(0)
   }, [scope])
@@ -133,6 +120,37 @@ export function HistoryOverlay({
       // this overlay is anchored to and destroy its session.
       data-shortcuts="off"
       onKeyDown={onKeyDown}
+      // Every key this overlay handles arrives through `onKeyDown` above, and
+      // that is a REACT handler on this element: it only fires for events whose
+      // target is this element or something inside it. DOM focus therefore has
+      // to stay in here, and a click is what takes it away. A mousedown on a
+      // row or on the padding lands on a non-focusable element, focus goes to
+      // `body`, and `body` is an ANCESTOR of this div rather than a descendant,
+      // so nothing typed afterwards reaches this handler. The overlay would
+      // then sit there covering the pane with no key that could shift it: Esc
+      // is this handler's, and a second Up is refused by `requestHistory`
+      // because the overlay is already open.
+      //
+      // Preventing the default on mousedown is what keeps the focus where it
+      // is. The filter box is excluded so that clicking into it, or dragging a
+      // selection across text already in it, behaves the way a text field
+      // should.
+      onMouseDown={(event) => {
+        if (event.target !== inputRef.current) event.preventDefault()
+      }}
+      // The other half of the same problem, and the half `onMouseDown` cannot
+      // reach: a click on the part of the terminal still visible above this
+      // overlay gives focus to xterm's textarea, which is outside this div.
+      // Rather than leave the overlay stranded, treat focus leaving it as a
+      // dismissal, which is what clicking away from a popover means anyway.
+      //
+      // Only for a named `relatedTarget`. A null one means focus left the
+      // document altogether, which is what switching to another application
+      // does, and coming back should find the overlay where it was left.
+      onBlur={(event) => {
+        const next = event.relatedTarget
+        if (next instanceof Node && !event.currentTarget.contains(next)) onDismiss()
+      }}
       // Above the divider strips, which sit in an overlay of their own at z-20
       // on the group container (`App.tsx`). Equal z-index would hand it to the
       // one later in the document, which is theirs.
@@ -150,9 +168,14 @@ export function HistoryOverlay({
             key={`${entry.ts}:${entry.cmd}`}
             data-testid={`history-row-${row}`}
             data-selected={row === index ? 'true' : 'false'}
+            // Clicking a row picks it, which is the obvious thing to try. The
+            // mousedown that precedes this click had its default prevented on
+            // the container, so focus never moved and `onPick` runs with the
+            // overlay still whole.
+            onClick={() => onPick(entry.cmd)}
             className={cn(
-              'flex gap-2 px-2 py-0.5',
-              row === index ? 'bg-border text-fg' : 'text-muted',
+              'flex cursor-default gap-2 px-2 py-0.5',
+              row === index ? 'bg-border text-fg' : 'text-muted hover:bg-border hover:text-fg',
             )}
           >
             <span className="flex-1 truncate font-mono">{entry.cmd}</span>

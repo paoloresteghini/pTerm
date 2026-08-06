@@ -107,8 +107,18 @@ export function Terminal({
     // something to put in its place. Returning `true` is xterm's untouched
     // behaviour, so every branch that is not "a bare Up that opened the
     // overlay" leaves this terminal exactly as it was before this handler
-    // existed. A modified Up in particular is left alone: ⌥⌘↑ is the app's own
-    // pane navigation and ⇧↑ is xterm's selection.
+    // existed.
+    //
+    // A modified Up is left alone because every combination already means
+    // something. ⌥⌘↑ is this app's own pane navigation, in the window keydown
+    // handler in `App.tsx`. The rest belong to the pane: read in
+    // `node_modules/@xterm/xterm/lib/xterm.js` on 2026-08-06,
+    // `evaluateKeyboardEvent` builds `(shiftKey?1:0)|(altKey?2:0)|(ctrlKey?4:0)|(metaKey?8:0)`
+    // and `case 38` emits `ESC[1;<that+1>A` whenever it is non-zero, so ⇧↑, ⌃↑
+    // and ⌥↑ are each a DISTINCT sequence sent to whatever is running in the
+    // pane. Swallowing one would take a keystroke away from that program.
+    // (⌘↑ is the exception xterm makes for itself: `case 38` breaks on
+    // `metaKey` and sends nothing at all.)
     term.attachCustomKeyEventHandler((event) => {
       if (event.type !== 'keydown') return true
       if (event.key !== 'ArrowUp') return true
