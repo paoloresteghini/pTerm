@@ -1340,6 +1340,7 @@ export function registerIpc(
     realUpdateService(app.getVersion()).check({ respectSkip: false }),
   )
   ipcMain.handle(CHANNELS.skipUpdate, (_event, version: string) => writeSkipped(version))
+  ipcMain.handle(CHANNELS.appVersion, () => app.getVersion())
 
   // Deliberately not inside `serialise`: this reads `~/.claude`, never PRCLI's
   // own config file, so it has nothing to serialise against — the same

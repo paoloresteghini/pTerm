@@ -82,6 +82,7 @@ const api: PrcliApi = {
   },
   checkForUpdate: (): Promise<UpdateCheckResult> => ipcRenderer.invoke(CHANNELS.checkForUpdate),
   skipUpdate: (version: string): Promise<void> => ipcRenderer.invoke(CHANNELS.skipUpdate, version),
+  appVersion: (): Promise<string> => ipcRenderer.invoke(CHANNELS.appVersion),
 }
 
 contextBridge.exposeInMainWorld('prcli', api)

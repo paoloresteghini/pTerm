@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { HooksState, NotificationConfig, Rule, TabState } from '../shared/ipc'
+import type { HooksState, NotificationConfig, Rule, TabState, UpdateCheckResult } from '../shared/ipc'
 import { Dialog, DialogContent, DialogTitle } from './ui/Dialog'
 import { Button } from './ui/Button'
 import { globalRuleOf, setGlobalRule } from './globalRule'
@@ -33,6 +33,19 @@ export function SettingsPane({
   // write must say so rather than leaving an unhandled rejection and a
   // checkbox that silently reverts the next time this pane opens.
   const [notifError, setNotifError] = useState<string | null>(null)
+  const [version, setVersion] = useState<string | null>(null)
+  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null)
+  const [checking, setChecking] = useState(false)
+
+  useEffect(() => {
+    // Fire and forget, like the hooks read beside it: a version that fails to
+    // arrive leaves an ellipsis, which is a better failure than a dialog that
+    // will not open.
+    window.prcli
+      .appVersion()
+      .then(setVersion)
+      .catch(() => undefined)
+  }, [])
 
   // Refetched every time the pane opens: another PRCLI window, or a hand
   // edit, could have changed the file since it was last read.
@@ -236,6 +249,51 @@ export function SettingsPane({
             />
             Mute toasts for the tab you are already looking at
           </label>
+        </section>
+
+        <section className="mb-4 border-b border-border pb-3">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-[11px] uppercase tracking-wider text-faint">Updates</span>
+            <span data-testid="update-current-version" className="text-[11px] text-muted">
+              {version ?? '…'}
+            </span>
+          </div>
+
+          {/* The one place an update failure is visible. Everywhere else a
+              failed check is silent by design; here the user pressed a button,
+              and a button that answers nothing reads as broken. */}
+          {updateResult ? (
+            <p data-testid="update-check-result" className="mb-2 text-[11px] text-muted">
+              {updateResult.status === 'available' || updateResult.status === 'skipped'
+                ? `PRCLI ${updateResult.info?.version} is available`
+                : updateResult.status === 'current'
+                  ? 'PRCLI is up to date'
+                  : `Could not check: ${updateResult.message ?? 'unknown reason'}`}
+            </p>
+          ) : null}
+
+          <div className="flex gap-2">
+            <Button
+              data-testid="update-check-now"
+              disabled={checking}
+              onClick={() => {
+                setChecking(true)
+                window.prcli
+                  .checkForUpdate()
+                  .then(setUpdateResult)
+                  .catch((reason: unknown) =>
+                    setUpdateResult({
+                      status: 'failed',
+                      info: null,
+                      message: errorMessage(reason),
+                    }),
+                  )
+                  .finally(() => setChecking(false))
+              }}
+            >
+              {checking ? 'Checking…' : 'Check now'}
+            </Button>
+          </div>
         </section>
       </DialogContent>
     </Dialog>

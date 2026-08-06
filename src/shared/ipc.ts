@@ -47,6 +47,7 @@ export const CHANNELS = {
   updateAvailable: 'prcli:updateAvailable',
   checkForUpdate: 'prcli:checkForUpdate',
   skipUpdate: 'prcli:skipUpdate',
+  appVersion: 'prcli:appVersion',
 } as const
 
 /**
@@ -699,4 +700,15 @@ export interface PrcliApi {
   checkForUpdate(): Promise<UpdateCheckResult>
   /** Never mention this version again. Persisted outside the workspace config. */
   skipUpdate(version: string): Promise<void>
+  /**
+   * The running build's version, from `package.json` by way of
+   * `app.getVersion()`.
+   *
+   * Asked for rather than baked into the bundle at build time: a version
+   * compiled into the renderer would be whatever Vite saw, which in a dev run
+   * is the source tree and in a packaged run is the same file main reads. One
+   * of those two would eventually drift, and the drift would show up as the
+   * app comparing releases against a version it is not.
+   */
+  appVersion(): Promise<string>
 }
