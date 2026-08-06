@@ -54,10 +54,11 @@
  *   every other e2e spec's panes do. Nothing here submits a line to it: the one
  *   Enter pressed belongs to the overlay, and every marker typed afterwards is
  *   left sitting on the prompt unexecuted. The passthrough test below does
- *   depend on that history being non-empty — a real interactive shell recalls
+ *   depend on that history being non-empty: a real interactive shell recalls
  *   something onto the prompt when Up actually reaches it, and that is the
- *   only way this file can tell a passed-through Up from a swallowed one that
- *   also never opened an overlay — but it never reads what gets recalled.
+ *   only way this file can tell a passed-through Up from a swallowed one
+ *   that also never opened an overlay. It never reads what gets recalled,
+ *   though.
  */
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -424,7 +425,7 @@ test('Up reaches the shell when there is no history to show', async () => {
   // The overlay's absence, checked below, is only a third of this: it is
   // exactly what a swallowed Up that never opened anything would also look
   // like. Measured 2026-08-06 by sabotaging the passthrough guard to always
-  // report "handled" — the overlay still never opened (there is nothing to
+  // report "handled": the overlay still never opened (there is nothing to
   // show it), and this test stayed green with only the two checks that used
   // to follow. What a swallowed Up cannot do, and a passed-through one can, is
   // reach zsh's own line editor: this real login shell always has SOME native
