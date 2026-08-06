@@ -72,14 +72,15 @@ test.afterAll(async () => {
 })
 
 /**
- * The check really runs and really hits the network: nothing stubs it,
- * `PRCLI_UPDATE_CHECK` is not set by this harness, and the repo this build
- * checks against (`paoloresteghini/PRCLI`) does not exist yet. So today the
- * check genuinely 404s and resolves `failed`, which is why the result
- * assertion below is a three-way alternation rather than one string. It is
- * not sloppiness: it is what the button can honestly promise before the
- * check has a real repo, and after one exists the same test still passes on
- * whichever of the three outcomes is true that day.
+ * The check really runs and really hits the network: nothing stubs the
+ * `checkForUpdate` handler's own HTTP call (`PRCLI_UPDATE_CHECK` only gates
+ * the background poller in `src/main/update/schedule.ts`, never this
+ * button), and the repo it checks against (`paoloresteghini/PRCLI`) does not
+ * exist yet. So today the check genuinely 404s and resolves `failed`, which
+ * is why the result assertion below is a three-way alternation rather than
+ * one string. It is not sloppiness: it is what the button can honestly
+ * promise before the check has a real repo, and after one exists the same
+ * test still passes on whichever of the three outcomes is true that day.
  */
 test('settings names the version and answers a check', async () => {
   await expect(page.getByTestId('titlebar')).toBeVisible()

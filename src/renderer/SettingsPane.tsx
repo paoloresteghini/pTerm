@@ -3,6 +3,7 @@ import type { HooksState, NotificationConfig, Rule, TabState, UpdateCheckResult 
 import { Dialog, DialogContent, DialogTitle } from './ui/Dialog'
 import { Button } from './ui/Button'
 import { globalRuleOf, setGlobalRule } from './globalRule'
+import { updateResultText } from './lib/updateResultText'
 
 const STATES: TabState[] = ['waiting', 'crashed', 'idle', 'thinking', 'running', 'ended']
 const SOUNDS = ['', 'Funk', 'Glass', 'Basso', 'Ping', 'Submarine']
@@ -38,9 +39,10 @@ export function SettingsPane({
   const [checking, setChecking] = useState(false)
 
   useEffect(() => {
-    // Fire and forget, like the hooks read beside it: a version that fails to
-    // arrive leaves an ellipsis, which is a better failure than a dialog that
-    // will not open.
+    // Unlike the hooks read just below, this swallows its error rather than
+    // surfacing one: the version is decoration next to a dialog that already
+    // works, not something the user asked for, so a failed read just leaves
+    // the ellipsis in place instead of needing a place to show an error.
     window.prcli
       .appVersion()
       .then(setVersion)
@@ -264,11 +266,7 @@ export function SettingsPane({
               and a button that answers nothing reads as broken. */}
           {updateResult ? (
             <p data-testid="update-check-result" className="mb-2 text-[11px] text-muted">
-              {updateResult.status === 'available' || updateResult.status === 'skipped'
-                ? `PRCLI ${updateResult.info?.version} is available`
-                : updateResult.status === 'current'
-                  ? 'PRCLI is up to date'
-                  : `Could not check: ${updateResult.message ?? 'unknown reason'}`}
+              {updateResultText(updateResult)}
             </p>
           ) : null}
 
