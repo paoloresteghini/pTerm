@@ -134,17 +134,6 @@ export function unmerge(rc: string): string {
  * whatever it actually held. Mirrors `hooks/install.ts`'s `readSettings` for
  * the same reason.
  */
-/**
- * Read `rcPath`, or `''` when there is none.
- *
- * Only ENOENT counts as "no file". Anything else (permissions, a full disk,
- * a path that is a directory) is rethrown rather than treated the same way:
- * `merge`/`unmerge` build their write from this read, so mistaking "I could
- * not read the real file" for "there is no file yet" would overwrite an
- * existing, unreadable `~/.zshrc` with just the new block, discarding
- * whatever it actually held. Mirrors `hooks/install.ts`'s `readSettings` for
- * the same reason.
- */
 async function readRc(rcPath: string): Promise<string> {
   try {
     return await readFile(rcPath, 'utf8')

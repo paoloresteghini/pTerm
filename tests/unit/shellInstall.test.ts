@@ -20,8 +20,10 @@ describe('the zshrc block', () => {
     expect(isInstalled(merged)).toBe(true)
   })
 
-  // Installing twice must not leave two blocks: the hook would then be
-  // registered twice and every command recorded twice.
+  // A second merge on already-merged text must return the identical string,
+  // not just an equivalent one: otherwise a second install would splice in
+  // a second copy of the block, and the zsh hook would fire twice per
+  // command.
   it('is idempotent', () => {
     const once = merge('export PATH=/usr/bin\n', script)
     const twice = merge(once, script)
