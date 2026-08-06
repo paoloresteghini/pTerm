@@ -126,6 +126,13 @@ if [[ ! -f "$ZIP" ]]; then
   exit 1
 fi
 
+# Last gate before anything leaves this machine, and the only one that opens
+# the zip a user downloads. Everything upstream (vitest, playwright, review)
+# reads the source tree, so a defect introduced by packaging itself reaches
+# users with every gate green. See scripts/verify-artifact.js for the two
+# that already did.
+node scripts/verify-artifact.js "$ZIP"
+
 git push "$REMOTE" "$RELEASE_BRANCH" --follow-tags
 gh release create "v${VERSION}" "$ZIP" --title "v${VERSION}" --generate-notes
 

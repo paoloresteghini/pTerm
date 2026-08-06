@@ -70,7 +70,21 @@ async function adHocSign(appPath: string): Promise<void> {
 
 const config: ForgeConfig = {
   packagerConfig: {
-    asar: true,
+    /**
+     * `AutoUnpackNativesPlugin` (below) keeps this glob and ORs its own onto
+     * it, and its own only ever matches files ending in `.node`. node-pty
+     * needs one more file outside the asar: `spawn-helper`, an extensionless
+     * Mach-O it executes for every pty. `lib/unixTerminal.js` resolves that
+     * helper next to whichever native module it loaded (`build/Release`
+     * here) and then rewrites `app.asar` to `app.asar.unpacked` in the
+     * resulting path. So a `spawn-helper` left inside the archive leaves
+     * that path pointing at a file that does not exist, and every session in
+     * the packaged app dies at `posix_spawnp failed.` before a shell starts.
+     * Nothing upstream of the packaged app catches it: dev and the E2E suite
+     * load node-pty straight out of `node_modules`, where the helper is an
+     * ordinary executable file on disk.
+     */
+    asar: { unpack: '**/node_modules/node-pty/build/Release/spawn-helper' },
     /**
      * Extensionless by design: Electron Packager appends the extension each
      * platform wants, `.icns` here. `src/images/icon.icns` is generated from
