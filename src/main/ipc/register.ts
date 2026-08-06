@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain, type BrowserWindow } from 'electron'
+import { app, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
 import {
   CHANNELS,
   canHaveSession,
@@ -44,6 +44,7 @@ import { listSkills } from '../skills/scan'
 import { readNote, writeNote } from '../notes/store'
 import { realUpdateService } from '../update/service'
 import { writeSkipped } from '../update/store'
+import { isOpenable } from '../update/openable'
 import { addPrompt, readPrompts, removePrompt } from '../prompts/store'
 import { listDir, readFileInside, resolveInside, writeFileInside } from '../files/tree'
 import { readBranch } from '../git/branch'
@@ -1344,6 +1345,16 @@ export function registerIpc(
   )
   ipcMain.handle(CHANNELS.skipUpdate, (_event, version: string) => writeSkipped(version))
   ipcMain.handle(CHANNELS.appVersion, () => app.getVersion())
+
+  // The URL came off the network by way of the renderer, which any renderer
+  // code could invoke this with. `parseRelease` already checks the scheme
+  // once, at the point a release enters the app; this is a second check at
+  // this handler's own boundary, since `shell.openExternal` will hand a
+  // `file:` or a custom-scheme URL to whatever claims it. See `isOpenable`.
+  ipcMain.handle(CHANNELS.openExternal, async (_event, url: string) => {
+    if (!isOpenable(url)) return
+    await shell.openExternal(url)
+  })
 
   // Deliberately not inside `serialise`: this reads `~/.claude`, never PRCLI's
   // own config file, so it has nothing to serialise against — the same

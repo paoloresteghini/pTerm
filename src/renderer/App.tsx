@@ -13,6 +13,7 @@ import { AddProjectDialog } from './AddProjectDialog'
 import { ConfirmClosePane } from './ConfirmClosePane'
 import { SettingsPane } from './SettingsPane'
 import { TitleBar } from './TitleBar'
+import { UpdateBar } from './UpdateBar'
 import { StatusBar } from './StatusBar'
 import { Welcome } from './Welcome'
 import { CommandPalette, type PaletteSession } from './CommandPalette'
@@ -44,7 +45,13 @@ import {
 import { projectMuted, toggleProjectMute } from './mute'
 import { PANE_COLOR_DEFAULT, type PaneColor } from '../shared/paneColors'
 import { ColorSwatches } from './ColorSwatches'
-import { UNSORTED_ID, type NotificationConfig, type TabDescriptor, type TabType } from '../shared/ipc'
+import {
+  UNSORTED_ID,
+  type NotificationConfig,
+  type TabDescriptor,
+  type TabType,
+  type UpdateInfo,
+} from '../shared/ipc'
 import { SEVERITY } from '../shared/status'
 
 /**
@@ -108,6 +115,11 @@ export function App() {
   // (see `dirtyPanes.ts`). Keyed by pane id rather than tab id: `TabBar` maps
   // a tab to its one pane before reading this.
   const [dirty, setDirtyPanes] = useState<DirtyPanes>({})
+  // A release newer than this build, pushed by main once it finds one. Null
+  // until then, and null again once the bar is downloaded, skipped or
+  // dismissed: none of those close the app, so there is nothing else that
+  // would clear it.
+  const [update, setUpdate] = useState<UpdateInfo | null>(null)
   // The pane `ConfirmClosePane` is asking about, or null when it is not open.
   // Only ever set by `requestClosePane` below, and only for a dirty pane.
   const [pendingClose, setPendingClose] = useState<string | null>(null)
@@ -612,6 +624,10 @@ export function App() {
     [state.panes, state.projects],
   )
 
+  // Pushed by main on its own schedule, not polled: see `onUpdateAvailable`'s
+  // own comment in `shared/ipc.ts`.
+  useEffect(() => window.prcli.onUpdateAvailable(setUpdate), [])
+
   const restartTab = useCallback(
     (tab: TabDescriptor) => {
       // No explicit cols/rows: the tab's Terminal is still mounted, so
@@ -882,6 +898,21 @@ export function App() {
       {/* Above the sidebar rather than beside it, so the strip spans the
           window and the traffic lights get a band that belongs to them. */}
       <TitleBar />
+
+      {update ? (
+        <UpdateBar
+          info={update}
+          onDownload={() => {
+            void window.prcli.openExternal(update.url)
+            setUpdate(null)
+          }}
+          onSkip={() => {
+            void window.prcli.skipUpdate(update.version)
+            setUpdate(null)
+          }}
+          onDismiss={() => setUpdate(null)}
+        />
+      ) : null}
 
       <div className="flex min-h-0 flex-1">
         {/* Left of the sidebar, so the tree reads as the outermost thing and

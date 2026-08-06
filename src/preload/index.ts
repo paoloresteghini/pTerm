@@ -80,6 +80,7 @@ const api: PrcliApi = {
   fsWrite: (projectId, relPath, text, expectedMtimeMs) =>
     ipcRenderer.invoke(CHANNELS.fsWrite, projectId, relPath, text, expectedMtimeMs),
   openEditor: (projectId, relPath) => ipcRenderer.invoke(CHANNELS.openEditor, projectId, relPath),
+  openExternal: (url: string): Promise<void> => ipcRenderer.invoke(CHANNELS.openExternal, url),
   onUpdateAvailable: (listener: (info: UpdateInfo) => void) => {
     const handler = (_event: IpcRendererEvent, payload: UpdateInfo): void => listener(payload)
     ipcRenderer.on(CHANNELS.updateAvailable, handler)

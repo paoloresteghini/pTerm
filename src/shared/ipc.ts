@@ -47,6 +47,7 @@ export const CHANNELS = {
   fsRead: 'prcli:fsRead',
   fsWrite: 'prcli:fsWrite',
   openEditor: 'prcli:openEditor',
+  openExternal: 'prcli:openExternal',
   updateAvailable: 'prcli:updateAvailable',
   checkForUpdate: 'prcli:checkForUpdate',
   skipUpdate: 'prcli:skipUpdate',
@@ -737,6 +738,15 @@ export interface PrcliApi {
    * the renderer select the new tab by the pane it was handed.
    */
   openEditor(projectId: string, relPath: string): Promise<TabDescriptor | null>
+  /**
+   * Hand a URL to the default browser.
+   *
+   * In main because the renderer has no `shell`, and narrow on purpose: the
+   * handler refuses anything that is not http(s), so a URL that arrived from
+   * the network cannot become `file:` or a custom scheme registered by another
+   * app on this machine.
+   */
+  openExternal(url: string): Promise<void>
   /**
    * A release newer than this build, pushed by main when it finds one.
    *
