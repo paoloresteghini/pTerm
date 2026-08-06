@@ -275,6 +275,12 @@ test('Needs You lists it, and clicking it lands on the tab', async () => {
   await expect(window.getByTestId('project-id-alpha')).toHaveAttribute('data-active', 'true')
 
   await expect(window.getByTestId('needs-you-count')).toHaveText('1')
+  // Finding 2 of the whole-branch review: the row's label had two halves,
+  // and every other assertion in this file addresses elements by testid,
+  // never rendered text, so a build that truncated the id clean off the row
+  // passed the whole suite. The id is what tells two tabs of the same
+  // project apart, so it has to actually be on the row.
+  await expect(window.getByTestId(`needs-${needy}`)).toContainText(needy.slice(0, 6))
   await window.getByTestId(`needs-${needy}`).click()
 
   await expect(window.getByTestId('project-id-beta')).toHaveAttribute('data-active', 'true')

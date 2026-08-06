@@ -45,16 +45,15 @@ export function NeedsYou({
               className="flex min-w-0 flex-1 cursor-default items-center gap-1.5 border-none bg-transparent px-2.5 py-0.5 text-left text-muted hover:text-fg"
             >
               <StatusDot state={status[tab.id] ?? null} testid={`ndot-${tab.id}`} />
-              <span className="truncate">
-                {project?.name ?? 'Unsorted'} · {tab.id.slice(0, 6)}
-              </span>
+              <span className="truncate">{project?.name ?? 'Unsorted'}</span>
+              <span className="shrink-0">· {tab.id.slice(0, 6)}</span>
             </button>
             <button
               data-testid={`ack-${tab.id}`}
               aria-label="Mark actioned"
               title="Mark actioned"
               onClick={() => onAcknowledge(tab)}
-              className="shrink-0 cursor-default border-none bg-transparent px-2 py-0.5 text-muted hover:text-fg"
+              className="shrink-0 cursor-default border-none bg-transparent px-1.5 py-0.5 text-muted hover:text-fg"
             >
               ✓
             </button>
