@@ -603,6 +603,53 @@ export interface GitStatus {
 /** Whether a sync got all the way through, and git's own words if it did not. */
 export type GitSyncResult = { ok: true } | { ok: false; error: string }
 
+/** Which side of the index a diff is of. */
+export type DiffSide = 'staged' | 'worktree'
+
+/**
+ * One path that differs from HEAD, from the index, or from both.
+ *
+ * `staged` and `worktree` are git's own status letters for that path (`M`,
+ * `A`, `D`, `R`, `?` for untracked, `U` for unmerged), or null when that side
+ * has nothing to say. A path modified in both the index and the worktree has
+ * both set, and appears in both lists in `GitChanges`, which is what git
+ * reports and what VS Code shows.
+ */
+export interface GitFileChange {
+  path: string
+  staged: string | null
+  worktree: string | null
+  /** Where a rename came from. Only ever set alongside a staged `R`. */
+  renamedFrom?: string
+}
+
+/**
+ * Everything the git column draws, from one `git status` run.
+ *
+ * `head` is the commit the working tree was read against, and exists so a
+ * commit can refuse to run if the branch moved underneath it. It is null in a
+ * repository with no commits yet, where nothing can have moved.
+ */
+export interface GitChanges {
+  branch: string | null
+  head: string | null
+  staged: GitFileChange[]
+  unstaged: GitFileChange[]
+}
+
+/**
+ * The answer to any mutating git channel.
+ *
+ * The new list travels with the answer rather than being fetched separately,
+ * so the renderer replaces its state from the reply instead of patching its
+ * own copy. `changes` is present on failure too, because a failed operation
+ * still leaves a list worth drawing, and null only when the list itself could
+ * not be read afterwards.
+ */
+export type GitMutation =
+  | { ok: true; changes: GitChanges }
+  | { ok: false; error: string; changes: GitChanges | null }
+
 export interface PTermApi {
   open(request: OpenRequest): Promise<TabDescriptor>
   list(): Promise<TabDescriptor[]>
