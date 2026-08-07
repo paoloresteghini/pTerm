@@ -963,8 +963,13 @@ export interface PTermApi {
    *
    * Irreversible. The caller is expected to have confirmed with the user
    * first; nothing in main asks.
+   *
+   * `expectedUntracked` is the subset of `paths` the confirm dialog told the
+   * user would be deleted rather than restored. Main refuses the whole
+   * batch, with no path acted on, when a fresh read disagrees with it: see
+   * `discard` in `src/main/git/ops.ts` for why that check exists.
    */
-  gitDiscard(projectId: string, paths: string[]): Promise<GitMutation>
+  gitDiscard(projectId: string, paths: string[], expectedUntracked: string[]): Promise<GitMutation>
   /** Stash every change, untracked included. Recoverable via `git stash`. */
   gitStash(projectId: string): Promise<GitMutation>
 }

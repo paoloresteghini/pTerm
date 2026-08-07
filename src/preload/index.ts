@@ -112,8 +112,12 @@ const api: PTermApi = {
     message: string,
     expected: { branch: string | null; head: string | null },
   ): Promise<GitMutation> => ipcRenderer.invoke(CHANNELS.gitCommit, projectId, message, expected),
-  gitDiscard: (projectId: string, paths: string[]): Promise<GitMutation> =>
-    ipcRenderer.invoke(CHANNELS.gitDiscard, projectId, paths),
+  gitDiscard: (
+    projectId: string,
+    paths: string[],
+    expectedUntracked: string[],
+  ): Promise<GitMutation> =>
+    ipcRenderer.invoke(CHANNELS.gitDiscard, projectId, paths, expectedUntracked),
   gitStash: (projectId: string): Promise<GitMutation> =>
     ipcRenderer.invoke(CHANNELS.gitStash, projectId),
 }

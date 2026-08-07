@@ -117,11 +117,24 @@ export async function commit(
  * committed state to return to, so discarding it means deleting it, and
  * nothing anywhere can bring it back.
  *
- * Which is which is decided HERE, from a fresh status read, rather than taken
- * from the renderer: a stale list arriving as "this one is untracked" would
- * turn a restore into a deletion.
+ * `expectedUntracked` is which of `paths` the confirm dialog told the user
+ * would be DELETED, as opposed to restored. It is checked against a fresh
+ * status read taken here, and the whole batch is refused if the two
+ * disagree on even one path, rather than silently acting on the fresh
+ * classification. Several sessions can share one checkout, so a path shown
+ * as "restored to the last commit" can become untracked (a peer's `rm
+ * --cached`, say) between the dialog opening and the click landing; acting
+ * on the fresh read in that case would delete something the user was told
+ * would survive. Refusing and handing back the current list, the same shape
+ * `commit` refuses in when the branch moved underneath it, is what fails
+ * safe: the alternative of re-checking only at dialog-open time still
+ * leaves the gap between open and click, just narrower.
  */
-export async function discard(root: string, paths: string[]): Promise<GitMutation> {
+export async function discard(
+  root: string,
+  paths: string[],
+  expectedUntracked: string[],
+): Promise<GitMutation> {
   const safe = safePaths(root, paths)
   if (safe.length === 0) return failed(root, 'Nothing to discard')
 
@@ -131,6 +144,15 @@ export async function discard(root: string, paths: string[]): Promise<GitMutatio
   const untracked = new Set(
     before.unstaged.filter((c) => c.worktree === '?').map((c) => c.path),
   )
+  const expected = new Set(expectedUntracked)
+  const changed = safe.some((path) => untracked.has(path) !== expected.has(path))
+  if (changed) {
+    return failed(
+      root,
+      'The list changed since it was shown. Nothing was discarded; review and try again.',
+    )
+  }
+
   const toDelete = safe.filter((path) => untracked.has(path))
   const toRestore = safe.filter((path) => !untracked.has(path))
 
@@ -139,15 +161,23 @@ export async function discard(root: string, paths: string[]): Promise<GitMutatio
     if (run.code !== 0) return failed(root, describeFailure(run.stderr, run.stdout))
   }
 
+  const deleteErrors: string[] = []
   for (const path of toDelete) {
     try {
       await unlink(join(root, path))
-    } catch {
-      // A file already gone is the state the caller asked for. Anything else
-      // shows up as the row still being there after the refresh below, which
-      // is a truer report than a message about one path in a batch.
+    } catch (error) {
+      // ENOENT means the file is already gone, which is the state the
+      // caller asked for. Anything else (permissions, say) is a real
+      // failure and must be surfaced the same way a failed restore above
+      // is, rather than swallowed into a row that is just still there after
+      // the refresh with no explanation why.
+      const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined
+      if (code !== 'ENOENT') {
+        deleteErrors.push(`${path}: ${error instanceof Error ? error.message : String(error)}`)
+      }
     }
   }
+  if (deleteErrors.length > 0) return failed(root, `Could not delete ${deleteErrors.join('; ')}`)
 
   return settled(root)
 }

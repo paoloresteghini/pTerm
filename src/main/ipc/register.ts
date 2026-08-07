@@ -1492,11 +1492,16 @@ export function registerIpc(
     },
   )
 
-  ipcMain.handle(CHANNELS.gitDiscard, async (_event, projectId: string, paths: string[]) => {
-    const root = await rootOfProject(projectId)
-    if (root === null) return { ok: false as const, error: 'Not a git repository', changes: null }
-    return discard(root, paths)
-  })
+  ipcMain.handle(
+    CHANNELS.gitDiscard,
+    async (_event, projectId: string, paths: string[], expectedUntracked: string[]) => {
+      const root = await rootOfProject(projectId)
+      if (root === null) {
+        return { ok: false as const, error: 'Not a git repository', changes: null }
+      }
+      return discard(root, paths, expectedUntracked)
+    },
+  )
 
   ipcMain.handle(CHANNELS.gitStash, async (_event, projectId: string) => {
     const root = await rootOfProject(projectId)

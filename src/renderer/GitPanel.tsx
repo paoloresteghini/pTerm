@@ -192,14 +192,23 @@ export function GitPanel({
     [mutate],
   )
 
+  // Computed fresh from `changes` on every render, not memoized once: this is
+  // also what the confirm dialog is drawn from, and `confirmDiscard` sends
+  // exactly this split back to main as "this is what was shown" — see
+  // `discard` in `src/main/git/ops.ts` for why the two have to agree.
+  const untrackedNow = new Set(
+    (changes?.unstaged ?? []).filter((c) => c.worktree === '?').map((c) => c.path),
+  )
+
   const requestDiscard = useCallback((path: string) => setPendingDiscard([path]), [])
 
   const confirmDiscard = useCallback(() => {
     const paths = pendingDiscard
     setPendingDiscard(null)
     if (paths === null) return
-    mutate((id) => window.pterm.gitDiscard(id, paths))
-  }, [pendingDiscard, mutate])
+    const expectedUntracked = paths.filter((path) => untrackedNow.has(path))
+    mutate((id) => window.pterm.gitDiscard(id, paths, expectedUntracked))
+  }, [pendingDiscard, mutate, untrackedNow])
 
   // The one place that decides whether a commit may proceed: both the button
   // and the ⌘Enter key handler call this rather than duplicating its checks,
@@ -226,9 +235,6 @@ export function GitPanel({
   const clean =
     changes !== null && changes.staged.length === 0 && changes.unstaged.length === 0
 
-  const untrackedNow = new Set(
-    (changes?.unstaged ?? []).filter((c) => c.worktree === '?').map((c) => c.path),
-  )
   const pending = pendingDiscard ?? []
 
   return (
