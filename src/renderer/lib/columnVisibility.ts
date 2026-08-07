@@ -2,6 +2,12 @@
  * Which side columns are collapsed, and the two operations the View menu's
  * hide-all item needs.
  *
+ * `ColumnId` and `ColumnVisibility` now live in `src/shared/ipc.ts`, and are
+ * only re-exported here: `columnsVisible` carries this shape across the IPC
+ * boundary, so main needs the same type the renderer does, and a type the
+ * renderer cannot import from `src/main` has to live somewhere both sides
+ * can reach.
+ *
  * The booleans are COLLAPSED rather than visible, matching the `*Collapsed`
  * state that `App.tsx` already holds and the `'0' means expanded` convention
  * the stored keys already use. Inverting the sense here would mean one file
@@ -11,9 +17,9 @@
  * `diffLines.ts` are: this repo's vitest runs `environment: 'node'` with no
  * DOM, so logic that lives inside a component cannot be unit-tested at all.
  */
-export type ColumnId = 'files' | 'skills' | 'presets' | 'prompts' | 'notes' | 'git'
+import type { ColumnId, ColumnVisibility } from '../../shared/ipc'
 
-export type ColumnVisibility = Record<ColumnId, boolean>
+export type { ColumnId, ColumnVisibility }
 
 /** Left to right as they appear on screen, which is the order the menu lists. */
 export const COLUMN_IDS: readonly ColumnId[] = [

@@ -13,7 +13,13 @@ import { mergeTab, NotificationRouter } from './notify/router'
 import { ConfigStore } from './state/store'
 import { HookServer } from './hooks/server'
 import { hookPaths, writeScript } from './hooks/install'
-import { CHANNELS, type MenuCommand } from '../shared/ipc'
+import {
+  CHANNELS,
+  columnIsCollapsed,
+  type ColumnId,
+  type ColumnVisibility,
+  type MenuCommand,
+} from '../shared/ipc'
 import { scheduleUpdateChecks } from './update/schedule'
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string
@@ -191,10 +197,10 @@ function sendMenuCommand(command: MenuCommand): void {
  * every item on every column toggle, and the ids already exist for the tests
  * to click through.
  */
-function showColumns(collapsed: Record<string, boolean>): void {
+function showColumns(collapsed: ColumnVisibility): void {
   const menu = Menu.getApplicationMenu()
   if (!menu) return
-  const ids: Record<string, string> = {
+  const ids: Record<ColumnId, string> = {
     files: 'toggle-files',
     skills: 'toggle-skills',
     presets: 'toggle-presets',
@@ -203,8 +209,8 @@ function showColumns(collapsed: Record<string, boolean>): void {
     git: 'toggle-git',
   }
   let open = false
-  for (const [column, itemId] of Object.entries(ids)) {
-    const shut = collapsed[column] === true
+  for (const [column, itemId] of Object.entries(ids) as [ColumnId, string][]) {
+    const shut = columnIsCollapsed(collapsed, column)
     if (!shut) open = true
     const item = menu.getMenuItemById(itemId)
     if (item) item.checked = !shut
@@ -483,7 +489,7 @@ app.whenReady().then(async () => {
   }
 
   installMenu()
-  ipcMain.on(CHANNELS.columnsVisible, (_event, collapsed: Record<string, boolean>) => {
+  ipcMain.on(CHANNELS.columnsVisible, (_event, collapsed: ColumnVisibility) => {
     showColumns(collapsed)
   })
 
