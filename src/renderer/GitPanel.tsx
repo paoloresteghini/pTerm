@@ -194,7 +194,7 @@ export function GitPanel({
 
   // Computed fresh from `changes` on every render, not memoized once: this is
   // also what the confirm dialog is drawn from, and `confirmDiscard` sends
-  // exactly this split back to main as "this is what was shown" — see
+  // exactly this split back to main as "this is what was shown". See
   // `discard` in `src/main/git/ops.ts` for why the two have to agree.
   const untrackedNow = new Set(
     (changes?.unstaged ?? []).filter((c) => c.worktree === '?').map((c) => c.path),
