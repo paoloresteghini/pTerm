@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- **Never use em dashes** anywhere: code, comments, commit messages. Use commas, colons, parentheses or separate sentences. Hyphens in compound words are fine. Verify before each commit with `git diff master..HEAD -- . | grep '^+' | grep '—'` returning nothing.
+- **Never use em dashes** anywhere: code, comments, commit messages. Use commas, colons, parentheses or separate sentences. Hyphens in compound words are fine. Verify before each commit with `git diff master..HEAD -- . | grep '^+' | grep $'\u2014'` returning nothing.
 - **The app is `pterm`**: IPC channels `pterm:*`, localStorage keys `pterm:*`, the API interface is `PTermApi`.
 - **No testid may begin with `tab-`.** Over 27 e2e locators count open tabs by `[data-testid^="tab-"]`.
 - **Every new menu item sets `registerAccelerator: false`.** Electron then displays the keystroke without claiming it, and the renderer's own handler (which declines to fire inside `[data-shortcuts="off"]`) implements it. An Electron-registered accelerator would fire while the user is typing in a text field, which this app has shipped as a bug twice.
