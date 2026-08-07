@@ -57,7 +57,8 @@ import { addPrompt, readPrompts, removePrompt } from '../prompts/store'
 import { listDir, readFileInside, resolveInside, writeFileInside } from '../files/tree'
 import { readBranch } from '../git/branch'
 import { readCounts, syncBranch } from '../git/sync'
-import { readChanges } from '../git/status'
+import { readChanges, repoRoot } from '../git/status'
+import { stage, unstage } from '../git/ops'
 import { newSessionId } from '../tmux/names'
 import {
   addProject,
@@ -1449,6 +1450,32 @@ export function registerIpc(
     const project = config.projects.find((row) => row.id === projectId)
     if (!project) return null
     return readChanges(project.cwd)
+  })
+
+  /**
+   * The repository root behind a project id, or null when there is no project
+   * or it is not in a repository. Every git mutation starts here, so that the
+   * renderer names a project and main decides which directory that means.
+   */
+  const rootOfProject = async (projectId: string): Promise<string | null> => {
+    const config = await store.read()
+    const project = config.projects.find((row) => row.id === projectId)
+    if (!project) return null
+    return repoRoot(project.cwd)
+  }
+
+  // Outside `serialise`, beside `gitChanges` and for the same reason: these
+  // read and write a repository, not pTerm's config.
+  ipcMain.handle(CHANNELS.gitStage, async (_event, projectId: string, paths: string[]) => {
+    const root = await rootOfProject(projectId)
+    if (root === null) return { ok: false as const, error: 'Not a git repository', changes: null }
+    return stage(root, paths)
+  })
+
+  ipcMain.handle(CHANNELS.gitUnstage, async (_event, projectId: string, paths: string[]) => {
+    const root = await rootOfProject(projectId)
+    if (root === null) return { ok: false as const, error: 'Not a git repository', changes: null }
+    return unstage(root, paths)
   })
 
   ipcMain.handle(CHANNELS.fsList, async (_event, projectId: string, relPath: string) => {

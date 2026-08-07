@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { GitChanges, GitFileChange, ProjectDescriptor } from '../shared/ipc'
+import type { GitChanges, GitFileChange, GitMutation, ProjectDescriptor } from '../shared/ipc'
 import { useColumnWidth } from './lib/columnWidth'
 import { ColumnResizer, PanelHeading, PanelStrip } from './ui/Panel'
 
@@ -18,17 +18,40 @@ function baseOf(path: string): string {
   return cut === -1 ? path : path.slice(cut + 1)
 }
 
-function Row({ change }: { change: GitFileChange }) {
+function Row({
+  change,
+  section,
+  busy,
+  onStage,
+  onUnstage,
+}: {
+  change: GitFileChange
+  section: 'staged' | 'unstaged'
+  busy: boolean
+  onStage: (path: string) => void
+  onUnstage: (path: string) => void
+}) {
   const letter = change.staged ?? change.worktree ?? '?'
   const dir = dirOf(change.path)
   return (
     <div
-      data-testid={`gitpanel-row-${change.path}`}
-      className="flex w-full items-baseline gap-2 px-2.5 py-1 text-left text-muted"
+      data-testid={`gitpanel-${section}-${change.path}`}
+      className="group flex w-full items-baseline gap-2 px-2.5 py-1 text-left text-muted"
     >
       <span className="w-3 shrink-0 text-faint">{letter}</span>
-      <span className="truncate">{baseOf(change.path)}</span>
+      <span className="flex-1 truncate">{baseOf(change.path)}</span>
       {dir === '' ? null : <span className="truncate text-faint">{dir}</span>}
+      {/* Revealed on hover so a resting list reads as file names rather than
+          as a wall of controls. `group-hover` needs the `group` class above. */}
+      <button
+        data-testid={`gitpanel-${section === 'staged' ? 'unstage' : 'stage'}-${change.path}`}
+        disabled={busy}
+        onClick={() => (section === 'staged' ? onUnstage(change.path) : onStage(change.path))}
+        title={section === 'staged' ? 'Unstage' : 'Stage'}
+        className="shrink-0 cursor-default border-none bg-transparent px-1 text-faint opacity-0 group-hover:opacity-100 hover:text-fg disabled:opacity-40"
+      >
+        {section === 'staged' ? '−' : '+'}
+      </button>
     </div>
   )
 }
@@ -53,6 +76,8 @@ export function GitPanel({
   const { width, set, commit } = useColumnWidth('pterm:gitWidth')
   const [changes, setChanges] = useState<GitChanges | null>(null)
   const [loaded, setLoaded] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   // Which project the state on screen belongs to. Every reply re-checks this
   // before landing, so a project switch mid-request cannot put the old
@@ -98,6 +123,45 @@ export function GitPanel({
     }
   }, [collapsed, refresh])
 
+  /**
+   * Run a mutation and take the list from its reply.
+   *
+   * Non-optimistic on purpose, following `PromptsPanel`: the reply IS the
+   * list, so a refused stage leaves the row where it was instead of showing a
+   * move that did not happen.
+   */
+  const mutate = useCallback(
+    (call: (projectId: string) => Promise<GitMutation>): void => {
+      const asked = project?.id
+      if (!asked || busy) return
+      setBusy(true)
+      setError(null)
+      call(asked)
+        .then((result) => {
+          if (shown.current !== asked) return
+          if (result.changes !== null) setChanges(result.changes)
+          if (!result.ok) setError(result.error)
+        })
+        .catch((reason: unknown) => {
+          if (shown.current !== asked) return
+          setError(reason instanceof Error ? reason.message : String(reason))
+        })
+        .finally(() => {
+          if (shown.current === asked) setBusy(false)
+        })
+    },
+    [project?.id, busy],
+  )
+
+  const onStage = useCallback(
+    (path: string) => mutate((id) => window.pterm.gitStage(id, [path])),
+    [mutate],
+  )
+  const onUnstage = useCallback(
+    (path: string) => mutate((id) => window.pterm.gitUnstage(id, [path])),
+    [mutate],
+  )
+
   if (collapsed) {
     return <PanelStrip testid="git-toggle" label="Git" onClick={onToggle} />
   }
@@ -116,6 +180,12 @@ export function GitPanel({
         {changes?.branch ? (
           <p data-testid="gitpanel-branch" className="truncate px-2.5 py-1 text-faint">
             {changes.branch}
+          </p>
+        ) : null}
+
+        {error ? (
+          <p data-testid="gitpanel-error" title={error} className="truncate px-2.5 py-1 text-danger">
+            {error}
           </p>
         ) : null}
 
@@ -138,7 +208,8 @@ export function GitPanel({
               <span data-testid="gitpanel-staged-count">{changes.staged.length}</span>
             </p>
             {changes.staged.map((change) => (
-              <Row key={`staged-${change.path}`} change={change} />
+              <Row key={`staged-${change.path}`} change={change} section="staged"
+                busy={busy} onStage={onStage} onUnstage={onUnstage} />
             ))}
           </>
         ) : null}
@@ -150,7 +221,8 @@ export function GitPanel({
               <span data-testid="gitpanel-unstaged-count">{changes.unstaged.length}</span>
             </p>
             {changes.unstaged.map((change) => (
-              <Row key={`unstaged-${change.path}`} change={change} />
+              <Row key={`unstaged-${change.path}`} change={change} section="unstaged"
+                busy={busy} onStage={onStage} onUnstage={onUnstage} />
             ))}
           </>
         ) : null}

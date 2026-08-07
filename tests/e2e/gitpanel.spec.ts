@@ -75,8 +75,8 @@ test('lists a modified file and an untracked one', async () => {
   await writeFile(join(repo, 'fresh.txt'), 'new\n', 'utf8')
   await open()
 
-  await expect(page.getByTestId('gitpanel-row-tracked.txt')).toBeVisible({ timeout: 15_000 })
-  await expect(page.getByTestId('gitpanel-row-fresh.txt')).toBeVisible()
+  await expect(page.getByTestId('gitpanel-unstaged-tracked.txt')).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByTestId('gitpanel-unstaged-fresh.txt')).toBeVisible()
   await expect(page.getByTestId('gitpanel-unstaged-count')).toHaveText('2')
   await expect(page.getByTestId('gitpanel-branch')).toHaveText('master')
 })
@@ -84,7 +84,7 @@ test('lists a modified file and an untracked one', async () => {
 test('says so when the tree is clean', async () => {
   await open()
   await expect(page.getByTestId('gitpanel-empty')).toBeVisible({ timeout: 15_000 })
-  await expect(page.getByTestId('gitpanel-row-tracked.txt')).toHaveCount(0)
+  await expect(page.getByTestId('gitpanel-unstaged-tracked.txt')).toHaveCount(0)
 })
 
 test('says so when the project is not a repository', async () => {
@@ -102,4 +102,29 @@ test('says so when the project is not a repository', async () => {
   await open()
   await expect(page.getByTestId('gitpanel-norepo')).toBeVisible({ timeout: 15_000 })
   await rm(bare, { recursive: true, force: true })
+})
+
+test('staging a file moves it into the staged section', async () => {
+  await writeFile(join(repo, 'tracked.txt'), 'two\n', 'utf8')
+  await open()
+
+  await expect(page.getByTestId('gitpanel-unstaged-tracked.txt')).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByTestId('gitpanel-staged-tracked.txt')).toHaveCount(0)
+
+  await page.getByTestId('gitpanel-stage-tracked.txt').click()
+
+  await expect(page.getByTestId('gitpanel-staged-tracked.txt')).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByTestId('gitpanel-unstaged-tracked.txt')).toHaveCount(0)
+  await expect(page.getByTestId('gitpanel-staged-count')).toHaveText('1')
+})
+
+test('unstaging puts it back', async () => {
+  await writeFile(join(repo, 'tracked.txt'), 'two\n', 'utf8')
+  await gitIn(repo, ['add', 'tracked.txt'])
+  await open()
+
+  await expect(page.getByTestId('gitpanel-staged-tracked.txt')).toBeVisible({ timeout: 15_000 })
+  await page.getByTestId('gitpanel-unstage-tracked.txt').click()
+  await expect(page.getByTestId('gitpanel-unstaged-tracked.txt')).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByTestId('gitpanel-staged-tracked.txt')).toHaveCount(0)
 })

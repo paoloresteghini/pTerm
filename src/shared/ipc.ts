@@ -61,6 +61,8 @@ export const CHANNELS = {
   gitStatus: 'pterm:gitStatus',
   gitSync: 'pterm:gitSync',
   gitChanges: 'pterm:gitChanges',
+  gitStage: 'pterm:gitStage',
+  gitUnstage: 'pterm:gitUnstage',
 } as const
 
 /**
@@ -932,4 +934,13 @@ export interface PTermApi {
    * the renderer never names a directory main then runs a subprocess in.
    */
   gitChanges(projectId: string): Promise<GitChanges | null>
+  /**
+   * Stage `paths`, and answer with the change list as it stands afterwards.
+   *
+   * Paths are repo-relative, as `gitChanges` reports them. A path that does
+   * not resolve inside the repository is dropped rather than run.
+   */
+  gitStage(projectId: string, paths: string[]): Promise<GitMutation>
+  /** Unstage `paths`. The mirror of `gitStage`, with the same path rules. */
+  gitUnstage(projectId: string, paths: string[]): Promise<GitMutation>
 }

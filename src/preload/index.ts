@@ -4,6 +4,7 @@ import {
   type DataEvent,
   type ExitEvent,
   type GitChanges,
+  type GitMutation,
   type GitStatus,
   type GitSyncResult,
   type MenuCommand,
@@ -102,6 +103,10 @@ const api: PTermApi = {
     ipcRenderer.invoke(CHANNELS.gitSync, projectId),
   gitChanges: (projectId: string): Promise<GitChanges | null> =>
     ipcRenderer.invoke(CHANNELS.gitChanges, projectId),
+  gitStage: (projectId: string, paths: string[]): Promise<GitMutation> =>
+    ipcRenderer.invoke(CHANNELS.gitStage, projectId, paths),
+  gitUnstage: (projectId: string, paths: string[]): Promise<GitMutation> =>
+    ipcRenderer.invoke(CHANNELS.gitUnstage, projectId, paths),
 }
 
 contextBridge.exposeInMainWorld('pterm', api)
