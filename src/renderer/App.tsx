@@ -26,6 +26,14 @@ import { tabLabel } from './lib/tabLabel'
 import { relativeToProject } from './lib/relativeToProject'
 import { markDirty, forgetPane, type DirtyPanes } from './lib/dirtyPanes'
 import {
+  COLUMN_IDS,
+  anyOpen,
+  hideAll,
+  restore,
+  type ColumnId,
+  type ColumnVisibility,
+} from './lib/columnVisibility'
+import {
   INITIAL_WORKSPACE_STATE,
   activeProject,
   activeTabId,
@@ -76,21 +84,23 @@ const MIN_PANE_COLS = 20
 const MIN_PANE_ROWS = 5
 
 /**
- * Collapse state for the five collapsible columns, in the same shape
- * `NotesPanel` stores its own: '0' means expanded, anything else (including
- * absent) means collapsed.
+ * Collapse state for the six collapsible columns: '0' means expanded,
+ * anything else (including absent) means collapsed.
  *
  * **Every one of them defaults collapsed**, so a fresh profile shows the
  * projects sidebar and the terminal and nothing else. Each expanded column
- * costs 208px, and five of them plus the sidebar leave under 40px of terminal
- * on the 1280px window `src/main/index.ts` opens, narrower than any splittable
- * pane. The state persists per column, so this is the first run only.
+ * costs 208px: six of them plus the 208px sidebar is 1456px, which already
+ * exceeds the 1280px window `src/main/index.ts` opens, so opening all six on
+ * that window leaves no room for a terminal. Nothing stops a user from doing
+ * it anyway on a wider or maximised window. The state persists per column, so
+ * this default is the first run only.
  */
 const SKILLS_KEY = 'pterm:skillsCollapsed'
 const PRESETS_KEY = 'pterm:presetsCollapsed'
 const FILES_KEY = 'pterm:filesCollapsed'
 const PROMPTS_KEY = 'pterm:promptsCollapsed'
 const GIT_KEY = 'pterm:gitCollapsed'
+const NOTES_KEY = 'pterm:notesCollapsed'
 
 /** Reads one of those keys, with the default applied when nothing is stored. */
 function storedCollapsed(key: string, fallback: boolean): boolean {
@@ -109,6 +119,7 @@ export function App() {
   const [filesCollapsed, setFilesCollapsed] = useState(() => storedCollapsed(FILES_KEY, true))
   const [promptsCollapsed, setPromptsCollapsed] = useState(() => storedCollapsed(PROMPTS_KEY, true))
   const [gitCollapsed, setGitCollapsed] = useState(() => storedCollapsed(GIT_KEY, true))
+  const [notesCollapsed, setNotesCollapsed] = useState(() => storedCollapsed(NOTES_KEY, true))
   const [paletteOpen, setPaletteOpen] = useState(false)
   // Set once the workspace exists. Until then this window knows nothing about
   // what is selected and must not say anything about it — see the effects.
@@ -142,7 +153,7 @@ export function App() {
   }, [])
 
   // Clicking a column's own heading or strip moves only that column. The
-  // localStorage write sits in the updater the way `NotesPanel`'s does; it is
+  // localStorage write sits in the updater, same shape for all six; it is
   // idempotent, so StrictMode's double invocation costs nothing.
   const toggleSkills = useCallback(() => {
     setSkillsCollapsed((was) => {
@@ -174,23 +185,78 @@ export function App() {
       return !was
     })
   }, [])
+  const toggleNotes = useCallback(() => {
+    setNotesCollapsed((was) => {
+      localStorage.setItem(NOTES_KEY, was ? '0' : '1')
+      return !was
+    })
+  }, [])
+
+  // What was open when hide-all last closed everything. A ref, not state:
+  // nothing renders from it, and it must not be persisted, because it answers
+  // "what did I have open a moment ago" and a set restored from last week is
+  // not that.
+  const rememberedColumns = useRef<ColumnId[]>([])
+
+  const setColumn: Record<ColumnId, (collapsed: boolean) => void> = {
+    files: setFilesCollapsed,
+    skills: setSkillsCollapsed,
+    presets: setPresetsCollapsed,
+    prompts: setPromptsCollapsed,
+    notes: setNotesCollapsed,
+    git: setGitCollapsed,
+  }
+
+  const COLUMN_KEY: Record<ColumnId, string> = {
+    files: FILES_KEY,
+    skills: SKILLS_KEY,
+    presets: PRESETS_KEY,
+    prompts: PROMPTS_KEY,
+    notes: NOTES_KEY,
+    git: GIT_KEY,
+  }
 
   /**
-   * ⇧\ and the Presets menu item, which move both columns together because
-   * that is what the one panel they were split out of did.
+   * Close every column, or reopen the set the last close remembered.
    *
-   * "Collapse unless both are already collapsed" rather than inverting each
-   * column separately: with one open and one shut, a per-column invert would
-   * swap them and leave the same amount of screen taken, which is not what
-   * anybody presses this for.
+   * Which of the two it does is decided by whether anything is open, so the
+   * one item and the one keystroke cover both directions.
    */
-  const toggleSidePanels = useCallback(() => {
-    const collapsed = !(skillsCollapsed && presetsCollapsed)
-    localStorage.setItem(SKILLS_KEY, collapsed ? '1' : '0')
-    localStorage.setItem(PRESETS_KEY, collapsed ? '1' : '0')
-    setSkillsCollapsed(collapsed)
-    setPresetsCollapsed(collapsed)
-  }, [skillsCollapsed, presetsCollapsed])
+  const hideAllColumns = useCallback(() => {
+    const now: ColumnVisibility = {
+      files: filesCollapsed,
+      skills: skillsCollapsed,
+      presets: presetsCollapsed,
+      prompts: promptsCollapsed,
+      notes: notesCollapsed,
+      git: gitCollapsed,
+    }
+    const next = anyOpen(now)
+      ? (() => {
+          const closed = hideAll(now)
+          rememberedColumns.current = closed.remembered
+          return closed.next
+        })()
+      : restore(now, rememberedColumns.current)
+    for (const id of COLUMN_IDS) {
+      setColumn[id](next[id])
+      localStorage.setItem(COLUMN_KEY[id], next[id] ? '1' : '0')
+    }
+  }, [filesCollapsed, skillsCollapsed, presetsCollapsed, promptsCollapsed, notesCollapsed, gitCollapsed])
+
+  // Main cannot read localStorage or React state, so the menu's checkmarks
+  // would otherwise be a guess. Sent on mount too, not only on change: a
+  // relaunch restores these from localStorage without any toggle firing.
+  useEffect(() => {
+    window.pterm.columnsVisible({
+      files: filesCollapsed,
+      skills: skillsCollapsed,
+      presets: presetsCollapsed,
+      prompts: promptsCollapsed,
+      notes: notesCollapsed,
+      git: gitCollapsed,
+    })
+  }, [filesCollapsed, skillsCollapsed, presetsCollapsed, promptsCollapsed, notesCollapsed, gitCollapsed])
 
   const project = activeProject(state)
   const currentTabId = activeTabId(state)
@@ -891,14 +957,45 @@ export function App() {
           case 'focusDown':
             focusPane('down')
             return
+          case 'toggleFiles':
+            toggleFiles()
+            return
+          case 'toggleSkills':
+            toggleSkills()
+            return
           case 'togglePresets':
-            toggleSidePanels()
+            togglePresets()
+            return
+          case 'togglePrompts':
+            togglePrompts()
+            return
+          case 'toggleNotes':
+            toggleNotes()
+            return
+          case 'toggleGit':
+            toggleGit()
+            return
+          case 'hideAllColumns':
+            hideAllColumns()
             return
           case 'settings':
             setSettingsOpen(true)
         }
       }),
-    [activePaneId, openTab, requestClosePane, splitActive, focusPane, toggleSidePanels],
+    [
+      activePaneId,
+      openTab,
+      requestClosePane,
+      splitActive,
+      focusPane,
+      toggleFiles,
+      toggleSkills,
+      togglePresets,
+      togglePrompts,
+      toggleNotes,
+      toggleGit,
+      hideAllColumns,
+    ],
   )
 
   useEffect(() => {
@@ -972,9 +1069,29 @@ export function App() {
           return
         }
       }
+      // ⌥⌘ + a letter, one per column. A sibling of the arrow branch above
+      // rather than nested inside it: both test the same `altKey &&
+      // !shiftKey` guard, and nesting one inside the other would make the
+      // arrow branch's fallthrough (no direction matched) swallow these too.
+      if (event.altKey && !event.shiftKey) {
+        const column: Record<string, () => void> = {
+          KeyF: toggleFiles,
+          KeyS: toggleSkills,
+          KeyP: togglePresets,
+          KeyR: togglePrompts,
+          KeyN: toggleNotes,
+          KeyG: toggleGit,
+        }
+        const toggle = column[event.code]
+        if (toggle) {
+          event.preventDefault()
+          toggle()
+          return
+        }
+      }
       if (event.code === 'Backslash' && event.shiftKey) {
         event.preventDefault()
-        toggleSidePanels()
+        hideAllColumns()
         return
       }
       if (event.code === 'Comma') {
@@ -1011,7 +1128,13 @@ export function App() {
     splitActive,
     focusPane,
     fail,
-    toggleSidePanels,
+    toggleFiles,
+    toggleSkills,
+    togglePresets,
+    togglePrompts,
+    toggleNotes,
+    toggleGit,
+    hideAllColumns,
   ])
 
   /**
@@ -1413,9 +1536,9 @@ export function App() {
           </div>
         ) : null}
 
-        {/* Four independently collapsible columns. Each renders its own
-            vertical strip when collapsed, so none of them can vanish without
-            leaving a way back. */}
+        {/* Five independently collapsible columns (Files, above, is the
+            sixth). Each renders its own vertical strip when collapsed, so
+            none of them can vanish without leaving a way back. */}
         <SkillsPanel
           project={project}
           collapsed={skillsCollapsed}
@@ -1456,7 +1579,7 @@ export function App() {
           onOpenDiff={openDiff}
         />
 
-        <NotesPanel project={project} />
+        <NotesPanel project={project} collapsed={notesCollapsed} onToggle={toggleNotes} />
 
         <CommandPalette
           open={paletteOpen}

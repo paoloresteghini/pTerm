@@ -1,10 +1,14 @@
 /**
  * Which directories of a project's tree are expanded, and where that is kept.
  *
- * `localStorage`, per project, following the precedent `NotesPanel.tsx` set
- * for this app: view state goes in `localStorage`, project data goes in a file
- * under `configRoot()`, and neither goes in `config.json`. Which folders are
- * open is view state.
+ * `localStorage`, per project, following this app's split: view state goes in
+ * `localStorage`, project data goes in a file under `configRoot()`, and
+ * neither goes in `config.json`. Which folders are open is view state.
+ *
+ * The rule used to be cited here as `NotesPanel.tsx`'s precedent. That file no
+ * longer demonstrates it: every column's collapse flag moved into `App.tsx`
+ * when the View menu needed to read them. The split itself is unchanged, so
+ * only the example moved.
  *
  * Here rather than inside `FileTree.tsx` so it can be tested at all. vitest
  * runs `environment: 'node'`, so a component is only reachable from Playwright,

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, Menu, Notification } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, Notification } from 'electron'
 import type { MenuItemConstructorOptions } from 'electron'
 import { execFile } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
@@ -13,7 +13,13 @@ import { mergeTab, NotificationRouter } from './notify/router'
 import { ConfigStore } from './state/store'
 import { HookServer } from './hooks/server'
 import { hookPaths, writeScript } from './hooks/install'
-import { CHANNELS, type MenuCommand } from '../shared/ipc'
+import {
+  CHANNELS,
+  columnIsCollapsed,
+  type ColumnId,
+  type ColumnVisibility,
+  type MenuCommand,
+} from '../shared/ipc'
 import { scheduleUpdateChecks } from './update/schedule'
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string
@@ -184,6 +190,35 @@ function sendMenuCommand(command: MenuCommand): void {
   mainWindow?.webContents.send(CHANNELS.menuCommand, command)
 }
 
+/**
+ * Show the renderer's column state on the View menu.
+ *
+ * By id rather than by rebuilding the template: a rebuild would re-create
+ * every item on every column toggle, and the ids already exist for the tests
+ * to click through.
+ */
+function showColumns(collapsed: ColumnVisibility): void {
+  const menu = Menu.getApplicationMenu()
+  if (!menu) return
+  const ids: Record<ColumnId, string> = {
+    files: 'toggle-files',
+    skills: 'toggle-skills',
+    presets: 'toggle-presets',
+    prompts: 'toggle-prompts',
+    notes: 'toggle-notes',
+    git: 'toggle-git',
+  }
+  let open = false
+  for (const [column, itemId] of Object.entries(ids) as [ColumnId, string][]) {
+    const shut = columnIsCollapsed(collapsed, column)
+    if (!shut) open = true
+    const item = menu.getMenuItemById(itemId)
+    if (item) item.checked = !shut
+  }
+  const all = menu.getMenuItemById('hide-all-columns')
+  if (all) all.label = open ? 'Hide All Columns' : 'Show All Columns'
+}
+
 function installMenu(): void {
   const template: MenuItemConstructorOptions[] = [
     { role: 'appMenu' },
@@ -226,11 +261,66 @@ function installMenu(): void {
       label: 'View',
       submenu: [
         {
+          id: 'toggle-files',
+          label: 'Files',
+          type: 'checkbox',
+          accelerator: 'Alt+CmdOrCtrl+F',
+          registerAccelerator: false,
+          click: () => sendMenuCommand('toggleFiles'),
+        },
+        {
+          id: 'toggle-skills',
+          label: 'Skills',
+          type: 'checkbox',
+          accelerator: 'Alt+CmdOrCtrl+S',
+          registerAccelerator: false,
+          click: () => sendMenuCommand('toggleSkills'),
+        },
+        {
           id: 'toggle-presets',
-          label: 'Toggle Presets',
-          accelerator: 'Shift+CmdOrCtrl+\\',
+          label: 'Presets',
+          type: 'checkbox',
+          accelerator: 'Alt+CmdOrCtrl+P',
           registerAccelerator: false,
           click: () => sendMenuCommand('togglePresets'),
+        },
+        {
+          id: 'toggle-prompts',
+          label: 'Prompts',
+          type: 'checkbox',
+          // One modifier away from `reload`'s CmdOrCtrl+R, and distinct from
+          // it. Taken so the six letters stay mnemonic: P is spent on Presets,
+          // and one non-mnemonic key among six is harder to remember than a
+          // near miss.
+          accelerator: 'Alt+CmdOrCtrl+R',
+          registerAccelerator: false,
+          click: () => sendMenuCommand('togglePrompts'),
+        },
+        {
+          id: 'toggle-git',
+          label: 'Git',
+          type: 'checkbox',
+          accelerator: 'Alt+CmdOrCtrl+G',
+          registerAccelerator: false,
+          click: () => sendMenuCommand('toggleGit'),
+        },
+        {
+          id: 'toggle-notes',
+          label: 'Notes',
+          type: 'checkbox',
+          accelerator: 'Alt+CmdOrCtrl+N',
+          registerAccelerator: false,
+          click: () => sendMenuCommand('toggleNotes'),
+        },
+        { type: 'separator' },
+        {
+          id: 'hide-all-columns',
+          // Relabelled from main whenever the renderer reports its columns,
+          // so it never claims to do the opposite of what it will do.
+          label: 'Hide All Columns',
+          accelerator: 'Shift+CmdOrCtrl+\\',
+          registerAccelerator: false,
+          click: () => sendMenuCommand('hideAllColumns'),
         },
         { type: 'separator' },
         // `reload` stays: restore reattaches everything, so a reload is how a
@@ -399,6 +489,9 @@ app.whenReady().then(async () => {
   }
 
   installMenu()
+  ipcMain.on(CHANNELS.columnsVisible, (_event, collapsed: ColumnVisibility) => {
+    showColumns(collapsed)
+  })
 
   registerIpc(manager, () => mainWindow, registry, store, setAttendedTab, () =>
     router.refreshBadge(),

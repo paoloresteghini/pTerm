@@ -6,12 +6,13 @@ import { ColumnResizer, PanelHeading, PanelStrip } from './ui/Panel'
 
 /**
  * Was the top half of `RightPanel`, which owned Skills and Presets in one
- * column and collapsed only as a pair. They are two columns now so either can
- * be given up for terminal width on its own.
+ * column and collapsed only as a pair. They are two columns now: this one
+ * toggles on its own item and `⌥⌘S`, independently of Presets.
  *
- * `collapsed` is a prop rather than this component's own state, unlike
- * `NotesPanel`: ⇧\ collapses this column and the presets column together, and
- * a keystroke in `App` cannot reach state that lives down here.
+ * `collapsed` is a prop rather than this component's own state, the same
+ * shape every other column (including `NotesPanel`) now takes: `App` is the
+ * one place that has to answer to the View menu's six items and the
+ * hide-all/restore pair, so it holds all six flags itself.
  */
 export function SkillsPanel({
   project,

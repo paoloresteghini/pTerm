@@ -4,11 +4,15 @@ import { createNoteSaver } from './lib/noteSaver'
 import { useColumnWidth } from './lib/columnWidth'
 import { ColumnResizer, PanelHeading, PanelStrip } from './ui/Panel'
 
-/** '0' when the user has expanded the panel; anything else, including absent, is collapsed. Collapsed is the default so a new column must not steal terminal width unasked. */
-const COLLAPSED_KEY = 'pterm:notesCollapsed'
-
-export function NotesPanel({ project }: { project: ProjectDescriptor | undefined }) {
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSED_KEY) !== '0')
+export function NotesPanel({
+  project,
+  collapsed,
+  onToggle,
+}: {
+  project: ProjectDescriptor | undefined
+  collapsed: boolean
+  onToggle: () => void
+}) {
   // null is "loading": the textarea is disabled so keystrokes cannot land in a
   // note that is about to be replaced by the fetch result.
   const [text, setText] = useState<string | null>(null)
@@ -49,17 +53,8 @@ export function NotesPanel({ project }: { project: ProjectDescriptor | undefined
     }
   }, [projectId, saver])
 
-  const toggle = (): void => {
-    setCollapsed((was) => {
-      const now = !was
-      if (now) localStorage.setItem(COLLAPSED_KEY, '1')
-      else localStorage.setItem(COLLAPSED_KEY, '0')
-      return now
-    })
-  }
-
   if (collapsed) {
-    return <PanelStrip testid="notes-toggle" label="Notes" onClick={toggle} />
+    return <PanelStrip testid="notes-toggle" label="Notes" onClick={onToggle} />
   }
 
   return (
@@ -68,7 +63,7 @@ export function NotesPanel({ project }: { project: ProjectDescriptor | undefined
       className="relative flex shrink-0 flex-col border-l border-border bg-surface font-mono text-[11px] select-none"
       style={{ width }}
     >
-      <PanelHeading testid="notes-toggle" label="Notes" onClick={toggle} />
+      <PanelHeading testid="notes-toggle" label="Notes" onClick={onToggle} />
       {!project ? (
         <p data-testid="notes-empty" className="px-2.5 py-1 text-faint">
           No project selected.

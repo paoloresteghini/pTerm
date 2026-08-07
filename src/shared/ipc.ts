@@ -68,6 +68,7 @@ export const CHANNELS = {
   gitStash: 'pterm:gitStash',
   gitDiff: 'pterm:gitDiff',
   openDiff: 'pterm:openDiff',
+  columnsVisible: 'pterm:columnsVisible',
 } as const
 
 /**
@@ -94,7 +95,13 @@ export type MenuCommand =
   | 'focusRight'
   | 'focusUp'
   | 'focusDown'
+  | 'toggleFiles'
+  | 'toggleSkills'
   | 'togglePresets'
+  | 'togglePrompts'
+  | 'toggleNotes'
+  | 'toggleGit'
+  | 'hideAllColumns'
   | 'settings'
 
 /**
@@ -1017,4 +1024,44 @@ export interface PTermApi {
    * path cannot be resolved.
    */
   openDiff(projectId: string, relPath: string, side: DiffSide): Promise<TabDescriptor | null>
+  /**
+   * Tell main which side columns are collapsed, so the View menu's checkboxes
+   * and its hide-all label can show the truth.
+   *
+   * Fire and forget, like `setActive`: main holds this only for display, and
+   * the renderer stays the source of truth. A dropped message costs a stale
+   * tick until the next change, never a wrong toggle, because every menu
+   * command still asks the renderer to flip its own state.
+   */
+  columnsVisible(collapsed: ColumnVisibility): void
+}
+
+/**
+ * Which side columns are collapsed, and the id each one is keyed by.
+ *
+ * The booleans are COLLAPSED rather than visible, matching the `*Collapsed`
+ * state `App.tsx` holds and the `'0' means expanded` convention its stored
+ * keys use. Declared here rather than only in
+ * `src/renderer/lib/columnVisibility.ts`, which now imports and re-exports
+ * both for its existing consumers, because `columnsVisible` above carries
+ * this shape across the IPC boundary and main needs the same type the
+ * renderer does.
+ */
+export type ColumnId = 'files' | 'skills' | 'presets' | 'prompts' | 'notes' | 'git'
+
+export type ColumnVisibility = Record<ColumnId, boolean>
+
+/**
+ * Whether one column counts as collapsed, given what actually arrived over
+ * the wire.
+ *
+ * Reads a missing or non-boolean key as collapsed, never as open: a
+ * `ColumnVisibility` payload is plain JSON once it crosses `ipcMain.on`,
+ * where the type above no longer holds anything to account, so a column
+ * absent from a future payload (a renamed key, a seventh column a caller
+ * forgot to add) must fail toward hiding a checkmark rather than toward the
+ * menu claiming an already-shut column is open.
+ */
+export function columnIsCollapsed(collapsed: ColumnVisibility, id: ColumnId): boolean {
+  return collapsed[id] !== false
 }

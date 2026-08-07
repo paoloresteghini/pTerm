@@ -513,9 +513,9 @@ test('⌘D on a pane too narrow to halve is refused, and says why', async () => 
   // `lib/columnWidth.ts`, since the columns became draggable) and the six
   // collapsible columns (Files, Skills, Presets, Prompts, Notes, Git) are
   // `w-6` strips on a fresh profile, which every test here launches with
-  // (`App.tsx`'s and `NotesPanel`'s own collapse defaults), so ~360px never
-  // reaches the terminal and the pane is left a strip far narrower than 40
-  // columns. The
+  // (all six default collapsed in `App.tsx`, which now owns every column's
+  // collapse state), so ~360px never reaches the terminal and the pane is
+  // left a strip far narrower than 40 columns. The
   // poll below is what makes the test depend on the column count rather than
   // on that arithmetic being right.
   //

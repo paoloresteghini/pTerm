@@ -515,9 +515,9 @@ test('the File and View menu items do what their accelerators do', async () => {
   await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(1)
   await expect.poll(async () => (await sessionNames(SOCKET)).length, { timeout: 20_000 }).toBe(1)
 
-  // Both columns start collapsed on a fresh profile, and this one item moves
-  // the pair: the first click has to open BOTH and the second shut both. A
-  // toggle that only ever fired one way would pass a single assertion.
+  // Both columns start collapsed on a fresh profile, and each has its own
+  // item: Presets and Skills toggle independently of one another, so a click
+  // on one must never move the other.
   const skills = window.getByTestId('skills-panel')
   const presets = window.getByTestId('presets-panel')
   await expect(skills).toHaveCount(0)
@@ -527,21 +527,18 @@ test('the File and View menu items do what their accelerators do', async () => {
   await expect(window.getByTestId('presets-toggle')).toBeVisible()
 
   await clickMenuItem(app, 'toggle-presets')
-  await expect(skills).toBeVisible()
   await expect(presets).toBeVisible()
-
-  await clickMenuItem(app, 'toggle-presets')
   await expect(skills).toHaveCount(0)
-  await expect(presets).toHaveCount(0)
 
-  // With one open and one shut, the item closes the pair rather than swapping
-  // them. This is the assertion a per-column invert fails: that would leave
-  // Skills open and Presets shut, in the other order.
   await clickMenuItem(app, 'toggle-presets')
-  await window.getByTestId('presets-toggle').click()
+  await expect(presets).toHaveCount(0)
+  await expect(skills).toHaveCount(0)
+
+  await clickMenuItem(app, 'toggle-skills')
   await expect(skills).toBeVisible()
   await expect(presets).toHaveCount(0)
-  await clickMenuItem(app, 'toggle-presets')
+
+  await clickMenuItem(app, 'toggle-skills')
   await expect(skills).toHaveCount(0)
   await expect(presets).toHaveCount(0)
 
