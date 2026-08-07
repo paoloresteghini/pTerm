@@ -4,9 +4,9 @@
  */
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { execFile } from 'node:child_process'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { promisify } from 'node:util'
 import { launchApp, killServer, expandColumn } from './harness'
 
@@ -17,6 +17,7 @@ let userDataDir: string
 let configDir: string
 let projectsRoot: string
 let repo: string
+let other: string | null
 let claudeSettingsDir: string
 let claudeSettingsPath: string
 let claudeHome: string
@@ -37,6 +38,7 @@ test.beforeEach(async () => {
   claudeSettingsPath = join(claudeSettingsDir, 'settings.json')
   claudeHome = await mkdtemp(join(tmpdir(), 'pterm-e2e-claude-'))
 
+  other = null
   repo = await mkdtemp(join(tmpdir(), 'pterm-e2e-repo-'))
   await gitIn(repo, ['init'])
   await writeFile(join(repo, 'tracked.txt'), 'one\n', 'utf8')
@@ -61,7 +63,44 @@ test.afterEach(async () => {
   for (const dir of [userDataDir, configDir, projectsRoot, repo, claudeSettingsDir, claudeHome]) {
     await rm(dir, { recursive: true, force: true })
   }
+  if (other !== null) await rm(other, { recursive: true, force: true })
 })
+
+/**
+ * A second project on a second repository, replacing the config written above.
+ *
+ * Both repositories start identically, so a test that finds work missing can
+ * say which one lost it rather than only that something did. Must be called
+ * before `open()`: the config is read once, at launch.
+ */
+async function twoProjects(): Promise<string> {
+  const second = await mkdtemp(join(tmpdir(), 'pterm-e2e-repo2-'))
+  other = second
+  await gitIn(second, ['init'])
+  await writeFile(join(second, 'tracked.txt'), 'one\n', 'utf8')
+  await gitIn(second, ['add', 'tracked.txt'])
+  await gitIn(second, ['commit', '-m', 'first'])
+  await writeFile(
+    join(configDir, 'config.json'),
+    JSON.stringify({
+      version: 3,
+      projects: [
+        { id: 'id-repo', name: 'Repo', slug: 'repo', cwd: repo, presets: [], activeTabId: null },
+        { id: 'id-other', name: 'Other', slug: 'other', cwd: second, presets: [], activeTabId: null },
+      ],
+      activeProjectId: 'id-repo',
+      tabs: [],
+    }),
+    'utf8',
+  )
+  return second
+}
+
+/** What `git diff --name-only` reports in `cwd`, trimmed. */
+async function dirtyIn(cwd: string): Promise<string> {
+  const { stdout } = await run('git', ['diff', '--name-only'], { cwd })
+  return stdout.trim()
+}
 
 async function open(): Promise<void> {
   app = await launchApp({ socket: SOCKET, configDir, projectsRoot,
@@ -259,6 +298,173 @@ test('confirming a discard deletes an untracked file', async () => {
   await expect(page.getByTestId('gitpanel-empty')).toBeVisible({ timeout: 15_000 })
   const listed = await run('git', ['status', '--porcelain'], { cwd: repo })
   expect(listed.stdout.trim()).toBe('')
+})
+
+/**
+ * The confirm must still say what it said when it was read.
+ *
+ * The list behind it keeps polling every 5s, and a session sharing the
+ * checkout can reclassify a path inside that window. `git rm --cached` is
+ * that reclassification at its sharpest: the working file is untouched, the
+ * index entry that made the path tracked is gone, and the difference between
+ * the two labels is the difference between a restore and a deletion nothing
+ * can undo.
+ *
+ * Drawn from a classification snapshotted when the dialog opened, the wording
+ * cannot move. Recomputed on every render, it moves under the user, and the
+ * `expectedUntracked` sent to main moves with it, so main's fail-safe
+ * compares two equally fresh reads, finds them in agreement, and unlinks the
+ * file the dialog promised to restore.
+ */
+test('the open confirm keeps the classification the user read', async () => {
+  await writeFile(join(repo, 'tracked.txt'), 'two\n', 'utf8')
+  await open()
+  await expect(page.getByTestId('gitpanel-unstaged-tracked.txt')).toBeVisible({ timeout: 15_000 })
+
+  await page.getByTestId('gitpanel-discard-tracked.txt').click()
+  await expect(page.getByTestId('confirm-discard')).toContainText('Restored to the staged version')
+
+  await gitIn(repo, ['rm', '--cached', 'tracked.txt'])
+
+  // A staged row appearing is proof the poll landed and the panel behind the
+  // dialog was rewritten. A fixed wait would pass whether it ran or not, and
+  // the whole test rests on it having run.
+  await expect(page.getByTestId('gitpanel-staged-tracked.txt')).toBeVisible({ timeout: 15_000 })
+
+  await expect(page.getByTestId('confirm-discard')).toContainText('Restored to the staged version')
+  await expect(page.getByTestId('confirm-discard')).not.toContainText('Deleted from disk')
+
+  await page.getByTestId('confirm-discard-go').click()
+
+  // Main refuses the batch, because what it was handed genuinely disagrees
+  // with what it reads now. The file is neither restored nor deleted.
+  await expect(page.getByTestId('gitpanel-error')).toContainText('changed since it was shown', {
+    timeout: 15_000,
+  })
+  expect(await readFile(join(repo, 'tracked.txt'), 'utf8')).toBe('two\n')
+})
+
+/**
+ * A confirm must not outlive the project it was raised in.
+ *
+ * `confirmDiscard` reaches main with whatever project is active when the
+ * click lands, while the paths are still the ones the dialog named. A pending
+ * discard that survives a switch therefore runs `git restore` in a repository
+ * the user was never shown, and leaves the one they confirmed untouched.
+ *
+ * The keydown is dispatched at `window` rather than typed, deliberately.
+ * Typing it is now stopped by `data-shortcuts="off"` on the dialog, which is
+ * the other half of this fix and has its own test below; dispatching past
+ * that attribute is what still reaches the half under test here, and stands
+ * in for any future route that changes project with the confirm open.
+ */
+test('a project switch cannot carry a pending discard into another repository', async () => {
+  const second = await twoProjects()
+  await writeFile(join(repo, 'tracked.txt'), 'two\n', 'utf8')
+  await writeFile(join(second, 'tracked.txt'), 'two\n', 'utf8')
+  await open()
+
+  await expect(page.getByTestId('gitpanel-unstaged-tracked.txt')).toBeVisible({ timeout: 15_000 })
+  await page.getByTestId('gitpanel-discard-tracked.txt').click()
+  await expect(page.getByTestId('confirm-discard')).toBeVisible()
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2', metaKey: true }))
+  })
+
+  await expect(page.getByTestId('gitpanel-repo')).toHaveText(basename(second), { timeout: 15_000 })
+  await expect(page.getByTestId('confirm-discard')).toHaveCount(0)
+
+  // Neither repository lost anything: the one the dialog named still has its
+  // change, and the one it never mentioned is untouched.
+  expect(await dirtyIn(repo)).toBe('tracked.txt')
+  expect(await dirtyIn(second)).toBe('tracked.txt')
+})
+
+/**
+ * ⌘1-⌘9 switches project from a window listener, and a Radix modal stops the
+ * mouse but not that. Without `data-shortcuts="off"` on the dialog the
+ * keystroke reaches straight through the confirm.
+ *
+ * `waitForTimeout` before the assertions, for the reason the empty-message
+ * test above gives: both already hold at the moment of the press, so an
+ * auto-retrying assertion would pass before a switch had time to land.
+ */
+test('Cmd+2 typed at the confirm does not switch project', async () => {
+  await twoProjects()
+  await writeFile(join(repo, 'tracked.txt'), 'two\n', 'utf8')
+  await open()
+
+  await expect(page.getByTestId('gitpanel-unstaged-tracked.txt')).toBeVisible({ timeout: 15_000 })
+  await page.getByTestId('gitpanel-discard-tracked.txt').click()
+  await expect(page.getByTestId('confirm-discard')).toBeVisible()
+
+  await page.keyboard.press('Meta+2')
+  await page.waitForTimeout(500)
+
+  await expect(page.getByTestId('gitpanel-repo')).toHaveText(basename(repo))
+  await expect(page.getByTestId('confirm-discard')).toBeVisible()
+})
+
+/**
+ * The commit box is a text field, so the app's ⌘ shortcuts are not its. ⌘2
+ * typed into it used to switch project, which now also clears the box: the
+ * message is gone and it went to a repository the user was not looking at.
+ */
+test('Cmd+2 typed into the commit box does not switch project', async () => {
+  await twoProjects()
+  await open()
+
+  await expect(page.getByTestId('gitpanel-repo')).toHaveText(basename(repo), { timeout: 15_000 })
+  await page.getByTestId('gitpanel-message').fill('half typed')
+  await page.getByTestId('gitpanel-message').press('Meta+2')
+  await page.waitForTimeout(500)
+
+  await expect(page.getByTestId('gitpanel-repo')).toHaveText(basename(repo))
+  await expect(page.getByTestId('gitpanel-message')).toHaveValue('half typed')
+})
+
+// ⌘Enter is the panel's own key and must survive the opt-out above: no App
+// binding matches `Enter`, so the handler on the box still sees it.
+test('Cmd+Enter still commits with the shortcuts opt-out in place', async () => {
+  await writeFile(join(repo, 'tracked.txt'), 'two\n', 'utf8')
+  await gitIn(repo, ['add', 'tracked.txt'])
+  await open()
+
+  await expect(page.getByTestId('gitpanel-staged-tracked.txt')).toBeVisible({ timeout: 15_000 })
+  await page.getByTestId('gitpanel-message').fill('by keyboard')
+  await page.getByTestId('gitpanel-message').press('Meta+Enter')
+
+  await expect(page.getByTestId('gitpanel-empty')).toBeVisible({ timeout: 15_000 })
+  const { stdout } = await run('git', ['log', '-1', '--pretty=%s'], { cwd: repo })
+  expect(stdout.trim()).toBe('by keyboard')
+})
+
+/**
+ * A message typed for one repository must not be sitting in the box, ready to
+ * commit, under another repository's name.
+ *
+ * Switched by clicking the sidebar, which is the way a user does it: the
+ * dialog is not open here, so nothing is blocking the mouse.
+ */
+test('a project switch does not carry the commit message across', async () => {
+  const second = await twoProjects()
+  await open()
+
+  await expect(page.getByTestId('gitpanel-repo')).toHaveText(basename(repo), { timeout: 15_000 })
+  await page.getByTestId('gitpanel-message').fill('for the first repo')
+  await page.getByTestId('project-id-other').click()
+
+  await expect(page.getByTestId('gitpanel-repo')).toHaveText(basename(second), { timeout: 15_000 })
+  await expect(page.getByTestId('gitpanel-message')).toHaveValue('')
+})
+
+// The header names the repository as well as the branch: the project's name
+// is the user's own label, and several projects can point into one checkout.
+test('the header names the repository and the branch', async () => {
+  await open()
+  await expect(page.getByTestId('gitpanel-repo')).toHaveText(basename(repo), { timeout: 15_000 })
+  await expect(page.getByTestId('gitpanel-branch')).toHaveText('master')
 })
 
 test('stashing clears the list without asking', async () => {

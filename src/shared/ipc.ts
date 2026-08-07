@@ -661,8 +661,14 @@ export interface GitFileChange {
  * `head` is the commit the working tree was read against, and exists so a
  * commit can refuse to run if the branch moved underneath it. It is null in a
  * repository with no commits yet, where nothing can have moved.
+ *
+ * `repo` is the last segment of the repository root, which is not always the
+ * project's own name: a project can point at a subdirectory, and several
+ * projects can share one checkout. The column names it so that what is about
+ * to be committed to is on screen next to the branch.
  */
 export interface GitChanges {
+  repo: string
   branch: string | null
   head: string | null
   staged: GitFileChange[]

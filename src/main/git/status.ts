@@ -1,3 +1,4 @@
+import { basename } from 'node:path'
 import { git } from './sync'
 import type { GitChanges, GitFileChange } from '../../shared/ipc'
 
@@ -26,8 +27,11 @@ function tail(field: string, tokens: number): string {
  * Pure, and exported for its own sake: spawning git to test the parsing of a
  * rename would be a slower test of the same thing, and this is the shape
  * `parseCounts` in `sync.ts` already establishes for this codebase.
+ *
+ * `repo` is not part of what it returns because status output does not carry
+ * it. Only `readChanges`, which resolved the root to run in, knows it.
  */
-export function parseStatus(stdout: string): GitChanges {
+export function parseStatus(stdout: string): Omit<GitChanges, 'repo'> {
   const fields = stdout.split('\0').filter((field) => field.length > 0)
   let branch: string | null = null
   let head: string | null = null
@@ -130,5 +134,5 @@ export async function readChanges(cwd: string): Promise<GitChanges | null> {
     '--untracked-files=all',
   ])
   if (run.code !== 0) return null
-  return parseStatus(run.stdout)
+  return { repo: basename(root), ...parseStatus(run.stdout) }
 }

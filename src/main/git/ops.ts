@@ -118,17 +118,18 @@ export async function commit(
  * nothing anywhere can bring it back.
  *
  * `expectedUntracked` is which of `paths` the confirm dialog told the user
- * would be DELETED, as opposed to restored. It is checked against a fresh
- * status read taken here, and the whole batch is refused if the two
- * disagree on even one path, rather than silently acting on the fresh
- * classification. Several sessions can share one checkout, so a path shown
- * as "restored to the last commit" can become untracked (a peer's `rm
- * --cached`, say) between the dialog opening and the click landing; acting
- * on the fresh read in that case would delete something the user was told
- * would survive. Refusing and handing back the current list, the same shape
- * `commit` refuses in when the branch moved underneath it, is what fails
- * safe: the alternative of re-checking only at dialog-open time still
- * leaves the gap between open and click, just narrower.
+ * would be DELETED, as opposed to restored. The renderer snapshots that
+ * split when the dialog OPENS and sends the snapshot unchanged
+ * (`PendingDiscard` in `src/renderer/GitPanel.tsx`), so what arrives here is
+ * genuinely what was read, not a re-read taken at click time. It is checked
+ * against a fresh status read taken here, and the whole batch is refused if
+ * the two disagree on even one path, rather than silently acting on the
+ * fresh classification. Several sessions can share one checkout, so a path
+ * shown as restorable can become untracked (a peer's `rm --cached`, say)
+ * between the dialog opening and the click landing; acting on the fresh read
+ * in that case would delete something the user was told would survive.
+ * Refusing and handing back the current list, the same shape `commit`
+ * refuses in when the branch moved underneath it, is what fails safe.
  */
 export async function discard(
   root: string,

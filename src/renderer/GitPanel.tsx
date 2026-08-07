@@ -85,6 +85,24 @@ function Row({
 }
 
 /**
+ * A discard the user has been asked to confirm, frozen as the dialog opened.
+ *
+ * `untracked` is which of `paths` were classified as untracked THEN, not now.
+ * The list behind the dialog keeps polling, so recomputing at click time would
+ * rewrite the dialog's own wording under the user and hand main a
+ * classification exactly as fresh as its own, which is the disagreement
+ * `discard`'s fail-safe in `src/main/git/ops.ts` exists to catch.
+ *
+ * `projectId` is which project it was raised in, so an answer can never reach
+ * a repository the dialog never named.
+ */
+type PendingDiscard = {
+  projectId: string
+  paths: string[]
+  untracked: string[]
+}
+
+/**
  * What has changed in the active project's repository.
  *
  * Polled rather than pushed, on `StatusBar`'s cadence and for its reason: the
@@ -109,7 +127,7 @@ export function GitPanel({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState('')
-  const [pendingDiscard, setPendingDiscard] = useState<string[] | null>(null)
+  const [pendingDiscard, setPendingDiscard] = useState<PendingDiscard | null>(null)
 
   // Owns `busy` across a project switch that abandons a stage/unstage still
   // in flight: see `mutationGuard.ts` for why that needs a dedicated guard
@@ -126,6 +144,13 @@ export function GitPanel({
     setChanges(null)
     setLoaded(false)
     setError(null)
+    // Both of these belong to the project being left. A message typed against
+    // one repository must not be committed to another, and a confirm still on
+    // screen must not stay answerable once the list behind it is a different
+    // repository's: ⌘1-⌘9 switches project from a window listener, so a
+    // project switch with the dialog open is reachable by keyboard alone.
+    setMessage('')
+    setPendingDiscard(null)
   }, [project?.id, guard])
 
   const refresh = useCallback((): void => {
@@ -174,9 +199,16 @@ export function GitPanel({
    * true again while this call is still the EARLIER visit's, and its (now
    * stale) reply would land as if it were fresh. The guard's generation
    * tells the two visits apart even when their project id does not.
+   *
+   * `onLanded` runs only for a reply that passed that same guard, so anything
+   * a caller wants to do with the outcome inherits the check rather than
+   * having to repeat it. Clearing the commit box is the reason it exists.
    */
   const mutate = useCallback(
-    (call: (projectId: string) => Promise<GitMutation>): void => {
+    (
+      call: (projectId: string) => Promise<GitMutation>,
+      onLanded?: (result: GitMutation) => void,
+    ): void => {
       const asked = project?.id
       if (!asked || guard.isBusy()) return
       const token = guard.started()
@@ -186,6 +218,7 @@ export function GitPanel({
           if (!guard.isCurrent(token)) return
           if (result.changes !== null) setChanges(result.changes)
           if (!result.ok) setError(result.error)
+          onLanded?.(result)
         })
         .catch((reason: unknown) => {
           if (!guard.isCurrent(token)) return
@@ -207,23 +240,35 @@ export function GitPanel({
     [mutate],
   )
 
-  // Computed fresh from `changes` on every render, not memoized once: this is
-  // also what the confirm dialog is drawn from, and `confirmDiscard` sends
-  // exactly this split back to main as "this is what was shown". See
-  // `discard` in `src/main/git/ops.ts` for why the two have to agree.
-  const untrackedNow = new Set(
-    (changes?.unstaged ?? []).filter((c) => c.worktree === '?').map((c) => c.path),
+  // Classified once, here, from the list the user is looking at as they ask.
+  // Everything downstream reads the snapshot: see `PendingDiscard`.
+  const requestDiscard = useCallback(
+    (path: string) => {
+      const projectId = project?.id
+      if (projectId === undefined) return
+      const untracked = new Set(
+        (changes?.unstaged ?? []).filter((c) => c.worktree === '?').map((c) => c.path),
+      )
+      const paths = [path]
+      setPendingDiscard({
+        projectId,
+        paths,
+        untracked: paths.filter((p) => untracked.has(p)),
+      })
+    },
+    [project?.id, changes],
   )
 
-  const requestDiscard = useCallback((path: string) => setPendingDiscard([path]), [])
-
   const confirmDiscard = useCallback(() => {
-    const paths = pendingDiscard
+    const pending = pendingDiscard
     setPendingDiscard(null)
-    if (paths === null) return
-    const expectedUntracked = paths.filter((path) => untrackedNow.has(path))
-    mutate((id) => window.pterm.gitDiscard(id, paths, expectedUntracked))
-  }, [pendingDiscard, mutate, untrackedNow])
+    // The switch effect already clears a pending discard, so this can only
+    // fire if some future path leaves one behind. It costs a comparison and
+    // it is what makes "an answer cannot reach another repository" a property
+    // of this function rather than of one effect elsewhere.
+    if (pending === null || pending.projectId !== project?.id) return
+    mutate((id) => window.pterm.gitDiscard(id, pending.paths, pending.untracked))
+  }, [pendingDiscard, project?.id, mutate])
 
   // The one place that decides whether a commit may proceed: both the button
   // and the ⌘Enter key handler call this rather than duplicating its checks,
@@ -233,13 +278,16 @@ export function GitPanel({
     if (busy || message.trim() === '' || changes === null) return
     const expected = { branch: changes.branch, head: changes.head }
     const text = message
-    mutate((id) =>
-      window.pterm.gitCommit(id, text, expected).then((result) => {
-        // Cleared only on success: a refused commit must not throw away the
-        // message the user typed.
+    mutate(
+      (id) => window.pterm.gitCommit(id, text, expected),
+      // Through `onLanded` rather than inside the `gitCommit` chain, so it
+      // inherits `mutate`'s staleness check: a commit resolving after a
+      // project switch would otherwise clear whatever the user has typed
+      // since. Cleared only on success either way, because a refused commit
+      // must not throw away the message.
+      (result) => {
         if (result.ok) setMessage('')
-        return result
-      }),
+      },
     )
   }, [busy, changes, message, mutate])
 
@@ -250,7 +298,8 @@ export function GitPanel({
   const clean =
     changes !== null && changes.staged.length === 0 && changes.unstaged.length === 0
 
-  const pending = pendingDiscard ?? []
+  const pendingPaths = pendingDiscard?.paths ?? []
+  const pendingUntracked = new Set(pendingDiscard?.untracked ?? [])
 
   return (
     <div
@@ -260,15 +309,31 @@ export function GitPanel({
     >
       <PanelHeading testid="git-toggle" label="Git" onClick={onToggle} />
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-        {changes?.branch ? (
-          <p data-testid="gitpanel-branch" className="truncate px-2.5 py-1 text-faint">
-            {changes.branch}
+        {/* The repository, not the project: they are the same name often
+            enough that only naming one of them would read as either. A
+            detached head has no branch to show, and the repository is then
+            the whole line. */}
+        {changes ? (
+          <p className="flex gap-2 px-2.5 py-1 text-faint">
+            <span data-testid="gitpanel-repo" className="truncate text-muted">
+              {changes.repo}
+            </span>
+            {changes.branch ? (
+              <span data-testid="gitpanel-branch" className="truncate">
+                {changes.branch}
+              </span>
+            ) : null}
           </p>
         ) : null}
 
         <div className="flex flex-col gap-1 px-2.5 py-2">
           <textarea
             data-testid="gitpanel-message"
+            // Every text field in the app carries this: without it ⌘W typed
+            // into the box closes a pane and destroys its session, taking the
+            // half-written message with it. ⌘Enter below is unaffected, since
+            // no App binding matches `Enter`.
+            data-shortcuts="off"
             value={message}
             onChange={(event) => setMessage(event.target.value)}
             // ⌘Enter commits, which is what VS Code's own placeholder
@@ -352,8 +417,8 @@ export function GitPanel({
       </div>
       <ConfirmGitDiscard
         open={pendingDiscard !== null}
-        tracked={pending.filter((path) => !untrackedNow.has(path))}
-        untracked={pending.filter((path) => untrackedNow.has(path))}
+        tracked={pendingPaths.filter((path) => !pendingUntracked.has(path))}
+        untracked={pendingPaths.filter((path) => pendingUntracked.has(path))}
         onCancel={() => setPendingDiscard(null)}
         onDiscard={confirmDiscard}
       />
