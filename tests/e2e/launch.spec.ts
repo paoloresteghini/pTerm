@@ -171,10 +171,28 @@ test('renders a terminal and echoes typed input', async () => {
 
 // `cat -v` because the shell cannot show the difference: it treats ESC CR as
 // Meta+Return and accepts the line, exactly like a bare Return. `cat -v`
-// echoes the ESC as a visible `^[`, which a bare CR never produces — so with
-// the Shift+Return branch deleted from `Terminal.tsx`'s key handler, the
-// marker below still appears (Return still submits) and `^[` does not, and
-// this test is RED on exactly that.
+// renders an ESC as a visible `^[`, which no bare CR can produce.
+//
+// Structured as its own control: the plain Return goes first and must leave
+// the pane free of `^[`, and only then does Shift+Return have to put one
+// there. The claim is the DIFFERENCE between the two returns, so asserting
+// both halves in one pane is what makes a pass mean that difference exists,
+// rather than meaning some ESC reached the pty from anywhere at all.
+//
+// **Measured, 2026-08-06.** An earlier version asserted `/\^\[\s*seen-esc/`,
+// requiring the ESC to be adjacent to text typed after it. It passed alone
+// and FAILED in the full suite, on this buffer:
+//
+//     % cat -v
+//     ^[
+//     s^[
+//     een-esc
+//
+// Two things write to that screen and they interleave under load: the tty
+// echoes each keystroke as it is typed, and `cat -v` prints the line it read
+// only once the line is flushed. So the ESC legitimately appears twice, and
+// nothing typed afterwards is reliably adjacent to either copy. Adjacency was
+// never part of the claim; presence is. Hence a bare `.toContain('^[')`.
 test('Shift+Return reaches the pty as ESC CR, not a bare Return', async () => {
   const app = await launch()
   const window = await app.firstWindow()
@@ -191,14 +209,23 @@ test('Shift+Return reaches the pty as ESC CR, not a bare Return', async () => {
 
   await window.keyboard.type('cat -v')
   await window.keyboard.press('Enter')
-  await window.keyboard.press('Shift+Enter')
-  // Something visible after it, so the poll below cannot pass on a `^[` that
-  // a future handler change might emit for the plain Enter above.
-  await window.keyboard.type('seen-esc')
-
+  // `cat` is now reading. Waited for rather than assumed: a Return that
+  // arrives before it starts is consumed by the shell, and the control below
+  // would then be asserting the absence of an ESC nothing could have sent.
   await expect
     .poll(async () => (await terminalTexts(window)).join('\n'), { timeout: 20_000 })
-    .toMatch(/\^\[\s*seen-esc/)
+    .toContain('cat -v')
+
+  // The control. A plain Return through the same path must leave no ESC.
+  await window.keyboard.press('Enter')
+  await window.waitForTimeout(750)
+  expect((await terminalTexts(window)).join('\n')).not.toContain('^[')
+
+  // The claim.
+  await window.keyboard.press('Shift+Enter')
+  await expect
+    .poll(async () => (await terminalTexts(window)).join('\n'), { timeout: 20_000 })
+    .toContain('^[')
   await app.close()
 })
 
