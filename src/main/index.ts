@@ -226,11 +226,66 @@ function installMenu(): void {
       label: 'View',
       submenu: [
         {
+          id: 'toggle-files',
+          label: 'Files',
+          type: 'checkbox',
+          accelerator: 'Alt+CmdOrCtrl+F',
+          registerAccelerator: false,
+          click: () => sendMenuCommand('toggleFiles'),
+        },
+        {
+          id: 'toggle-skills',
+          label: 'Skills',
+          type: 'checkbox',
+          accelerator: 'Alt+CmdOrCtrl+S',
+          registerAccelerator: false,
+          click: () => sendMenuCommand('toggleSkills'),
+        },
+        {
           id: 'toggle-presets',
-          label: 'Toggle Presets',
-          accelerator: 'Shift+CmdOrCtrl+\\',
+          label: 'Presets',
+          type: 'checkbox',
+          accelerator: 'Alt+CmdOrCtrl+P',
           registerAccelerator: false,
           click: () => sendMenuCommand('togglePresets'),
+        },
+        {
+          id: 'toggle-prompts',
+          label: 'Prompts',
+          type: 'checkbox',
+          // One modifier away from `reload`'s CmdOrCtrl+R, and distinct from
+          // it. Taken so the six letters stay mnemonic: P is spent on Presets,
+          // and one non-mnemonic key among six is harder to remember than a
+          // near miss.
+          accelerator: 'Alt+CmdOrCtrl+R',
+          registerAccelerator: false,
+          click: () => sendMenuCommand('togglePrompts'),
+        },
+        {
+          id: 'toggle-notes',
+          label: 'Notes',
+          type: 'checkbox',
+          accelerator: 'Alt+CmdOrCtrl+N',
+          registerAccelerator: false,
+          click: () => sendMenuCommand('toggleNotes'),
+        },
+        {
+          id: 'toggle-git',
+          label: 'Git',
+          type: 'checkbox',
+          accelerator: 'Alt+CmdOrCtrl+G',
+          registerAccelerator: false,
+          click: () => sendMenuCommand('toggleGit'),
+        },
+        { type: 'separator' },
+        {
+          id: 'hide-all-columns',
+          // Relabelled from main whenever the renderer reports its columns,
+          // so it never claims to do the opposite of what it will do.
+          label: 'Hide All Columns',
+          accelerator: 'Shift+CmdOrCtrl+\\',
+          registerAccelerator: false,
+          click: () => sendMenuCommand('hideAllColumns'),
         },
         { type: 'separator' },
         // `reload` stays: restore reattaches everything, so a reload is how a

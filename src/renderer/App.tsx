@@ -26,6 +26,14 @@ import { tabLabel } from './lib/tabLabel'
 import { relativeToProject } from './lib/relativeToProject'
 import { markDirty, forgetPane, type DirtyPanes } from './lib/dirtyPanes'
 import {
+  COLUMN_IDS,
+  anyOpen,
+  hideAll,
+  restore,
+  type ColumnId,
+  type ColumnVisibility,
+} from './lib/columnVisibility'
+import {
   INITIAL_WORKSPACE_STATE,
   activeProject,
   activeTabId,
@@ -183,22 +191,57 @@ export function App() {
     })
   }, [])
 
+  // What was open when hide-all last closed everything. A ref, not state:
+  // nothing renders from it, and it must not be persisted, because it answers
+  // "what did I have open a moment ago" and a set restored from last week is
+  // not that.
+  const rememberedColumns = useRef<ColumnId[]>([])
+
+  const setColumn: Record<ColumnId, (collapsed: boolean) => void> = {
+    files: setFilesCollapsed,
+    skills: setSkillsCollapsed,
+    presets: setPresetsCollapsed,
+    prompts: setPromptsCollapsed,
+    notes: setNotesCollapsed,
+    git: setGitCollapsed,
+  }
+
+  const COLUMN_KEY: Record<ColumnId, string> = {
+    files: FILES_KEY,
+    skills: SKILLS_KEY,
+    presets: PRESETS_KEY,
+    prompts: PROMPTS_KEY,
+    notes: NOTES_KEY,
+    git: GIT_KEY,
+  }
+
   /**
-   * ⇧\ and the Presets menu item, which move both columns together because
-   * that is what the one panel they were split out of did.
+   * Close every column, or reopen the set the last close remembered.
    *
-   * "Collapse unless both are already collapsed" rather than inverting each
-   * column separately: with one open and one shut, a per-column invert would
-   * swap them and leave the same amount of screen taken, which is not what
-   * anybody presses this for.
+   * Which of the two it does is decided by whether anything is open, so the
+   * one item and the one keystroke cover both directions.
    */
-  const toggleSidePanels = useCallback(() => {
-    const collapsed = !(skillsCollapsed && presetsCollapsed)
-    localStorage.setItem(SKILLS_KEY, collapsed ? '1' : '0')
-    localStorage.setItem(PRESETS_KEY, collapsed ? '1' : '0')
-    setSkillsCollapsed(collapsed)
-    setPresetsCollapsed(collapsed)
-  }, [skillsCollapsed, presetsCollapsed])
+  const hideAllColumns = useCallback(() => {
+    const now: ColumnVisibility = {
+      files: filesCollapsed,
+      skills: skillsCollapsed,
+      presets: presetsCollapsed,
+      prompts: promptsCollapsed,
+      notes: notesCollapsed,
+      git: gitCollapsed,
+    }
+    const next = anyOpen(now)
+      ? (() => {
+          const closed = hideAll(now)
+          rememberedColumns.current = closed.remembered
+          return closed.next
+        })()
+      : restore(now, rememberedColumns.current)
+    for (const id of COLUMN_IDS) {
+      setColumn[id](next[id])
+      localStorage.setItem(COLUMN_KEY[id], next[id] ? '1' : '0')
+    }
+  }, [filesCollapsed, skillsCollapsed, presetsCollapsed, promptsCollapsed, notesCollapsed, gitCollapsed])
 
   const project = activeProject(state)
   const currentTabId = activeTabId(state)
@@ -899,14 +942,45 @@ export function App() {
           case 'focusDown':
             focusPane('down')
             return
+          case 'toggleFiles':
+            toggleFiles()
+            return
+          case 'toggleSkills':
+            toggleSkills()
+            return
           case 'togglePresets':
-            toggleSidePanels()
+            togglePresets()
+            return
+          case 'togglePrompts':
+            togglePrompts()
+            return
+          case 'toggleNotes':
+            toggleNotes()
+            return
+          case 'toggleGit':
+            toggleGit()
+            return
+          case 'hideAllColumns':
+            hideAllColumns()
             return
           case 'settings':
             setSettingsOpen(true)
         }
       }),
-    [activePaneId, openTab, requestClosePane, splitActive, focusPane, toggleSidePanels],
+    [
+      activePaneId,
+      openTab,
+      requestClosePane,
+      splitActive,
+      focusPane,
+      toggleFiles,
+      toggleSkills,
+      togglePresets,
+      togglePrompts,
+      toggleNotes,
+      toggleGit,
+      hideAllColumns,
+    ],
   )
 
   useEffect(() => {
@@ -980,9 +1054,29 @@ export function App() {
           return
         }
       }
+      // ⌥⌘ + a letter, one per column. A sibling of the arrow branch above
+      // rather than nested inside it: both test the same `altKey &&
+      // !shiftKey` guard, and nesting one inside the other would make the
+      // arrow branch's fallthrough (no direction matched) swallow these too.
+      if (event.altKey && !event.shiftKey) {
+        const column: Record<string, () => void> = {
+          KeyF: toggleFiles,
+          KeyS: toggleSkills,
+          KeyP: togglePresets,
+          KeyR: togglePrompts,
+          KeyN: toggleNotes,
+          KeyG: toggleGit,
+        }
+        const toggle = column[event.code]
+        if (toggle) {
+          event.preventDefault()
+          toggle()
+          return
+        }
+      }
       if (event.code === 'Backslash' && event.shiftKey) {
         event.preventDefault()
-        toggleSidePanels()
+        hideAllColumns()
         return
       }
       if (event.code === 'Comma') {
@@ -1019,7 +1113,13 @@ export function App() {
     splitActive,
     focusPane,
     fail,
-    toggleSidePanels,
+    toggleFiles,
+    toggleSkills,
+    togglePresets,
+    togglePrompts,
+    toggleNotes,
+    toggleGit,
+    hideAllColumns,
   ])
 
   /**

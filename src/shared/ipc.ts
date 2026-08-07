@@ -94,7 +94,13 @@ export type MenuCommand =
   | 'focusRight'
   | 'focusUp'
   | 'focusDown'
+  | 'toggleFiles'
+  | 'toggleSkills'
   | 'togglePresets'
+  | 'togglePrompts'
+  | 'toggleNotes'
+  | 'toggleGit'
+  | 'hideAllColumns'
   | 'settings'
 
 /**
