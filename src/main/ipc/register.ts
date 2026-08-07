@@ -4,6 +4,7 @@ import {
   canHaveSession,
   type Candidate,
   type DataEvent,
+  type DiffSide,
   type ExitEvent,
   type HistoryEntry,
   type HistoryScope,
@@ -58,7 +59,7 @@ import { listDir, readFileInside, resolveInside, writeFileInside } from '../file
 import { readBranch } from '../git/branch'
 import { readCounts, syncBranch } from '../git/sync'
 import { readChanges, repoRoot } from '../git/status'
-import { commit, discard, stage, stashAll, unstage } from '../git/ops'
+import { commit, diffOf, discard, stage, stashAll, unstage } from '../git/ops'
 import { newSessionId } from '../tmux/names'
 import {
   addProject,
@@ -1509,6 +1510,17 @@ export function registerIpc(
     return stashAll(root)
   })
 
+  // Outside `serialise`, beside the rest of the git handlers: reads a
+  // repository, writes no config.
+  ipcMain.handle(
+    CHANNELS.gitDiff,
+    async (_event, projectId: string, relPath: string, side: DiffSide) => {
+      const root = await rootOfProject(projectId)
+      if (root === null) return null
+      return diffOf(root, relPath, side)
+    },
+  )
+
   ipcMain.handle(CHANNELS.fsList, async (_event, projectId: string, relPath: string) => {
     const config = await store.read()
     const project = config.projects.find((row) => row.id === projectId)
@@ -1605,6 +1617,55 @@ export function registerIpc(
 
         // Both arrays in one write, for `splitPane`'s reason: a separate write
         // per array leaves a window in which the file holds a pane no tab lists.
+        await store.write({
+          ...config,
+          panes: [...config.panes, pane],
+          tabs: withTabRow(config.tabs, id, row),
+        })
+        return pane
+      }),
+  )
+
+  // Clones `openEditor` above, with three differences: `type: 'diff'`, the
+  // extra `diffSide`/`diffRelPath` fields, and no `readFileInside` pre-read.
+  // A diff's subject may be a file that has been deleted, which is exactly a
+  // change worth showing, and `readFileInside` would refuse it.
+  ipcMain.handle(
+    CHANNELS.openDiff,
+    (_event, projectId: string, relPath: string, side: DiffSide): Promise<TabDescriptor | null> =>
+      serialise(async () => {
+        const config = await store.read()
+        const project = config.projects.find((row) => row.id === projectId)
+        if (!project) return null
+
+        const root = await repoRoot(project.cwd)
+        if (root === null) return null
+        // Resolved against the REPOSITORY root, not the project cwd: status
+        // paths are repo-relative, and a project pointed at a subdirectory
+        // would reject every path outside it.
+        const filePath = resolveInside(root, relPath)
+        if (filePath === null) return null
+
+        const id = newSessionId()
+        const pane: PaneRecord = {
+          id,
+          projectSlug: project.slug,
+          cwd: project.cwd,
+          type: 'diff',
+          filePath,
+          diffSide: side,
+          // The repo-relative string as-is, rather than re-derived from
+          // `filePath` later: `App.tsx`'s `editorRelPath` derives relative to
+          // the PROJECT cwd, which only agrees with this repo-root-relative
+          // path when the project IS the repository root.
+          diffRelPath: relPath,
+        }
+        const row: TabRow = {
+          id,
+          groupId: id,
+          activePaneId: id,
+          layout: { dir: 'row', ratio: [1], kids: [id] },
+        }
         await store.write({
           ...config,
           panes: [...config.panes, pane],

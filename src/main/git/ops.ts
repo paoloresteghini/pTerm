@@ -2,7 +2,7 @@ import { unlink } from 'node:fs/promises'
 import { relative, resolve, sep, join } from 'node:path'
 import { git, describeFailure } from './sync'
 import { readChanges } from './status'
-import type { GitMutation } from '../../shared/ipc'
+import type { DiffSide, GitMutation } from '../../shared/ipc'
 
 /**
  * The subset of `paths` that really are inside `root`, normalised and made
@@ -190,4 +190,37 @@ export async function discard(
  */
 export async function stashAll(root: string): Promise<GitMutation> {
   return operate(root, ['stash', 'push', '--include-untracked'])
+}
+
+/**
+ * The unified diff for one path, as text.
+ *
+ * Untracked files get `--no-index` against /dev/null, which is how git itself
+ * renders a wholly new file, so the pane's renderer has one format to read
+ * rather than two. That invocation exits 1 when the files differ, which for
+ * this call is the normal case and not a failure.
+ */
+export async function diffOf(
+  root: string,
+  path: string,
+  side: DiffSide,
+): Promise<string | null> {
+  const safe = safePaths(root, [path])
+  if (safe.length === 0) return null
+  const only = safe[0]
+
+  const status = await readChanges(root)
+  const untracked =
+    status?.unstaged.some((c) => c.path === only && c.worktree === '?') ?? false
+
+  if (untracked) {
+    const run = await git(root, ['diff', '--no-index', '--', '/dev/null', only])
+    // `--no-index` exits 1 when the two differ, which is every use of it here.
+    return run.code === 0 || run.code === 1 ? run.stdout : null
+  }
+
+  const args =
+    side === 'staged' ? ['diff', '--cached', '--', only] : ['diff', '--', only]
+  const run = await git(root, args)
+  return run.code === 0 ? run.stdout : null
 }

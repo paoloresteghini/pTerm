@@ -6,7 +6,7 @@ import { decodeSessionName, encodeSessionName, newSessionId, tabIdFromGroupName 
 // deliberate `killed` apart from a genuine exit too (see `ExitEvent.reason`
 // in shared/ipc.ts), so a second, main-only definition here would only
 // invite drift. Re-exported so existing importers keep working unchanged.
-import type { ExitReason, TabType } from '../../shared/ipc'
+import type { DiffSide, ExitReason, TabType } from '../../shared/ipc'
 import type { PaneColor } from '../../shared/paneColors'
 
 export type { ExitReason }
@@ -41,13 +41,25 @@ export interface PaneRecord {
    */
   color?: PaneColor
   /**
-   * The file an editor pane is showing, absolute. Absent on every terminal
-   * pane, and absent on an editor pane whose file could not be read.
+   * The file an editor or diff pane is showing, absolute. Absent on every
+   * terminal pane, and absent on an editor pane whose file could not be read.
    *
    * Display data only, same as `title` and `color`: nothing in this file
    * reads it, since this file deals in tmux and an editor pane has none.
    */
   filePath?: string
+  /**
+   * Which side of the index a `diff` pane is showing. Absent on every other
+   * kind, and on a `diff` row that predates the field, where the working tree
+   * is the sensible reading.
+   */
+  diffSide?: DiffSide
+  /**
+   * The repo-relative path a `diff` pane's `gitDiff` calls need. See the
+   * field of the same name on `TabDescriptor` in `shared/ipc.ts` for why it
+   * exists alongside `filePath` rather than being re-derived from it.
+   */
+  diffRelPath?: string
 }
 
 /**

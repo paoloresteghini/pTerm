@@ -66,6 +66,8 @@ export const CHANNELS = {
   gitCommit: 'pterm:gitCommit',
   gitDiscard: 'pterm:gitDiscard',
   gitStash: 'pterm:gitStash',
+  gitDiff: 'pterm:gitDiff',
+  openDiff: 'pterm:openDiff',
 } as const
 
 /**
@@ -101,10 +103,10 @@ export type MenuCommand =
  * A declaration of intent, not a gate on status: it decides the launch command
  * and whether an expecting-hooks dot is drawn before any event has arrived.
  * Every tab carries PTERM_TAB_ID regardless, so a `claude` typed by hand into
- * a shell tab gets full status the moment its first hook lands. `editor` is
- * the exception: it has no launch command at all.
+ * a shell tab gets full status the moment its first hook lands. `editor` and
+ * `diff` are the exceptions: neither has a launch command at all.
  */
-export type TabType = 'claude' | 'preset' | 'shell' | 'editor'
+export type TabType = 'claude' | 'preset' | 'shell' | 'editor' | 'diff'
 
 /**
  * Whether a pane of this kind has a tmux session behind it.
@@ -122,9 +124,14 @@ export type TabType = 'claude' | 'preset' | 'shell' | 'editor'
  * the same question to answer before it kills anything, and two spellings of
  * "is this a terminal" is how a pane comes to be killable on one side of the
  * IPC boundary and not the other.
+ *
+ * Two sessionless kinds now: `editor` and `diff`. Neither ever had a tmux
+ * session to attach, restart, or kill.
  */
+const SESSIONLESS: readonly TabType[] = ['editor', 'diff']
+
 export function canHaveSession(pane: { type: TabType }): boolean {
-  return pane.type !== 'editor'
+  return !SESSIONLESS.includes(pane.type)
 }
 
 /** A notification rule, exactly as it is stored. */
@@ -257,13 +264,32 @@ export interface TabDescriptor {
    */
   color?: PaneColor
   /**
-   * The file an editor pane is showing, absolute. Absent on every terminal
-   * pane, and absent on an editor pane whose file could not be read.
+   * The file an editor or diff pane is showing, absolute. Absent on every
+   * terminal pane, and absent on an editor pane whose file could not be read.
    *
    * Absolute here and relative across `fsRead`: this is written by main and
    * read back by main, and never spelled by the renderer.
    */
   filePath?: string
+  /**
+   * Which side of the index a `diff` pane is showing. Absent on every other
+   * kind, and on a `diff` row that predates the field, where the working tree
+   * is the sensible reading.
+   */
+  diffSide?: DiffSide
+  /**
+   * The repo-relative path `gitDiff` needs, for a `diff` pane only.
+   *
+   * `filePath` above is resolved against the REPOSITORY root (see `openDiff`
+   * in `register.ts`), but `editorRelPath` in `App.tsx` derives a path
+   * relative to the PROJECT's cwd. Those two agree only when the project IS
+   * the repository root. Carrying the original repo-relative path here, set
+   * once at open time from the same string `gitChanges` reported, means the
+   * renderer never has to re-derive it and never gets it wrong for a project
+   * pointed at a subdirectory. Absent on a `diff` row that predates the
+   * field, where `App.tsx` falls back to `editorRelPath`.
+   */
+  diffRelPath?: string
 }
 
 export interface TabLayout {
@@ -972,4 +998,17 @@ export interface PTermApi {
   gitDiscard(projectId: string, paths: string[], expectedUntracked: string[]): Promise<GitMutation>
   /** Stash every change, untracked included. Recoverable via `git stash`. */
   gitStash(projectId: string): Promise<GitMutation>
+  /**
+   * The unified diff for one path, or null when there is none to show.
+   *
+   * An untracked file has no diff at all; main answers with the file's own
+   * contents rendered as wholly added, so the pane has something true to show
+   * rather than an error.
+   */
+  gitDiff(projectId: string, relPath: string, side: DiffSide): Promise<string | null>
+  /**
+   * Open a read-only diff pane for one path, or null when the project or the
+   * path cannot be resolved.
+   */
+  openDiff(projectId: string, relPath: string, side: DiffSide): Promise<TabDescriptor | null>
 }

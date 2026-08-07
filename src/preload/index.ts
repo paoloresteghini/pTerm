@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import {
   CHANNELS,
   type DataEvent,
+  type DiffSide,
   type ExitEvent,
   type GitChanges,
   type GitMutation,
@@ -120,6 +121,10 @@ const api: PTermApi = {
     ipcRenderer.invoke(CHANNELS.gitDiscard, projectId, paths, expectedUntracked),
   gitStash: (projectId: string): Promise<GitMutation> =>
     ipcRenderer.invoke(CHANNELS.gitStash, projectId),
+  gitDiff: (projectId: string, relPath: string, side: DiffSide): Promise<string | null> =>
+    ipcRenderer.invoke(CHANNELS.gitDiff, projectId, relPath, side),
+  openDiff: (projectId: string, relPath: string, side: DiffSide): Promise<TabDescriptor | null> =>
+    ipcRenderer.invoke(CHANNELS.openDiff, projectId, relPath, side),
 }
 
 contextBridge.exposeInMainWorld('pterm', api)

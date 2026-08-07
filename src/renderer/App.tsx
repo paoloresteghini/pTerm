@@ -20,6 +20,7 @@ import { StatusBar } from './StatusBar'
 import { Welcome } from './Welcome'
 import { CommandPalette, type PaletteSession } from './CommandPalette'
 import { FileView, saveEditorPane } from './FileView'
+import { DiffView } from './DiffView'
 import { cn } from './lib/cn'
 import { tabLabel } from './lib/tabLabel'
 import { relativeToProject } from './lib/relativeToProject'
@@ -48,6 +49,7 @@ import { PANE_COLOR_DEFAULT, type PaneColor } from '../shared/paneColors'
 import { ColorSwatches } from './ColorSwatches'
 import {
   UNSORTED_ID,
+  type DiffSide,
   type HistoryEntry,
   type HistoryScope,
   type NotificationConfig,
@@ -262,6 +264,29 @@ export function App() {
           // it cannot read, and the renderer cannot tell those apart from a
           // null. Naming one would be a guess.
           fail(`Could not open ${relPath}`)
+        })
+        .catch(fail)
+    },
+    [project, fail],
+  )
+
+  /**
+   * Open a read-only diff pane for one path of the active project's
+   * repository, in a new tab.
+   *
+   * Mirrors `openFile` above: `relPath` here is repo-relative (it comes
+   * straight from `GitPanel`'s `change.path`, which `gitChanges` reported),
+   * not project-relative, which is why `openDiff` in main resolves it against
+   * the repository root rather than the project's `cwd`.
+   */
+  const openDiff = useCallback(
+    (relPath: string, side: DiffSide) => {
+      if (!project) return
+      window.pterm
+        .openDiff(project.id, relPath, side)
+        .then((tab) => {
+          if (tab) dispatch({ type: 'opened', tab })
+          else fail(`Could not open a diff for ${relPath}`)
         })
         .catch(fail)
     },
@@ -1228,10 +1253,23 @@ export function App() {
                     style={{ ...box.style, background: box.pane.color ?? PANE_COLOR_DEFAULT }}
                   >
                     {/* The pane's contents, by kind. Every pane was a terminal
-                        until this slice; an editor has no session to attach and
-                        mounting one for it would create the very tmux session
-                        the kind exists to do without. */}
-                    {box.pane.type === 'editor' ? (
+                        until this slice; an editor or diff pane has no session
+                        to attach and mounting one for it would create the very
+                        tmux session the kind exists to do without. */}
+                    {box.pane.type === 'diff' ? (
+                      <DiffView
+                        projectId={projectIdForTab(state.projects, box.pane)}
+                        // `diffRelPath` is repo-root-relative, set once by
+                        // `openDiff` in main; `editorRelPath` is relative to
+                        // the PROJECT cwd. The two agree only when the project
+                        // IS the repository root, so a saved row that already
+                        // carries `diffRelPath` is preferred and the derived
+                        // path is only a fallback for one that predates it.
+                        relPath={box.pane.diffRelPath ?? editorRelPath(box.pane)}
+                        side={box.pane.diffSide ?? 'worktree'}
+                        color={box.pane.color ?? PANE_COLOR_DEFAULT}
+                      />
+                    ) : box.pane.type === 'editor' ? (
                       <FileView
                         projectId={projectIdForTab(state.projects, box.pane)}
                         relPath={editorRelPath(box.pane)}
@@ -1411,7 +1449,12 @@ export function App() {
           }}
         />
 
-        <GitPanel project={project} collapsed={gitCollapsed} onToggle={toggleGit} />
+        <GitPanel
+          project={project}
+          collapsed={gitCollapsed}
+          onToggle={toggleGit}
+          onOpenDiff={openDiff}
+        />
 
         <NotesPanel project={project} />
 

@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { GitChanges, GitFileChange, GitMutation, ProjectDescriptor } from '../shared/ipc'
+import type {
+  DiffSide,
+  GitChanges,
+  GitFileChange,
+  GitMutation,
+  ProjectDescriptor,
+} from '../shared/ipc'
 import { useColumnWidth } from './lib/columnWidth'
 import { createMutationGuard } from './lib/mutationGuard'
 import { ColumnResizer, PanelHeading, PanelStrip } from './ui/Panel'
@@ -27,6 +33,7 @@ function Row({
   onStage,
   onUnstage,
   onDiscard,
+  onOpen,
 }: {
   change: GitFileChange
   section: 'staged' | 'unstaged'
@@ -34,6 +41,7 @@ function Row({
   onStage: (path: string) => void
   onUnstage: (path: string) => void
   onDiscard: (path: string) => void
+  onOpen: (path: string, side: DiffSide) => void
 }) {
   const letter = change.staged ?? change.worktree ?? '?'
   const dir = dirOf(change.path)
@@ -43,8 +51,13 @@ function Row({
       className="group flex w-full items-baseline gap-2 px-2.5 py-1 text-left text-muted"
     >
       <span className="w-3 shrink-0 text-faint">{letter}</span>
-      <span className="flex-1 truncate">{baseOf(change.path)}</span>
-      {dir === '' ? null : <span className="truncate text-faint">{dir}</span>}
+      <button
+        onClick={() => onOpen(change.path, section === 'staged' ? 'staged' : 'worktree')}
+        className="flex min-w-0 flex-1 items-baseline gap-2 cursor-default border-none bg-transparent p-0 text-left text-muted hover:text-fg"
+      >
+        <span className="truncate">{baseOf(change.path)}</span>
+        {dir === '' ? null : <span className="truncate text-faint">{dir}</span>}
+      </button>
       {/* Revealed on hover so a resting list reads as file names rather than
           as a wall of controls. `group-hover` needs the `group` class above. */}
       {section === 'unstaged' ? (
@@ -83,10 +96,12 @@ export function GitPanel({
   project,
   collapsed,
   onToggle,
+  onOpenDiff,
 }: {
   project: ProjectDescriptor | undefined
   collapsed: boolean
   onToggle: () => void
+  onOpenDiff: (relPath: string, side: DiffSide) => void
 }) {
   const { width, set, commit } = useColumnWidth('pterm:gitWidth')
   const [changes, setChanges] = useState<GitChanges | null>(null)
@@ -304,7 +319,8 @@ export function GitPanel({
             </p>
             {changes.staged.map((change) => (
               <Row key={`staged-${change.path}`} change={change} section="staged"
-                busy={busy} onStage={onStage} onUnstage={onUnstage} onDiscard={requestDiscard} />
+                busy={busy} onStage={onStage} onUnstage={onUnstage} onDiscard={requestDiscard}
+                onOpen={onOpenDiff} />
             ))}
           </>
         ) : null}
@@ -328,7 +344,8 @@ export function GitPanel({
             </p>
             {changes.unstaged.map((change) => (
               <Row key={`unstaged-${change.path}`} change={change} section="unstaged"
-                busy={busy} onStage={onStage} onUnstage={onUnstage} onDiscard={requestDiscard} />
+                busy={busy} onStage={onStage} onUnstage={onUnstage} onDiscard={requestDiscard}
+                onOpen={onOpenDiff} />
             ))}
           </>
         ) : null}
