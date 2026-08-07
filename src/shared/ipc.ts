@@ -60,6 +60,7 @@ export const CHANNELS = {
   skippedVersion: 'pterm:skippedVersion',
   gitStatus: 'pterm:gitStatus',
   gitSync: 'pterm:gitSync',
+  gitChanges: 'pterm:gitChanges',
 } as const
 
 /**
@@ -923,4 +924,12 @@ export interface PTermApi {
    * merge commit nobody asked for.
    */
   gitSync(projectId: string): Promise<GitSyncResult>
+  /**
+   * Every uncommitted change in the active project's repository, or null when
+   * its cwd is not inside one.
+   *
+   * Keyed by project id rather than by a path, like every other channel here:
+   * the renderer never names a directory main then runs a subprocess in.
+   */
+  gitChanges(projectId: string): Promise<GitChanges | null>
 }

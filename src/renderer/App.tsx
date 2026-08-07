@@ -9,6 +9,7 @@ import { FilesPanel } from './FilesPanel'
 import { SkillsPanel } from './SkillsPanel'
 import { PresetsPanel } from './PresetsPanel'
 import { PromptsPanel } from './PromptsPanel'
+import { GitPanel } from './GitPanel'
 import { NotesPanel } from './NotesPanel'
 import { AddProjectDialog } from './AddProjectDialog'
 import { ConfirmClosePane } from './ConfirmClosePane'
@@ -73,20 +74,21 @@ const MIN_PANE_COLS = 20
 const MIN_PANE_ROWS = 5
 
 /**
- * Collapse state for the four collapsible columns, in the same shape
+ * Collapse state for the five collapsible columns, in the same shape
  * `NotesPanel` stores its own: '0' means expanded, anything else (including
  * absent) means collapsed.
  *
  * **Every one of them defaults collapsed**, so a fresh profile shows the
  * projects sidebar and the terminal and nothing else. Each expanded column
- * costs 208px, and four of them plus the sidebar leave under 420px of terminal
- * on the 1280px window `src/main/index.ts` opens, narrower than two splittable
- * panes. The state persists per column, so this is the first run only.
+ * costs 208px, and five of them plus the sidebar leave under 40px of terminal
+ * on the 1280px window `src/main/index.ts` opens, narrower than any splittable
+ * pane. The state persists per column, so this is the first run only.
  */
 const SKILLS_KEY = 'pterm:skillsCollapsed'
 const PRESETS_KEY = 'pterm:presetsCollapsed'
 const FILES_KEY = 'pterm:filesCollapsed'
 const PROMPTS_KEY = 'pterm:promptsCollapsed'
+const GIT_KEY = 'pterm:gitCollapsed'
 
 /** Reads one of those keys, with the default applied when nothing is stored. */
 function storedCollapsed(key: string, fallback: boolean): boolean {
@@ -104,6 +106,7 @@ export function App() {
   const [presetsCollapsed, setPresetsCollapsed] = useState(() => storedCollapsed(PRESETS_KEY, true))
   const [filesCollapsed, setFilesCollapsed] = useState(() => storedCollapsed(FILES_KEY, true))
   const [promptsCollapsed, setPromptsCollapsed] = useState(() => storedCollapsed(PROMPTS_KEY, true))
+  const [gitCollapsed, setGitCollapsed] = useState(() => storedCollapsed(GIT_KEY, true))
   const [paletteOpen, setPaletteOpen] = useState(false)
   // Set once the workspace exists. Until then this window knows nothing about
   // what is selected and must not say anything about it — see the effects.
@@ -148,6 +151,12 @@ export function App() {
   const togglePrompts = useCallback(() => {
     setPromptsCollapsed((was) => {
       localStorage.setItem(PROMPTS_KEY, was ? '0' : '1')
+      return !was
+    })
+  }, [])
+  const toggleGit = useCallback(() => {
+    setGitCollapsed((was) => {
+      localStorage.setItem(GIT_KEY, was ? '0' : '1')
       return !was
     })
   }, [])
@@ -1366,7 +1375,7 @@ export function App() {
           </div>
         ) : null}
 
-        {/* Three independently collapsible columns. Each renders its own
+        {/* Four independently collapsible columns. Each renders its own
             vertical strip when collapsed, so none of them can vanish without
             leaving a way back. */}
         <SkillsPanel
@@ -1401,6 +1410,8 @@ export function App() {
             if (activePaneId) window.pterm.input(activePaneId, body)
           }}
         />
+
+        <GitPanel project={project} collapsed={gitCollapsed} onToggle={toggleGit} />
 
         <NotesPanel project={project} />
 

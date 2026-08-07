@@ -57,6 +57,7 @@ import { addPrompt, readPrompts, removePrompt } from '../prompts/store'
 import { listDir, readFileInside, resolveInside, writeFileInside } from '../files/tree'
 import { readBranch } from '../git/branch'
 import { readCounts, syncBranch } from '../git/sync'
+import { readChanges } from '../git/status'
 import { newSessionId } from '../tmux/names'
 import {
   addProject,
@@ -1438,6 +1439,16 @@ export function registerIpc(
     const project = config.projects.find((row) => row.id === projectId)
     if (!project) return { ok: false as const, error: 'No project' }
     return syncBranch(project.cwd)
+  })
+
+  // Outside `serialise`, like the git read above and for the same reason:
+  // this reads a repository and never touches pTerm's config, and it is
+  // polled by the column while it is open.
+  ipcMain.handle(CHANNELS.gitChanges, async (_event, projectId: string) => {
+    const config = await store.read()
+    const project = config.projects.find((row) => row.id === projectId)
+    if (!project) return null
+    return readChanges(project.cwd)
   })
 
   ipcMain.handle(CHANNELS.fsList, async (_event, projectId: string, relPath: string) => {
