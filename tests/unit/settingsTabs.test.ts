@@ -4,8 +4,8 @@ import { SETTINGS_TABS, nextTabIndex } from '../../src/renderer/settings/tabs'
 describe('SETTINGS_TABS', () => {
   // The order is a decision, not an accident: Notifications is first because
   // it is the only tab a user changes more than once, and the settings pane
-  // opens on the first tab. Task 3's e2e spec presses ArrowRight from
-  // Notifications and expects Hooks, which is this order.
+  // opens on the first tab. tests/e2e/settingsTabs.spec.ts presses ArrowRight
+  // from Notifications and expects Hooks, which is this order.
   it('runs Notifications, Hooks, Shell history, Updates', () => {
     expect(SETTINGS_TABS.map((tab) => tab.id)).toEqual([
       'notifications',

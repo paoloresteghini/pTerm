@@ -9,8 +9,8 @@ import { SETTINGS_TABS, nextTabIndex, type SettingsTabId } from './tabs'
  * of this project and this is 40 lines. The arrow-key handling below is
  * therefore ours, written out, not a capability assumed from a library.
  *
- * Inactive tabs are drawn in `text-label`, not `text-faint`, which measures
- * 1.86:1 on `--color-surface`. See `tests/unit/labelContrast.test.ts`.
+ * Inactive tabs are drawn in `text-label`, not `--color-faint`, which
+ * measures 1.86:1 on `--color-surface`. See `tests/unit/labelContrast.test.ts`.
  */
 export function SettingsTabs({
   active,

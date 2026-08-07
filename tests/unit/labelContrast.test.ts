@@ -82,10 +82,26 @@ describe('the section-label colour', () => {
   it('is what the settings sections draw their headings in', () => {
     const dir = new URL('../../src/renderer/settings/', import.meta.url)
     const hooks = readFileSync(new URL('HooksSection.tsx', dir), 'utf8')
-    expect(hooks).toContain('text-label')
+    // Ties the colour to the element that renders the heading text itself,
+    // not to any other `text-label` in the file: HooksSection also carries
+    // one on its collisions paragraph, which would keep this green even if
+    // the heading span were recoloured.
+    expect(hooks).toMatch(/className="[^"]*\btext-label\b[^"]*"[^>]*>Claude hooks/)
     expect(hooks).not.toContain('text-faint')
 
-    for (const file of ['ShellHistorySection.tsx', 'NotificationsSection.tsx', 'UpdatesSection.tsx']) {
+    // Every other file the settings pane renders, checked for the regression
+    // this file exists to catch. `SettingsTabs.tsx` and `SettingsPane.tsx`
+    // belong in this list too: the tab strip's inactive labels and the
+    // dialog's title and footer are exactly the kind of text a repalette
+    // could walk back to the unreadable colour, and neither file was in this
+    // loop before, so a repalette there would have shipped green.
+    for (const file of [
+      'ShellHistorySection.tsx',
+      'NotificationsSection.tsx',
+      'UpdatesSection.tsx',
+      'SettingsTabs.tsx',
+      'SettingsPane.tsx',
+    ]) {
       const source = readFileSync(new URL(file, dir), 'utf8')
       expect(source).not.toContain('text-faint')
     }
