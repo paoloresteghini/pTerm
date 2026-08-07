@@ -92,12 +92,23 @@ Notifications   Hooks   Shell history   Updates
 ```
 
 - `<div role="tablist">` of `<button role="tab" aria-selected>`.
-- Active tab: `text-fg` and a 1px bottom border. Inactive: `text-faint`, no border.
+- Active tab: `text-fg` and a 1px bottom border. Inactive: `text-label`, no border.
 - Left and Right arrow move the selection, written out explicitly with a roving `tabIndex`
   (the active tab is `tabIndex={0}`, the rest `-1`). This is our own code, not a capability
   assumed from a library.
-- `data-testid="settings-tab-notifications"`, `-hooks`, `-shell-history`, `-updates`, and
-  `data-active` on the selected one.
+- `data-testid="settings-tab-notifications"`, `-hooks`, `-shell-history`, `-updates`.
+
+Corrected 2026-08-07, after implementation. Two lines above were wrong when written.
+
+Inactive tabs were specified as `text-faint`, which measures 1.86:1 on `--color-surface`
+and is the exact pair `tests/unit/labelContrast.test.ts` exists to keep out of this app.
+They ship as `text-label`, and the same correction was applied to every heading in the
+dialog, which had been drawing in `text-faint` since long before this branch.
+
+This section also asked for `data-active` on the selected tab. It ships without one and the
+tests assert `aria-selected` instead. A `role="tab"` button must carry `aria-selected`
+anyway, so `data-active` would have been a second copy of the same fact, free to disagree
+with the first. One source of truth, and the tests read the one the browser also reads.
 
 The strip takes `tabs`, `active` and `onSelect`. It is its own file so the arrow-key handling
 has one place to live and one place to be read.
