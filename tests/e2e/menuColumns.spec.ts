@@ -122,9 +122,15 @@ test('the hide-all item renames itself once everything is hidden', async () => {
   await expect.poll(() => labelOf('hide-all-columns'), { timeout: 10_000 }).toBe('Show All Columns')
 })
 
-// The reason every item sets `registerAccelerator: false`. An
-// Electron-registered accelerator fires everywhere, including while the user
-// is typing, which this app has shipped as a bug twice.
+// What this actually covers is the renderer's own `data-shortcuts="off"`
+// guard in `App.tsx`, not `registerAccelerator: false`. Measured by flipping
+// `toggle-git` alone to `registerAccelerator: true` and re-running this test:
+// it still passed. `page.keyboard.press` is delivered through CDP, which on
+// macOS lands downstream of the `NSApplication sendEvent:` layer where
+// Electron matches a registered accelerator against native menu items, so a
+// synthetic keypress never reaches that layer whether or not the item claims
+// the accelerator. Whether `registerAccelerator: false` still matters for a
+// REAL keystroke is not tested anywhere in this suite.
 test('a column shortcut typed into a text field does not toggle the column', async () => {
   await clickMenuItem('toggle-notes')
   await expect(page.getByTestId('notes-panel')).toBeVisible()
