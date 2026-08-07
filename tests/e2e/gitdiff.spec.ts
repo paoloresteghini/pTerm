@@ -90,6 +90,23 @@ test('an untracked file shows as wholly added', async () => {
   await expect(page.getByTestId('diff-content')).toContainText('+brand new', { timeout: 15_000 })
 })
 
+// openDiff minted a fresh pane on every call, which put two identically
+// named tabs in the bar and made a `tab-` locator match two elements. Row
+// clicks are this panel's primary gesture, so the same behaviour here would
+// be hit constantly rather than occasionally.
+test('clicking the same file twice focuses the pane rather than adding one', async () => {
+  await writeFile(join(repo, 'tracked.txt'), 'two\n', 'utf8')
+  await open()
+
+  await page.getByTestId('gitpanel-unstaged-tracked.txt').click()
+  await expect(page.getByTestId('diff-content')).toBeVisible({ timeout: 15_000 })
+  const after = await page.locator('[data-testid^="tab-"]').count()
+
+  await page.getByTestId('gitpanel-unstaged-tracked.txt').click()
+  await page.waitForTimeout(750)
+  expect(await page.locator('[data-testid^="tab-"]').count()).toBe(after)
+})
+
 // The seam that silently erases a new pane type: sessionlessPanes.ts's filter.
 test('a diff pane survives a relaunch', async () => {
   await writeFile(join(repo, 'tracked.txt'), 'two\n', 'utf8')

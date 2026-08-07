@@ -17,6 +17,10 @@
   --color-label: #a1a1aa;
   --color-accent: #a3e635;
   --color-danger: #f87171;
+  /* Added for the diff pane's added-line colour, alongside the removed-line
+     `--color-danger` it is paired with. Measured against `--color-bg`:
+     11.42:1, clearing the 4.5:1 floor with room to spare. */
+  --color-ok: #4ade80;
 
   /* xterm renders to a canvas and cannot read these variables, so
      Terminal.tsx repeats the two values it needs in a JS object. If you

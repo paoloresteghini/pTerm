@@ -1646,6 +1646,15 @@ export function registerIpc(
         const filePath = resolveInside(root, relPath)
         if (filePath === null) return null
 
+        // A pane already showing this path and side is the answer, not a
+        // reason to mint a second one. Returning the existing record makes
+        // the renderer's `opened` action select it, which is the focus this
+        // gesture wants.
+        const already = config.panes.find(
+          (row) => row.type === 'diff' && row.filePath === filePath && row.diffSide === side,
+        )
+        if (already) return already
+
         const id = newSessionId()
         const pane: PaneRecord = {
           id,

@@ -63,9 +63,29 @@ export function DiffView({
         </p>
       ) : null}
       {text && text.trim() !== '' ? (
-        <pre data-testid="diff-content" className="m-0 p-2 whitespace-pre text-fg">
-          {text}
-        </pre>
+        <div data-testid="diff-content" className="p-2">
+          {text.split('\n').map((line, index) => (
+            <div
+              // Index keys: these lines have no identity of their own, the
+              // list is replaced wholesale on every read, and nothing in it is
+              // reordered or focused.
+              key={index}
+              className={
+                line.startsWith('+++') || line.startsWith('---')
+                  ? 'whitespace-pre text-faint'
+                  : line.startsWith('@@')
+                    ? 'whitespace-pre text-label'
+                    : line.startsWith('+')
+                      ? 'whitespace-pre text-ok'
+                      : line.startsWith('-')
+                        ? 'whitespace-pre text-danger'
+                        : 'whitespace-pre text-muted'
+              }
+            >
+              {line === '' ? ' ' : line}
+            </div>
+          ))}
+        </div>
       ) : null}
     </div>
   )
