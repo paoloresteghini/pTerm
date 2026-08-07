@@ -297,20 +297,20 @@ function installMenu(): void {
           click: () => sendMenuCommand('togglePrompts'),
         },
         {
-          id: 'toggle-notes',
-          label: 'Notes',
-          type: 'checkbox',
-          accelerator: 'Alt+CmdOrCtrl+N',
-          registerAccelerator: false,
-          click: () => sendMenuCommand('toggleNotes'),
-        },
-        {
           id: 'toggle-git',
           label: 'Git',
           type: 'checkbox',
           accelerator: 'Alt+CmdOrCtrl+G',
           registerAccelerator: false,
           click: () => sendMenuCommand('toggleGit'),
+        },
+        {
+          id: 'toggle-notes',
+          label: 'Notes',
+          type: 'checkbox',
+          accelerator: 'Alt+CmdOrCtrl+N',
+          registerAccelerator: false,
+          click: () => sendMenuCommand('toggleNotes'),
         },
         { type: 'separator' },
         {

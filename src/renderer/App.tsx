@@ -90,9 +90,10 @@ const MIN_PANE_ROWS = 5
  * **Every one of them defaults collapsed**, so a fresh profile shows the
  * projects sidebar and the terminal and nothing else. Each expanded column
  * costs 208px: six of them plus the 208px sidebar is 1456px, which already
- * exceeds the 1280px window `src/main/index.ts` opens, so all six cannot be
- * open at once. The state persists per column, so this is the first run
- * only.
+ * exceeds the 1280px window `src/main/index.ts` opens, so opening all six on
+ * that window leaves no room for a terminal. Nothing stops a user from doing
+ * it anyway on a wider or maximised window. The state persists per column, so
+ * this default is the first run only.
  */
 const SKILLS_KEY = 'pterm:skillsCollapsed'
 const PRESETS_KEY = 'pterm:presetsCollapsed'
@@ -1535,9 +1536,9 @@ export function App() {
           </div>
         ) : null}
 
-        {/* Four independently collapsible columns. Each renders its own
-            vertical strip when collapsed, so none of them can vanish without
-            leaving a way back. */}
+        {/* Five independently collapsible columns (Files, above, is the
+            sixth). Each renders its own vertical strip when collapsed, so
+            none of them can vanish without leaving a way back. */}
         <SkillsPanel
           project={project}
           collapsed={skillsCollapsed}

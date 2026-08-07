@@ -27,8 +27,8 @@ export const COLUMN_IDS: readonly ColumnId[] = [
   'skills',
   'presets',
   'prompts',
-  'notes',
   'git',
+  'notes',
 ]
 
 export function anyOpen(state: ColumnVisibility): boolean {

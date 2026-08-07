@@ -25,7 +25,7 @@ const withOpen = (...open: Array<keyof ColumnVisibility>): ColumnVisibility => {
 
 describe('COLUMN_IDS', () => {
   it('lists the six columns in on-screen order', () => {
-    expect(COLUMN_IDS).toEqual(['files', 'skills', 'presets', 'prompts', 'notes', 'git'])
+    expect(COLUMN_IDS).toEqual(['files', 'skills', 'presets', 'prompts', 'git', 'notes'])
   })
 })
 
@@ -47,8 +47,19 @@ describe('hideAll', () => {
   })
 
   it('remembers in on-screen order, not the order they were opened', () => {
-    const { remembered } = hideAll(withOpen('git', 'files'))
-    expect(remembered).toEqual(['files', 'git'])
+    // Insertion order deliberately reversed, so a `Object.keys(state)` walk
+    // would return ['git', 'files'] and this would fail. `withOpen` cannot
+    // show that: it always spreads `ALL_SHUT`, so its insertion order is
+    // always `COLUMN_IDS` order regardless of which columns end up open.
+    const opened: ColumnVisibility = {
+      git: false,
+      notes: true,
+      prompts: true,
+      presets: true,
+      skills: true,
+      files: false,
+    }
+    expect(hideAll(opened).remembered).toEqual(['files', 'git'])
   })
 
   it('remembers a single open column', () => {
