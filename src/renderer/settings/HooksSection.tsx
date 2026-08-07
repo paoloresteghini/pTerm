@@ -12,10 +12,8 @@ export function HooksSection() {
   const [hooksError, setHooksError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  // Read on mount, which is when this tab is selected: another pTerm window,
-  // or a hand edit of settings.json, could have changed the file since it was
-  // last read. This used to be an effect keyed on the dialog's `open`, back
-  // when all four sections were mounted together.
+  // Read on mount: another pTerm window, or a hand edit of settings.json,
+  // could have changed the file since it was last read.
   useEffect(() => {
     let cancelled = false
     window.pterm

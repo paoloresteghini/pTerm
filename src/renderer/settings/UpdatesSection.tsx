@@ -11,10 +11,10 @@ export function UpdatesSection() {
   const [skippedVersion, setSkippedVersion] = useState<string | null>(null)
 
   useEffect(() => {
-    // Unlike the other sections' reads, this swallows its error rather than
-    // surfacing one: the version is decoration next to a dialog that already
-    // works, not something the user asked for, so a failed read just leaves
-    // the ellipsis in place instead of needing a place to show an error.
+    // Swallows its error rather than surfacing one, like refreshSkipped just
+    // below: the version is decoration next to a dialog that already works,
+    // not something the user asked for, so a failed read just leaves the
+    // ellipsis in place instead of needing a place to show an error.
     window.pterm
       .appVersion()
       .then(setVersion)
@@ -31,11 +31,8 @@ export function UpdatesSection() {
       .catch(() => undefined)
   }
 
-  // Refetched on mount, which is when this tab is selected: another pTerm
-  // window's Skip button, or a hand edit of update.json, could have changed
-  // what is skipped since this tab was last read. This used to be an effect
-  // keyed on the dialog's `open`, back when all four sections were mounted
-  // together.
+  // Read on mount: another pTerm window's Skip button, or a hand edit of
+  // update.json, could have changed what is skipped since it was last read.
   useEffect(() => {
     refreshSkipped()
   }, [])

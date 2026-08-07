@@ -11,10 +11,8 @@ export function ShellHistorySection() {
   const [shellHistoryError, setShellHistoryError] = useState<string | null>(null)
   const [shellBusy, setShellBusy] = useState(false)
 
-  // Read on mount, which is when this tab is selected: another pTerm window,
-  // or a hand edit of the rc file, could have changed it since it was last
-  // read. This used to be an effect keyed on the dialog's `open`, back when
-  // all four sections were mounted together.
+  // Read on mount: another pTerm window, or a hand edit of the rc file,
+  // could have changed it since it was last read.
   useEffect(() => {
     let cancelled = false
     window.pterm
