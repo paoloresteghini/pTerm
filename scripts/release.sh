@@ -118,7 +118,7 @@ VERSION="$(node -p "require('./package.json').version")"
 
 npm run make
 
-ZIP="out/make/zip/darwin/arm64/PRCLI-darwin-arm64-${VERSION}.zip"
+ZIP="out/make/zip/darwin/arm64/pTerm-darwin-arm64-${VERSION}.zip"
 if [[ ! -f "$ZIP" ]]; then
   echo "Expected build output at $ZIP but it is not there." >&2
   echo "Contents of out/make:" >&2

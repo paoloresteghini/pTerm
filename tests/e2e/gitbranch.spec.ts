@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchApp, killServer } from './harness'
 
-const SOCKET = 'prcli-e2e-gitbranch'
+const SOCKET = 'pterm-e2e-gitbranch'
 
 let app: ElectronApplication
 let page: Page
@@ -29,11 +29,11 @@ let claudeHome: string
 let repoCwd: string
 
 test.beforeAll(async () => {
-  userDataDir = await mkdtemp(join(tmpdir(), 'prcli-gitbranch-user-'))
-  configDir = await mkdtemp(join(tmpdir(), 'prcli-gitbranch-config-'))
-  projectsRoot = await mkdtemp(join(tmpdir(), 'prcli-gitbranch-root-'))
-  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'prcli-gitbranch-settings-'))
-  claudeHome = await mkdtemp(join(tmpdir(), 'prcli-gitbranch-claude-'))
+  userDataDir = await mkdtemp(join(tmpdir(), 'pterm-gitbranch-user-'))
+  configDir = await mkdtemp(join(tmpdir(), 'pterm-gitbranch-config-'))
+  projectsRoot = await mkdtemp(join(tmpdir(), 'pterm-gitbranch-root-'))
+  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'pterm-gitbranch-settings-'))
+  claudeHome = await mkdtemp(join(tmpdir(), 'pterm-gitbranch-claude-'))
   claudeSettingsPath = join(claudeSettingsDir, 'settings.json')
   await writeFile(claudeSettingsPath, JSON.stringify({ enabledPlugins: {} }))
 

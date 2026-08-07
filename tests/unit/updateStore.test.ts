@@ -8,21 +8,21 @@ let dir: string
 let previous: string | undefined
 
 beforeEach(async () => {
-  previous = process.env.PRCLI_CONFIG_DIR
-  dir = await mkdtemp(join(tmpdir(), 'prcli-update-'))
-  process.env.PRCLI_CONFIG_DIR = dir
+  previous = process.env.PTERM_CONFIG_DIR
+  dir = await mkdtemp(join(tmpdir(), 'pterm-update-'))
+  process.env.PTERM_CONFIG_DIR = dir
 })
 
 afterEach(async () => {
-  if (previous === undefined) delete process.env.PRCLI_CONFIG_DIR
-  else process.env.PRCLI_CONFIG_DIR = previous
+  if (previous === undefined) delete process.env.PTERM_CONFIG_DIR
+  else process.env.PTERM_CONFIG_DIR = previous
   await rm(dir, { recursive: true, force: true })
 })
 
 describe('skipPath', () => {
   // Read at call time, not at import time: a test that set the env var after
-  // this module loaded would otherwise write into the developer's real ~/.prcli.
-  it('resolves under PRCLI_CONFIG_DIR as it stands when called', () => {
+  // this module loaded would otherwise write into the developer's real ~/.pterm.
+  it('resolves under PTERM_CONFIG_DIR as it stands when called', () => {
     expect(skipPath()).toBe(join(dir, 'update.json'))
   })
 })

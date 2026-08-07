@@ -14,7 +14,7 @@ const INTERVAL_MS = 6 * 60 * 60 * 1000
 /**
  * Poll for a newer release, and push the first one worth mentioning.
  *
- * `PRCLI_UPDATE_CHECK=0` turns this off entirely. The switch exists for the
+ * `PTERM_UPDATE_CHECK=0` turns this off entirely. The switch exists for the
  * E2E suite, where every spec launches a real app: left unchecked, each
  * launch would put a request on api.github.com and make the suite's
  * behaviour depend on GitHub being up and on the rate limit. Nothing sets
@@ -31,7 +31,7 @@ const INTERVAL_MS = 6 * 60 * 60 * 1000
  * having built the feature.
  */
 export function scheduleUpdateChecks(window: () => BrowserWindow | null): void {
-  if (process.env.PRCLI_UPDATE_CHECK === '0') return
+  if (process.env.PTERM_UPDATE_CHECK === '0') return
 
   const service = realUpdateService(app.getVersion())
 

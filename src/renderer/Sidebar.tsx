@@ -58,7 +58,7 @@ export function Sidebar({
   // Resizable like every other column, though this one never collapses:
   // it is the only way to reach a project, and a workspace with no visible
   // project list is a window with nothing to do.
-  const { width, set, commit } = useColumnWidth('prcli:sidebarWidth')
+  const { width, set, commit } = useColumnWidth('pterm:sidebarWidth')
   const [menuFor, setMenuFor] = useState<string | null>(null)
   // Renaming happens in the row itself. `window.prompt` is not implemented in
   // Electron — it *throws* ("prompt() is not supported."), so the rename it

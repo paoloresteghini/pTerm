@@ -2,7 +2,7 @@
  * The status board: hook events arriving over the socket, the dots they draw,
  * and the hook install that is supposed to produce them.
  *
- * Ten tests on the `prcli-e2e-status` socket: an injected event moves a tab's
+ * Ten tests on the `pterm-e2e-status` socket: an injected event moves a tab's
  * dot; a `claude` tab starts hollow rather than silent; a project row takes
  * the worst of its tabs; Needs You lists a waiting tab and clicking it moves
  * both the selected project and the selected tab; the board survives a
@@ -53,7 +53,7 @@
  *   wire format, but nothing here executes the script the install writes, and
  *   no real Claude process is involved. That the file Claude reads causes
  *   Claude to call it is untested at this level;
- * - **the real `~/.claude/settings.json`.** `PRCLI_CLAUDE_SETTINGS` points at
+ * - **the real `~/.claude/settings.json`.** `PTERM_CLAUDE_SETTINGS` points at
  *   a temp file in every test in this file, including the ones that never
  *   open the settings pane. The install is measured against a fixture;
  * - **`crashed` from a killed session.** See the long note on `a dead tab
@@ -83,7 +83,7 @@ import { HOOK_EVENTS, type HookEvent } from '../../src/main/status/machine'
 import { DEFAULT_NOTIFICATIONS } from '../../src/main/state/store'
 
 const run = promisify(execFile)
-const SOCKET = 'prcli-e2e-status'
+const SOCKET = 'pterm-e2e-status'
 
 let userDataDir: string
 let configDir: string
@@ -95,7 +95,7 @@ let claudeHome: string
 // Every launch in this file goes through the shared harness, so all five
 // overrides are set by construction rather than by four copies of one env
 // block that could drift apart — which is how three of the four specs came to
-// be missing PRCLI_CLAUDE_SETTINGS.
+// be missing PTERM_CLAUDE_SETTINGS.
 const launch = (): Promise<ElectronApplication> =>
   launchApp({ socket: SOCKET, configDir, projectsRoot, claudeSettings: claudeSettingsPath, claudeHome, userDataDir })
 
@@ -103,7 +103,7 @@ const launch = (): Promise<ElectronApplication> =>
 async function candidate(name: string, manifest?: object): Promise<string> {
   const cwd = join(projectsRoot, name)
   await mkdir(join(cwd, '.git'), { recursive: true })
-  if (manifest) await writeFile(join(cwd, '.prcli.json'), JSON.stringify(manifest), 'utf8')
+  if (manifest) await writeFile(join(cwd, '.pterm.json'), JSON.stringify(manifest), 'utf8')
   return cwd
 }
 
@@ -216,12 +216,12 @@ async function idIsClipped(window: Page, rowTestId: string, text: string): Promi
 
 test.beforeEach(async () => {
   await killServer(SOCKET)
-  userDataDir = await mkdtemp(join(tmpdir(), 'prcli-status-user-'))
-  configDir = await mkdtemp(join(tmpdir(), 'prcli-status-config-'))
-  projectsRoot = await mkdtemp(join(tmpdir(), 'prcli-status-root-'))
-  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'prcli-status-settings-'))
+  userDataDir = await mkdtemp(join(tmpdir(), 'pterm-status-user-'))
+  configDir = await mkdtemp(join(tmpdir(), 'pterm-status-config-'))
+  projectsRoot = await mkdtemp(join(tmpdir(), 'pterm-status-root-'))
+  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'pterm-status-settings-'))
   claudeSettingsPath = join(claudeSettingsDir, 'settings.json')
-  claudeHome = await mkdtemp(join(tmpdir(), 'prcli-status-claude-'))
+  claudeHome = await mkdtemp(join(tmpdir(), 'pterm-status-claude-'))
 })
 
 test.afterEach(async () => {
@@ -529,7 +529,7 @@ test('a dead tab lingers, then restarts', async () => {
   const window = await app.firstWindow()
 
   const id = await openTab(window)
-  const name = `prcli-alpha-${id}`
+  const name = `pterm-alpha-${id}`
   await expect.poll(async () => (await sessionNames(SOCKET)).includes(name), { timeout: 20_000 }).toBe(true)
 
   // Exactly what a crash outside the app leaves behind: the client is gone
@@ -584,7 +584,7 @@ test('a tab whose command crashes goes red, stays put, and strands no session', 
   const window = await app.firstWindow()
 
   const id = await openTab(window)
-  const name = `prcli-alpha-${id}`
+  const name = `pterm-alpha-${id}`
   await expect.poll(async () => (await sessionNames(SOCKET)).includes(name), { timeout: 20_000 }).toBe(true)
 
   // Typed into the tab's own shell, so the status comes from the pane's
@@ -652,15 +652,15 @@ interface HookFileGroup {
 
 type HookFile = Record<string, unknown> & { hooks?: Record<string, HookFileGroup[]> }
 
-function hasPrcliHook(groups: HookFileGroup[] | undefined): boolean {
+function hasPTermHook(groups: HookFileGroup[] | undefined): boolean {
   return (groups ?? []).some((group) =>
-    group.hooks.some((hook) => typeof hook.command === 'string' && hook.command.includes('/bin/prcli-hook')),
+    group.hooks.some((hook) => typeof hook.command === 'string' && hook.command.includes('/bin/pterm-hook')),
   )
 }
 
 test('install and uninstall leave an unrelated hook untouched', async () => {
   // Modelled on install.test.ts's `realistic()`: a matcher-bearing group on
-  // an event PRCLI itself subscribes to, which is the case that actually
+  // an event pTerm itself subscribes to, which is the case that actually
   // exercises "append, never edit, reorder or replace".
   const fixture = {
     otherSetting: 'kept',
@@ -689,10 +689,10 @@ test('install and uninstall leave an unrelated hook untouched', async () => {
   // The fixture's own group survives, untouched and first in the array —
   // appended past, never edited.
   expect(installedHooks.PreToolUse?.[0]).toEqual(fixture.hooks.PreToolUse[0])
-  // PRCLI's own group is now on every event it subscribes to, including the
+  // pTerm's own group is now on every event it subscribes to, including the
   // one the fixture already partially populated.
   for (const event of HOOK_EVENTS) {
-    expect(hasPrcliHook(installedHooks[event])).toBe(true)
+    expect(hasPTermHook(installedHooks[event])).toBe(true)
   }
 
   await window.getByTestId('hooks-uninstall').click()

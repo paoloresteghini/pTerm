@@ -30,11 +30,11 @@ export function updateResultText(result: UpdateCheckResult, skippedVersion?: str
   switch (result.status) {
     case 'available':
     case 'skipped': {
-      const text = `PRCLI ${result.info?.version} is available`
+      const text = `pTerm ${result.info?.version} is available`
       return result.info !== null && result.info.version === skippedVersion ? `${text} (skipped)` : text
     }
     case 'current':
-      return 'PRCLI is up to date'
+      return 'pTerm is up to date'
     case 'failed':
       return `Could not check: ${result.message ?? 'unknown reason'}`
   }

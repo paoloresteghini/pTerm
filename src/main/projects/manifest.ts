@@ -7,7 +7,7 @@ import type { ResolvedPreset } from '../../shared/ipc'
 
 export type { ResolvedPreset }
 
-const MANIFEST = '.prcli.json'
+const MANIFEST = '.pterm.json'
 
 function isPresetLike(value: unknown): value is { label: string; command: string } {
   if (typeof value !== 'object' || value === null) return false

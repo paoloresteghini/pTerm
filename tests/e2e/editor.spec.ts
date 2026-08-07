@@ -45,7 +45,7 @@ import { join } from 'node:path'
 import { launchApp, killServer, sessionNames, expandColumn } from './harness'
 import { UNSORTED_ID } from '../../src/shared/ipc'
 
-const SOCKET = 'prcli-e2e-editor'
+const SOCKET = 'pterm-e2e-editor'
 
 /** Seeded as both `src/app.ts` and `notes.txt`. See `beforeAll`. */
 const TYPESCRIPT_BYTES = 'export const answer = 42\n'
@@ -61,11 +61,11 @@ let claudeHome: string
 let projectCwd: string
 
 test.beforeAll(async () => {
-  userDataDir = await mkdtemp(join(tmpdir(), 'prcli-editor-user-'))
-  configDir = await mkdtemp(join(tmpdir(), 'prcli-editor-config-'))
-  projectsRoot = await mkdtemp(join(tmpdir(), 'prcli-editor-root-'))
-  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'prcli-editor-settings-'))
-  claudeHome = await mkdtemp(join(tmpdir(), 'prcli-editor-claude-'))
+  userDataDir = await mkdtemp(join(tmpdir(), 'pterm-editor-user-'))
+  configDir = await mkdtemp(join(tmpdir(), 'pterm-editor-config-'))
+  projectsRoot = await mkdtemp(join(tmpdir(), 'pterm-editor-root-'))
+  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'pterm-editor-settings-'))
+  claudeHome = await mkdtemp(join(tmpdir(), 'pterm-editor-claude-'))
   claudeSettingsPath = join(claudeSettingsDir, 'settings.json')
   await writeFile(claudeSettingsPath, JSON.stringify({ enabledPlugins: {} }))
 
@@ -463,7 +463,7 @@ test('closing an editor tab kills no session, and says nothing', async () => {
   // this waits picked up ONE session and the read after the close picked up
   // two, failing as though the close had opened something.
   await expect
-    .poll(async () => (await sessionNames(SOCKET)).includes(`prcli-demo-${shellTab}`), {
+    .poll(async () => (await sessionNames(SOCKET)).includes(`pterm-demo-${shellTab}`), {
       timeout: 20_000,
     })
     .toBe(true)
@@ -481,7 +481,7 @@ test('closing an editor tab kills no session, and says nothing', async () => {
 
   // The defect a human hit, asserted directly. `fail` renders a rejected IPC
   // call into `startup-error`, and the message it painted was
-  // `Error invoking remote method 'prcli:closePane': Error: kill: no tmux
+  // `Error invoking remote method 'pterm:closePane': Error: kill: no tmux
   // session found for tab <id>`.
   await expect(page.getByTestId('startup-error')).toHaveCount(0)
 
@@ -697,7 +697,7 @@ test('the pane menu on an editor offers colours and nothing else', async () => {
  *    an unmounted pane, so the renderer proceeds to IPC, this test failed at
  *    the `startup-error` assertion below with the app painting
  *
- *        Error invoking remote method 'prcli:splitPane':
+ *        Error invoking remote method 'pterm:splitPane':
  *        Error: splitTab: no pane 4faff38fe9376b03
  *
  *    which is `manager.splitTab`'s opening `this.entries.get(input.paneId)`.
@@ -871,7 +871,7 @@ test('two editor panes on one file: a save from one refuses the other, and neith
  * dot itself and destroy the thing being measured. Holding the write open from
  * the page, which would have given an exact marker, was tried and is not
  * available: measured 2026-08-05, `contextBridge` hands the renderer a frozen
- * object, `window.prcli` is `writable: false, configurable: false` and so is
+ * object, `window.pterm` is `writable: false, configurable: false` and so is
  * `fsWrite` on it, and both a plain assignment and `defineProperty` are refused
  * (the assignment silently). The continuation is triggered by the same IPC
  * reply the disk write precedes, so once the bytes below are on disk it is one

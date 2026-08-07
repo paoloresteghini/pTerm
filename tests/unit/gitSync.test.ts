@@ -96,7 +96,7 @@ describe('against real repositories', () => {
   }
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'prcli-gitsync-'))
+    root = await mkdtemp(join(tmpdir(), 'pterm-gitsync-'))
     bare = join(root, 'remote.git')
     work = join(root, 'work')
     other = join(root, 'other')

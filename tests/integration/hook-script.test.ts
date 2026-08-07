@@ -14,8 +14,8 @@ let server: Server | null = null
 
 /** Write the rendered script to a temp dir and make it executable. */
 async function install(): Promise<{ script: string; socket: string; spool: string }> {
-  dir = await mkdtemp(join(tmpdir(), 'prcli-hook-'))
-  const paths = { script: join(dir, 'prcli-hook'), socket: join(dir, 'h.sock'), spool: join(dir, 'h.spool') }
+  dir = await mkdtemp(join(tmpdir(), 'pterm-hook-'))
+  const paths = { script: join(dir, 'pterm-hook'), socket: join(dir, 'h.sock'), spool: join(dir, 'h.spool') }
   await writeFile(paths.script, renderScript(paths), 'utf8')
   await chmod(paths.script, 0o755)
   return paths
@@ -45,7 +45,7 @@ function runHook(
       args,
       {
         timeout: 5_000,
-        env: tabId === undefined ? { PATH: process.env.PATH ?? '' } : { PATH: process.env.PATH ?? '', PRCLI_TAB_ID: tabId },
+        env: tabId === undefined ? { PATH: process.env.PATH ?? '' } : { PATH: process.env.PATH ?? '', PTERM_TAB_ID: tabId },
       },
       (error, stdout) => {
         if (error && typeof error.code !== 'number') return reject(error)
@@ -61,7 +61,7 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true })
 })
 
-describe('prcli-hook', () => {
+describe('pterm-hook', () => {
   it('delivers a line to a listening socket', async () => {
     const paths = await install()
     const received: string[] = []
@@ -216,7 +216,7 @@ describe('prcli-hook', () => {
     const { code } = await runHook(paths.script, 'Stop', undefined)
 
     expect(code).toBe(0)
-    // A Claude session started outside PRCLI fires these too. It must cost
+    // A Claude session started outside pTerm fires these too. It must cost
     // nothing and leave nothing behind.
     await expect(readFile(paths.spool, 'utf8')).rejects.toThrow()
   })

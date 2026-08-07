@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { pluginRoots } from '../../src/main/skills/resolve'
 
 const LUMIO = '/Users/paolo/Code/Lumio'
-const OTHER = '/Users/paolo/Code/PRCLI'
+const OTHER = '/Users/paolo/Code/pTerm'
 
 /** The real registry's shape, reduced to the one plugin that has two installs. */
 const registry = {

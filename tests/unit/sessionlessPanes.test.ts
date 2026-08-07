@@ -8,7 +8,7 @@ const term = (id: string): PaneRecord => ({
   projectSlug: 'demo',
   cwd: '/tmp/demo',
   type: 'shell',
-  tmuxSession: `prcli-demo-${id}`,
+  tmuxSession: `pterm-demo-${id}`,
 })
 
 const editor = (id: string, filePath = `/tmp/demo/${id}.ts`): PaneRecord => ({

@@ -11,9 +11,9 @@ import { test, expect, type ElectronApplication, type Page } from '@playwright/t
 import { chmod, mkdtemp, rm, writeFile, mkdir, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchApp, killServer, expandColumn } from './harness'
+import { launchApp, killServer, expandColumn, terminalTexts } from './harness'
 
-const SOCKET = 'prcli-e2e-prompts'
+const SOCKET = 'pterm-e2e-prompts'
 
 /** Long enough to be recognisable in a terminal, and the user's real example. */
 const HANDOVER = 'give me a handover prompt for a fresh context window'
@@ -47,11 +47,11 @@ const launch = (): Promise<ElectronApplication> =>
   })
 
 test.beforeAll(async () => {
-  userDataDir = await mkdtemp(join(tmpdir(), 'prcli-prompts-user-'))
-  configDir = await mkdtemp(join(tmpdir(), 'prcli-prompts-config-'))
-  projectsRoot = await mkdtemp(join(tmpdir(), 'prcli-prompts-root-'))
-  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'prcli-prompts-settings-'))
-  claudeHome = await mkdtemp(join(tmpdir(), 'prcli-prompts-claude-'))
+  userDataDir = await mkdtemp(join(tmpdir(), 'pterm-prompts-user-'))
+  configDir = await mkdtemp(join(tmpdir(), 'pterm-prompts-config-'))
+  projectsRoot = await mkdtemp(join(tmpdir(), 'pterm-prompts-root-'))
+  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'pterm-prompts-settings-'))
+  claudeHome = await mkdtemp(join(tmpdir(), 'pterm-prompts-claude-'))
   claudeSettingsPath = join(claudeSettingsDir, 'settings.json')
   await writeFile(claudeSettingsPath, JSON.stringify({ enabledPlugins: {} }))
 
@@ -135,7 +135,7 @@ test('the + dialog refuses an incomplete prompt and saves a complete one', async
  * and it was reported as "I added a prompt and it didn't add".
  *
  * A revoked config directory rather than a stubbed bridge, because
- * `window.prcli` is frozen by `contextBridge` and cannot be replaced from an
+ * `window.pterm` is frozen by `contextBridge` and cannot be replaced from an
  * `evaluate` (the assignment silently no-ops). Taking write permission away
  * from the directory makes the real write fail in main, which is the same
  * shape of failure arriving through the same path.
@@ -185,7 +185,7 @@ test('clicking a prompt types it into the active pane and does NOT submit it', a
   // Settle before reading: "and then nothing else happened" cannot be polled
   // for, so this waits and then reads the pane once.
   await page.waitForTimeout(750)
-  const text = await page.locator('.xterm-rows').first().innerText()
+  const text = (await terminalTexts(page))[0] ?? ''
   expect(text).toContain('handover prompt')
   expect(text).not.toMatch(SUBMITTED)
 })

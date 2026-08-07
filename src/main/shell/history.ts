@@ -15,7 +15,7 @@ export interface SelectOptions {
   limit?: number
 }
 
-/** Lives under `configRoot()` so `PRCLI_CONFIG_DIR` moves it the same way it moves everything else. */
+/** Lives under `configRoot()` so `PTERM_CONFIG_DIR` moves it the same way it moves everything else. */
 export function historyPath(): string {
   return join(configRoot(), 'history.jsonl')
 }
@@ -58,8 +58,8 @@ export function parseHistory(text: string): HistoryEntry[] {
  * Whether `cwd` is the project root or somewhere beneath it.
  *
  * Compares against `${projectCwd}/`, not a bare prefix: a sibling directory
- * whose name happens to start with the project's (e.g. `PRCLI-old` next to
- * `PRCLI`) shares the prefix but is not inside it.
+ * whose name happens to start with the project's (e.g. `pTerm-old` next to
+ * `pTerm`) shares the prefix but is not inside it.
  */
 function inProject(cwd: string, projectCwd: string): boolean {
   return cwd === projectCwd || cwd.startsWith(`${projectCwd}/`)

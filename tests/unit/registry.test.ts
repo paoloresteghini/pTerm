@@ -293,7 +293,7 @@ describe('StatusRegistry', () => {
       id: ID,
       projectSlug: 'lumio',
       cwd: '/tmp',
-      tmuxSession: `prcli-lumio-${ID}`,
+      tmuxSession: `pterm-lumio-${ID}`,
       type: 'preset' as const,
     }
 

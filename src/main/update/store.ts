@@ -5,13 +5,13 @@ import { configRoot } from '../state/store'
 /**
  * One version string, in a file of its own.
  *
- * Deliberately NOT a field on `PrcliConfig`. That store is at `version: 8`,
+ * Deliberately NOT a field on `PTermConfig`. That store is at `version: 8`,
  * and adding a field to it means a migration to 9 plus an entry in
  * `attachSavedFields`, both on the path that decides what survives a
  * relaunch, for a value nothing but this module ever reads. A file of its own
  * costs thirty lines and cannot break restore.
  *
- * `configRoot()` reads `PRCLI_CONFIG_DIR` at call time, so a test pointing
+ * `configRoot()` reads `PTERM_CONFIG_DIR` at call time, so a test pointing
  * that at a temp dir gets its own file, same as `ConfigStore.defaultPath()`.
  */
 export function skipPath(): string {

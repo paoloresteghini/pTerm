@@ -39,13 +39,13 @@ export function PromptsPanel({
   // which stays open; a delete has no dialog to report in, so it says so here
   // rather than leaving a row that looks deleted-but-is-not on the next launch.
   const [error, setError] = useState<string | null>(null)
-  const { width, set, commit } = useColumnWidth('prcli:promptsWidth')
+  const { width, set, commit } = useColumnWidth('pterm:promptsWidth')
 
   // Mounting is the column opening, so this reads on every expand. Prompts are
   // global and another window may have added one.
   useEffect(() => {
     let cancelled = false
-    window.prcli
+    window.pterm
       .promptsList()
       .then((found) => {
         if (!cancelled) setPrompts(found)
@@ -115,7 +115,7 @@ export function PromptsPanel({
                   // Optimism would be wrong here: the reply IS the file, and a
                   // failed delete must leave the row on screen.
                   setError(null)
-                  window.prcli
+                  window.pterm
                     .promptsRemove(prompt.id)
                     .then(setPrompts)
                     .catch((reason: unknown) => {
@@ -143,7 +143,7 @@ export function PromptsPanel({
       <NewPromptDialog
         open={adding}
         onOpenChange={setAdding}
-        onSave={(label, body) => window.prcli.promptsAdd(label, body).then(setPrompts)}
+        onSave={(label, body) => window.pterm.promptsAdd(label, body).then(setPrompts)}
       />
       <ColumnResizer
         testid="resize-prompts"

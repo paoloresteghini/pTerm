@@ -23,7 +23,7 @@ import { describe, it, expect } from 'vitest'
  * adjust*, *that the box the divider is positioned against is the box the
  * panes are laid out in*, and, since the "a drag is written to disk once it
  * ends" describe below was added, *that the gesture's end reaches
- * `window.prcli.setLayout` at all* — deleting that call, or unwiring
+ * `window.pterm.setLayout` at all* — deleting that call, or unwiring
  * `PaneDivider`'s `onCommit`, used to leave the whole suite (508 unit, 255
  * integration, at the time this was measured) green; now each fails exactly
  * one assertion in this file, and only that one.
@@ -31,7 +31,7 @@ import { describe, it, expect } from 'vitest'
  * **What this does NOT cover, stated so it is not mistaken for coverage:**
  *
  * - **that main actually persists what this handler sends.** This file only
- *   reaches as far as the IPC call being made — `window.prcli.setLayout(...)`
+ *   reaches as far as the IPC call being made — `window.pterm.setLayout(...)`
  *   — and never what main does with it once it arrives; that is not this
  *   file's ground to cover and never was. What main does with it is now
  *   pinned elsewhere: `layoutWrite` and `routeShares` in `shares.test.ts`
@@ -270,18 +270,18 @@ describe('the gesture reaches the arithmetic', () => {
 describe('a drag is written to disk once it ends', () => {
   // Until this describe existed, nothing anywhere asserted the commit call:
   // `grep -rn "setLayout\|onCommit\|commitLayout" tests/` returned nothing,
-  // and deleting `window.prcli.setLayout(...)` from `commitLayout`, or
+  // and deleting `window.pterm.setLayout(...)` from `commitLayout`, or
   // unwiring `onCommit` from `PaneDivider`, both left the full suite — 508
   // unit, 255 integration, at the time this was measured — green. Neither
   // mutation touches `resizeKids` or `state.tabs`, which is why the gesture
   // itself staying correct on screen hid the write to disk going missing.
 
-  it('commitLayout writes the row through window.prcli.setLayout', () => {
-    // Measured: deleting the whole `window.prcli.setLayout(tabId,
+  it('commitLayout writes the row through window.pterm.setLayout', () => {
+    // Measured: deleting the whole `window.pterm.setLayout(tabId,
     // Object.fromEntries(...))` call from `commitLayout` fails only this
     // assertion — nothing else in this file or `workspace.test.ts` reaches
     // main's IPC boundary at all.
-    expect(app).toMatch(/window\.prcli\.setLayout\(/)
+    expect(app).toMatch(/window\.pterm\.setLayout\(/)
   })
 
   it('wires PaneDivider\'s onCommit to commitLayout, not to a no-op', () => {
@@ -294,7 +294,7 @@ describe('a drag is written to disk once it ends', () => {
   })
 
   it('sends a record built from row.layout.kids paired with row.layout.ratio, not just some call', () => {
-    // The previous test only sees THAT `window.prcli.setLayout(` appears —
+    // The previous test only sees THAT `window.pterm.setLayout(` appears —
     // sending `{}`, or pairing the ratio to the wrong ids, leaves it green.
     // Three bare-token pins, in the style of the arithmetic assertions above:
     // not a full parse, but each one names a specific piece of the pairing.

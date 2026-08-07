@@ -20,17 +20,17 @@
  * store.ts` confirmed empty for that line before committing.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-// afterEach is used both for temp-dir cleanup and PRCLI_CONFIG_DIR restore.
+// afterEach is used both for temp-dir cleanup and PTERM_CONFIG_DIR restore.
 import { mkdtemp, rm, readFile, writeFile, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ConfigStore, DEFAULT_NOTIFICATIONS, type PrcliConfig } from '../../src/main/state/store'
+import { ConfigStore, DEFAULT_NOTIFICATIONS, type PTermConfig } from '../../src/main/state/store'
 
 let dir: string
 let file: string
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'prcli-store-'))
+  dir = await mkdtemp(join(tmpdir(), 'pterm-store-'))
   file = join(dir, 'config.json')
 })
 
@@ -44,7 +44,7 @@ async function storeWith(raw: unknown): Promise<ConfigStore> {
   return new ConfigStore(file)
 }
 
-const sampleConfig: PrcliConfig = {
+const sampleConfig: PTermConfig = {
   version: 8,
   activeProjectId: 'p1',
   projects: [
@@ -62,7 +62,7 @@ const sampleConfig: PrcliConfig = {
       id: 'a1b2c3d4e5f60718',
       projectSlug: 'lumio',
       cwd: '/Users/paolo/Code/Lumio',
-      tmuxSession: 'prcli-lumio-a1b2c3d4e5f60718',
+      tmuxSession: 'pterm-lumio-a1b2c3d4e5f60718',
       type: 'shell',
     },
   ],
@@ -78,7 +78,7 @@ const sampleConfig: PrcliConfig = {
 }
 
 /** Two panes side by side under one tab — the shape v4 could not express. */
-const splitConfig: PrcliConfig = {
+const splitConfig: PTermConfig = {
   version: 8,
   activeProjectId: null,
   projects: [],
@@ -87,14 +87,14 @@ const splitConfig: PrcliConfig = {
       id: 'a'.repeat(16),
       projectSlug: 'lumio',
       cwd: '/tmp',
-      tmuxSession: `prcli-lumio-${'a'.repeat(16)}`,
+      tmuxSession: `pterm-lumio-${'a'.repeat(16)}`,
       type: 'shell',
     },
     {
       id: 'b'.repeat(16),
       projectSlug: 'lumio',
       cwd: '/tmp',
-      tmuxSession: `prcli-lumio-${'b'.repeat(16)}`,
+      tmuxSession: `pterm-lumio-${'b'.repeat(16)}`,
       type: 'claude',
     },
   ],
@@ -110,7 +110,7 @@ const splitConfig: PrcliConfig = {
 }
 
 /** What `read()` answers with when it has nothing it can trust. */
-const EMPTY_CONFIG: PrcliConfig = {
+const EMPTY_CONFIG: PTermConfig = {
   version: 8,
   activeProjectId: null,
   projects: [],
@@ -211,7 +211,7 @@ describe('ConfigStore.write', () => {
   it('does not corrupt the existing file when given unserialisable input', async () => {
     const store = new ConfigStore(file)
     await store.write(sampleConfig)
-    const circular = { version: 8, panes: [], tabs: [] } as unknown as PrcliConfig
+    const circular = { version: 8, panes: [], tabs: [] } as unknown as PTermConfig
     ;(circular as unknown as { self: unknown }).self = circular
     await expect(store.write(circular)).rejects.toThrow()
     await expect(store.read()).resolves.toEqual(sampleConfig)
@@ -234,7 +234,7 @@ describe('ConfigStore.read, hostile shapes', () => {
       id: 'a1b2c3d4e5f60718',
       projectSlug: 'lumio',
       cwd: '/tmp',
-      tmuxSession: 'prcli-lumio-a1b2c3d4e5f60718',
+      tmuxSession: 'pterm-lumio-a1b2c3d4e5f60718',
       type: 'shell',
     }
     const store = await storeWith({
@@ -269,7 +269,7 @@ describe('ConfigStore.read, hostile shapes', () => {
       id: 'a1b2c3d4e5f60718',
       projectSlug: 'lumio',
       cwd: '/tmp',
-      tmuxSession: 'prcli-lumio-a1b2c3d4e5f60718',
+      tmuxSession: 'pterm-lumio-a1b2c3d4e5f60718',
       type: 'shell',
     }
     const store = await storeWith({
@@ -304,13 +304,13 @@ describe('ConfigStore migration', () => {
         id: 'a1b2c3d4e5f60718',
         projectSlug: 'scratch',
         cwd: '/Users/paolo/Code',
-        tmuxSession: 'prcli-scratch-a1b2c3d4e5f60718',
+        tmuxSession: 'pterm-scratch-a1b2c3d4e5f60718',
       },
       {
         id: '00000000000000ff',
         projectSlug: 'scratch',
         cwd: '/Users/paolo/Code',
-        tmuxSession: 'prcli-scratch-00000000000000ff',
+        tmuxSession: 'pterm-scratch-00000000000000ff',
       },
     ],
   }
@@ -322,7 +322,7 @@ describe('ConfigStore migration', () => {
         id: 'a1b2c3d4e5f60718',
         projectSlug: 'scratch',
         cwd: '/Users/paolo/Code',
-        tmuxSession: 'prcli-scratch-a1b2c3d4e5f60718',
+        tmuxSession: 'pterm-scratch-a1b2c3d4e5f60718',
       },
     ],
   }
@@ -390,7 +390,7 @@ describe('ConfigStore migration', () => {
           id: 'a1b2c3d4e5f60718',
           projectSlug: 'lumio',
           cwd: '/Users/paolo/Code/Lumio',
-          tmuxSession: 'prcli-lumio-a1b2c3d4e5f60718',
+          tmuxSession: 'pterm-lumio-a1b2c3d4e5f60718',
         },
       ],
     }
@@ -449,13 +449,13 @@ describe('ConfigStore migration', () => {
       projects: [],
       activeProjectId: null,
       tabs: [
-        { id: 'a'.repeat(16), projectSlug: 'lumio', cwd: '/tmp', tmuxSession: 'prcli-lumio-' + 'a'.repeat(16) },
+        { id: 'a'.repeat(16), projectSlug: 'lumio', cwd: '/tmp', tmuxSession: 'pterm-lumio-' + 'a'.repeat(16) },
         {
           id: 'b'.repeat(16),
           projectSlug: 'lumio',
           cwd: '/tmp',
           command: 'npm run dev',
-          tmuxSession: 'prcli-lumio-' + 'b'.repeat(16),
+          tmuxSession: 'pterm-lumio-' + 'b'.repeat(16),
         },
       ],
     })
@@ -532,7 +532,7 @@ describe('ConfigStore migration', () => {
       activeProjectId: null,
       tabs: [
         null,
-        { id: 'c'.repeat(16), projectSlug: 'lumio', cwd: '/tmp', tmuxSession: 'prcli-lumio-' + 'c'.repeat(16), type: 'shell' },
+        { id: 'c'.repeat(16), projectSlug: 'lumio', cwd: '/tmp', tmuxSession: 'pterm-lumio-' + 'c'.repeat(16), type: 'shell' },
         { id: 'no-cwd', projectSlug: 'lumio', tmuxSession: 'x' },
       ],
       notifications: { rules: [], muteWhenFocused: true, quietHours: null },
@@ -550,7 +550,7 @@ describe('ConfigStore migration', () => {
       projects: [],
       activeProjectId: null,
       tabs: [
-        { id: 'd'.repeat(16), projectSlug: 'lumio', cwd: '/tmp', tmuxSession: 'prcli-lumio-' + 'd'.repeat(16) },
+        { id: 'd'.repeat(16), projectSlug: 'lumio', cwd: '/tmp', tmuxSession: 'pterm-lumio-' + 'd'.repeat(16) },
       ],
       notifications: { rules: [], muteWhenFocused: true, quietHours: null },
     })
@@ -572,7 +572,7 @@ describe('ConfigStore migration', () => {
           id: 'a'.repeat(16),
           projectSlug: 'lumio',
           cwd: '/tmp',
-          tmuxSession: 'prcli-lumio-' + 'a'.repeat(16),
+          tmuxSession: 'pterm-lumio-' + 'a'.repeat(16),
           type: 'shell',
           title: 'payments api',
         },
@@ -593,7 +593,7 @@ describe('ConfigStore migration', () => {
         id: 'a'.repeat(16),
         projectSlug: 'lumio',
         cwd: '/tmp',
-        tmuxSession: 'prcli-lumio-' + 'a'.repeat(16),
+        tmuxSession: 'pterm-lumio-' + 'a'.repeat(16),
         type: 'shell',
         color,
       },
@@ -640,7 +640,7 @@ describe('ConfigStore migration', () => {
           id: 'a'.repeat(16),
           projectSlug: 'lumio',
           cwd: '/tmp',
-          tmuxSession: 'prcli-lumio-' + 'a'.repeat(16),
+          tmuxSession: 'pterm-lumio-' + 'a'.repeat(16),
           type: 'shell',
           title: { evil: true },
         },
@@ -665,7 +665,7 @@ describe('ConfigStore migration', () => {
           id: 'a'.repeat(16),
           projectSlug: 'lumio',
           cwd: '/tmp',
-          tmuxSession: 'prcli-lumio-' + 'a'.repeat(16),
+          tmuxSession: 'pterm-lumio-' + 'a'.repeat(16),
           type: 'shell',
         },
       ],
@@ -761,7 +761,7 @@ describe('ConfigStore migration, v7 to v8', () => {
       projects: [],
       activeProjectId: null,
       panes: [
-        { id: 'p1', projectSlug: 'demo', cwd: '/tmp/demo', type: 'shell', tmuxSession: 'prcli-demo-p1' },
+        { id: 'p1', projectSlug: 'demo', cwd: '/tmp/demo', type: 'shell', tmuxSession: 'pterm-demo-p1' },
       ],
       tabs: [],
     })
@@ -769,7 +769,7 @@ describe('ConfigStore migration, v7 to v8', () => {
     const config = await store.read()
 
     expect(config.version).toBe(8)
-    expect(config.panes[0]?.tmuxSession).toBe('prcli-demo-p1')
+    expect(config.panes[0]?.tmuxSession).toBe('pterm-demo-p1')
     expect(config.panes[0]?.filePath).toBeUndefined()
   })
 })
@@ -779,7 +779,7 @@ describe('ConfigStore migration, v4 to v5', () => {
     id: 'a'.repeat(16),
     projectSlug: 'lumio',
     cwd: '/Users/paolo/Code/Lumio',
-    tmuxSession: `prcli-lumio-${'a'.repeat(16)}`,
+    tmuxSession: `pterm-lumio-${'a'.repeat(16)}`,
     type: 'claude',
   }
   const devPane = {
@@ -787,7 +787,7 @@ describe('ConfigStore migration, v4 to v5', () => {
     projectSlug: 'lumio',
     cwd: '/Users/paolo/Code/Lumio',
     command: 'npm run dev',
-    tmuxSession: `prcli-lumio-${'b'.repeat(16)}`,
+    tmuxSession: `pterm-lumio-${'b'.repeat(16)}`,
     type: 'preset',
   }
   const v4 = {
@@ -855,7 +855,7 @@ describe('ConfigStore migration, v4 to v5', () => {
             id: 'e'.repeat(16),
             projectSlug: 'scratch',
             cwd: '/tmp',
-            tmuxSession: `prcli-scratch-${'e'.repeat(16)}`,
+            tmuxSession: `pterm-scratch-${'e'.repeat(16)}`,
           },
         ],
       })
@@ -1090,20 +1090,20 @@ describe('ConfigStore.read, v5 layouts', () => {
 })
 
 describe('ConfigStore.defaultPath', () => {
-  const original = process.env.PRCLI_CONFIG_DIR
+  const original = process.env.PTERM_CONFIG_DIR
 
   afterEach(() => {
-    if (original === undefined) delete process.env.PRCLI_CONFIG_DIR
-    else process.env.PRCLI_CONFIG_DIR = original
+    if (original === undefined) delete process.env.PTERM_CONFIG_DIR
+    else process.env.PTERM_CONFIG_DIR = original
   })
 
-  it('points at ~/.prcli/config.json by default', () => {
-    delete process.env.PRCLI_CONFIG_DIR
-    expect(ConfigStore.defaultPath()).toMatch(/\.prcli\/config\.json$/)
+  it('points at ~/.pterm/config.json by default', () => {
+    delete process.env.PTERM_CONFIG_DIR
+    expect(ConfigStore.defaultPath()).toMatch(/\.pterm\/config\.json$/)
   })
 
-  it('honours PRCLI_CONFIG_DIR so tests never touch the real config', () => {
-    process.env.PRCLI_CONFIG_DIR = '/tmp/prcli-override'
-    expect(ConfigStore.defaultPath()).toBe('/tmp/prcli-override/config.json')
+  it('honours PTERM_CONFIG_DIR so tests never touch the real config', () => {
+    process.env.PTERM_CONFIG_DIR = '/tmp/pterm-override'
+    expect(ConfigStore.defaultPath()).toBe('/tmp/pterm-override/config.json')
   })
 })

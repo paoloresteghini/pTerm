@@ -36,7 +36,7 @@ export function CommandPalette({
     if (!open || !projectCwd) return
     let cancelled = false
     setQuery('')
-    window.prcli
+    window.pterm
       .skills(projectCwd)
       .then((found) => {
         if (!cancelled) setSkills(found)

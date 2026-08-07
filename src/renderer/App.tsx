@@ -83,10 +83,10 @@ const MIN_PANE_ROWS = 5
  * on the 1280px window `src/main/index.ts` opens, narrower than two splittable
  * panes. The state persists per column, so this is the first run only.
  */
-const SKILLS_KEY = 'prcli:skillsCollapsed'
-const PRESETS_KEY = 'prcli:presetsCollapsed'
-const FILES_KEY = 'prcli:filesCollapsed'
-const PROMPTS_KEY = 'prcli:promptsCollapsed'
+const SKILLS_KEY = 'pterm:skillsCollapsed'
+const PRESETS_KEY = 'pterm:presetsCollapsed'
+const FILES_KEY = 'pterm:filesCollapsed'
+const PROMPTS_KEY = 'pterm:promptsCollapsed'
 
 /** Reads one of those keys, with the default applied when nothing is stored. */
 function storedCollapsed(key: string, fallback: boolean): boolean {
@@ -205,7 +205,7 @@ export function App() {
   const launch = useCallback(
     (command: string | undefined, type: TabType = 'shell') => {
       if (!project || !canOpen) return
-      window.prcli
+      window.pterm
         .open({ projectSlug: project.slug, cwd: project.cwd, command, type })
         .then((tab) => dispatch({ type: 'opened', tab }))
         .catch(fail)
@@ -235,7 +235,7 @@ export function App() {
   const openFile = useCallback(
     (relPath: string) => {
       if (!project) return
-      window.prcli
+      window.pterm
         .openEditor(project.id, relPath)
         .then((tab) => {
           if (tab) {
@@ -331,7 +331,7 @@ export function App() {
       return
     }
     let cancelled = false
-    window.prcli
+    window.pterm
       .historyList(cwd, historyScope)
       .then((found) => {
         if (!cancelled) setHistoryEntries(found)
@@ -423,7 +423,7 @@ export function App() {
    */
   const closePane = useCallback(
     (paneId: string) => {
-      window.prcli
+      window.pterm
         .closePane(paneId)
         .then((shape) => dispatch({ type: 'closedPane', paneId, shape }))
         .catch(fail)
@@ -510,7 +510,7 @@ export function App() {
         setError(`Not enough room to split: a pane needs at least ${floor} ${dir === 'row' ? 'columns' : 'rows'}`)
         return
       }
-      window.prcli
+      window.pterm
         .splitPane({
           paneId: activePaneId,
           dir,
@@ -649,7 +649,7 @@ export function App() {
       // tab holds a tombstone, and pairing the two by index is what dropped
       // every such drag. Whole-tab fractions, tombstones included — which is
       // what this row holds, on every path that writes it.
-      window.prcli.setLayout(
+      window.pterm.setLayout(
         tabId,
         Object.fromEntries(row.layout.kids.map((id, index) => [id, row.layout.ratio[index] ?? 0])),
       )
@@ -669,7 +669,7 @@ export function App() {
       // every launch with real sessions running. One response has nothing
       // left to race against.
       const [{ projects, panes, tabs, activeProjectId, status }, notificationConfig] =
-        await Promise.all([window.prcli.restore(), window.prcli.notifications()])
+        await Promise.all([window.pterm.restore(), window.pterm.notifications()])
       if (cancelled) return
       dispatch({ type: 'restored', projects, panes, tabs, activeProjectId, status })
       setNotifications(notificationConfig)
@@ -688,7 +688,7 @@ export function App() {
   // covers what had already happened before the renderer mounted.
   useEffect(
     () =>
-      window.prcli.onStatus(({ tabId, state: tabState }) =>
+      window.pterm.onStatus(({ tabId, state: tabState }) =>
         dispatch({ type: 'statusChanged', tabId, state: tabState }),
       ),
     [],
@@ -699,12 +699,12 @@ export function App() {
   // death moving the active tab to a neighbour.
   useEffect(() => {
     if (!ready) return
-    window.prcli.setActive(currentTabId)
+    window.pterm.setActive(currentTabId)
   }, [ready, currentTabId])
 
   useEffect(() => {
     if (!ready) return
-    window.prcli.setActiveProject(state.activeProjectId)
+    window.pterm.setActiveProject(state.activeProjectId)
   }, [ready, state.activeProjectId])
 
   // A client stopping is not a session dying. `Ctrl-b d` inside a pane, and
@@ -714,7 +714,7 @@ export function App() {
   // dead, instead of vanishing.
   useEffect(
     () =>
-      window.prcli.onExit(({ id, code, sessionAlive, reason }) => {
+      window.pterm.onExit(({ id, code, sessionAlive, reason }) => {
         if (sessionAlive) return
         // A kill the user asked for is not a death to render: main already
         // exempts `killed` from the registry tombstone for exactly this
@@ -739,7 +739,7 @@ export function App() {
   // stale closure silently failing to find a tab that has since moved.
   useEffect(
     () =>
-      window.prcli.onFocusTab((tabId) => {
+      window.pterm.onFocusTab((tabId) => {
         const tab = state.panes.find((candidate) => candidate.id === tabId)
         if (!tab) return
         dispatch({ type: 'activatedProject', id: projectIdForTab(state.projects, tab) })
@@ -750,7 +750,7 @@ export function App() {
 
   // Pushed by main on its own schedule, not polled: see `onUpdateAvailable`'s
   // own comment in `shared/ipc.ts`.
-  useEffect(() => window.prcli.onUpdateAvailable(setUpdate), [])
+  useEffect(() => window.pterm.onUpdateAvailable(setUpdate), [])
 
   const restartTab = useCallback(
     (tab: TabDescriptor) => {
@@ -763,7 +763,7 @@ export function App() {
       // send: which tab holds the pane is main's own record, not this one's to
       // supply, so offering Restart on a pane inside a split needs no change
       // here. See `RestartRequest`.
-      window.prcli
+      window.pterm
         .restartTab({ tab })
         .then((restarted) => dispatch({ type: 'opened', tab: restarted }))
         .catch(fail)
@@ -772,13 +772,13 @@ export function App() {
   )
 
   const dismissTab = useCallback((id: string) => {
-    window.prcli.dismissTab(id)
+    window.pterm.dismissTab(id)
     dispatch({ type: 'dismissed', id })
   }, [])
 
   const renameTab = useCallback(
     (id: string, title: string) => {
-      window.prcli
+      window.pterm
         .renameTab(id, title)
         .then((panes) => dispatch({ type: 'panesMerged', panes }))
         .catch(fail)
@@ -801,7 +801,7 @@ export function App() {
 
   const recolorPane = useCallback(
     (id: string, color: PaneColor | null) => {
-      window.prcli
+      window.pterm
         .setPaneColor(id, color)
         .then((panes) => dispatch({ type: 'panesMerged', panes }))
         .catch(fail)
@@ -818,7 +818,7 @@ export function App() {
     (projectId: string) => {
       if (!notifications) return
       const rules = toggleProjectMute(notifications.rules, projectId)
-      window.prcli.updateNotifications({ rules }).then(setNotifications).catch(fail)
+      window.pterm.updateNotifications({ rules }).then(setNotifications).catch(fail)
     },
     [notifications, fail],
   )
@@ -829,7 +829,7 @@ export function App() {
   // them — and why clicking one used to do nothing at all.
   useEffect(
     () =>
-      window.prcli.onMenuCommand((command) => {
+      window.pterm.onMenuCommand((command) => {
         switch (command) {
           case 'newTab':
             openTab()
@@ -1027,11 +1027,11 @@ export function App() {
         <UpdateBar
           info={update}
           onDownload={() => {
-            void window.prcli.openExternal(update.url)
+            void window.pterm.openExternal(update.url)
             setUpdate(null)
           }}
           onSkip={() => {
-            void window.prcli.skipUpdate(update.version)
+            void window.pterm.skipUpdate(update.version)
             setUpdate(null)
           }}
           onDismiss={() => setUpdate(null)}
@@ -1060,7 +1060,7 @@ export function App() {
             dispatch({ type: 'activatedProject', id: projectIdForTab(state.projects, tab) })
             dispatch({ type: 'activatedTab', id: tab.id })
           }}
-          onAcknowledgeNeedy={(tab) => window.prcli.acknowledgeTab(tab.id)}
+          onAcknowledgeNeedy={(tab) => window.pterm.acknowledgeTab(tab.id)}
           muted={muted}
           onToggleMute={toggleMute}
           onSelectProject={(id) => dispatch({ type: 'activatedProject', id })}
@@ -1072,13 +1072,13 @@ export function App() {
             // the name it keeps, so every pane keeps its scrollback and
             // everything running in it. The reply lists every pane that moved —
             // one, until 2b lets a tab hold more.
-            window.prcli
+            window.pterm
               .moveTabToProject(tabId, projectId)
               .then(({ projects, panes }) => dispatch({ type: 'movedTab', panes, projects }))
               .catch(fail)
           }}
           onRename={(id, name) => {
-            window.prcli
+            window.pterm
               .updateProject(id, { name })
               .then((projects) => dispatch({ type: 'projects', projects }))
               .catch(fail)
@@ -1089,7 +1089,7 @@ export function App() {
             const to = from + direction
             if (from === -1 || to < 0 || to >= order.length) return
             order.splice(to, 0, ...order.splice(from, 1))
-            window.prcli
+            window.pterm
               .reorderProjects(order)
               .then((projects) => dispatch({ type: 'projects', projects }))
               .catch(fail)
@@ -1097,7 +1097,7 @@ export function App() {
           onRemove={(id) => {
             // The sessions keep running; they reappear under Unsorted, so a
             // relaunch is not needed to reach them again.
-            window.prcli
+            window.pterm
               .removeProject(id)
               .then((projects) => dispatch({ type: 'projects', projects }))
               .catch(fail)
@@ -1256,7 +1256,7 @@ export function App() {
                         // Typed, never submitted, on the same channel the
                         // skills and prompts columns insert with.
                         onPick={(cmd) => {
-                          window.prcli.input(box.pane.id, cmd)
+                          window.pterm.input(box.pane.id, cmd)
                           closeHistory(box.pane.id)
                         }}
                       />
@@ -1377,7 +1377,7 @@ export function App() {
           // to decide, per the spec. A submitted `/name` would run a skill
           // nobody had finished choosing.
           onInsert={(name) => {
-            if (activePaneId) window.prcli.input(activePaneId, `/${name}`)
+            if (activePaneId) window.pterm.input(activePaneId, `/${name}`)
           }}
         />
 
@@ -1398,7 +1398,7 @@ export function App() {
           // Typed, never submitted, exactly like a skill. `input` is the same
           // channel the skills list uses.
           onInsert={(body) => {
-            if (activePaneId) window.prcli.input(activePaneId, body)
+            if (activePaneId) window.pterm.input(activePaneId, body)
           }}
         />
 
@@ -1417,7 +1417,7 @@ export function App() {
             dispatch({ type: 'activatedTab', id: tab.id })
           }}
           onInsert={(name) => {
-            if (activePaneId) window.prcli.input(activePaneId, `/${name}`)
+            if (activePaneId) window.pterm.input(activePaneId, `/${name}`)
           }}
         />
 
@@ -1425,7 +1425,7 @@ export function App() {
           open={adding}
           onOpenChange={setAdding}
           onAdd={(input) => {
-            window.prcli
+            window.pterm
               .addProject(input)
               .then((projects) => {
                 dispatch({ type: 'projects', projects })

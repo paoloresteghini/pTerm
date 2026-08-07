@@ -16,7 +16,7 @@ import type { UpdateCheckResult } from '../../shared/ipc'
 export const RELEASES_URL = 'https://api.github.com/repos/paoloresteghini/PRCLI/releases/latest'
 
 /** GitHub rejects a request with no User-Agent, with a 403. */
-const USER_AGENT = 'PRCLI-update-check'
+const USER_AGENT = 'pTerm-update-check'
 
 const TIMEOUT_MS = 10_000
 

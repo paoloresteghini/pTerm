@@ -4,21 +4,21 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { addPrompt, promptsPath, readPrompts, removePrompt } from '../../src/main/prompts/store'
 
-// Same env pairing `notes.test.ts` uses: the store reads PRCLI_CONFIG_DIR at
+// Same env pairing `notes.test.ts` uses: the store reads PTERM_CONFIG_DIR at
 // call time, so pointing it at a temp dir per test is what keeps this off the
-// developer's real ~/.prcli.
+// developer's real ~/.pterm.
 let dir: string
 let previousConfigDir: string | undefined
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'prcli-prompts-'))
-  previousConfigDir = process.env.PRCLI_CONFIG_DIR
-  process.env.PRCLI_CONFIG_DIR = dir
+  dir = await mkdtemp(join(tmpdir(), 'pterm-prompts-'))
+  previousConfigDir = process.env.PTERM_CONFIG_DIR
+  process.env.PTERM_CONFIG_DIR = dir
 })
 
 afterEach(async () => {
-  if (previousConfigDir === undefined) delete process.env.PRCLI_CONFIG_DIR
-  else process.env.PRCLI_CONFIG_DIR = previousConfigDir
+  if (previousConfigDir === undefined) delete process.env.PTERM_CONFIG_DIR
+  else process.env.PTERM_CONFIG_DIR = previousConfigDir
   await rm(dir, { recursive: true, force: true })
 })
 
@@ -71,7 +71,7 @@ describe('addPrompt', () => {
 
   it('creates the config directory and leaves no temp file behind', async () => {
     const nested = join(dir, 'not-made-yet')
-    process.env.PRCLI_CONFIG_DIR = nested
+    process.env.PTERM_CONFIG_DIR = nested
     await addPrompt('Handover', 'body')
     // One entry, and it is the file itself: the atomic write's temp was
     // renamed away rather than left in the directory.

@@ -56,7 +56,7 @@ type Config = Awaited<ReturnType<Store['read']>>
 type TerminalTabDescriptor = TabDescriptor & { tmuxSession: string }
 
 const run = promisify(execFile)
-const SOCKET = 'prcli-test'
+const SOCKET = 'pterm-test'
 
 async function killServer(): Promise<void> {
   try {
@@ -242,7 +242,7 @@ async function sessionGroup(name: string): Promise<string> {
  * window forced to `manual` and resized to the same numbers the client happens
  * to have MEASURES IDENTICALLY. So `windowSize()` cannot tell an unsized
  * restart from one that drove the window to 80x24 — this can. Both readings
- * measured on `-L prcli-test`, each exiting 0.
+ * measured on `-L pterm-test`, each exiting 0.
  */
 async function windowSizeOption(windowId: string): Promise<string> {
   const { stdout } = await run('tmux', [
@@ -269,7 +269,7 @@ async function written(): Promise<Config> {
 
 /**
  * A session's own environment entry for `key`, as tmux prints it —
- * `'PRCLI_TAB_ID=<id>'`, or `''` when there is none and when the session is not
+ * `'PTERM_TAB_ID=<id>'`, or `''` when there is none and when the session is not
  * there at all. Every caller compares it against a non-empty expected string,
  * so the two failures cannot pass as an answer.
  */
@@ -290,14 +290,14 @@ function writeToTab(id: string, data: string): void {
 }
 
 /**
- * What `$PRCLI_TAB_ID` expands to inside the pane's own running PROCESS.
+ * What `$PTERM_TAB_ID` expands to inside the pane's own running PROCESS.
  *
  * Not `show-environment`, which reads the session's environment table — a
  * different object, and not the one that matters. `addMember` sets the variable
  * twice for exactly this reason: `-e` on `new-window` reaches the spawned
  * pane's process and never the table, `-e` on `new-session -t <group>` reaches
  * the table and not the process. The installed hook script reads
- * `$PRCLI_TAB_ID` out of its own process environment (see `install.ts`), so a
+ * `$PTERM_TAB_ID` out of its own process environment (see `install.ts`), so a
  * regression dropping `-e` from `newWindow` would take every status dot out
  * while leaving a `show-environment` assertion perfectly green.
  *
@@ -316,7 +316,7 @@ function paneEnvTabId(id: string, ms = 10_000): Promise<string> {
     const timer = setTimeout(
       () =>
         reject(
-          new Error(`timed out reading PRCLI_TAB_ID from ${id}; saw ${JSON.stringify(buffer)}`),
+          new Error(`timed out reading PTERM_TAB_ID from ${id}; saw ${JSON.stringify(buffer)}`),
         ),
       ms,
     )
@@ -329,7 +329,7 @@ function paneEnvTabId(id: string, ms = 10_000): Promise<string> {
       resolve(found[1])
     })
     // Registered above before this runs, so nothing printed can be missed.
-    writeToTab(id, 'printf "TABID[%s]\\n" "$PRCLI_TAB_ID"\n')
+    writeToTab(id, 'printf "TABID[%s]\\n" "$PTERM_TAB_ID"\n')
   })
 }
 
@@ -353,7 +353,7 @@ let fakeBinDir: string | undefined
  * gone, which is the case that must not drop the record.
  */
 async function tmuxRefusingKills(): Promise<string> {
-  fakeBinDir ??= await mkdtemp(join(tmpdir(), 'prcli-fake-tmux-'))
+  fakeBinDir ??= await mkdtemp(join(tmpdir(), 'pterm-fake-tmux-'))
   const bin = join(fakeBinDir, 'tmux')
   await writeFile(
     bin,
@@ -425,7 +425,7 @@ function waitForExitEvent(id: string, ms = 8000): Promise<ExitEvent> {
 beforeAll(killServer)
 
 beforeEach(async () => {
-  configDir = await mkdtemp(join(tmpdir(), 'prcli-persist-'))
+  configDir = await mkdtemp(join(tmpdir(), 'pterm-persist-'))
   store = new ConfigStore(join(configDir, 'config.json'))
   ipc.folderChoice = { canceled: true, filePaths: [] }
   useManager()
@@ -949,7 +949,7 @@ describe('a tab that re-founds', () => {
     // Something else about a server going down mid-teardown does it.
     //
     // The keeper's own name decodes to nothing, so no lookup in main can see
-    // it: `findOrphans` filters on `isPrcliSession`, and every match in
+    // it: `findOrphans` filters on `isPTermSession`, and every match in
     // `memberOfTab` and `panesOfTab` goes through `decodeSessionName`.
     await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-s', 'keeper'])
 
@@ -1247,11 +1247,11 @@ describe('splitPane and closePane', () => {
     // for the other: `-e` on `new-window` reaches only the process, `-e` on
     // `new-session -t <group>` reaches only the table.
     await expect
-      .poll(() => sessionEnv(sessionOf(founder), 'PRCLI_TAB_ID'), { timeout: 10_000 })
-      .toBe(`PRCLI_TAB_ID=${founder.id}`)
+      .poll(() => sessionEnv(sessionOf(founder), 'PTERM_TAB_ID'), { timeout: 10_000 })
+      .toBe(`PTERM_TAB_ID=${founder.id}`)
     await expect
-      .poll(() => sessionEnv(sessionOf(second), 'PRCLI_TAB_ID'), { timeout: 10_000 })
-      .toBe(`PRCLI_TAB_ID=${second.id}`)
+      .poll(() => sessionEnv(sessionOf(second), 'PTERM_TAB_ID'), { timeout: 10_000 })
+      .toBe(`PTERM_TAB_ID=${second.id}`)
 
     // A window each, bound before either client attached. A member that
     // attaches onto a sibling's window leaves two xterms rendering one pane.
@@ -2406,7 +2406,7 @@ describe('project channels', () => {
     expect(moved.panes).toHaveLength(1)
     expect(moved.panes[0].projectSlug).toBe('lumio')
     expect(moved.panes[0].id).toBe(tab.id)
-    expect(sessionOf(moved.panes[0])).toBe(`prcli-lumio-${tab.id}`)
+    expect(sessionOf(moved.panes[0])).toBe(`pterm-lumio-${tab.id}`)
     const adapter = new TmuxAdapter({ socket: SOCKET })
     await expect(adapter.hasSession(sessionOf(moved.panes[0]))).resolves.toBe(true)
     await expect(adapter.hasSession(before)).resolves.toBe(false)
@@ -2490,7 +2490,7 @@ describe('project channels', () => {
     expect(saved).toHaveLength(2)
     for (const row of saved) {
       expect(row.projectSlug).toBe('lumio')
-      expect(sessionOf(row)).toBe(`prcli-lumio-${row.id}`)
+      expect(sessionOf(row)).toBe(`pterm-lumio-${row.id}`)
     }
     expect(saved.map((row) => row.id).sort()).toEqual([founder.id, second.id].sort())
     expect(saved.find((row) => row.id === second.id)?.cwd).toBe(secondCwd)
@@ -2543,7 +2543,7 @@ describe('project channels', () => {
     )
 
     expect(moved.panes).toHaveLength(1)
-    expect(sessionOf(moved.panes[0])).toBe(`prcli-lumio-${tab.id}`)
+    expect(sessionOf(moved.panes[0])).toBe(`pterm-lumio-${tab.id}`)
     expect(moved.panes[0].cwd).toBe(before)
     await expect(store.read().then((c) => c.panes.map((p) => p.cwd))).resolves.toEqual([before])
   })
@@ -2590,9 +2590,9 @@ describe('project channels', () => {
 
   // The scan must never see the developer's real ~/Code.
   it('offers candidates from the projects root, minus the ones already added', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'prcli-root-'))
-    const previous = process.env.PRCLI_PROJECTS_ROOT
-    process.env.PRCLI_PROJECTS_ROOT = root
+    const root = await mkdtemp(join(tmpdir(), 'pterm-root-'))
+    const previous = process.env.PTERM_PROJECTS_ROOT
+    process.env.PTERM_PROJECTS_ROOT = root
     try {
       for (const name of ['lumio', 'studio']) {
         await mkdir(join(root, name), { recursive: true })
@@ -2604,8 +2604,8 @@ describe('project channels', () => {
       expect(candidates.map((c) => c.name)).toEqual(['lumio'])
       expect(candidates[0].markers).toEqual(['package.json'])
     } finally {
-      if (previous === undefined) delete process.env.PRCLI_PROJECTS_ROOT
-      else process.env.PRCLI_PROJECTS_ROOT = previous
+      if (previous === undefined) delete process.env.PTERM_PROJECTS_ROOT
+      else process.env.PTERM_PROJECTS_ROOT = previous
       await rm(root, { recursive: true, force: true })
     }
   })
@@ -2783,18 +2783,18 @@ describe('hooks channels', () => {
   // registerIpc rather than the functions directly.
   let hooksDir: string
   let hooksSettings: string
-  const savedEnv = { config: process.env.PRCLI_CONFIG_DIR, claude: process.env.PRCLI_CLAUDE_SETTINGS }
+  const savedEnv = { config: process.env.PTERM_CONFIG_DIR, claude: process.env.PTERM_CLAUDE_SETTINGS }
 
   beforeEach(async () => {
-    hooksDir = await mkdtemp(join(tmpdir(), 'prcli-hooks-ipc-'))
+    hooksDir = await mkdtemp(join(tmpdir(), 'pterm-hooks-ipc-'))
     hooksSettings = join(hooksDir, 'settings.json')
-    process.env.PRCLI_CONFIG_DIR = hooksDir
-    process.env.PRCLI_CLAUDE_SETTINGS = hooksSettings
+    process.env.PTERM_CONFIG_DIR = hooksDir
+    process.env.PTERM_CLAUDE_SETTINGS = hooksSettings
   })
 
   afterEach(async () => {
-    process.env.PRCLI_CONFIG_DIR = savedEnv.config
-    process.env.PRCLI_CLAUDE_SETTINGS = savedEnv.claude
+    process.env.PTERM_CONFIG_DIR = savedEnv.config
+    process.env.PTERM_CLAUDE_SETTINGS = savedEnv.claude
     await rm(hooksDir, { recursive: true, force: true })
   })
 

@@ -24,13 +24,13 @@ function isExecutable(candidate: string): boolean {
  * adapter to raise TmuxNotInstalledError, which is the caller's cue to tell the
  * user how to install it.
  *
- * `PRCLI_TMUX_BIN` overrides everything, for a non-standard install.
+ * `PTERM_TMUX_BIN` overrides everything, for a non-standard install.
  */
 export function resolveTmuxBin(
   env: NodeJS.ProcessEnv = process.env,
   fallbackDirs: readonly string[] = TMUX_FALLBACK_DIRS,
 ): string {
-  const override = env.PRCLI_TMUX_BIN
+  const override = env.PTERM_TMUX_BIN
   if (override) return override
 
   const pathDirs = (env.PATH ?? '').split(delimiter).filter(Boolean).filter(isAbsolute)

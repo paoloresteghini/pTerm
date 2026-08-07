@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { MARKER_END, MARKER_START, block, isInstalled, merge, unmerge } from '../../src/main/shell/install'
 
-const script = '/Users/x/.prcli/bin/prcli-history.zsh'
+const script = '/Users/x/.pterm/bin/pterm-history.zsh'
 
 describe('the zshrc block', () => {
   it('is bounded by markers so uninstall can be exact', () => {

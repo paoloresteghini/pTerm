@@ -11,7 +11,7 @@ import { renderScript } from '../../src/main/hooks/install'
 import type { HookLine } from '../../src/main/hooks/protocol'
 
 const run = promisify(execFile)
-const SOCKET = 'prcli-test'
+const SOCKET = 'pterm-test'
 
 async function killServer(): Promise<void> {
   try {
@@ -93,9 +93,9 @@ async function harness(): Promise<{
   adapter: TmuxAdapter
   received: HookLine[]
 }> {
-  dir = await mkdtemp(join(tmpdir(), 'prcli-death-'))
+  dir = await mkdtemp(join(tmpdir(), 'pterm-death-'))
   const paths = {
-    script: join(dir, 'prcli-hook'),
+    script: join(dir, 'pterm-hook'),
     socket: join(dir, 'h.sock'),
     spool: join(dir, 'h.spool'),
   }
@@ -369,7 +369,7 @@ describe('a pane that dies', () => {
     const moved = await sessions.moveTabToProject(founder.id, 'beta')
 
     expect(moved.map((pane) => pane.tmuxSession).sort()).toEqual(
-      [`prcli-beta-${founder.id}`, `prcli-beta-${second.id}`].sort(),
+      [`pterm-beta-${founder.id}`, `pterm-beta-${second.id}`].sort(),
     )
     // No await above this line since the move returned: the reattach's own
     // wiring cannot have got past its first tmux call yet.
@@ -382,7 +382,7 @@ describe('a pane that dies', () => {
     for (const pane of moved) {
       const hooks = await hooksOf(await windowIdOf(pane.tmuxSession))
       expect(hooks).toContain(`kill-session -t =${pane.tmuxSession}`)
-      expect(hooks).not.toContain('prcli-alpha-')
+      expect(hooks).not.toContain('pterm-alpha-')
     }
     sessions.detachAll()
   })

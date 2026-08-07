@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchApp, killServer, expandColumn } from './harness'
 
-const SOCKET = 'prcli-e2e-columns'
+const SOCKET = 'pterm-e2e-columns'
 
 /** `COLUMN_WIDTH_DEFAULT` and `COLUMN_WIDTH_MIN` in `lib/columnWidth.ts`. */
 const DEFAULT_WIDTH = 208
@@ -63,11 +63,11 @@ async function dragHandle(target: Page, testid: string, dx: number): Promise<voi
 }
 
 test.beforeAll(async () => {
-  userDataDir = await mkdtemp(join(tmpdir(), 'prcli-columns-user-'))
-  configDir = await mkdtemp(join(tmpdir(), 'prcli-columns-config-'))
-  projectsRoot = await mkdtemp(join(tmpdir(), 'prcli-columns-root-'))
-  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'prcli-columns-settings-'))
-  claudeHome = await mkdtemp(join(tmpdir(), 'prcli-columns-claude-'))
+  userDataDir = await mkdtemp(join(tmpdir(), 'pterm-columns-user-'))
+  configDir = await mkdtemp(join(tmpdir(), 'pterm-columns-config-'))
+  projectsRoot = await mkdtemp(join(tmpdir(), 'pterm-columns-root-'))
+  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'pterm-columns-settings-'))
+  claudeHome = await mkdtemp(join(tmpdir(), 'pterm-columns-claude-'))
   claudeSettingsPath = join(claudeSettingsDir, 'settings.json')
   await writeFile(claudeSettingsPath, JSON.stringify({ enabledPlugins: {} }))
 

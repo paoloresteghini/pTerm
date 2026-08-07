@@ -27,7 +27,7 @@ async function handle(
 let root: string
 
 beforeAll(async () => {
-  root = await mkdtemp(join(tmpdir(), 'prcli-tree-ipc-'))
+  root = await mkdtemp(join(tmpdir(), 'pterm-tree-ipc-'))
   await mkdir(join(root, 'src'), { recursive: true })
   await writeFile(join(root, 'README.md'), '#')
 })

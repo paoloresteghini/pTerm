@@ -1,10 +1,10 @@
 /// <reference types="vite/client" />
 
-import type { PrcliApi } from '../shared/ipc'
+import type { PTermApi } from '../shared/ipc'
 
 declare global {
   interface Window {
-    prcli: PrcliApi
+    pterm: PTermApi
   }
 }
 

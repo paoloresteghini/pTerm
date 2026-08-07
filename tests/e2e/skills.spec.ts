@@ -2,7 +2,7 @@
  * The skills panel and the ⌘K palette, against a fixture `~/.claude` rather
  * than whatever is installed on the machine that day.
  *
- * `PRCLI_CLAUDE_HOME` is a required launch option, so this spec points the app
+ * `PTERM_CLAUDE_HOME` is a required launch option, so this spec points the app
  * at a temp tree holding four known entries and asserts against a known list.
  * That is what makes "the panel shows the right names" a real assertion here
  * rather than a restatement of the developer's own plugin set.
@@ -28,9 +28,9 @@ import { test, expect, type ElectronApplication, type Page } from '@playwright/t
 import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchApp, killServer, expandColumn } from './harness'
+import { launchApp, killServer, expandColumn, terminalTexts } from './harness'
 
-const SOCKET = 'prcli-e2e-skills'
+const SOCKET = 'pterm-e2e-skills'
 
 /**
  * What the pane's shell prints if `/browse` is ever actually submitted.
@@ -63,11 +63,11 @@ const write = async (path: string, body: string): Promise<void> => {
 }
 
 test.beforeAll(async () => {
-  userDataDir = await mkdtemp(join(tmpdir(), 'prcli-skills-user-'))
-  configDir = await mkdtemp(join(tmpdir(), 'prcli-skills-config-'))
-  projectsRoot = await mkdtemp(join(tmpdir(), 'prcli-skills-root-'))
-  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'prcli-skills-settings-'))
-  claudeHome = await mkdtemp(join(tmpdir(), 'prcli-skills-claude-'))
+  userDataDir = await mkdtemp(join(tmpdir(), 'pterm-skills-user-'))
+  configDir = await mkdtemp(join(tmpdir(), 'pterm-skills-config-'))
+  projectsRoot = await mkdtemp(join(tmpdir(), 'pterm-skills-root-'))
+  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'pterm-skills-settings-'))
+  claudeHome = await mkdtemp(join(tmpdir(), 'pterm-skills-claude-'))
   claudeSettingsPath = join(claudeSettingsDir, 'settings.json')
 
   projectCwd = join(projectsRoot, 'demo')
@@ -170,7 +170,7 @@ test('clicking a skill types its invocation and does NOT submit it', async () =>
   // Let anything that was going to happen happen.
   await page.waitForTimeout(750)
 
-  const text = await page.locator('.xterm-rows').first().innerText()
+  const text = (await terminalTexts(page))[0] ?? ''
   expect(text).toContain('/browse')
   // If it had submitted, the shell would have answered. This is the assertion
   // the settle above exists for, and `SUBMITTED` is derived from what the
@@ -250,7 +250,7 @@ test('choosing a skill from the palette types it and closes the palette', async 
   await expect(page.getByTestId('command-palette')).toBeHidden()
 
   await page.waitForTimeout(750)
-  const text = await page.locator('.xterm-rows').first().innerText()
+  const text = (await terminalTexts(page))[0] ?? ''
   expect(text).toContain('/zebra')
 })
 

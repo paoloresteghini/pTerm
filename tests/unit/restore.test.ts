@@ -21,7 +21,7 @@ async function configHolding(
   version: 5 | 6,
   panes: PaneRecord[],
 ): Promise<{ store: ConfigStore; file: string }> {
-  const dir = await mkdtemp(join(tmpdir(), 'prcli-restore-unit-'))
+  const dir = await mkdtemp(join(tmpdir(), 'pterm-restore-unit-'))
   const file = join(dir, 'config.json')
   await writeFile(
     file,
@@ -36,7 +36,7 @@ async function emptyConfig(): Promise<ConfigStore> {
 }
 
 function pane(id: string): PaneRecord {
-  return { id, projectSlug: 'lumio', cwd: tmpdir(), tmuxSession: `prcli-lumio-${id}`, type: 'shell' }
+  return { id, projectSlug: 'lumio', cwd: tmpdir(), tmuxSession: `pterm-lumio-${id}`, type: 'shell' }
 }
 
 /**
@@ -67,7 +67,7 @@ function fakeManager(records: PaneRecord[], failing: ReadonlySet<string>): Sessi
         projectSlug: input.projectSlug,
         cwd: input.cwd,
         command: input.command,
-        tmuxSession: `prcli-${input.projectSlug}-${input.id}`,
+        tmuxSession: `pterm-${input.projectSlug}-${input.id}`,
         type: input.type ?? 'shell',
       }
     },

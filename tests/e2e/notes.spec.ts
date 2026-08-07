@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchApp, killServer } from './harness'
 
-const SOCKET = 'prcli-e2e-notes'
+const SOCKET = 'pterm-e2e-notes'
 const ALPHA_NOTE = 'startup: npm run dev'
 
 let app: ElectronApplication
@@ -25,11 +25,11 @@ let claudeSettingsPath: string
 let claudeHome: string
 
 test.beforeAll(async () => {
-  userDataDir = await mkdtemp(join(tmpdir(), 'prcli-notes-user-'))
-  configDir = await mkdtemp(join(tmpdir(), 'prcli-notes-config-'))
-  projectsRoot = await mkdtemp(join(tmpdir(), 'prcli-notes-root-'))
-  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'prcli-notes-settings-'))
-  claudeHome = await mkdtemp(join(tmpdir(), 'prcli-notes-claude-'))
+  userDataDir = await mkdtemp(join(tmpdir(), 'pterm-notes-user-'))
+  configDir = await mkdtemp(join(tmpdir(), 'pterm-notes-config-'))
+  projectsRoot = await mkdtemp(join(tmpdir(), 'pterm-notes-root-'))
+  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'pterm-notes-settings-'))
+  claudeHome = await mkdtemp(join(tmpdir(), 'pterm-notes-claude-'))
   claudeSettingsPath = join(claudeSettingsDir, 'settings.json')
   await writeFile(claudeSettingsPath, JSON.stringify({ enabledPlugins: {} }))
 

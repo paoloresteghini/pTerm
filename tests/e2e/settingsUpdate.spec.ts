@@ -13,7 +13,7 @@ import { join } from 'node:path'
 import { launchApp, killServer } from './harness'
 import { CHANNELS, type MenuCommand } from '../../src/shared/ipc'
 
-const SOCKET = 'prcli-e2e-settingsupdate'
+const SOCKET = 'pterm-e2e-settingsupdate'
 
 // A typed assignment, not a bare string: if `MenuCommand`'s `settings`
 // variant is ever renamed, this line fails to compile rather than the
@@ -30,11 +30,11 @@ let claudeSettingsPath: string
 let claudeHome: string
 
 test.beforeAll(async () => {
-  userDataDir = await mkdtemp(join(tmpdir(), 'prcli-settingsupdate-user-'))
-  configDir = await mkdtemp(join(tmpdir(), 'prcli-settingsupdate-config-'))
-  projectsRoot = await mkdtemp(join(tmpdir(), 'prcli-settingsupdate-root-'))
-  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'prcli-settingsupdate-settings-'))
-  claudeHome = await mkdtemp(join(tmpdir(), 'prcli-settingsupdate-claude-'))
+  userDataDir = await mkdtemp(join(tmpdir(), 'pterm-settingsupdate-user-'))
+  configDir = await mkdtemp(join(tmpdir(), 'pterm-settingsupdate-config-'))
+  projectsRoot = await mkdtemp(join(tmpdir(), 'pterm-settingsupdate-root-'))
+  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'pterm-settingsupdate-settings-'))
+  claudeHome = await mkdtemp(join(tmpdir(), 'pterm-settingsupdate-claude-'))
   claudeSettingsPath = join(claudeSettingsDir, 'settings.json')
   await writeFile(claudeSettingsPath, JSON.stringify({ enabledPlugins: {} }))
 
@@ -73,7 +73,7 @@ test.afterAll(async () => {
 
 /**
  * The check really runs and really hits the network: nothing stubs the
- * `checkForUpdate` handler's own HTTP call (`PRCLI_UPDATE_CHECK` only gates
+ * `checkForUpdate` handler's own HTTP call (`PTERM_UPDATE_CHECK` only gates
  * the background poller in `src/main/update/schedule.ts`, never this
  * button), and the repo it checks against (`paoloresteghini/PRCLI`) does not
  * exist yet. So today the check genuinely 404s and resolves `failed`, which
@@ -89,10 +89,10 @@ test('settings names the version and answers a check', async () => {
   // process and cannot import CHANNELS: a renamed channel or command here
   // fails these two expects loudly, instead of the send below silently
   // reaching no listener.
-  expect(CHANNELS.menuCommand).toBe('prcli:menuCommand')
+  expect(CHANNELS.menuCommand).toBe('pterm:menuCommand')
   expect(SETTINGS_COMMAND).toBe('settings')
   await app.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows()[0].webContents.send('prcli:menuCommand', 'settings')
+    BrowserWindow.getAllWindows()[0].webContents.send('pterm:menuCommand', 'settings')
   })
 
   await expect(page.getByTestId('settings-pane')).toBeVisible()

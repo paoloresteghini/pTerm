@@ -27,13 +27,13 @@ interface HookGroup {
 }
 
 /**
- * `PRCLI_CLAUDE_SETTINGS` exists for the same reason `PRCLI_CONFIG_DIR` does,
+ * `PTERM_CLAUDE_SETTINGS` exists for the same reason `PTERM_CONFIG_DIR` does,
  * and matters more: this file is read by every live Claude session on the
  * machine, so a test that wrote the real one could break work in progress in
  * a dozen windows at once.
  */
 export function claudeSettingsPath(): string {
-  return process.env.PRCLI_CLAUDE_SETTINGS ?? join(homedir(), '.claude', 'settings.json')
+  return process.env.PTERM_CLAUDE_SETTINGS ?? join(homedir(), '.claude', 'settings.json')
 }
 
 /**
@@ -50,14 +50,14 @@ export function hookCommand(hookPath: string, event: HookEvent): string {
 
 /**
  * Everything the hook bridge keeps on disk, all of it under `configRoot()` so
- * that `PRCLI_CONFIG_DIR` moves the socket, the spool and the script together
- * and a test can never reach the real `~/.prcli`.
+ * that `PTERM_CONFIG_DIR` moves the socket, the spool and the script together
+ * and a test can never reach the real `~/.pterm`.
  */
 export function hookPaths(): { dir: string; script: string; socket: string; spool: string } {
   const dir = configRoot()
   return {
     dir,
-    script: join(dir, 'bin', 'prcli-hook'),
+    script: join(dir, 'bin', 'pterm-hook'),
     socket: join(dir, 'hook.sock'),
     spool: join(dir, 'hook.spool'),
   }
@@ -113,19 +113,19 @@ export function renderScript(paths: { socket: string; spool: string }): string {
   const sixteenHex = Array.from({ length: 16 }, () => hex).join('')
   return [
     '#!/bin/sh',
-    '# PRCLI hook — installed by PRCLI. Edits here are overwritten on reinstall.',
+    '# pTerm hook — installed by pTerm. Edits here are overwritten on reinstall.',
     '#',
     '# Never blocks Claude and never fails it: exits 0 on every path, writes',
     '# nothing to stdout, and hands the socket write to a background subshell',
     "# because Apple's nc does not exit when the server closes.",
     '',
-    '# Not a PRCLI tab — a Claude session started outside the app. Cost nothing.',
-    '[ -n "$PRCLI_TAB_ID" ] || exit 0',
+    '# Not a pTerm tab — a Claude session started outside the app. Cost nothing.',
+    '[ -n "$PTERM_TAB_ID" ] || exit 0',
     '',
     '# Our ids are exactly 16 hex characters. The environment is not ours to',
     '# trust, and this value is about to be interpolated into JSON and a shell',
     '# string, so the match is on the full shape, not just the charset.',
-    'case "$PRCLI_TAB_ID" in',
+    'case "$PTERM_TAB_ID" in',
     `  ${sixteenHex}) ;;`,
     '  *) exit 0 ;;',
     'esac',
@@ -148,17 +148,17 @@ export function renderScript(paths: { socket: string; spool: string }): string {
     '  case "$signal" in',
     '    *[!A-Za-z0-9]*) exit 0 ;;',
     '  esac',
-    '  line="{\\"tabId\\":\\"$PRCLI_TAB_ID\\",\\"event\\":\\"$event\\",\\"signal\\":\\"$signal\\",\\"at\\":$at}"',
+    '  line="{\\"tabId\\":\\"$PTERM_TAB_ID\\",\\"event\\":\\"$event\\",\\"signal\\":\\"$signal\\",\\"at\\":$at}"',
     'elif [ -n "$status" ]; then',
     '  case "$status" in',
     '    *[!0-9]*) exit 0 ;;',
     '  esac',
-    '  line="{\\"tabId\\":\\"$PRCLI_TAB_ID\\",\\"event\\":\\"$event\\",\\"status\\":$status,\\"at\\":$at}"',
+    '  line="{\\"tabId\\":\\"$PTERM_TAB_ID\\",\\"event\\":\\"$event\\",\\"status\\":$status,\\"at\\":$at}"',
     'elif [ "$event" = Exit ]; then',
     '  # A death that explains nothing. Sending it would only be refused.',
     '  exit 0',
     'else',
-    '  line="{\\"tabId\\":\\"$PRCLI_TAB_ID\\",\\"event\\":\\"$event\\",\\"at\\":$at}"',
+    '  line="{\\"tabId\\":\\"$PTERM_TAB_ID\\",\\"event\\":\\"$event\\",\\"at\\":$at}"',
     'fi',
     '',
     '{',
@@ -213,7 +213,7 @@ function hasUnrecognisedHooksShape(settings: ClaudeSettings): boolean {
 function assertRecognisedHooksShape(settings: ClaudeSettings, settingsPath: string): void {
   if (!hasUnrecognisedHooksShape(settings)) return
   throw new Error(
-    `${settingsPath}: "hooks" has a shape PRCLI does not recognise (an event whose value ` +
+    `${settingsPath}: "hooks" has a shape pTerm does not recognise (an event whose value ` +
       'is not an array, or "hooks" itself not being an object) — refusing to modify it. ' +
       'Fix or remove the offending entry by hand.',
   )
@@ -241,13 +241,13 @@ function commandsOf(group: unknown): string[] {
 }
 
 /**
- * Whether a group is one PRCLI itself added.
+ * Whether a group is one pTerm itself added.
  *
  * Matches on the *quoted* hook path, not the bare path — `hookCommand` always
  * wraps the path in `"..."`, so a command is only recognised as ours when it
  * starts with `"${hookPath}"` followed immediately by the closing quote. That
  * stops a different tool's hook whose path happens to share a prefix with
- * ours (e.g. `/Users/x/.prcli-other/...` against `/Users/x/.prcli/...`) from
+ * ours (e.g. `/Users/x/.pterm-other/...` against `/Users/x/.pterm/...`) from
  * being mistaken for one of our own.
  */
 function isOurs(group: unknown, hookPath: string): boolean {
@@ -256,14 +256,14 @@ function isOurs(group: unknown, hookPath: string): boolean {
 }
 
 /**
- * Append PRCLI's entry to every subscribed event, touching nothing else.
+ * Append pTerm's entry to every subscribed event, touching nothing else.
  *
  * Appending is the whole design. The real file holds five of these seven
  * events already: one carries a `matcher`, two hold more than one group, and
  * every one of them belongs to something the user installed on purpose. So
  * this adds an element to an array and never edits, reorders or replaces one.
  *
- * PRCLI's own `PreToolUse` group carries no matcher, so it fires for every
+ * pTerm's own `PreToolUse` group carries no matcher, so it fires for every
  * tool rather than for the one the neighbouring entry happens to filter on.
  *
  * Pure, and non-mutating: the install screen renders the diff from this call
@@ -302,7 +302,7 @@ export function isInstalled(settings: unknown, hookPath: string): boolean {
 }
 
 /**
- * Remove only PRCLI's own groups.
+ * Remove only pTerm's own groups.
  *
  * An event whose array still holds someone else's hook keeps the array; an
  * event where ours was the only group loses the key, because `SessionEnd: []`
@@ -333,11 +333,11 @@ export function unmerge(
 }
 
 /**
- * Existing `afplay` hooks on events PRCLI subscribes to.
+ * Existing `afplay` hooks on events pTerm subscribes to.
  *
  * Not a problem to fix, a fact to show. This machine already plays Funk on
  * Notification and Glass on Stop, which are two of the three sounds the parent
- * spec's default rules name — so PRCLI's defaults ship silent and the install
+ * spec's default rules name — so pTerm's defaults ship silent and the install
  * screen says why, rather than leaving it to be discovered by ear.
  */
 export function soundCollisions(settings: unknown): { event: string; command: string }[] {
@@ -458,7 +458,7 @@ export async function installHooks(): Promise<HooksState> {
 
   if (added.length > 0) {
     // Timestamp rather than a single `.bak`: a second install a week later
-    // must not overwrite the copy that predates PRCLI entirely.
+    // must not overwrite the copy that predates pTerm entirely.
     await backupIfPresent(settingsPath)
     await writeFile(settingsPath, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
   }

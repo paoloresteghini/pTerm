@@ -37,7 +37,7 @@ describe('readBranch', () => {
   let root: string
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'prcli-gitbranch-'))
+    root = await mkdtemp(join(tmpdir(), 'pterm-gitbranch-'))
   })
 
   afterEach(async () => {

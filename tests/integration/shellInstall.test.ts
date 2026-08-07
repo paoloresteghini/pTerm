@@ -16,19 +16,19 @@ import {
 
 let dir: string
 let rc: string
-const saved = { zshrc: process.env.PRCLI_ZSHRC, config: process.env.PRCLI_CONFIG_DIR }
+const saved = { zshrc: process.env.PTERM_ZSHRC, config: process.env.PTERM_CONFIG_DIR }
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'prcli-shell-inst-'))
+  dir = await mkdtemp(join(tmpdir(), 'pterm-shell-inst-'))
   rc = join(dir, '.zshrc')
   await writeFile(rc, 'export PATH=/usr/bin\n', 'utf8')
-  process.env.PRCLI_ZSHRC = rc
-  process.env.PRCLI_CONFIG_DIR = dir
+  process.env.PTERM_ZSHRC = rc
+  process.env.PTERM_CONFIG_DIR = dir
 })
 
 afterEach(async () => {
-  process.env.PRCLI_ZSHRC = saved.zshrc
-  process.env.PRCLI_CONFIG_DIR = saved.config
+  process.env.PTERM_ZSHRC = saved.zshrc
+  process.env.PTERM_CONFIG_DIR = saved.config
   await rm(dir, { recursive: true, force: true })
 })
 
@@ -49,7 +49,7 @@ describe('readShellHistoryState', () => {
 describe('installShellHistory', () => {
   it('writes the sourcing snippet under configRoot()', async () => {
     const state = await installShellHistory()
-    expect(await readFile(state.scriptPath, 'utf8')).toContain('PRCLI_HISTORY_FILE')
+    expect(await readFile(state.scriptPath, 'utf8')).toContain('PTERM_HISTORY_FILE')
   })
 
   it('appends the marker block to the rc file, keeping what was already there', async () => {
@@ -92,7 +92,7 @@ describe('uninstallShellHistory', () => {
     const installed = await installShellHistory()
     await uninstallShellHistory()
 
-    await expect(readFile(installed.scriptPath, 'utf8')).resolves.toContain('PRCLI_HISTORY_FILE')
+    await expect(readFile(installed.scriptPath, 'utf8')).resolves.toContain('PTERM_HISTORY_FILE')
   })
 
   it('does nothing to an rc file it never touched', async () => {

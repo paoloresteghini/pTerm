@@ -15,7 +15,7 @@ import { renderHistoryScript } from '../../src/main/shell/install'
 
 const entry = (over: Partial<HistoryEntry>): HistoryEntry => ({
   ts: 1,
-  cwd: '/Users/x/Code/PRCLI',
+  cwd: '/Users/x/Code/pTerm',
   tab: 'tab1',
   cmd: 'ls',
   ...over,
@@ -40,7 +40,7 @@ describe('parseHistory', () => {
 })
 
 describe('selectHistory', () => {
-  const project = '/Users/x/Code/PRCLI'
+  const project = '/Users/x/Code/pTerm'
 
   it('returns newest first', () => {
     const got = selectHistory(
@@ -104,21 +104,21 @@ describe('selectHistory', () => {
 })
 
 describe('readHistory', () => {
-  // configRoot() reads PRCLI_CONFIG_DIR at call time, the same seam
+  // configRoot() reads PTERM_CONFIG_DIR at call time, the same seam
   // notes.test.ts and prompts.test.ts use to keep this test off the real
-  // ~/.prcli.
+  // ~/.pterm.
   let dir: string
   let previousConfigDir: string | undefined
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'prcli-history-'))
-    previousConfigDir = process.env.PRCLI_CONFIG_DIR
-    process.env.PRCLI_CONFIG_DIR = dir
+    dir = await mkdtemp(join(tmpdir(), 'pterm-history-'))
+    previousConfigDir = process.env.PTERM_CONFIG_DIR
+    process.env.PTERM_CONFIG_DIR = dir
   })
 
   afterEach(async () => {
-    if (previousConfigDir === undefined) delete process.env.PRCLI_CONFIG_DIR
-    else process.env.PRCLI_CONFIG_DIR = previousConfigDir
+    if (previousConfigDir === undefined) delete process.env.PTERM_CONFIG_DIR
+    else process.env.PTERM_CONFIG_DIR = previousConfigDir
     await rm(dir, { recursive: true, force: true })
   })
 
@@ -156,14 +156,14 @@ const run = promisify(execFile)
  * file, off the developer's real `~/.zshrc` and `~/.zsh_history`.
  */
 async function recordViaZsh(commands: string[]): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'prcli-hist-'))
+  const dir = await mkdtemp(join(tmpdir(), 'pterm-hist-'))
   const historyFile = join(dir, 'history.jsonl')
-  const scriptFile = join(dir, 'prcli-history.zsh')
+  const scriptFile = join(dir, 'pterm-history.zsh')
   await writeFile(scriptFile, renderHistoryScript(historyFile), 'utf8')
   const spawned = run('zsh', ['-i'], {
     env: {
       ...process.env,
-      PRCLI_TAB_ID: 'tab-under-test',
+      PTERM_TAB_ID: 'tab-under-test',
       ZDOTDIR: dir,
       HISTFILE: join(dir, '.zsh_history'),
     },
@@ -208,18 +208,18 @@ describe('the zsh snippet', () => {
    * able to tell apart from a working one.
    */
   it('does not record a command typed with a leading space', async () => {
-    const written = await recordViaZsh([' echo prcli-spaced', 'echo prcli-plain'])
+    const written = await recordViaZsh([' echo pterm-spaced', 'echo pterm-plain'])
     const recorded = parseHistory(written).map((e) => e.cmd)
-    expect(recorded).toContain('echo prcli-plain')
-    expect(recorded.filter((cmd) => cmd.includes('prcli-spaced'))).toEqual([])
+    expect(recorded).toContain('echo pterm-plain')
+    expect(recorded.filter((cmd) => cmd.includes('pterm-spaced'))).toEqual([])
   }, 20_000)
 
-  it('records nothing when PRCLI_TAB_ID is absent', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'prcli-hist-'))
+  it('records nothing when PTERM_TAB_ID is absent', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'pterm-hist-'))
     const historyFile = join(dir, 'history.jsonl')
-    const scriptFile = join(dir, 'prcli-history.zsh')
+    const scriptFile = join(dir, 'pterm-history.zsh')
     await writeFile(scriptFile, renderHistoryScript(historyFile), 'utf8')
-    const { PRCLI_TAB_ID: _unused, ...rest } = process.env
+    const { PTERM_TAB_ID: _unused, ...rest } = process.env
     const env = { ...rest, ZDOTDIR: dir, HISTFILE: join(dir, '.zsh_history') }
     const spawned = run('zsh', ['-i'], { env })
     spawned.child.stdin?.end(`source ${scriptFile}\ntrue\nexit\n`)

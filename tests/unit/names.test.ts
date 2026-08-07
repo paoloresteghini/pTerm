@@ -4,7 +4,7 @@ import {
   newSessionId,
   encodeSessionName,
   decodeSessionName,
-  isPrcliSession,
+  isPTermSession,
   tabIdFromGroupName,
 } from '../../src/main/tmux/names'
 
@@ -42,7 +42,7 @@ describe('newSessionId', () => {
 describe('encodeSessionName', () => {
   it('joins prefix, slug and id with dashes', () => {
     expect(encodeSessionName({ projectSlug: 'lumio', id: 'a1b2c3d4e5f60718' }))
-      .toBe('prcli-lumio-a1b2c3d4e5f60718')
+      .toBe('pterm-lumio-a1b2c3d4e5f60718')
   })
 
   it('rejects a slug that is not already sanitised', () => {
@@ -65,25 +65,25 @@ describe('decodeSessionName', () => {
   it('returns null for foreign session names', () => {
     expect(decodeSessionName('0')).toBeNull()
     expect(decodeSessionName('work')).toBeNull()
-    expect(decodeSessionName('prcli')).toBeNull()
+    expect(decodeSessionName('pterm')).toBeNull()
     expect(decodeSessionName('other-lumio-a1b2c3d4e5f60718')).toBeNull()
   })
 
   it('returns null when the id is malformed', () => {
-    expect(decodeSessionName('prcli-lumio-XYZ')).toBeNull()
+    expect(decodeSessionName('pterm-lumio-XYZ')).toBeNull()
   })
 })
 
-describe('isPrcliSession', () => {
+describe('isPTermSession', () => {
   it('distinguishes ours from foreign sessions', () => {
-    expect(isPrcliSession('prcli-lumio-a1b2c3d4e5f60718')).toBe(true)
-    expect(isPrcliSession('my-work-session')).toBe(false)
+    expect(isPTermSession('pterm-lumio-a1b2c3d4e5f60718')).toBe(true)
+    expect(isPTermSession('my-work-session')).toBe(false)
   })
 })
 
 describe('tabIdFromGroupName', () => {
   it('returns the id half', () => {
-    expect(tabIdFromGroupName('prcli-lumio-a1b2c3d4e5f60718')).toBe('a1b2c3d4e5f60718')
+    expect(tabIdFromGroupName('pterm-lumio-a1b2c3d4e5f60718')).toBe('a1b2c3d4e5f60718')
   })
 
   // The whole reason this function exists rather than callers reaching for
@@ -109,8 +109,8 @@ describe('tabIdFromGroupName', () => {
       .not.toBe(decodeSessionName(moved)?.projectSlug)
   })
 
-  it('returns null for anything that is not an encoded prcli name', () => {
-    for (const value of ['', 'lumio', 'prcli-lumio', 'prcli-lumio-nothex', 'other-lumio-a1b2c3d4e5f60718']) {
+  it('returns null for anything that is not an encoded pterm name', () => {
+    for (const value of ['', 'lumio', 'pterm-lumio', 'pterm-lumio-nothex', 'other-lumio-a1b2c3d4e5f60718']) {
       expect(tabIdFromGroupName(value)).toBeNull()
     }
   })

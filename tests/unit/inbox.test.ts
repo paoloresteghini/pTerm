@@ -11,7 +11,7 @@ function tab(id: string): TabDescriptor {
     id,
     projectSlug: 'lumio',
     cwd: '/tmp',
-    tmuxSession: `prcli-lumio-${id}`,
+    tmuxSession: `pterm-lumio-${id}`,
     type: 'claude',
   }
 }

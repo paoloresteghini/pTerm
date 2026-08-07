@@ -36,7 +36,7 @@ if (!fs.existsSync(zipPath)) {
 }
 
 const failures = []
-const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'prcli-verify-'))
+const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pterm-verify-'))
 
 function check(label, fn) {
   try {

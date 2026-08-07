@@ -2,7 +2,7 @@
  * The history overlay, from the one key that opens it to what ends up on the
  * shell's prompt.
  *
- * Five tests on the `prcli-e2e-history` socket, each launching its own app so
+ * Five tests on the `pterm-e2e-history` socket, each launching its own app so
  * no test inherits a page another one typed into. Every one of them seeds
  * `history.jsonl` directly rather than running commands in a pane: the file is
  * what the zsh hook writes, the overlay reads nothing else, and seeding it
@@ -66,7 +66,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchApp, killServer, sessionNames, capturePane, expandColumn } from './harness'
 
-const SOCKET = 'prcli-e2e-history'
+const SOCKET = 'pterm-e2e-history'
 
 /**
  * The command texts the seeds use. See the header for why they are prefixed.
@@ -89,8 +89,8 @@ const BOTTOM = 'echo hist-bottom'
  * substring with the `hist-` tokens above, because the passthrough test puts
  * it on a prompt line and other assertions read whole screens.
  */
-const PANE_PROMPT = 'PRCLIE2E$'
-const RECALLED = 'echo prcli-recall-probe'
+const PANE_PROMPT = 'pTermE2E$'
+const RECALLED = 'echo pterm-recall-probe'
 
 /**
  * The rc file the pane's zsh reads, given `ZDOTDIR` points at its directory.
@@ -147,7 +147,7 @@ const PRESET_COMMAND = `echo ${PRESET_READY}; cat`
 
 /** Write a config holding one project, selected, and return its directory. */
 async function seedProject(): Promise<string> {
-  const cwd = await mkdtemp(join(tmpdir(), 'prcli-proj-scratch-'))
+  const cwd = await mkdtemp(join(tmpdir(), 'pterm-proj-scratch-'))
   await writeFile(
     join(configDir, 'config.json'),
     JSON.stringify({
@@ -225,13 +225,13 @@ async function paneLines(session: string): Promise<string[]> {
 
 test.beforeEach(async () => {
   await killServer(SOCKET)
-  userDataDir = await mkdtemp(join(tmpdir(), 'prcli-history-user-'))
-  configDir = await mkdtemp(join(tmpdir(), 'prcli-history-config-'))
-  projectsRoot = await mkdtemp(join(tmpdir(), 'prcli-history-root-'))
-  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'prcli-history-settings-'))
+  userDataDir = await mkdtemp(join(tmpdir(), 'pterm-history-user-'))
+  configDir = await mkdtemp(join(tmpdir(), 'pterm-history-config-'))
+  projectsRoot = await mkdtemp(join(tmpdir(), 'pterm-history-root-'))
+  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'pterm-history-settings-'))
   claudeSettingsPath = join(claudeSettingsDir, 'settings.json')
-  claudeHome = await mkdtemp(join(tmpdir(), 'prcli-history-claude-'))
-  zshrcDir = await mkdtemp(join(tmpdir(), 'prcli-history-zshrc-'))
+  claudeHome = await mkdtemp(join(tmpdir(), 'pterm-history-claude-'))
+  zshrcDir = await mkdtemp(join(tmpdir(), 'pterm-history-zshrc-'))
   zshrcPath = join(zshrcDir, '.zshrc')
   paneHistoryPath = join(zshrcDir, '.zsh_history')
   await writeFile(zshrcPath, PANE_RC(paneHistoryPath))

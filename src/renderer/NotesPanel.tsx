@@ -5,7 +5,7 @@ import { useColumnWidth } from './lib/columnWidth'
 import { ColumnResizer, PanelHeading, PanelStrip } from './ui/Panel'
 
 /** '0' when the user has expanded the panel; anything else, including absent, is collapsed. Collapsed is the default so a new column must not steal terminal width unasked. */
-const COLLAPSED_KEY = 'prcli:notesCollapsed'
+const COLLAPSED_KEY = 'pterm:notesCollapsed'
 
 export function NotesPanel({ project }: { project: ProjectDescriptor | undefined }) {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSED_KEY) !== '0')
@@ -14,7 +14,7 @@ export function NotesPanel({ project }: { project: ProjectDescriptor | undefined
   const [text, setText] = useState<string | null>(null)
   // 256, not the 208 the other columns default to: this column held `w-64`
   // before it was adjustable, and a note is prose rather than a list of names.
-  const { width, set, commit } = useColumnWidth('prcli:notesWidth', 256)
+  const { width, set, commit } = useColumnWidth('pterm:notesWidth', 256)
   const projectId = project?.id
 
   // One saver for the component's lifetime. Rejections are swallowed for the
@@ -22,7 +22,7 @@ export function NotesPanel({ project }: { project: ProjectDescriptor | undefined
   // and this panel is not where transport faults get reported.
   const saver = useRef(
     createNoteSaver((id, body) => {
-      window.prcli.notesWrite(id, body).catch(() => {})
+      window.pterm.notesWrite(id, body).catch(() => {})
     }),
   ).current
 
@@ -33,7 +33,7 @@ export function NotesPanel({ project }: { project: ProjectDescriptor | undefined
     }
     let cancelled = false
     setText(null)
-    window.prcli
+    window.pterm
       .notesRead(projectId)
       .then((body) => {
         if (!cancelled) setText(body)

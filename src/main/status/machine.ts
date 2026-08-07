@@ -2,7 +2,7 @@ import type { TabType } from '../../shared/ipc'
 import type { TabState } from '../../shared/status'
 
 /**
- * The Claude Code hook events PRCLI subscribes to.
+ * The Claude Code hook events pTerm subscribes to.
  *
  * Each one is registered as its own entry in settings.json and passes its own
  * name as the hook script's argument, so the script never parses a payload.

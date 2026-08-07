@@ -6,7 +6,7 @@ import type { PaneRecord } from '../sessions/manager'
  * tmux: the pane's title, its colour, and the file an editor pane is showing.
  *
  * `SessionManager` knows nothing about any of them and should not: a pane's
- * session is named `prcli-${slug}-${id}`, and that name is what restore matches
+ * session is named `pterm-${slug}-${id}`, and that name is what restore matches
  * saved rows by. A title, a colour and a file path are display data stored
  * beside it. So a record the manager built carries none of them, and all three
  * are reattached here rather than threaded through `OpenInput` and back out
@@ -70,7 +70,7 @@ import type { PaneRecord } from '../sessions/manager'
  *   Neither a name nor a colour survives its pane's death, which is a ticketed
  *   scope line, not something this function papers over.
  * - `CHANNELS.list` is manager-built and reattaches nothing, and is inert:
- *   nothing in `src/renderer` or `tests/` calls `window.prcli.list()`.
+ *   nothing in `src/renderer` or `tests/` calls `window.pterm.list()`.
  */
 export function attachSavedFields(panes: TabDescriptor[], records: PaneRecord[]): TabDescriptor[] {
   const saved = new Map(records.map((row) => [row.id, row]))

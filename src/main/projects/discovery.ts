@@ -11,11 +11,11 @@ export type { Candidate }
 const MARKERS = ['.git', 'package.json', 'composer.json']
 
 /**
- * `PRCLI_PROJECTS_ROOT` exists so tests scan a temp directory instead of the
- * developer's real ~/Code, the same role PRCLI_CONFIG_DIR plays for config.
+ * `PTERM_PROJECTS_ROOT` exists so tests scan a temp directory instead of the
+ * developer's real ~/Code, the same role PTERM_CONFIG_DIR plays for config.
  */
 export function projectsRoot(): string {
-  return process.env.PRCLI_PROJECTS_ROOT ?? join(homedir(), 'Code')
+  return process.env.PTERM_PROJECTS_ROOT ?? join(homedir(), 'Code')
 }
 
 async function exists(path: string): Promise<boolean> {

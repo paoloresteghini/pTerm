@@ -34,21 +34,21 @@ function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
 
 let configDir: string
 let projectCwd: string
-const saved = { config: process.env.PRCLI_CONFIG_DIR, zshrc: process.env.PRCLI_ZSHRC }
+const saved = { config: process.env.PTERM_CONFIG_DIR, zshrc: process.env.PTERM_ZSHRC }
 
 beforeEach(async () => {
-  configDir = await mkdtemp(join(tmpdir(), 'prcli-history-ipc-'))
+  configDir = await mkdtemp(join(tmpdir(), 'pterm-history-ipc-'))
   // Never a real directory: selectHistory only compares this against the
   // cwd string stored in each entry, so nothing here needs to exist on disk.
   projectCwd = join(configDir, 'project')
   // Both seams set even though these tests never touch the install/uninstall
-  // channels: registerIpc wires all four together, and PRCLI_ZSHRC keeps any
+  // channels: registerIpc wires all four together, and PTERM_ZSHRC keeps any
   // future addition to this file from reaching the developer's real rc file.
-  process.env.PRCLI_CONFIG_DIR = configDir
-  process.env.PRCLI_ZSHRC = join(configDir, '.zshrc')
+  process.env.PTERM_CONFIG_DIR = configDir
+  process.env.PTERM_ZSHRC = join(configDir, '.zshrc')
 
   ipc.handlers.clear()
-  const manager = new SessionManager(new TmuxAdapter({ socket: 'prcli-history-ipc-test' }))
+  const manager = new SessionManager(new TmuxAdapter({ socket: 'pterm-history-ipc-test' }))
   const registry = new StatusRegistry()
   const store = new ConfigStore(join(configDir, 'config.json'))
   const fakeWindow = {
@@ -59,8 +59,8 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
-  process.env.PRCLI_CONFIG_DIR = saved.config
-  process.env.PRCLI_ZSHRC = saved.zshrc
+  process.env.PTERM_CONFIG_DIR = saved.config
+  process.env.PTERM_ZSHRC = saved.zshrc
   await rm(configDir, { recursive: true, force: true })
 })
 

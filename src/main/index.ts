@@ -29,20 +29,20 @@ let mainWindow: BrowserWindow | null = null
  * suite can run while its developer keeps working. Read once here rather than
  * per call: the harness sets it before launch and nothing changes it after.
  */
-const backgroundWindow = process.env.PRCLI_BACKGROUND_WINDOW === '1'
+const backgroundWindow = process.env.PTERM_BACKGROUND_WINDOW === '1'
 
-// `PRCLI_TMUX_SOCKET` exists so tests run against their own tmux server and can
+// `PTERM_TMUX_SOCKET` exists so tests run against their own tmux server and can
 // never see, adopt or kill the user's real sessions.
 // tmux is resolved to an absolute path because a Finder/Dock launch inherits
 // launchd's PATH, which has no Homebrew in it.
 const adapter = new TmuxAdapter({
   bin: resolveTmuxBin(),
-  socket: process.env.PRCLI_TMUX_SOCKET,
+  socket: process.env.PTERM_TMUX_SOCKET,
 })
 // Every session tmux opens gets a `pane-died` hook pointing at this script,
 // which is how a command that exits non-zero reaches the app as a crash rather
 // than as the code 0 an attached client always reports. `hookPaths()` reads
-// `PRCLI_CONFIG_DIR` at call time, so a test's sessions point at the test's
+// `PTERM_CONFIG_DIR` at call time, so a test's sessions point at the test's
 // own copy.
 const manager = new SessionManager(adapter, { deathReporter: hookPaths().script })
 const registry = new StatusRegistry()
@@ -55,7 +55,7 @@ const store = new ConfigStore(ConfigStore.defaultPath())
  * `registerIpc`: it must already be listening before the renderer's first
  * `restore` call, or an event that fires in the gap between launch and that
  * call would have nowhere to land but the spool. `hookPaths()` reads
- * `PRCLI_CONFIG_DIR` at call time, same as `ConfigStore.defaultPath()` above.
+ * `PTERM_CONFIG_DIR` at call time, same as `ConfigStore.defaultPath()` above.
  */
 const hookServer = new HookServer(hookPaths().socket)
 // Which events are admitted, and in what order, is `inbox.ts`'s business —
@@ -374,8 +374,8 @@ app.whenReady().then(async () => {
       // Milestone 4 replaces this with a proper onboarding screen.
       dialog.showErrorBox(
         'tmux is required',
-        'PRCLI could not find tmux.\n\nInstall it with:\n    brew install tmux\n\n' +
-          'If tmux is installed somewhere unusual, set PRCLI_TMUX_BIN to its full path.',
+        'pTerm could not find tmux.\n\nInstall it with:\n    brew install tmux\n\n' +
+          'If tmux is installed somewhere unusual, set PTERM_TMUX_BIN to its full path.',
       )
       app.exit(1)
       return
@@ -395,7 +395,7 @@ app.whenReady().then(async () => {
     await writeScript()
     await hookServer.start()
   } catch (error) {
-    console.error('PRCLI: failed to start the hook server', error)
+    console.error('pTerm: failed to start the hook server', error)
   }
 
   installMenu()

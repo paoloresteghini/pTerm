@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 
-export const SESSION_PREFIX = 'prcli'
+export const SESSION_PREFIX = 'pterm'
 
 const SLUG_RE = /^[a-z0-9_]+$/
 const ID_RE = /^[0-9a-f]{16}$/
@@ -12,7 +12,7 @@ export interface SessionNameParts {
 
 /**
  * Reduce a display name to a session-safe slug. Lossy and deliberately so:
- * the slug is the project's identity everywhere in PRCLI, and the display
+ * the slug is the project's identity everywhere in pTerm, and the display
  * name is stored separately in config.
  */
 export function slugify(name: string): string {
@@ -53,7 +53,7 @@ export function decodeSessionName(name: string): SessionNameParts | null {
   return { projectSlug, id }
 }
 
-export function isPrcliSession(name: string): boolean {
+export function isPTermSession(name: string): boolean {
   return decodeSessionName(name) !== null
 }
 

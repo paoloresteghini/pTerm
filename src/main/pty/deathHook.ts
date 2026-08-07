@@ -1,4 +1,4 @@
-import { isPrcliSession } from '../tmux/names'
+import { isPTermSession } from '../tmux/names'
 
 /**
  * Anything that would change meaning on the way to the shell.
@@ -61,7 +61,7 @@ export function canBuildDeathHook(input: {
   // `tmuxSession` this app hands in comes from `encodeSessionName`
   // (`SessionManager.open`, `.moveTabToProject`) — so this makes an existing
   // guarantee explicit rather than fixing a live bug.
-  if (!isPrcliSession(input.tmuxSession)) return false
+  if (!isPTermSession(input.tmuxSession)) return false
   return true
 }
 
@@ -86,8 +86,8 @@ export function deathHookCommand(input: {
   // The order is `run-shell`, then `kill-session`, then `kill-window`, and it
   // is not free. A tmux command list aborts at the first failure — measured:
   //
-  //   $ tmux kill-session -t '=prcli-gone-0000000000000000' ';' kill-window -t @1
-  //   can't find session: prcli-gone-0000000000000000
+  //   $ tmux kill-session -t '=pterm-gone-0000000000000000' ';' kill-window -t @1
+  //   can't find session: pterm-gone-0000000000000000
   //   windows after: @0 @1        # @1 survived
   //
   // So putting `kill-session` first means any failure of it forfeits the
@@ -108,7 +108,7 @@ export function deathHookCommand(input: {
   // status with no signal, or a signal *name* with no status. Asking only for
   // the status is what left a segfault or an OOM kill reporting nothing.
   const report =
-    `PRCLI_TAB_ID=${input.tabId} '${input.reporter}' Exit ` +
+    `PTERM_TAB_ID=${input.tabId} '${input.reporter}' Exit ` +
     `'#{pane_dead_status}' '#{pane_dead_signal}'`
 
   return (

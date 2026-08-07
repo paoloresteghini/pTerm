@@ -1,18 +1,20 @@
 /**
  * The app starting, drawing a terminal, and finding its session again.
  *
- * Five tests, each against the packaged build (`npm run package`, run once for
+ * Six tests, each against the packaged build (`npm run package`, run once for
  * the whole suite by `tests/e2e/global-setup.ts`) and a real tmux server on
- * the `prcli-e2e` socket: typed input reaches the shell and its output comes
+ * the `pterm-e2e` socket: typed input reaches the shell and its output comes
  * back; a quit and relaunch reattaches the same session with its scrollback;
  * closing the window and reopening it through macOS `activate` reattaches
- * rather than replacing, leaving exactly one `prcli-` session on the socket;
- * a fourth that opens no tmux session at all — it reads the five `PRCLI_*`
+ * rather than replacing, leaving exactly one `pterm-` session on the socket;
+ * a fourth that opens no tmux session at all — it reads the five `PTERM_*`
  * env vars back out of the launched app's own `process.env` and asserts each
  * equals the exact value this file handed `launchApp` (four temp paths made
  * in `beforeEach`, plus the `SOCKET` const), not merely that it is set to
- * something; and a fifth that opens no session either, asserting the title
- * bar computes to a draggable region and holds nothing interactive.
+ * something; a fifth that opens no session either, asserting the title
+ * bar computes to a draggable region and holds nothing interactive; and a
+ * sixth that types Shift+Return into `cat -v` and asserts the pty received
+ * ESC CR rather than a bare Return.
  *
  * **Measured, 2026-08-02, this file run alone** (`npx playwright test
  * tests/e2e/launch.spec.ts`), against the three tests that existed at the
@@ -72,22 +74,22 @@
  *   asserted on. That is `tabs.spec.ts`'s ground;
  * - **hook events, status dots and project switching** — `status.spec.ts` and
  *   `projects.spec.ts` respectively. This file seeds exactly one project and
- *   touches nothing but `new-tab`, `terminal` and `.xterm-rows` — the
+ *   touches nothing but `new-tab`, `terminal` and `terminalTexts` — the
  *   sidebar, the settings pane and the add-project dialog are never clicked;
  * - **what the shell actually printed**, beyond one marker string appearing in
- *   `.xterm-rows`. Rendering fidelity, wrapping, colour and resize behaviour
- *   are all outside it.
+ *   a pane's buffer (`terminalTexts`). Rendering fidelity, wrapping, colour
+ *   and resize behaviour are all outside it.
  */
 import { test, expect, type ElectronApplication } from '@playwright/test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchApp, killServer, sessionNames } from './harness'
+import { launchApp, killServer, sessionNames, terminalTexts } from './harness'
 
 // The app runs against its own tmux server here. Nothing these tests create
 // is visible on the user's default socket, and nothing they clean up can
 // reach the user's real sessions.
-const SOCKET = 'prcli-e2e'
+const SOCKET = 'pterm-e2e'
 
 let userDataDir: string
 let configDir: string
@@ -100,7 +102,7 @@ let claudeHome: string
 // Every launch in this file goes through the shared harness, so all five
 // overrides are set by construction rather than by four copies of one env
 // block that could drift apart — which is how three of the four specs came to
-// be missing PRCLI_CLAUDE_SETTINGS.
+// be missing PTERM_CLAUDE_SETTINGS.
 const launch = (): Promise<ElectronApplication> =>
   launchApp({ socket: SOCKET, configDir, projectsRoot, claudeSettings: claudeSettingsPath, claudeHome, userDataDir })
 
@@ -113,7 +115,7 @@ const launch = (): Promise<ElectronApplication> =>
  * the config file is seeded directly. Returns the project's directory.
  */
 async function seedProject(slug: string, name: string): Promise<string> {
-  const cwd = await mkdtemp(join(tmpdir(), `prcli-proj-${slug}-`))
+  const cwd = await mkdtemp(join(tmpdir(), `pterm-proj-${slug}-`))
   await writeFile(
     join(configDir, 'config.json'),
     JSON.stringify({
@@ -130,13 +132,13 @@ async function seedProject(slug: string, name: string): Promise<string> {
 // A config dir per test: the launches within a test share it, which is what
 // proves reattachment, while the tests stay independent of one another.
 test.beforeEach(async () => {
-  userDataDir = await mkdtemp(join(tmpdir(), 'prcli-e2e-'))
-  configDir = await mkdtemp(join(tmpdir(), 'prcli-e2e-config-'))
-  projectsRoot = await mkdtemp(join(tmpdir(), 'prcli-e2e-root-'))
+  userDataDir = await mkdtemp(join(tmpdir(), 'pterm-e2e-'))
+  configDir = await mkdtemp(join(tmpdir(), 'pterm-e2e-config-'))
+  projectsRoot = await mkdtemp(join(tmpdir(), 'pterm-e2e-root-'))
   projectCwd = await seedProject('scratch', 'Scratch')
-  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'prcli-e2e-settings-'))
+  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'pterm-e2e-settings-'))
   claudeSettingsPath = join(claudeSettingsDir, 'settings.json')
-  claudeHome = await mkdtemp(join(tmpdir(), 'prcli-e2e-claude-'))
+  claudeHome = await mkdtemp(join(tmpdir(), 'pterm-e2e-claude-'))
 })
 
 test.afterEach(async () => {
@@ -161,7 +163,42 @@ test('renders a terminal and echoes typed input', async () => {
   await window.keyboard.type('echo e2e-marker')
   await window.keyboard.press('Enter')
 
-  await expect(window.locator('.xterm-rows')).toContainText('e2e-marker', { timeout: 20_000 })
+  await expect
+    .poll(async () => (await terminalTexts(window)).join('\n'), { timeout: 20_000 })
+    .toContain('e2e-marker')
+  await app.close()
+})
+
+// `cat -v` because the shell cannot show the difference: it treats ESC CR as
+// Meta+Return and accepts the line, exactly like a bare Return. `cat -v`
+// echoes the ESC as a visible `^[`, which a bare CR never produces — so with
+// the Shift+Return branch deleted from `Terminal.tsx`'s key handler, the
+// marker below still appears (Return still submits) and `^[` does not, and
+// this test is RED on exactly that.
+test('Shift+Return reaches the pty as ESC CR, not a bare Return', async () => {
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  await window.getByTestId('new-tab').click()
+  const terminal = window.getByTestId('terminal')
+  await expect(terminal).toBeVisible()
+  await terminal.click()
+
+  // A prompt first, or the keystrokes race the shell's startup.
+  await expect
+    .poll(async () => (await terminalTexts(window)).join('\n'), { timeout: 20_000 })
+    .toMatch(/[$%#]/)
+
+  await window.keyboard.type('cat -v')
+  await window.keyboard.press('Enter')
+  await window.keyboard.press('Shift+Enter')
+  // Something visible after it, so the poll below cannot pass on a `^[` that
+  // a future handler change might emit for the plain Enter above.
+  await window.keyboard.type('seen-esc')
+
+  await expect
+    .poll(async () => (await terminalTexts(window)).join('\n'), { timeout: 20_000 })
+    .toMatch(/\^\[\s*seen-esc/)
   await app.close()
 })
 
@@ -173,16 +210,16 @@ test('reattaches the same session with scrollback after relaunch', async () => {
   await firstWindow.getByTestId('terminal').click()
   await firstWindow.keyboard.type('echo survives-restart')
   await firstWindow.keyboard.press('Enter')
-  await expect(firstWindow.locator('.xterm-rows')).toContainText('survives-restart', {
-    timeout: 20_000,
-  })
+  await expect
+    .poll(async () => (await terminalTexts(firstWindow)).join('\n'), { timeout: 20_000 })
+    .toContain('survives-restart')
   await first.close()
 
   const second = await launch()
   const secondWindow = await second.firstWindow()
-  await expect(secondWindow.locator('.xterm-rows')).toContainText('survives-restart', {
-    timeout: 20_000,
-  })
+  await expect
+    .poll(async () => (await terminalTexts(secondWindow)).join('\n'), { timeout: 20_000 })
+    .toContain('survives-restart')
   await second.close()
 })
 
@@ -197,9 +234,9 @@ test('reattaches the same session after closing and reopening the window', async
   await window.getByTestId('terminal').click()
   await window.keyboard.type('echo survives-window-close')
   await window.keyboard.press('Enter')
-  await expect(window.locator('.xterm-rows')).toContainText('survives-window-close', {
-    timeout: 20_000,
-  })
+  await expect
+    .poll(async () => (await terminalTexts(window)).join('\n'), { timeout: 20_000 })
+    .toContain('survives-window-close')
 
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close())
   await expect
@@ -213,27 +250,27 @@ test('reattaches the same session after closing and reopening the window', async
     electronApp.emit('activate')
   })
   const reopened = await reopening
-  await expect(reopened.locator('.xterm-rows')).toContainText('survives-window-close', {
-    timeout: 20_000,
-  })
+  await expect
+    .poll(async () => (await terminalTexts(reopened)).join('\n'), { timeout: 20_000 })
+    .toContain('survives-window-close')
 
   // One session, not two: a replacement rather than a reattach would leave the
   // original running and invisible.
   const sessions = await sessionNames(SOCKET)
-  expect(sessions.filter((name) => name.startsWith('prcli-'))).toHaveLength(1)
+  expect(sessions.filter((name) => name.startsWith('pterm-'))).toHaveLength(1)
 
   await app.close()
 })
 
 // tests/unit/e2eSafety.test.ts checks that `harness.ts`'s source text sets all
-// five PRCLI_* vars, and that no spec launches Electron around it — but a var
+// five PTERM_* vars, and that no spec launches Electron around it — but a var
 // pointing at the wrong path satisfies that check just as well as a var
 // pointing at the right one, and neither half of it can see what this file
 // passes to `launchApp`. Only a runtime read from inside the launched app can
 // tell the difference, which is what this test does.
 //
 // It opens no tmux session and costs no pty — but not because it clicks
-// nothing. A launch against a NON-empty socket adopts every `prcli-` session
+// nothing. A launch against a NON-empty socket adopts every `pterm-` session
 // it finds there with no click at all (`tabs.spec.ts`'s `adopts a session the
 // app has never seen`). What makes this test free is the pair either side of
 // it: `beforeEach` seeds a fresh config whose `tabs` is `[]`, and `afterEach`
@@ -247,11 +284,11 @@ test('reattaches the same session after closing and reopening the window', async
 test('runs against overridden paths, never the developer’s own', async () => {
   const app = await launch()
   const seen = await app.evaluate(() => ({
-    config: process.env.PRCLI_CONFIG_DIR,
-    projects: process.env.PRCLI_PROJECTS_ROOT,
-    settings: process.env.PRCLI_CLAUDE_SETTINGS,
-    claudeHome: process.env.PRCLI_CLAUDE_HOME,
-    socket: process.env.PRCLI_TMUX_SOCKET,
+    config: process.env.PTERM_CONFIG_DIR,
+    projects: process.env.PTERM_PROJECTS_ROOT,
+    settings: process.env.PTERM_CLAUDE_SETTINGS,
+    claudeHome: process.env.PTERM_CLAUDE_HOME,
+    socket: process.env.PTERM_TMUX_SOCKET,
   }))
   // Asserted as "is the temp path we made", not as "is set": an override
   // pointing at the wrong place is set, and is exactly as dangerous.

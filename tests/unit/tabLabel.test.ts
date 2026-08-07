@@ -7,7 +7,7 @@ function tab(id: string, projectSlug = 'lumio'): TabDescriptor {
     id,
     projectSlug,
     cwd: '/tmp',
-    tmuxSession: `prcli-${projectSlug}-${id}`,
+    tmuxSession: `pterm-${projectSlug}-${id}`,
     type: 'shell',
   }
 }

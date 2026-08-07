@@ -21,7 +21,7 @@ export function AddProjectDialog({
     if (!open) return
     let cancelled = false
     setError(null)
-    window.prcli
+    window.pterm
       .scanCandidates()
       .then((found) => {
         if (!cancelled) setCandidates(found)
@@ -71,7 +71,7 @@ export function AddProjectDialog({
         <Button
           data-testid="choose-folder"
           onClick={() => {
-            void window.prcli.pickFolder().then((cwd) => {
+            void window.pterm.pickFolder().then((cwd) => {
               // Null means the user cancelled the picker.
               if (cwd) add(cwd)
             })

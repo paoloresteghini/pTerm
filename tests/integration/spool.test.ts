@@ -12,7 +12,7 @@ const NOW = 1_800_000_000_000
 let dir: string
 
 async function spoolWith(lines: string[]): Promise<string> {
-  dir = await mkdtemp(join(tmpdir(), 'prcli-spool-'))
+  dir = await mkdtemp(join(tmpdir(), 'pterm-spool-'))
   const path = join(dir, 'hook.spool')
   await writeFile(path, lines.join(''), 'utf8')
   return path
@@ -28,7 +28,7 @@ afterEach(async () => {
 
 describe('drainSpool', () => {
   it('returns nothing when there is no spool', async () => {
-    dir = await mkdtemp(join(tmpdir(), 'prcli-spool-'))
+    dir = await mkdtemp(join(tmpdir(), 'pterm-spool-'))
     expect(await drainSpool(join(dir, 'hook.spool'), NOW)).toEqual([])
   })
 
@@ -115,7 +115,7 @@ describe('drainSpool', () => {
   })
 
   it('survives an unreadable spool rather than failing the launch', async () => {
-    dir = await mkdtemp(join(tmpdir(), 'prcli-spool-'))
+    dir = await mkdtemp(join(tmpdir(), 'pterm-spool-'))
     const path = join(dir, 'hook.spool')
     // A directory where a file should be: unreadable in a way no amount of
     // retrying fixes. Restore must still finish.

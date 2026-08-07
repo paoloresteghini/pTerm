@@ -18,13 +18,13 @@ export type { ShellHistoryState }
  */
 export function shellPaths(): { rcPath: string; scriptPath: string; historyFile: string } {
   return {
-    // PRCLI_ZSHRC is a test seam for the same reason PRCLI_CONFIG_DIR is
+    // PTERM_ZSHRC is a test seam for the same reason PTERM_CONFIG_DIR is
     // one: without it, running the install/uninstall tests would edit the
     // developer's actual shell config.
-    rcPath: process.env.PRCLI_ZSHRC ?? join(homedir(), '.zshrc'),
+    rcPath: process.env.PTERM_ZSHRC ?? join(homedir(), '.zshrc'),
     // Under configRoot()'s bin/ directory, next to the Claude hook script
     // hookPaths() writes there.
-    scriptPath: join(configRoot(), 'bin', 'prcli-history.zsh'),
+    scriptPath: join(configRoot(), 'bin', 'pterm-history.zsh'),
     historyFile: historyPath(),
   }
 }
@@ -33,8 +33,8 @@ export function shellPaths(): { rcPath: string; scriptPath: string; historyFile:
  * The zsh snippet that records each command a `shell` pane runs.
  *
  * Runs on every `preexec`, the hook zsh fires just before executing a typed
- * command, with the raw command line as its argument. `PRCLI_TAB_ID` gates
- * it: a shell started outside a PRCLI pane has nothing to tag the entry
+ * command, with the raw command line as its argument. `PTERM_TAB_ID` gates
+ * it: a shell started outside a pTerm pane has nothing to tag the entry
  * with, so it writes nothing rather than appending an entry an overlay can
  * never scope back to a tab.
  *
@@ -59,11 +59,11 @@ export function shellPaths(): { rcPath: string; scriptPath: string; historyFile:
  */
 export function renderHistoryScript(historyFile: string): string {
   return [
-    '# Written by PRCLI. Edits are overwritten on reinstall.',
-    'typeset -g PRCLI_HISTORY_FILE=' + JSON.stringify(historyFile),
+    '# Written by pTerm. Edits are overwritten on reinstall.',
+    'typeset -g PTERM_HISTORY_FILE=' + JSON.stringify(historyFile),
     '',
-    'prcli_history_preexec() {',
-    '  [ -n "$PRCLI_TAB_ID" ] || return 0',
+    'pterm_history_preexec() {',
+    '  [ -n "$PTERM_TAB_ID" ] || return 0',
     "  [[ $1 == ' '* ]] && return 0",
     '  local cmd=$1',
     '  cmd=${cmd//\\\\/\\\\\\\\}',
@@ -71,18 +71,18 @@ export function renderHistoryScript(historyFile: string): string {
     "  cmd=${cmd//$'\\n'/ }",
     '  cmd=${cmd//$\'\\t\'/ }',
     '  printf \'{"ts":%d,"cwd":"%s","tab":"%s","cmd":"%s"}\\n\' \\',
-    '    "$EPOCHSECONDS" "$PWD" "$PRCLI_TAB_ID" "$cmd" >> "$PRCLI_HISTORY_FILE"',
+    '    "$EPOCHSECONDS" "$PWD" "$PTERM_TAB_ID" "$cmd" >> "$PTERM_HISTORY_FILE"',
     '}',
     '',
     'zmodload -F zsh/datetime +p:EPOCHSECONDS 2>/dev/null',
     'autoload -Uz add-zsh-hook',
-    'add-zsh-hook preexec prcli_history_preexec',
+    'add-zsh-hook preexec pterm_history_preexec',
     '',
   ].join('\n')
 }
 
-export const MARKER_START = '# >>> prcli shell history >>>'
-export const MARKER_END = '# <<< prcli shell history <<<'
+export const MARKER_START = '# >>> pterm shell history >>>'
+export const MARKER_END = '# <<< pterm shell history <<<'
 
 /** The block `merge` appends to `~/.zshrc`, bounded by markers so `unmerge` can find and remove exactly this and nothing else. */
 export function block(scriptPath: string): string {
@@ -174,7 +174,7 @@ export async function readShellHistoryState(): Promise<ShellHistoryState> {
  *
  * The timestamp in the name is `backupIfPresent`'s, and the reason is the one
  * given where `installHooks` calls it: a second install months later must not
- * overwrite the copy that predates PRCLI touching this file at all.
+ * overwrite the copy that predates pTerm touching this file at all.
  */
 async function writeRc(rcPath: string, current: string, next: string): Promise<void> {
   if (next === current) return
@@ -189,7 +189,7 @@ async function writeRc(rcPath: string, current: string, next: string): Promise<v
  * `0666 & ~umask`: measured on macOS with the default `umask 022`, that is
  * 0644. Every local account on a Mac is in group `staff`, so 0644 means the
  * other accounts on the machine can read a verbatim log of every command run
- * in every PRCLI shell pane. zsh does not leave its own `~/.zsh_history` that
+ * in every pTerm shell pane. zsh does not leave its own `~/.zsh_history` that
  * way, and this file holds the same commands.
  *
  * Creating it here means the hook's first append inherits this mode rather

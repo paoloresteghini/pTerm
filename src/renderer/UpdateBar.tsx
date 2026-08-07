@@ -1,7 +1,7 @@
 import type { UpdateInfo } from '../shared/ipc'
 
 /**
- * A strip below the title bar saying a newer PRCLI exists.
+ * A strip below the title bar saying a newer pTerm exists.
  *
  * Below `TitleBar` rather than inside it, deliberately. `TitleBar` is the
  * window's only `drag-region` and its own comment records why nothing in it
@@ -31,7 +31,7 @@ export function UpdateBar({
       className="flex h-[26px] shrink-0 items-center justify-center gap-3 border-b border-border bg-surface px-3 text-[11px]"
     >
       <span data-testid="update-version" className="text-muted">
-        PRCLI {info.version} available
+        pTerm {info.version} available
       </span>
       <button
         data-testid="update-download"

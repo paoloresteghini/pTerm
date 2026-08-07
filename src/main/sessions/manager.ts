@@ -27,7 +27,7 @@ export interface PaneRecord {
    *
    * Display text only. It is on this record because config is where it is
    * persisted, and nothing in this file reads it: a pane's tmux session is
-   * named `prcli-${slug}-${id}` and restore matches saved rows against live
+   * named `pterm-${slug}-${id}` and restore matches saved rows against live
    * sessions by that name, so a title has no more to do with tmux than a
    * window's colour does.
    */
@@ -377,10 +377,10 @@ export class SessionManager {
       // Every tab gets this, not only `claude` tabs. The way this app is used
       // is to open a tab and type `claude` into it, and a type field that
       // decided who got an id would leave exactly those sessions dark.
-      env: { PRCLI_TAB_ID: id },
+      env: { PTERM_TAB_ID: id },
       // The reporter is reached by absolute path rather than through the
       // session's environment: tmux runs a hook's command with the server's
-      // environment, not the session's, so `$PRCLI_TAB_ID` is not set there —
+      // environment, not the session's, so `$PTERM_TAB_ID` is not set there —
       // which is why the id is baked into the command instead of read from it.
       deathReporter: this.options.deathReporter,
       tabId: id,
@@ -609,7 +609,7 @@ export class SessionManager {
       // the next restore's reconcile will notice — logged here because
       // nothing else will report it.
       console.error(
-        `PRCLI: tmux was unreachable while wiring the death hook for ${record.tmuxSession}; ` +
+        `pTerm: tmux was unreachable while wiring the death hook for ${record.tmuxSession}; ` +
           'this pane will show grey instead of red when it exits',
       )
       return
@@ -632,7 +632,7 @@ export class SessionManager {
     // nothing of its own left here to leak.
     if (!ours && !(await this.ownsWindow(record.tmuxSession, window))) {
       console.error(
-        `PRCLI: ${record.tmuxSession} reports window ${window}, which a sibling pane of the ` +
+        `pTerm: ${record.tmuxSession} reports window ${window}, which a sibling pane of the ` +
           'same tab already owns — its own window has died. Leaving that window alone; ' +
           'this pane will show grey instead of red when it exits',
       )
@@ -751,7 +751,7 @@ export class SessionManager {
       // Not a log storm — every caller caches the answer on the entry, so this
       // is once per entry, not once per drag frame.
       console.error(
-        `PRCLI: tmux would not say who owns window ${windowId} for ${tmuxSession} ` +
+        `pTerm: tmux would not say who owns window ${windowId} for ${tmuxSession} ` +
           `(${String(error)}); assuming it is this pane's own`,
       )
       return true
@@ -1166,7 +1166,7 @@ export class SessionManager {
    * Put a pane into a tab that already exists in tmux.
    *
    * Three tmux objects, in this order and no other:
-   *   1. `new-window -e PRCLI_TAB_ID=<id>` in the group — holds the process.
+   *   1. `new-window -e PTERM_TAB_ID=<id>` in the group — holds the process.
    *   2. `new-session -t <group> -s <name>` — the view the xterm attaches to.
    *   3. `select-window` binding 2 to 1, BEFORE any client attaches.
    *
@@ -1208,7 +1208,7 @@ export class SessionManager {
     const window = await this.adapter.newWindow({
       member: input.through,
       cwd: record.cwd,
-      env: { PRCLI_TAB_ID: record.id },
+      env: { PTERM_TAB_ID: record.id },
     })
 
     try {
@@ -1237,7 +1237,7 @@ export class SessionManager {
       // on the new member reports nothing. `-e` on `new-session -t <group>`
       // does reach that table, which is where a reattach and any
       // `show-environment` caller both go looking, so both calls carry it.
-      await this.adapter.newGroupMember(group, record.tmuxSession, { PRCLI_TAB_ID: record.id })
+      await this.adapter.newGroupMember(group, record.tmuxSession, { PTERM_TAB_ID: record.id })
       // By index, with the member named. See the adapter method's comment.
       await this.adapter.selectWindow(record.tmuxSession, window.index)
       return await this.finishSplit(record, window, cols, rows, sized, tabId)
@@ -1276,7 +1276,7 @@ export class SessionManager {
       await this.adapter.respawnPane(window.id, {
         command: record.command,
         cwd: record.cwd,
-        env: { PRCLI_TAB_ID: record.id },
+        env: { PTERM_TAB_ID: record.id },
       })
     }
 
@@ -1636,8 +1636,8 @@ export class SessionManager {
     // is not a cosmetic staleness: a tmux command list ABORTS AT THE FIRST
     // FAILURE, measured —
     //
-    //   $ tmux kill-session -t '=prcli-gone-0000000000000000' ';' kill-window -t @1
-    //   can't find session: prcli-gone-0000000000000000
+    //   $ tmux kill-session -t '=pterm-gone-0000000000000000' ';' kill-window -t @1
+    //   can't find session: pterm-gone-0000000000000000
     //   windows after: @0 @1        # @1 survived
     //
     // — and `kill-session` comes first in the hook, because spec finding 2
@@ -1774,12 +1774,12 @@ export class SessionManager {
   }
 
   /**
-   * prcli-owned tmux sessions with no client in this app — left behind by a
+   * pterm-owned tmux sessions with no client in this app — left behind by a
    * previous run or a crash. Callers decide whether to reopen them.
    */
   async findOrphans(): Promise<TerminalPaneRecord[]> {
     const open = new Set(this.list().map((record) => record.tmuxSession))
-    const names = await this.adapter.listPrcliSessions()
+    const names = await this.adapter.listPTermSessions()
     const orphans: TerminalPaneRecord[] = []
     for (const name of names) {
       if (open.has(name)) continue
@@ -1990,7 +1990,7 @@ export class SessionManager {
       await this.adapter.killSession(tmuxSession)
     } catch (error) {
       console.error(
-        `PRCLI: could not kill the shadowing member session ${tmuxSession}; ` +
+        `pTerm: could not kill the shadowing member session ${tmuxSession}; ` +
           'it is running with no window of its own and no entry in the UI',
         error,
       )

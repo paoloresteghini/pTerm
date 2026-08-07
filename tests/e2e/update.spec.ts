@@ -9,7 +9,7 @@ import { killServer, launchApp } from './harness'
  * The update bar: that it appears when main says a release exists, that each
  * of its three buttons dismisses it, and that Skip reaches disk.
  *
- * No network. `PRCLI_UPDATE_CHECK=0` (set for every spec in `harness.ts`)
+ * No network. `PTERM_UPDATE_CHECK=0` (set for every spec in `harness.ts`)
  * keeps the scheduled check from ever running, and this file pushes the event
  * main would have pushed.
  *
@@ -34,7 +34,7 @@ import { killServer, launchApp } from './harness'
  *   `tests/e2e/settingsUpdate.spec.ts`.
  */
 
-const SOCKET = 'prcli-e2e-update'
+const SOCKET = 'pterm-e2e-update'
 
 const VERSION = '99.0.0'
 const RELEASE_URL = 'https://github.com/paoloresteghini/PRCLI/releases/tag/v99.0.0'
@@ -48,10 +48,10 @@ let claudeSettings: string
 
 test.beforeEach(async () => {
   await killServer(SOCKET)
-  configDir = await mkdtemp(join(tmpdir(), 'prcli-cfg-'))
-  projectsRoot = await mkdtemp(join(tmpdir(), 'prcli-projects-'))
-  claudeHome = await mkdtemp(join(tmpdir(), 'prcli-claude-'))
-  userDataDir = await mkdtemp(join(tmpdir(), 'prcli-userdata-'))
+  configDir = await mkdtemp(join(tmpdir(), 'pterm-cfg-'))
+  projectsRoot = await mkdtemp(join(tmpdir(), 'pterm-projects-'))
+  claudeHome = await mkdtemp(join(tmpdir(), 'pterm-claude-'))
+  userDataDir = await mkdtemp(join(tmpdir(), 'pterm-userdata-'))
   claudeSettings = join(claudeHome, 'settings.json')
   app = await launchApp({
     socket: SOCKET,
@@ -76,17 +76,17 @@ test.afterEach(async () => {
 /**
  * Push the event main's scheduler would have pushed.
  *
- * From main, not from the page: `contextBridge` freezes `window.prcli`, so no
+ * From main, not from the page: `contextBridge` freezes `window.pterm`, so no
  * spec can stub, delay or gate a bridge method. The channel is a literal here
  * because this callback is serialised into main and cannot import `CHANNELS`;
  * the assertion above it is what keeps the literal honest.
  */
 async function pushUpdate(): Promise<void> {
-  expect(CHANNELS.updateAvailable).toBe('prcli:updateAvailable')
+  expect(CHANNELS.updateAvailable).toBe('pterm:updateAvailable')
   await app.evaluate(
     ({ BrowserWindow }, payload) => {
       const [window] = BrowserWindow.getAllWindows()
-      window.webContents.send('prcli:updateAvailable', payload)
+      window.webContents.send('pterm:updateAvailable', payload)
     },
     { version: VERSION, url: RELEASE_URL },
   )
@@ -105,7 +105,7 @@ test('the bar names the version main pushed', async () => {
   await expect(page.getByTestId('update-bar')).toBeVisible()
   // The version, not merely that a bar exists: a bar hardcoding a string would
   // pass a mere visibility check.
-  await expect(page.getByTestId('update-version')).toHaveText(`PRCLI ${VERSION} available`)
+  await expect(page.getByTestId('update-version')).toHaveText(`pTerm ${VERSION} available`)
 })
 
 test('the bar sits below the title bar, not inside it', async () => {
@@ -165,7 +165,7 @@ test('skip hides the bar and writes the version to disk', async () => {
  * `shell`'s members as non-writable, so the monkeypatch a test would need
  * either throws or silently no-ops, and a test built on a patch that did not
  * install passes against a broken app. The remaining risk is one line,
- * `window.prcli.openExternal(update.url)` in `App.tsx`, whose scheme guard IS
+ * `window.pterm.openExternal(update.url)` in `App.tsx`, whose scheme guard IS
  * covered by `tests/unit/openable.test.ts`.
  */
 test('download hides the bar', async () => {

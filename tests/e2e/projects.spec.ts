@@ -2,7 +2,7 @@
  * Projects: discovering them, switching between them, renaming and removing
  * them, and what happens to their sessions when any of that occurs.
  *
- * Twelve tests on the `prcli-e2e-projects` socket: an empty workspace opens no
+ * Twelve tests on the `pterm-e2e-projects` socket: an empty workspace opens no
  * session; a scanned candidate can be added and a tab opened under its slug;
  * the tab bar shows only the active project's tabs; ⌘1/⌘2 switch project while
  * ⌥⌘1 switches tab; a repository-declared preset launches its command; a
@@ -84,7 +84,7 @@
  * - **the native folder picker.** `choose-folder` opens a dialog Playwright
  *   cannot touch, so the add path exercised here is the scanned-candidate
  *   list only, and every other project is seeded straight into `config.json`;
- * - **the real scan root.** `PRCLI_PROJECTS_ROOT` points at a temp directory
+ * - **the real scan root.** `PTERM_PROJECTS_ROOT` points at a temp directory
  *   in every test, so discovery is measured against fixtures, never against
  *   `~/Code`. What a scan of a large real tree costs or finds is untested;
  * - **status dots, hook events and the dock badge** — `status.spec.ts`. No
@@ -107,10 +107,10 @@ import { promisify } from 'node:util'
 import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchApp, killServer, sessionNames, expandColumn } from './harness'
+import { launchApp, killServer, sessionNames, expandColumn, activeTerminalText } from './harness'
 
 const run = promisify(execFile)
-const SOCKET = 'prcli-e2e-projects'
+const SOCKET = 'pterm-e2e-projects'
 
 let userDataDir: string
 let configDir: string
@@ -122,7 +122,7 @@ let claudeHome: string
 // Every launch in this file goes through the shared harness, so all five
 // overrides are set by construction rather than by four copies of one env
 // block that could drift apart — which is how three of the four specs came to
-// be missing PRCLI_CLAUDE_SETTINGS.
+// be missing PTERM_CLAUDE_SETTINGS.
 //
 // Known pre-existing flake, measured 2026-08-03 at **2 failures in 43
 // full-suite runs** on an idle machine (~4.7% of runs, ~1 in 1,000 launches):
@@ -133,7 +133,7 @@ let claudeHome: string
 // under `promptToIgnorePersistentStateWithCrashHistory:` — the "reopen
 // windows?" panel, with nobody there to click it — which suppresses
 // `finishLaunching`, so Electron's `ready` never fires and no window is ever
-// created. Confirmed by `sample(1)` on a live stalled process. **No PRCLI code
+// created. Confirmed by `sample(1)` on a live stalled process. **No pTerm code
 // has run when it hangs**: `ready` → window took ≤141ms across 1,654
 // instrumented launches, so `adapter.version()` (≤10ms) and
 // `hookServer.start()` (≤3ms) — which this comment used to name as the suspect
@@ -157,7 +157,7 @@ const launch = (): Promise<ElectronApplication> =>
 async function candidate(name: string, manifest?: object): Promise<string> {
   const cwd = join(projectsRoot, name)
   await mkdir(join(cwd, '.git'), { recursive: true })
-  if (manifest) await writeFile(join(cwd, '.prcli.json'), JSON.stringify(manifest), 'utf8')
+  if (manifest) await writeFile(join(cwd, '.pterm.json'), JSON.stringify(manifest), 'utf8')
   return cwd
 }
 
@@ -171,12 +171,12 @@ async function seed(projects: object[], activeProjectId: string | null): Promise
 
 test.beforeEach(async () => {
   await killServer(SOCKET)
-  userDataDir = await mkdtemp(join(tmpdir(), 'prcli-proj-user-'))
-  configDir = await mkdtemp(join(tmpdir(), 'prcli-proj-config-'))
-  projectsRoot = await mkdtemp(join(tmpdir(), 'prcli-proj-root-'))
-  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'prcli-proj-settings-'))
+  userDataDir = await mkdtemp(join(tmpdir(), 'pterm-proj-user-'))
+  configDir = await mkdtemp(join(tmpdir(), 'pterm-proj-config-'))
+  projectsRoot = await mkdtemp(join(tmpdir(), 'pterm-proj-root-'))
+  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'pterm-proj-settings-'))
   claudeSettingsPath = join(claudeSettingsDir, 'settings.json')
-  claudeHome = await mkdtemp(join(tmpdir(), 'prcli-proj-claude-'))
+  claudeHome = await mkdtemp(join(tmpdir(), 'pterm-proj-claude-'))
 })
 
 test.afterEach(async () => {
@@ -212,7 +212,7 @@ test('adds a scanned candidate and opens a tab in it', async () => {
   await window.getByTestId('new-tab').click()
   await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
   await expect
-    .poll(async () => (await sessionNames(SOCKET)).filter((n) => n.startsWith('prcli-alpha-')).length, {
+    .poll(async () => (await sessionNames(SOCKET)).filter((n) => n.startsWith('pterm-alpha-')).length, {
       timeout: 20_000,
     })
     .toBe(1)
@@ -293,9 +293,9 @@ test('a preset declared by the repository launches its command', async () => {
   // launches one.
   await expandColumn(window, 'presets')
   await window.getByTestId('preset-marker').click()
-  await expect(window.getByTestId('terminal-active')).toContainText('preset-ran', {
-    timeout: 20_000,
-  })
+  await expect
+    .poll(async () => activeTerminalText(window), { timeout: 20_000 })
+    .toContain('preset-ran')
 
   await app.close()
 })
@@ -321,17 +321,17 @@ test('restores the active project and each project\'s active tab', async () => {
   await firstWindow.getByTestId('terminal-active').click()
   await firstWindow.keyboard.type('echo beta-marker')
   await firstWindow.keyboard.press('Enter')
-  await expect(firstWindow.getByTestId('terminal-active')).toContainText('beta-marker', {
-    timeout: 20_000,
-  })
+  await expect
+    .poll(async () => activeTerminalText(firstWindow), { timeout: 20_000 })
+    .toContain('beta-marker')
   await first.close()
 
   const second = await launch()
   const secondWindow = await second.firstWindow()
   await expect(secondWindow.getByTestId('project-id-beta')).toHaveAttribute('data-active', 'true')
-  await expect(secondWindow.getByTestId('terminal-active')).toContainText('beta-marker', {
-    timeout: 20_000,
-  })
+  await expect
+    .poll(async () => activeTerminalText(secondWindow), { timeout: 20_000 })
+    .toContain('beta-marker')
   await second.close()
 })
 
@@ -343,7 +343,7 @@ test('an Unsorted tab can be filed into a project, keeping its session', async (
   )
   // A session created behind the app's back, as a crash would leave.
   await run('tmux', [
-    '-L', SOCKET, 'new-session', '-d', '-s', 'prcli-scratch-abcdef0123456789', 'sleep', '600',
+    '-L', SOCKET, 'new-session', '-d', '-s', 'pterm-scratch-abcdef0123456789', 'sleep', '600',
   ])
 
   const app = await launch()
@@ -353,12 +353,12 @@ test('an Unsorted tab can be filed into a project, keeping its session', async (
   await window.getByTestId('smove-abcdef0123456789').selectOption('id-alpha')
 
   await expect
-    .poll(async () => (await sessionNames(SOCKET)).includes('prcli-alpha-abcdef0123456789'), {
+    .poll(async () => (await sessionNames(SOCKET)).includes('pterm-alpha-abcdef0123456789'), {
       timeout: 20_000,
     })
     .toBe(true)
   // Renamed, not recreated: exactly one session, and the old name is gone.
-  expect(await sessionNames(SOCKET)).toEqual(['prcli-alpha-abcdef0123456789'])
+  expect(await sessionNames(SOCKET)).toEqual(['pterm-alpha-abcdef0123456789'])
   // The point of filing a stray is to be able to see it afterwards. Unsorted is
   // empty now, so the window has to follow the tab into Alpha rather than stay
   // pointed at a row that no longer exists.
@@ -469,7 +469,7 @@ test('a project can be renamed in place, keeping its slug', async () => {
     .poll(async () => (await sessionNames(SOCKET)).map((name) => name.replace(/-[0-9a-f]{16}$/, '')), {
       timeout: 20_000,
     })
-    .toEqual(['prcli-alpha'])
+    .toEqual(['pterm-alpha'])
 
   await app.close()
 })
@@ -518,7 +518,7 @@ test('the welcome page goes when a session opens and returns when it closes', as
   // there were no projects at all, so this launch used to show a blank box.
   await expect(window.getByTestId('welcome')).toBeVisible()
   // The wordmark and the shortcut copy: nothing else in this file asserts on
-  // them, so without this `pTerm` could silently become `PRCLI` with the
+  // them, so without this `pTerm` could silently become `pTerm` with the
   // suite green.
   await expect(window.getByTestId('welcome')).toContainText('pTerm')
   await expect(window.getByTestId('welcome')).toContainText(

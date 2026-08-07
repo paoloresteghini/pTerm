@@ -75,8 +75,8 @@ let root: string
 let outside: string
 
 beforeAll(async () => {
-  root = await mkdtemp(join(tmpdir(), 'prcli-tree-root-'))
-  outside = await mkdtemp(join(tmpdir(), 'prcli-tree-outside-'))
+  root = await mkdtemp(join(tmpdir(), 'pterm-tree-root-'))
+  outside = await mkdtemp(join(tmpdir(), 'pterm-tree-outside-'))
   await writeFile(join(outside, 'secret.txt'), 'no')
 
   await mkdir(join(root, 'src'), { recursive: true })

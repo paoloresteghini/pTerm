@@ -9,7 +9,7 @@ import { SessionManager } from '../../src/main/sessions/manager'
 import { encodeSessionName } from '../../src/main/tmux/names'
 
 const run = promisify(execFile)
-const SOCKET = 'prcli-test'
+const SOCKET = 'pterm-test'
 
 async function killServer(): Promise<void> {
   try {
@@ -198,7 +198,7 @@ describe('SessionManager.open', () => {
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
     const tab = manager.open({ projectSlug: 'lumio', cwd: tmpdir() })
     expect(tab.id).toMatch(/^[0-9a-f]{16}$/)
-    expect(tab.tmuxSession).toBe(`prcli-lumio-${tab.id}`)
+    expect(tab.tmuxSession).toBe(`pterm-lumio-${tab.id}`)
     await waitFor(manager, tab.id, /\$|%|#/)
     manager.detachAll()
   })
@@ -206,7 +206,7 @@ describe('SessionManager.open', () => {
   it('reuses a supplied id so a tab can be reattached', async () => {
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
     const tab = manager.open({ projectSlug: 'lumio', cwd: tmpdir(), id: 'a1b2c3d4e5f60718' })
-    expect(tab.tmuxSession).toBe('prcli-lumio-a1b2c3d4e5f60718')
+    expect(tab.tmuxSession).toBe('pterm-lumio-a1b2c3d4e5f60718')
     await waitFor(manager, tab.id, /\$|%|#/)
     manager.detachAll()
   })
@@ -299,7 +299,7 @@ describe('SessionManager.open', () => {
         projectSlug: 'lumio',
         cwd: tmpdir(),
         id: 'a1b2c3d4e5f60718',
-        tmuxSession: 'prcli-lumio-000000000000000f',
+        tmuxSession: 'pterm-lumio-000000000000000f',
       }),
     ).toThrow(/does not match/i)
   })
@@ -411,7 +411,7 @@ describe('SessionManager.moveToProject', () => {
 
     const moved = await manager.moveToProject(tab.id, 'lumio')
 
-    expect(moved.tmuxSession).toBe(`prcli-lumio-${tab.id}`)
+    expect(moved.tmuxSession).toBe(`pterm-lumio-${tab.id}`)
     const stalePid = stale.split(' ')[0]
     await expect
       .poll(() => reattachedSize(moved.tmuxSession, stalePid), { timeout: 8000 })
@@ -452,7 +452,7 @@ describe('SessionManager.splitTab', () => {
     const second = await manager.splitTab({ paneId: first.id })
 
     expect(second.id).not.toBe(first.id)
-    expect(second.tmuxSession).toBe(`prcli-lumio-${second.id}`)
+    expect(second.tmuxSession).toBe(`pterm-lumio-${second.id}`)
     // Both panes are members of one group, so one tab holds them both.
     const rows = await adapter.listSessionsWithGroups()
     const group = rows.find((row) => row.name === first.tmuxSession)?.group
@@ -460,11 +460,11 @@ describe('SessionManager.splitTab', () => {
     expect(rows.find((row) => row.name === second.tmuxSession)?.group).toBe(group)
     // And each pane's process carries its OWN id, not the founder's.
     await expect
-      .poll(() => sessionEnv(second.tmuxSession, 'PRCLI_TAB_ID'), { timeout: 10_000 })
-      .toBe(`PRCLI_TAB_ID=${second.id}`)
+      .poll(() => sessionEnv(second.tmuxSession, 'PTERM_TAB_ID'), { timeout: 10_000 })
+      .toBe(`PTERM_TAB_ID=${second.id}`)
     await expect
-      .poll(() => sessionEnv(first.tmuxSession, 'PRCLI_TAB_ID'), { timeout: 10_000 })
-      .toBe(`PRCLI_TAB_ID=${first.id}`)
+      .poll(() => sessionEnv(first.tmuxSession, 'PTERM_TAB_ID'), { timeout: 10_000 })
+      .toBe(`PTERM_TAB_ID=${first.id}`)
     manager.detachAll()
   })
 
@@ -550,7 +550,7 @@ describe('SessionManager.splitTab', () => {
 
     // The caller's own error, not the cleanup's — and nothing left over.
     expect(await windowsIn(first.tmuxSession)).toEqual(before)
-    await expect(adapter.listPrcliSessions()).resolves.toEqual([first.tmuxSession])
+    await expect(adapter.listPTermSessions()).resolves.toEqual([first.tmuxSession])
     manager.detachAll()
   })
 
@@ -580,7 +580,7 @@ describe('SessionManager exit reason', () => {
 })
 
 describe('SessionManager.findOrphans', () => {
-  it('reports prcli sessions that are not currently open', async () => {
+  it('reports pterm sessions that are not currently open', async () => {
     const adapter = new TmuxAdapter({ socket: SOCKET })
     const first = new SessionManager(adapter)
     const tab = first.open({ projectSlug: 'lumio', cwd: tmpdir() })
@@ -604,7 +604,7 @@ describe('SessionManager.findOrphans', () => {
   it('reports the session\'s real working directory, not $HOME', async () => {
     const adapter = new TmuxAdapter({ socket: SOCKET })
     const first = new SessionManager(adapter)
-    const cwd = await mkdtemp(join(tmpdir(), 'prcli-orphan-cwd-'))
+    const cwd = await mkdtemp(join(tmpdir(), 'pterm-orphan-cwd-'))
     const tab = first.open({ projectSlug: 'lumio', cwd })
     await waitFor(first, tab.id, /\$|%|#/)
     first.detachAll()
@@ -725,7 +725,7 @@ describe('SessionManager.panesOfTab', () => {
 
     // And the tab is movable again, which is what the empty array cost.
     const moved = await manager.moveTabToProject(founder.id, 'gco')
-    expect(moved.map((pane) => pane.tmuxSession)).toEqual([`prcli-gco-${second.id}`])
+    expect(moved.map((pane) => pane.tmuxSession)).toEqual([`pterm-gco-${second.id}`])
     manager.detachAll()
   })
 
@@ -750,7 +750,7 @@ describe('SessionManager.moveTabToProject', () => {
     const moved = await manager.moveTabToProject(founder.id, 'gco')
 
     expect(moved.map((pane) => pane.tmuxSession).sort()).toEqual(
-      [`prcli-gco-${founder.id}`, `prcli-gco-${second.id}`].sort(),
+      [`pterm-gco-${founder.id}`, `pterm-gco-${second.id}`].sort(),
     )
     // The stale-slug trap: the GROUP name still says lumio, because a group
     // name does not follow a rename. The tab must still list under gco, which
@@ -780,7 +780,7 @@ describe('SessionManager.moveTabToProject', () => {
     // Occupy the name the SECOND pane would move to, so its rename is refused
     // while the first pane's has already gone through.
     await run('tmux', [
-      '-L', SOCKET, 'new-session', '-d', '-s', `prcli-gco-${second.id}`, 'sleep', '600',
+      '-L', SOCKET, 'new-session', '-d', '-s', `pterm-gco-${second.id}`, 'sleep', '600',
     ])
 
     await expect(manager.moveTabToProject(founder.id, 'gco')).rejects.toThrow()
@@ -799,7 +799,7 @@ describe('SessionManager.moveTabToProject', () => {
   it('restores a rolled-back pane\'s hook to its original name too, not only the session', async () => {
     const adapter = new TmuxAdapter({ socket: SOCKET })
     const manager = new SessionManager(adapter, {
-      deathReporter: join(tmpdir(), 'prcli-hook-test-reporter'),
+      deathReporter: join(tmpdir(), 'pterm-hook-test-reporter'),
     })
     const founder = manager.open({ projectSlug: 'lumio', cwd: tmpdir() })
     await waitFor(manager, founder.id, /\$|%|#/)
@@ -813,7 +813,7 @@ describe('SessionManager.moveTabToProject', () => {
     // while the founder's has already gone through — and already picked up a
     // hook naming the destination it will shortly be undone out of.
     await run('tmux', [
-      '-L', SOCKET, 'new-session', '-d', '-s', `prcli-gco-${second.id}`, 'sleep', '600',
+      '-L', SOCKET, 'new-session', '-d', '-s', `pterm-gco-${second.id}`, 'sleep', '600',
     ])
 
     await expect(manager.moveTabToProject(founder.id, 'gco')).rejects.toThrow()
@@ -824,7 +824,7 @@ describe('SessionManager.moveTabToProject', () => {
     // destination it was renamed to and then undone from.
     const hooks = await hooksOf(await windowIdOf(founder.tmuxSession))
     expect(hooks).toContain(`=${founder.tmuxSession}`)
-    expect(hooks).not.toContain(`prcli-gco-${founder.id}`)
+    expect(hooks).not.toContain(`pterm-gco-${founder.id}`)
     manager.detachAll()
   })
 
@@ -853,10 +853,10 @@ describe('SessionManager.moveTabToProject', () => {
     const rename = adapter.renameSession.bind(adapter)
     vi.spyOn(adapter, 'renameSession').mockImplementation(async (from, to) => {
       // The move itself fails on the last pane, so the first two need undoing.
-      if (to === `prcli-gco-${last.id}`) throw new Error('destination name in use')
+      if (to === `pterm-gco-${last.id}`) throw new Error('destination name in use')
       // And the middle pane's undo is refused, the way a recreated source
       // name would refuse it.
-      if (from === `prcli-gco-${middle.id}`) throw new Error('source name in use')
+      if (from === `pterm-gco-${middle.id}`) throw new Error('source name in use')
       return rename(from, to)
     })
 
@@ -868,7 +868,7 @@ describe('SessionManager.moveTabToProject', () => {
     expect(await sessionExists(first.tmuxSession)).toBe(true)
     // The one that was refused is where it was left, which is what the
     // message warns about.
-    expect(await sessionExists(`prcli-gco-${middle.id}`)).toBe(true)
+    expect(await sessionExists(`pterm-gco-${middle.id}`)).toBe(true)
     // And the pane whose rename failed never moved at all.
     expect(await sessionExists(last.tmuxSession)).toBe(true)
     manager.detachAll()
@@ -901,7 +901,7 @@ describe('SessionManager.moveTabToProject', () => {
     // manager built without one installs no hooks at all, and every check
     // below would pass vacuously.
     const manager = new SessionManager(adapter, {
-      deathReporter: join(tmpdir(), 'prcli-hook-test-reporter'),
+      deathReporter: join(tmpdir(), 'pterm-hook-test-reporter'),
     })
 
     const founder = manager.open({ projectSlug: 'lumio', cwd: tmpdir() })
@@ -942,7 +942,7 @@ describe('SessionManager.moveTabToProject', () => {
     for (const pane of moved) {
       const hooks = await hooksOf(await windowIdOf(pane.tmuxSession))
       expect(hooks).toContain(`=${pane.tmuxSession}`)
-      expect(hooks).not.toContain('prcli-lumio-')
+      expect(hooks).not.toContain('pterm-lumio-')
     }
     manager.detachAll()
   })
@@ -969,7 +969,7 @@ describe('SessionManager window lookup', () => {
       return { kind: 'gone' }
     })
     const manager = new SessionManager(adapter, {
-      deathReporter: join(tmpdir(), 'prcli-hook-test-reporter'),
+      deathReporter: join(tmpdir(), 'pterm-hook-test-reporter'),
     })
     const tab = manager.open({ projectSlug: 'lumio', cwd: tmpdir(), cols: 100, rows: 30 })
 
@@ -1016,7 +1016,7 @@ describe('SessionManager window lookup', () => {
       }
     })
     const manager = new SessionManager(adapter, {
-      deathReporter: join(tmpdir(), 'prcli-hook-test-reporter'),
+      deathReporter: join(tmpdir(), 'pterm-hook-test-reporter'),
     })
     // Both consumers want a window here: the hook (a reporter is set) and the
     // attach-time resize (a size is given).
@@ -1124,7 +1124,7 @@ describe('SessionManager and a member that has fallen back onto a sibling window
   // state is real and detectable, so it is fixed with the rest of it.
   it("does not rewrite the sibling's death hook when the tab is moved", async () => {
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }), {
-      deathReporter: join(tmpdir(), 'prcli-hook-test-reporter'),
+      deathReporter: join(tmpdir(), 'pterm-hook-test-reporter'),
     })
     const { founder, second, founderWindow } = await fallenBack(manager)
     // `open()`'s hook installs asynchronously. Moving before it lands would
@@ -1139,8 +1139,8 @@ describe('SessionManager and a member that has fallen back onto a sibling window
     // dot to the wrong tab and reaps the wrong session, leaving the founder's
     // own behind as a stray.
     const hooks = await hooksOf(founderWindow)
-    expect(hooks).toContain(`PRCLI_TAB_ID=${founder.id}`)
-    expect(hooks).toContain(`=prcli-gco-${founder.id}`)
+    expect(hooks).toContain(`PTERM_TAB_ID=${founder.id}`)
+    expect(hooks).toContain(`=pterm-gco-${founder.id}`)
     expect(hooks).not.toContain(second.id)
     manager.detachAll()
   })
@@ -1253,7 +1253,7 @@ describe('SessionManager when tmux will not say who owns a window', () => {
 
   it('still pairs the death hook with remain-on-exit on an ordinary attach', async () => {
     const manager = withBrokenOwnership({
-      deathReporter: join(tmpdir(), 'prcli-hook-test-reporter'),
+      deathReporter: join(tmpdir(), 'pterm-hook-test-reporter'),
     })
     const tab = manager.open({ projectSlug: 'lumio', cwd: tmpdir(), cols: 100, rows: 30 })
     await waitFor(manager, tab.id, /\$|%|#/)
@@ -1296,8 +1296,8 @@ describe('SessionManager tab id in the session environment', () => {
     // shell — the shell may not have finished starting, and the session
     // environment is the thing that outlives this client anyway.
     await expect
-      .poll(() => sessionEnv(record.tmuxSession, 'PRCLI_TAB_ID'), { timeout: 10_000 })
-      .toBe(`PRCLI_TAB_ID=${record.id}`)
+      .poll(() => sessionEnv(record.tmuxSession, 'PTERM_TAB_ID'), { timeout: 10_000 })
+      .toBe(`PTERM_TAB_ID=${record.id}`)
 
     manager.detach(record.id)
   })
@@ -1321,8 +1321,8 @@ describe('SessionManager tab id in the session environment', () => {
     // not updating it on reattach is right rather than a limitation.
     expect(again.id).toBe(record.id)
     await expect
-      .poll(() => sessionEnv(record.tmuxSession, 'PRCLI_TAB_ID'), { timeout: 10_000 })
-      .toBe(`PRCLI_TAB_ID=${record.id}`)
+      .poll(() => sessionEnv(record.tmuxSession, 'PTERM_TAB_ID'), { timeout: 10_000 })
+      .toBe(`PTERM_TAB_ID=${record.id}`)
 
     manager.detach(record.id)
   })
@@ -1342,11 +1342,11 @@ describe('SessionManager tab id in the session environment', () => {
     expect(first.id).not.toBe(second.id)
 
     await expect
-      .poll(() => sessionEnv(first.tmuxSession, 'PRCLI_TAB_ID'), { timeout: 10_000 })
-      .toBe(`PRCLI_TAB_ID=${first.id}`)
+      .poll(() => sessionEnv(first.tmuxSession, 'PTERM_TAB_ID'), { timeout: 10_000 })
+      .toBe(`PTERM_TAB_ID=${first.id}`)
     await expect
-      .poll(() => sessionEnv(second.tmuxSession, 'PRCLI_TAB_ID'), { timeout: 10_000 })
-      .toBe(`PRCLI_TAB_ID=${second.id}`)
+      .poll(() => sessionEnv(second.tmuxSession, 'PTERM_TAB_ID'), { timeout: 10_000 })
+      .toBe(`PTERM_TAB_ID=${second.id}`)
 
     manager.detach(first.id)
     manager.detach(second.id)

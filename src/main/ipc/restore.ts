@@ -109,7 +109,7 @@ export type WorkspaceReconcile = Omit<RestoreResult, 'status'>
  * the tab — and its session killed, which is not the same as dropping it. A
  * pane whose session has gone needs nothing further; this one's session is
  * alive, and a pane dropped from the tab without being killed is a running
- * `prcli-*` session with no row on disk and no way back into the UI.
+ * `pterm-*` session with no row on disk and no way back into the UI.
  *
  * Which of the two members truly owns the surviving window is not recoverable
  * from tmux: killing either side's window leaves both members reporting the
@@ -153,7 +153,7 @@ async function withoutSharedWindows(
     // than deduplicate one.
     if (window && claimed.has(window)) {
       // Dropped from the tab AND killed. Dropping alone is what leaves a live
-      // `prcli-*` session with no config row, no tab-bar entry and nothing in
+      // `pterm-*` session with no config row, no tab-bar entry and nothing in
       // the app able to reach it — pruned again on every future restore, for
       // as long as it runs. Its session is all there is to kill: it has no
       // window of its own (that is what made it shadow one), and the window
@@ -412,7 +412,7 @@ export async function restoreWorkspace(
         // attention, hides exactly that. `record.tmuxSession` rather than the
         // bare id: it carries the project slug too, so it reads as something
         // the user placed rather than an opaque hex string.
-        console.warn(`PRCLI: could not attach ${record.tmuxSession} on restore`, error)
+        console.warn(`pTerm: could not attach ${record.tmuxSession} on restore`, error)
         continue
       }
     }

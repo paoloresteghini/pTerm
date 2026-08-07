@@ -50,7 +50,7 @@ export function FileTree({
 
   const load = useCallback(
     (id: string, relPath: string) => {
-      window.prcli
+      window.pterm
         .fsList(id, relPath)
         .then((entries) => {
           // The project switched while this was in flight. Five clients

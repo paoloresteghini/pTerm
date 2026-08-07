@@ -5,8 +5,8 @@ import { join } from 'node:path'
 import { listSkills } from '../../src/main/skills/scan'
 
 const saved = {
-  home: process.env.PRCLI_CLAUDE_HOME,
-  settings: process.env.PRCLI_CLAUDE_SETTINGS,
+  home: process.env.PTERM_CLAUDE_HOME,
+  settings: process.env.PTERM_CLAUDE_SETTINGS,
 }
 
 let root = ''
@@ -20,7 +20,7 @@ async function write(path: string, body: string): Promise<void> {
 }
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'prcli-skills-'))
+  root = await mkdtemp(join(tmpdir(), 'pterm-skills-'))
   home = join(root, 'claude')
   project = join(root, 'project')
 
@@ -60,15 +60,15 @@ beforeEach(async () => {
   await write(join(install, 'commands', 'ship-it.md'), '---\ndescription: Ship.\n---\n')
   await write(join(install, 'commands', 'nested', 'deep.md'), '---\ndescription: Deep.\n---\n')
 
-  process.env.PRCLI_CLAUDE_HOME = home
-  process.env.PRCLI_CLAUDE_SETTINGS = join(home, 'settings.json')
+  process.env.PTERM_CLAUDE_HOME = home
+  process.env.PTERM_CLAUDE_SETTINGS = join(home, 'settings.json')
 })
 
 afterEach(async () => {
-  if (saved.home === undefined) delete process.env.PRCLI_CLAUDE_HOME
-  else process.env.PRCLI_CLAUDE_HOME = saved.home
-  if (saved.settings === undefined) delete process.env.PRCLI_CLAUDE_SETTINGS
-  else process.env.PRCLI_CLAUDE_SETTINGS = saved.settings
+  if (saved.home === undefined) delete process.env.PTERM_CLAUDE_HOME
+  else process.env.PTERM_CLAUDE_HOME = saved.home
+  if (saved.settings === undefined) delete process.env.PTERM_CLAUDE_SETTINGS
+  else process.env.PTERM_CLAUDE_SETTINGS = saved.settings
   await rm(root, { recursive: true, force: true })
 })
 
@@ -187,7 +187,7 @@ describe('the skills handler', () => {
       readFile('src/main/ipc/register.ts', 'utf8'),
       readFile('src/preload/index.ts', 'utf8'),
     ])
-    expect(shared).toContain("skills: 'prcli:skills'")
+    expect(shared).toContain("skills: 'pterm:skills'")
     expect(shared).toMatch(/skills\(projectCwd: string\): Promise<SkillEntry\[\]>/)
     expect(main).toContain('ipcMain.handle(CHANNELS.skills')
     expect(bridge).toContain('ipcRenderer.invoke(CHANNELS.skills, projectCwd)')

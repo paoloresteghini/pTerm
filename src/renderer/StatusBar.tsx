@@ -44,7 +44,7 @@ export function StatusBar({ projectId }: { projectId?: string }) {
       setStatus(null)
       return
     }
-    window.prcli
+    window.pterm
       .gitStatus(asked)
       .then((next) => {
         if (shown.current === asked) setStatus(next)
@@ -71,7 +71,7 @@ export function StatusBar({ projectId }: { projectId?: string }) {
     if (!asked || syncing) return
     setSyncing(true)
     setError(null)
-    window.prcli
+    window.pterm
       .gitSync(asked)
       .then((result) => {
         if (shown.current !== asked) return

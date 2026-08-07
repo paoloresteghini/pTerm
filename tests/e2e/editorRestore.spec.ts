@@ -43,7 +43,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchApp, killServer } from './harness'
 
-const SOCKET = 'prcli-e2e-editor-restore'
+const SOCKET = 'pterm-e2e-editor-restore'
 
 let userDataDir: string
 let configDir: string
@@ -92,20 +92,20 @@ async function seedDeadTerminal(): Promise<void> {
     cwd: projectCwd,
     type: 'shell',
     // Never created on this socket, so no restore can find it live.
-    tmuxSession: 'prcli-demo-sentinel',
+    tmuxSession: 'pterm-demo-sentinel',
   })
   await writeFile(join(configDir, 'config.json'), JSON.stringify(config), 'utf8')
 }
 
 test.beforeEach(async () => {
   await killServer(SOCKET)
-  userDataDir = await mkdtemp(join(tmpdir(), 'prcli-ed-user-'))
-  configDir = await mkdtemp(join(tmpdir(), 'prcli-ed-config-'))
-  projectsRoot = await mkdtemp(join(tmpdir(), 'prcli-ed-root-'))
-  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'prcli-ed-settings-'))
+  userDataDir = await mkdtemp(join(tmpdir(), 'pterm-ed-user-'))
+  configDir = await mkdtemp(join(tmpdir(), 'pterm-ed-config-'))
+  projectsRoot = await mkdtemp(join(tmpdir(), 'pterm-ed-root-'))
+  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'pterm-ed-settings-'))
   claudeSettingsPath = join(claudeSettingsDir, 'settings.json')
   await writeFile(claudeSettingsPath, JSON.stringify({ enabledPlugins: {} }))
-  claudeHome = await mkdtemp(join(tmpdir(), 'prcli-ed-claude-'))
+  claudeHome = await mkdtemp(join(tmpdir(), 'pterm-ed-claude-'))
 
   projectCwd = join(projectsRoot, 'demo')
   await mkdir(join(projectCwd, 'src'), { recursive: true })
@@ -126,7 +126,7 @@ test.beforeEach(async () => {
         // See `seedDeadTerminal`. Present from the first launch so the disk
         // assertions below can tell "restore wrote and kept the pane" from
         // "restore never wrote and these are the bytes this file seeded".
-        { id: 'sentinel', projectSlug: 'demo', cwd: projectCwd, type: 'shell', tmuxSession: 'prcli-demo-sentinel' },
+        { id: 'sentinel', projectSlug: 'demo', cwd: projectCwd, type: 'shell', tmuxSession: 'pterm-demo-sentinel' },
       ],
       // The real `TabRow`: `kids`, `ratio` and the axis under `layout`, with
       // `activePaneId` beside them. A flat row is not a lenient spelling of

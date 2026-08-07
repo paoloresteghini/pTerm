@@ -3,7 +3,7 @@
  * Install then Uninstall leaves the rc file exactly as it started.
  *
  * A fresh spec file with its own page and its own socket, following
- * `settingsUpdate.spec.ts`'s lead. `PRCLI_ZSHRC` is pointed at a temp file
+ * `settingsUpdate.spec.ts`'s lead. `PTERM_ZSHRC` is pointed at a temp file
  * for the whole run: without it this row would read and write the
  * developer's real `~/.zshrc`, which is the one thing `harness.ts` exists to
  * rule out.
@@ -16,7 +16,7 @@ import { launchApp, killServer } from './harness'
 import { block } from '../../src/main/shell/install'
 import { type MenuCommand } from '../../src/shared/ipc'
 
-const SOCKET = 'prcli-e2e-shellhistorysettings'
+const SOCKET = 'pterm-e2e-shellhistorysettings'
 
 const SETTINGS_COMMAND: MenuCommand = 'settings'
 
@@ -38,12 +38,12 @@ let zshrcDir: string
 let zshrcPath: string
 
 test.beforeAll(async () => {
-  userDataDir = await mkdtemp(join(tmpdir(), 'prcli-shellhistorysettings-user-'))
-  configDir = await mkdtemp(join(tmpdir(), 'prcli-shellhistorysettings-config-'))
-  projectsRoot = await mkdtemp(join(tmpdir(), 'prcli-shellhistorysettings-root-'))
-  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'prcli-shellhistorysettings-settings-'))
-  claudeHome = await mkdtemp(join(tmpdir(), 'prcli-shellhistorysettings-claude-'))
-  zshrcDir = await mkdtemp(join(tmpdir(), 'prcli-shellhistorysettings-zshrc-'))
+  userDataDir = await mkdtemp(join(tmpdir(), 'pterm-shellhistorysettings-user-'))
+  configDir = await mkdtemp(join(tmpdir(), 'pterm-shellhistorysettings-config-'))
+  projectsRoot = await mkdtemp(join(tmpdir(), 'pterm-shellhistorysettings-root-'))
+  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'pterm-shellhistorysettings-settings-'))
+  claudeHome = await mkdtemp(join(tmpdir(), 'pterm-shellhistorysettings-claude-'))
+  zshrcDir = await mkdtemp(join(tmpdir(), 'pterm-shellhistorysettings-zshrc-'))
   claudeSettingsPath = join(claudeSettingsDir, 'settings.json')
   zshrcPath = join(zshrcDir, '.zshrc')
   await writeFile(claudeSettingsPath, JSON.stringify({ enabledPlugins: {} }))
@@ -87,7 +87,7 @@ test('names its rc and script, shows the real pending block, and round-trips the
   await expect(page.getByTestId('titlebar')).toBeVisible()
 
   await app.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows()[0].webContents.send('prcli:menuCommand', 'settings')
+    BrowserWindow.getAllWindows()[0].webContents.send('pterm:menuCommand', 'settings')
   })
   expect(SETTINGS_COMMAND).toBe('settings')
 
@@ -99,8 +99,8 @@ test('names its rc and script, shows the real pending block, and round-trips the
   // nothing else in the suite could have produced that exact string.
   const pathsText = await page.getByTestId('shell-history-paths').innerText()
   expect(pathsText).toContain(zshrcPath)
-  expect(pathsText).toContain('prcli-history.zsh')
-  const scriptPath = pathsText.match(/sources (\S+prcli-history\.zsh)\.$/)?.[1]
+  expect(pathsText).toContain('pterm-history.zsh')
+  const scriptPath = pathsText.match(/sources (\S+pterm-history\.zsh)\.$/)?.[1]
   if (!scriptPath) throw new Error(`could not extract scriptPath from "${pathsText}"`)
 
   /*

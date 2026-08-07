@@ -20,7 +20,7 @@ import {
   type TabShape,
 } from '../../shared/ipc'
 import type { ExitReason, SessionManager, PaneRecord, TerminalPaneRecord } from '../sessions/manager'
-import { ConfigStore, type PrcliConfig } from '../state/store'
+import { ConfigStore, type PTermConfig } from '../state/store'
 import { StatusRegistry } from '../status/registry'
 import {
   describeProjects,
@@ -637,7 +637,7 @@ export function registerIpc(
     // unrelated tab's next live transition happens to correct it.
     //
     // Per pane again: a spooled hook message names the pane's own
-    // `PRCLI_TAB_ID`, never a tab row's group id.
+    // `PTERM_TAB_ID`, never a tab row's group id.
     const live = new Set(result.panes.map((pane) => pane.id))
     const spooled = await drainSpool(hookPaths().spool, Date.now())
     for (const message of spooled) {
@@ -685,7 +685,7 @@ export function registerIpc(
    * against the rows it is given and has always been given pane rows — see the
    * ambiguity recorded on `ProjectRecord.activeTabId`.
    */
-  const described = async (config: PrcliConfig): Promise<ProjectDescriptor[]> =>
+  const described = async (config: PTermConfig): Promise<ProjectDescriptor[]> =>
     withUnsorted(await describeProjects(config.projects, config.panes), config.panes)
 
   ipcMain.on(CHANNELS.setActive, (_event, id: string | null) => {
@@ -771,7 +771,7 @@ export function registerIpc(
       if (!saved) return
       const routed = layoutWrite(saved, shares, tabId, tombstones)
       if (!routed.ok) {
-        console.warn(`PRCLI: ignored a layout for ${tabId} — ${routed.why}`)
+        console.warn(`pTerm: ignored a layout for ${tabId} — ${routed.why}`)
         return
       }
       // The renderer wins on a tombstone's share, and only here: it is what the
@@ -888,7 +888,7 @@ export function registerIpc(
         ...config.panes.map((row) => byId.get(row.id) ?? row),
         ...merged.filter((pane) => !listed.has(pane.id)),
       ]
-      const updated: PrcliConfig = { ...config, panes }
+      const updated: PTermConfig = { ...config, panes }
       await store.write(updated)
       return { projects: await described(updated), panes: merged }
     }),
@@ -1338,7 +1338,7 @@ export function registerIpc(
       }),
   )
 
-  // installHooks/uninstallHooks write ~/.claude/settings.json, not PRCLI's own
+  // installHooks/uninstallHooks write ~/.claude/settings.json, not pTerm's own
   // config file, so these deliberately do not go through `serialise` above.
   // That queue has no reentrancy protection, and nothing reached from inside
   // it may call back into it — going through it here would risk a silent
@@ -1379,7 +1379,7 @@ export function registerIpc(
     await shell.openExternal(url)
   })
 
-  // Deliberately not inside `serialise`: this reads `~/.claude`, never PRCLI's
+  // Deliberately not inside `serialise`: this reads `~/.claude`, never pTerm's
   // own config file, so it has nothing to serialise against — the same
   // reasoning the hooks handlers just above are registered under. Going
   // through that queue would add a deadlock risk for a panel the user is
@@ -1414,7 +1414,7 @@ export function registerIpc(
   // general directory-listing primitive. Here the renderer chooses a project
   // and a path within it, and main decides what that resolves to.
   // Outside `serialise` like the filesystem channels below it: this reads a
-  // repository and never touches PRCLI's config. Polled by the status bar, so
+  // repository and never touches pTerm's config. Polled by the status bar, so
   // going through that queue would put a tick of it in front of every write the
   // user's own clicks are waiting on.
   ipcMain.handle(CHANNELS.gitStatus, async (_event, projectId: string) => {

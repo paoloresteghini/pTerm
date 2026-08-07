@@ -26,7 +26,7 @@ export function SkillsPanel({
 }) {
   const [skills, setSkills] = useState<SkillEntry[] | null>(null)
   const [query, setQuery] = useState('')
-  const { width, set, commit } = useColumnWidth('prcli:skillsWidth')
+  const { width, set, commit } = useColumnWidth('pterm:skillsWidth')
   const cwd = project?.cwd
 
   // Keyed on `cwd`, so switching project re-reads. Also re-reads when the
@@ -40,7 +40,7 @@ export function SkillsPanel({
     }
     let cancelled = false
     setSkills(null)
-    window.prcli
+    window.pterm
       .skills(cwd)
       .then((found) => {
         if (!cancelled) setSkills(found)

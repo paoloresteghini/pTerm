@@ -5,18 +5,18 @@ import { join } from 'node:path'
 import { scanCandidates, projectsRoot } from '../../src/main/projects/discovery'
 
 let root: string
-const original = process.env.PRCLI_PROJECTS_ROOT
+const original = process.env.PTERM_PROJECTS_ROOT
 
 beforeEach(async () => {
   // Never scan the developer's real ~/Code, for the same reason tests never
-  // touch the real ~/.prcli.
-  root = await mkdtemp(join(tmpdir(), 'prcli-scan-'))
-  process.env.PRCLI_PROJECTS_ROOT = root
+  // touch the real ~/.pterm.
+  root = await mkdtemp(join(tmpdir(), 'pterm-scan-'))
+  process.env.PTERM_PROJECTS_ROOT = root
 })
 
 afterEach(async () => {
-  if (original === undefined) delete process.env.PRCLI_PROJECTS_ROOT
-  else process.env.PRCLI_PROJECTS_ROOT = original
+  if (original === undefined) delete process.env.PTERM_PROJECTS_ROOT
+  else process.env.PTERM_PROJECTS_ROOT = original
   await rm(root, { recursive: true, force: true })
 })
 
@@ -29,12 +29,12 @@ async function repo(name: string, marker: string): Promise<string> {
 }
 
 describe('projectsRoot', () => {
-  it('honours PRCLI_PROJECTS_ROOT', () => {
+  it('honours PTERM_PROJECTS_ROOT', () => {
     expect(projectsRoot()).toBe(root)
   })
 
   it('falls back to ~/Code', () => {
-    delete process.env.PRCLI_PROJECTS_ROOT
+    delete process.env.PTERM_PROJECTS_ROOT
     expect(projectsRoot()).toMatch(/\/Code$/)
   })
 })
@@ -92,7 +92,7 @@ describe('scanCandidates', () => {
   })
 
   it('returns nothing when the root does not exist', async () => {
-    process.env.PRCLI_PROJECTS_ROOT = join(root, 'gone')
+    process.env.PTERM_PROJECTS_ROOT = join(root, 'gone')
     await expect(scanCandidates([])).resolves.toEqual([])
   })
 

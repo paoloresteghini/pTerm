@@ -30,7 +30,7 @@ const { installHooks, readHooksState, uninstallHooks } = await import('../../src
 
 let dir: string
 let settings: string
-const saved = { config: process.env.PRCLI_CONFIG_DIR, claude: process.env.PRCLI_CLAUDE_SETTINGS }
+const saved = { config: process.env.PTERM_CONFIG_DIR, claude: process.env.PTERM_CLAUDE_SETTINGS }
 
 const ORIGINAL = {
   model: 'opusplan',
@@ -40,16 +40,16 @@ const ORIGINAL = {
 }
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'prcli-inst-'))
+  dir = await mkdtemp(join(tmpdir(), 'pterm-inst-'))
   settings = join(dir, 'settings.json')
   await writeFile(settings, `${JSON.stringify(ORIGINAL, null, 2)}\n`, 'utf8')
-  process.env.PRCLI_CONFIG_DIR = dir
-  process.env.PRCLI_CLAUDE_SETTINGS = settings
+  process.env.PTERM_CONFIG_DIR = dir
+  process.env.PTERM_CLAUDE_SETTINGS = settings
 })
 
 afterEach(async () => {
-  process.env.PRCLI_CONFIG_DIR = saved.config
-  process.env.PRCLI_CLAUDE_SETTINGS = saved.claude
+  process.env.PTERM_CONFIG_DIR = saved.config
+  process.env.PTERM_CLAUDE_SETTINGS = saved.claude
   copyFileControl.next = null
   await rm(dir, { recursive: true, force: true })
 })
@@ -59,7 +59,7 @@ describe('installHooks', () => {
     const state = await readHooksState()
 
     expect(state.installed).toBe(false)
-    expect(state.pending).toContain('prcli-hook')
+    expect(state.pending).toContain('pterm-hook')
     // The diff the screen shows comes from the same merge that writes.
     expect(JSON.parse(state.pending)).toBeTypeOf('object')
   })
@@ -224,7 +224,7 @@ describe('a backup that fails for a reason other than "nothing to back up"', () 
  * untouched — see the "malformed hook shapes" describe block in
  * tests/unit/install.test.ts).
  */
-describe('a settings file whose "hooks" has a shape PRCLI does not recognise', () => {
+describe('a settings file whose "hooks" has a shape pTerm does not recognise', () => {
   it('refuses to install, and writes nothing', async () => {
     await writeFile(
       settings,

@@ -1,0 +1,17 @@
+{
+  "presets": [
+    { "label": "start", "command": "npm start" },
+    { "label": "test", "command": "npm test" },
+    { "label": "e2e", "command": "npm run e2e" },
+    { "label": "typecheck", "command": "npm run typecheck" },
+    { "label": "check-deps", "command": "npm run check-deps" },
+    { "label": "release patch", "command": "./scripts/release.sh patch" },
+    { "label": "release minor", "command": "./scripts/release.sh minor" },
+    { "label": "release major", "command": "./scripts/release.sh major" },
+    { "label": "release patch + e2e", "command": "RELEASE_E2E=1 ./scripts/release.sh patch" },
+    { "label": "package (.app)", "command": "npm run package" },
+    { "label": "make (zip)", "command": "npm run make" },
+    { "label": "update feed", "command": "gh release list && curl -s https://api.github.com/repos/paoloresteghini/PRCLI/releases/latest | grep tag_name" },
+    { "label": "clear update skip", "command": "rm ~/.pterm/update.json" }
+  ]
+}

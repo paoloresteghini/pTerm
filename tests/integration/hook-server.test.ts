@@ -17,7 +17,7 @@ let dir: string
 let server: HookServer | null = null
 
 async function start(): Promise<{ server: HookServer; socket: string; seen: HookLine[] }> {
-  dir = await mkdtemp(join(tmpdir(), 'prcli-srv-'))
+  dir = await mkdtemp(join(tmpdir(), 'pterm-srv-'))
   const socket = join(dir, 'hook.sock')
   const seen: HookLine[] = []
   server = new HookServer(socket)
@@ -209,7 +209,7 @@ describe('HookServer', () => {
   })
 
   it('replaces a stale socket file left by a crash', async () => {
-    dir = await mkdtemp(join(tmpdir(), 'prcli-srv-'))
+    dir = await mkdtemp(join(tmpdir(), 'pterm-srv-'))
     const socket = join(dir, 'hook.sock')
     // Not a real socket, just a file in the way — which is what a crashed
     // process leaves behind and what makes listen() fail EADDRINUSE.
@@ -222,13 +222,13 @@ describe('HookServer', () => {
   // M2: the old comment justified an unconditional unlink-before-bind with
   // "safe only because requestSingleInstanceLock guarantees there is no
   // second live instance" — a guarantee the ledger's own notes record as
-  // false on this exact machine, where a packaged /Applications/PRCLI.app
+  // false on this exact machine, where a packaged /Applications/pTerm.app
   // and a dev `electron-forge start` are different app identities and each
   // acquires its own lock. Under that real condition, unlinking
   // unconditionally would steal the socket out from under the first
   // instance, which would then go deaf with no error anywhere.
   it('does not steal a socket a live process is actually using', async () => {
-    dir = await mkdtemp(join(tmpdir(), 'prcli-srv-'))
+    dir = await mkdtemp(join(tmpdir(), 'pterm-srv-'))
     const socket = join(dir, 'hook.sock')
 
     // A real listener on the path — stands in for a second live instance —
@@ -268,7 +268,7 @@ describe('HookServer', () => {
   })
 
   it('says plainly when the path is too long for a unix socket', async () => {
-    dir = await mkdtemp(join(tmpdir(), 'prcli-srv-'))
+    dir = await mkdtemp(join(tmpdir(), 'pterm-srv-'))
     const deep = join(dir, 'a'.repeat(60), 'b'.repeat(60))
     await mkdir(deep, { recursive: true })
     const socket = join(deep, 'hook.sock')
@@ -283,7 +283,7 @@ describe('HookServer', () => {
     // Verified directly against this machine rather than taken from the
     // textbook `sun_path[104]` struct field: listen() on a 104-byte path
     // succeeds here, so 104 — not 103 — is the real usable ceiling.
-    dir = await mkdtemp(join(tmpdir(), 'prcli-srv-'))
+    dir = await mkdtemp(join(tmpdir(), 'pterm-srv-'))
     const socket = socketOfLength(dir, 104)
     expect(Buffer.byteLength(socket, 'utf8')).toBe(104)
 
@@ -292,7 +292,7 @@ describe('HookServer', () => {
   })
 
   it('rejects a path one byte past the measured macOS ceiling (105 bytes)', async () => {
-    dir = await mkdtemp(join(tmpdir(), 'prcli-srv-'))
+    dir = await mkdtemp(join(tmpdir(), 'pterm-srv-'))
     const socket = socketOfLength(dir, 105)
     expect(Buffer.byteLength(socket, 'utf8')).toBe(105)
 
@@ -332,12 +332,12 @@ describe('HookServer', () => {
 
   it('receives what the real hook script sends', async () => {
     const { socket, seen } = await start()
-    const script = join(dir, 'prcli-hook')
+    const script = join(dir, 'pterm-hook')
     await writeFile(script, renderScript({ socket, spool: join(dir, 'hook.spool') }), 'utf8')
     await chmod(script, 0o755)
 
     await exec(script, ['UserPromptSubmit'], {
-      env: { PATH: process.env.PATH ?? '', PRCLI_TAB_ID: ID },
+      env: { PATH: process.env.PATH ?? '', PTERM_TAB_ID: ID },
     })
 
     await expect.poll(() => seen.length, { timeout: 4_000 }).toBe(1)

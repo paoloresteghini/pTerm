@@ -4,62 +4,62 @@ import type { PaneColor } from './paneColors'
 export type { TabState }
 
 export const CHANNELS = {
-  open: 'prcli:open',
-  list: 'prcli:list',
-  input: 'prcli:input',
-  resize: 'prcli:resize',
-  detach: 'prcli:detach',
-  restore: 'prcli:restore',
-  setActive: 'prcli:setActive',
-  addProject: 'prcli:addProject',
-  updateProject: 'prcli:updateProject',
-  removeProject: 'prcli:removeProject',
-  reorderProjects: 'prcli:reorderProjects',
-  setActiveProject: 'prcli:setActiveProject',
-  scanCandidates: 'prcli:scanCandidates',
-  pickFolder: 'prcli:pickFolder',
-  moveTabToProject: 'prcli:moveTabToProject',
-  renameTab: 'prcli:renameTab',
-  setPaneColor: 'prcli:setPaneColor',
-  data: 'prcli:data',
-  exit: 'prcli:exit',
-  status: 'prcli:status',
-  statusChanged: 'prcli:statusChanged',
-  restartTab: 'prcli:restartTab',
-  dismissTab: 'prcli:dismissTab',
-  acknowledgeTab: 'prcli:acknowledgeTab',
-  splitPane: 'prcli:splitPane',
-  closePane: 'prcli:closePane',
-  focusTab: 'prcli:focusTab',
-  notifications: 'prcli:notifications',
-  updateNotifications: 'prcli:updateNotifications',
-  hooksState: 'prcli:hooksState',
-  installHooks: 'prcli:installHooks',
-  uninstallHooks: 'prcli:uninstallHooks',
-  historyList: 'prcli:historyList',
-  shellHistoryState: 'prcli:shellHistoryState',
-  installShellHistory: 'prcli:installShellHistory',
-  uninstallShellHistory: 'prcli:uninstallShellHistory',
-  menuCommand: 'prcli:menuCommand',
-  setLayout: 'prcli:setLayout',
-  skills: 'prcli:skills',
-  notesRead: 'prcli:notesRead',
-  notesWrite: 'prcli:notesWrite',
-  promptsList: 'prcli:promptsList',
-  promptsAdd: 'prcli:promptsAdd',
-  promptsRemove: 'prcli:promptsRemove',
-  fsList: 'prcli:fsList',
-  fsRead: 'prcli:fsRead',
-  fsWrite: 'prcli:fsWrite',
-  openEditor: 'prcli:openEditor',
-  openExternal: 'prcli:openExternal',
-  updateAvailable: 'prcli:updateAvailable',
-  checkForUpdate: 'prcli:checkForUpdate',
-  skipUpdate: 'prcli:skipUpdate',
-  appVersion: 'prcli:appVersion',
-  skippedVersion: 'prcli:skippedVersion',
-  gitStatus: 'prcli:gitStatus',
-  gitSync: 'prcli:gitSync',
+  open: 'pterm:open',
+  list: 'pterm:list',
+  input: 'pterm:input',
+  resize: 'pterm:resize',
+  detach: 'pterm:detach',
+  restore: 'pterm:restore',
+  setActive: 'pterm:setActive',
+  addProject: 'pterm:addProject',
+  updateProject: 'pterm:updateProject',
+  removeProject: 'pterm:removeProject',
+  reorderProjects: 'pterm:reorderProjects',
+  setActiveProject: 'pterm:setActiveProject',
+  scanCandidates: 'pterm:scanCandidates',
+  pickFolder: 'pterm:pickFolder',
+  moveTabToProject: 'pterm:moveTabToProject',
+  renameTab: 'pterm:renameTab',
+  setPaneColor: 'pterm:setPaneColor',
+  data: 'pterm:data',
+  exit: 'pterm:exit',
+  status: 'pterm:status',
+  statusChanged: 'pterm:statusChanged',
+  restartTab: 'pterm:restartTab',
+  dismissTab: 'pterm:dismissTab',
+  acknowledgeTab: 'pterm:acknowledgeTab',
+  splitPane: 'pterm:splitPane',
+  closePane: 'pterm:closePane',
+  focusTab: 'pterm:focusTab',
+  notifications: 'pterm:notifications',
+  updateNotifications: 'pterm:updateNotifications',
+  hooksState: 'pterm:hooksState',
+  installHooks: 'pterm:installHooks',
+  uninstallHooks: 'pterm:uninstallHooks',
+  historyList: 'pterm:historyList',
+  shellHistoryState: 'pterm:shellHistoryState',
+  installShellHistory: 'pterm:installShellHistory',
+  uninstallShellHistory: 'pterm:uninstallShellHistory',
+  menuCommand: 'pterm:menuCommand',
+  setLayout: 'pterm:setLayout',
+  skills: 'pterm:skills',
+  notesRead: 'pterm:notesRead',
+  notesWrite: 'pterm:notesWrite',
+  promptsList: 'pterm:promptsList',
+  promptsAdd: 'pterm:promptsAdd',
+  promptsRemove: 'pterm:promptsRemove',
+  fsList: 'pterm:fsList',
+  fsRead: 'pterm:fsRead',
+  fsWrite: 'pterm:fsWrite',
+  openEditor: 'pterm:openEditor',
+  openExternal: 'pterm:openExternal',
+  updateAvailable: 'pterm:updateAvailable',
+  checkForUpdate: 'pterm:checkForUpdate',
+  skipUpdate: 'pterm:skipUpdate',
+  appVersion: 'pterm:appVersion',
+  skippedVersion: 'pterm:skippedVersion',
+  gitStatus: 'pterm:gitStatus',
+  gitSync: 'pterm:gitSync',
 } as const
 
 /**
@@ -94,7 +94,7 @@ export type MenuCommand =
  *
  * A declaration of intent, not a gate on status: it decides the launch command
  * and whether an expecting-hooks dot is drawn before any event has arrived.
- * Every tab carries PRCLI_TAB_ID regardless, so a `claude` typed by hand into
+ * Every tab carries PTERM_TAB_ID regardless, so a `claude` typed by hand into
  * a shell tab gets full status the moment its first hook lands. `editor` is
  * the exception: it has no launch command at all.
  */
@@ -167,7 +167,7 @@ export interface HistoryEntry {
   /** Epoch seconds, from the shell's own clock at the moment the command ran. */
   ts: number
   cwd: string
-  /** The pane that ran the command, identified by its PRCLI_TAB_ID. */
+  /** The pane that ran the command, identified by its PTERM_TAB_ID. */
   tab: string
   cmd: string
 }
@@ -603,7 +603,7 @@ export interface GitStatus {
 /** Whether a sync got all the way through, and git's own words if it did not. */
 export type GitSyncResult = { ok: true } | { ok: false; error: string }
 
-export interface PrcliApi {
+export interface PTermApi {
   open(request: OpenRequest): Promise<TabDescriptor>
   list(): Promise<TabDescriptor[]>
   /** Reattach tabs persisted by the previous run; returns what came back. */
@@ -700,11 +700,11 @@ export interface PrcliApi {
   notifications(): Promise<NotificationConfig>
   /** Merges `patch` into the stored notification config and returns the result. */
   updateNotifications(patch: Partial<NotificationConfig>): Promise<NotificationConfig>
-  /** Whether PRCLI's hooks are installed, and what installing would add. */
+  /** Whether pTerm's hooks are installed, and what installing would add. */
   hooksState(): Promise<HooksState>
-  /** Writes a timestamped backup, then merges PRCLI's hooks into settings.json. */
+  /** Writes a timestamped backup, then merges pTerm's hooks into settings.json. */
   installHooks(): Promise<HooksState>
-  /** Removes only PRCLI's own hook groups, restoring the file it found. */
+  /** Removes only pTerm's own hook groups, restoring the file it found. */
   uninstallHooks(): Promise<HooksState>
   /**
    * Past commands a `shell` pane ran, newest first, scoped to `projectCwd`
@@ -714,11 +714,11 @@ export interface PrcliApi {
    * appended to by a live shell the whole time an overlay might be open.
    */
   historyList(projectCwd: string, scope: HistoryScope): Promise<HistoryEntry[]>
-  /** Whether PRCLI's shell-history hook is installed, and what installing would add. */
+  /** Whether pTerm's shell-history hook is installed, and what installing would add. */
   shellHistoryState(): Promise<ShellHistoryState>
   /** Writes the snippet and merges it into `~/.zshrc`. */
   installShellHistory(): Promise<ShellHistoryState>
-  /** Removes only PRCLI's own marker block, restoring the file it found. */
+  /** Removes only pTerm's own marker block, restoring the file it found. */
   uninstallShellHistory(): Promise<ShellHistoryState>
   /**
    * Every skill and command available to the project at `projectCwd`.
@@ -842,7 +842,7 @@ export interface PrcliApi {
    * The version `skipUpdate` was last called with, or null when none is
    * skipped.
    *
-   * Read fresh rather than cached, like `hooksState`: another PRCLI window
+   * Read fresh rather than cached, like `hooksState`: another pTerm window
    * can skip a version while this one's Settings pane is open. What lets
    * Settings say a result was already skipped, since `checkForUpdate` itself
    * always ignores the skip and reports the release either way.

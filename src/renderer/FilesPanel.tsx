@@ -27,7 +27,7 @@ export function FilesPanel({
 }) {
   // Above the collapsed return, because a hook cannot be conditional. The read
   // is cheap and the value is what the column comes back at.
-  const { width, set, commit } = useColumnWidth('prcli:filesWidth')
+  const { width, set, commit } = useColumnWidth('pterm:filesWidth')
 
   if (collapsed) {
     return <PanelStrip testid="files-toggle" label="Files" side="left" onClick={onToggle} />

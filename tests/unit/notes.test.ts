@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-// afterEach both removes the temp dir and restores PRCLI_CONFIG_DIR, the same
+// afterEach both removes the temp dir and restores PTERM_CONFIG_DIR, the same
 // pairing store.test.ts uses.
 import { mkdtemp, rm, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -10,14 +10,14 @@ let dir: string
 let previousConfigDir: string | undefined
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'prcli-notes-'))
-  previousConfigDir = process.env.PRCLI_CONFIG_DIR
-  process.env.PRCLI_CONFIG_DIR = dir
+  dir = await mkdtemp(join(tmpdir(), 'pterm-notes-'))
+  previousConfigDir = process.env.PTERM_CONFIG_DIR
+  process.env.PTERM_CONFIG_DIR = dir
 })
 
 afterEach(async () => {
-  if (previousConfigDir === undefined) delete process.env.PRCLI_CONFIG_DIR
-  else process.env.PRCLI_CONFIG_DIR = previousConfigDir
+  if (previousConfigDir === undefined) delete process.env.PTERM_CONFIG_DIR
+  else process.env.PTERM_CONFIG_DIR = previousConfigDir
   await rm(dir, { recursive: true, force: true })
 })
 

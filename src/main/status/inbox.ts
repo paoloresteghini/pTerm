@@ -73,7 +73,7 @@ export function createHookInbox(deps: HookInboxDeps): HookInbox {
       // to report to — this is the far end of a socket.
       queue = queue.then(() =>
         admit(message).catch((error: unknown) => {
-          console.warn('PRCLI: dropped a hook event', error)
+          console.warn('pTerm: dropped a hook event', error)
         }),
       )
       return queue

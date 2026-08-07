@@ -2,7 +2,7 @@
  * Tabs, and the tmux sessions behind them, across every way a window can come
  * and go.
  *
- * Fifteen tests on the `prcli-e2e-tabs` socket: a second instance exits
+ * Fifteen tests on the `pterm-e2e-tabs` socket: a second instance exits
  * rather than opening its own session; several tabs each keep their own
  * scrollback; a relaunch restores every tab and the one that was active; a
  * restored background tab keeps its tmux window size instead of settling to
@@ -113,10 +113,10 @@ import { promisify } from 'node:util'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchApp, killServer, sessionNames } from './harness'
+import { launchApp, killServer, sessionNames, activeTerminalText } from './harness'
 
 const run = promisify(execFile)
-const SOCKET = 'prcli-e2e-tabs'
+const SOCKET = 'pterm-e2e-tabs'
 
 /**
  * The active tab in the tab bar.
@@ -139,7 +139,7 @@ let claudeHome: string
 // Every launch in this file goes through the shared harness, so all five
 // overrides are set by construction rather than by four copies of one env
 // block that could drift apart — which is how three of the four specs came to
-// be missing PRCLI_CLAUDE_SETTINGS.
+// be missing PTERM_CLAUDE_SETTINGS.
 const launch = (): Promise<ElectronApplication> =>
   launchApp({ socket: SOCKET, configDir, projectsRoot, claudeSettings: claudeSettingsPath, claudeHome, userDataDir })
 
@@ -152,7 +152,7 @@ const launch = (): Promise<ElectronApplication> =>
  * the config file is seeded directly. Returns the project's directory.
  */
 async function seedProject(slug: string, name: string): Promise<string> {
-  const cwd = await mkdtemp(join(tmpdir(), `prcli-proj-${slug}-`))
+  const cwd = await mkdtemp(join(tmpdir(), `pterm-proj-${slug}-`))
   await writeFile(
     join(configDir, 'config.json'),
     JSON.stringify({
@@ -203,13 +203,13 @@ async function attachedClients(): Promise<number> {
 
 test.beforeEach(async () => {
   await killServer(SOCKET)
-  userDataDir = await mkdtemp(join(tmpdir(), 'prcli-tabs-user-'))
-  configDir = await mkdtemp(join(tmpdir(), 'prcli-tabs-config-'))
-  projectsRoot = await mkdtemp(join(tmpdir(), 'prcli-tabs-root-'))
+  userDataDir = await mkdtemp(join(tmpdir(), 'pterm-tabs-user-'))
+  configDir = await mkdtemp(join(tmpdir(), 'pterm-tabs-config-'))
+  projectsRoot = await mkdtemp(join(tmpdir(), 'pterm-tabs-root-'))
   projectCwd = await seedProject('scratch', 'Scratch')
-  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'prcli-tabs-settings-'))
+  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'pterm-tabs-settings-'))
   claudeSettingsPath = join(claudeSettingsDir, 'settings.json')
-  claudeHome = await mkdtemp(join(tmpdir(), 'prcli-tabs-claude-'))
+  claudeHome = await mkdtemp(join(tmpdir(), 'pterm-tabs-claude-'))
 })
 
 test.afterEach(async () => {
@@ -259,7 +259,9 @@ test('opens several tabs and keeps each one\'s scrollback', async () => {
   await window.getByTestId('terminal-active').click()
   await window.keyboard.type('echo first-tab')
   await window.keyboard.press('Enter')
-  await expect(window.locator('.xterm-rows')).toContainText('first-tab', { timeout: 20_000 })
+  await expect
+    .poll(async () => activeTerminalText(window), { timeout: 20_000 })
+    .toContain('first-tab')
 
   await window.getByTestId('new-tab').click()
   await expect.poll(async () => (await sessionNames(SOCKET)).length, { timeout: 20_000 }).toBe(2)
@@ -267,18 +269,18 @@ test('opens several tabs and keeps each one\'s scrollback', async () => {
   await window.getByTestId('terminal-active').click()
   await window.keyboard.type('echo second-tab')
   await window.keyboard.press('Enter')
-  await expect(window.getByTestId('terminal-active')).toContainText('second-tab', {
-    timeout: 20_000,
-  })
+  await expect
+    .poll(async () => activeTerminalText(window), { timeout: 20_000 })
+    .toContain('second-tab')
   // The first tab's content is hidden, not gone.
-  await expect(window.getByTestId('terminal-active')).not.toContainText('first-tab')
+  expect(await activeTerminalText(window)).not.toContain('first-tab')
 
   const tabs = window.locator('[data-testid^="tab-"]')
   await expect(tabs).toHaveCount(2)
   await tabs.first().click()
-  await expect(window.getByTestId('terminal-active')).toContainText('first-tab', {
-    timeout: 20_000,
-  })
+  await expect
+    .poll(async () => activeTerminalText(window), { timeout: 20_000 })
+    .toContain('first-tab')
 
   await app.close()
 })
@@ -294,18 +296,18 @@ test('restores every tab and the active one after a relaunch', async () => {
   await firstWindow.getByTestId('terminal-active').click()
   await firstWindow.keyboard.type('echo marker-two')
   await firstWindow.keyboard.press('Enter')
-  await expect(firstWindow.getByTestId('terminal-active')).toContainText('marker-two', {
-    timeout: 20_000,
-  })
+  await expect
+    .poll(async () => activeTerminalText(firstWindow), { timeout: 20_000 })
+    .toContain('marker-two')
   await first.close()
 
   const second = await launch()
   const secondWindow = await second.firstWindow()
   await expect(secondWindow.locator('[data-testid^="tab-"]')).toHaveCount(2)
   // The second tab was active when we quit, and its scrollback came back.
-  await expect(secondWindow.getByTestId('terminal-active')).toContainText('marker-two', {
-    timeout: 20_000,
-  })
+  await expect
+    .poll(async () => activeTerminalText(secondWindow), { timeout: 20_000 })
+    .toContain('marker-two')
   await second.close()
 })
 
@@ -382,7 +384,7 @@ test('a relaunch lands on the tab that closing another one activated', async () 
 test('adopts a session the app has never seen', async () => {
   // Exactly what a crash or an external tmux command leaves behind.
   await run('tmux', [
-    '-L', SOCKET, 'new-session', '-d', '-s', 'prcli-scratch-abcdef0123456789', 'sleep', '600',
+    '-L', SOCKET, 'new-session', '-d', '-s', 'pterm-scratch-abcdef0123456789', 'sleep', '600',
   ])
 
   const app = await launch()
@@ -427,7 +429,9 @@ test('a detach from inside the pane leaves the tab and its session alone', async
 
   // Wait for a prompt: tmux must be up before it will act on its prefix key.
   await window.getByTestId('terminal-active').click()
-  await expect(window.getByTestId('terminal-active')).toContainText(/[$%#]/, { timeout: 20_000 })
+  await expect
+    .poll(async () => activeTerminalText(window), { timeout: 20_000 })
+    .toMatch(/[$%#]/)
 
   // The tmux user's reflex. The client dies; the session does not.
   await window.keyboard.press('Control+b')
@@ -468,7 +472,7 @@ test('the keyboard opens, switches and closes tabs', async () => {
 
   // ⌘W closes the active tab, which is now the first one, and destroys
   // exactly that session.
-  const firstSession = `prcli-scratch-${firstTab.replace('tab-', '')}`
+  const firstSession = `pterm-scratch-${firstTab.replace('tab-', '')}`
   expect(await sessionNames(SOCKET)).toContain(firstSession)
   await window.keyboard.press('Meta+w')
   await expect(window.locator('[data-testid^="tab-"]')).toHaveCount(1)

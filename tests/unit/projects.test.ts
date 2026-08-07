@@ -8,9 +8,9 @@ import {
   reorderProjects,
   projectForSlug,
 } from '../../src/main/projects/projects'
-import { DEFAULT_NOTIFICATIONS, type PrcliConfig } from '../../src/main/state/store'
+import { DEFAULT_NOTIFICATIONS, type PTermConfig } from '../../src/main/state/store'
 
-const EMPTY: PrcliConfig = {
+const EMPTY: PTermConfig = {
   version: 8,
   projects: [],
   activeProjectId: null,
@@ -19,8 +19,8 @@ const EMPTY: PrcliConfig = {
   notifications: DEFAULT_NOTIFICATIONS,
 }
 
-function withProjects(...names: string[]): PrcliConfig {
-  return names.reduce<PrcliConfig>(
+function withProjects(...names: string[]): PTermConfig {
+  return names.reduce<PTermConfig>(
     (config, name) => addProject(config, { name, cwd: `/tmp/${name}` }).config,
     EMPTY,
   )
@@ -100,14 +100,14 @@ describe('removeProject', () => {
   // The sessions keep running; restore lists them under Unsorted because
   // their slug no longer matches anything. Nothing here should touch panes.
   it('leaves the panes alone', () => {
-    const config: PrcliConfig = {
+    const config: PTermConfig = {
       ...withProjects('Lumio'),
       panes: [
         {
           id: 'a1b2c3d4e5f60718',
           projectSlug: 'lumio',
           cwd: '/tmp/lumio',
-          tmuxSession: 'prcli-lumio-a1b2c3d4e5f60718',
+          tmuxSession: 'pterm-lumio-a1b2c3d4e5f60718',
           type: 'shell',
         },
       ],

@@ -8,9 +8,9 @@ import { TmuxAdapter } from '../../src/main/tmux/adapter'
 import { PtySession } from '../../src/main/pty/session'
 
 const run = promisify(execFile)
-const SOCKET = 'prcli-test'
+const SOCKET = 'pterm-test'
 const adapter = new TmuxAdapter({ socket: SOCKET })
-const NAME = 'prcli-lumio-a1b2c3d4e5f60718'
+const NAME = 'pterm-lumio-a1b2c3d4e5f60718'
 
 async function killServer(): Promise<void> {
   try {
@@ -64,9 +64,9 @@ describe('PtySession', () => {
   it('runs input and streams output back', async () => {
     const session = open()
     await waitForOutput(session, /\$|%|#/)
-    session.write('echo prcli-marker\r')
-    const output = await waitForOutput(session, /prcli-marker/)
-    expect(output).toContain('prcli-marker')
+    session.write('echo pterm-marker\r')
+    const output = await waitForOutput(session, /pterm-marker/)
+    expect(output).toContain('pterm-marker')
     session.detach()
   })
 
@@ -140,7 +140,7 @@ describe('PtySession remain-on-exit', () => {
 
   /** A stand-in for the tmux binary that writes the argv it was handed. */
   async function recordingTmux(): Promise<{ adapter: TmuxAdapter; argv: () => Promise<string[]> }> {
-    recorderDir ??= await mkdtemp(join(tmpdir(), 'prcli-argv-'))
+    recorderDir ??= await mkdtemp(join(tmpdir(), 'pterm-argv-'))
     const bin = join(recorderDir, `tmux-${Math.random().toString(16).slice(2)}`)
     const log = `${bin}.argv`
     await writeFile(bin, `#!/bin/sh\nprintf '%s\\n' "$@" > ${JSON.stringify(log)}\n`, 'utf8')
@@ -170,7 +170,7 @@ describe('PtySession remain-on-exit', () => {
 
   it('chains the option on when a hook can be built for the reporter', async () => {
     const { adapter: recorder, argv } = await recordingTmux()
-    const session = startWith(recorder, '/Users/paolo/.prcli/prcli-hook')
+    const session = startWith(recorder, '/Users/paolo/.pterm/pterm-hook')
 
     await expect.poll(argv, { timeout: 8000 }).toContain('remain-on-exit')
     session.detach()
@@ -183,7 +183,7 @@ describe('PtySession remain-on-exit', () => {
   // that will ever reap it.
   it('leaves the option off when the reporter path makes a hook unsafe', async () => {
     const { adapter: recorder, argv } = await recordingTmux()
-    const session = startWith(recorder, "/Users/o'brien/.prcli/prcli-hook")
+    const session = startWith(recorder, "/Users/o'brien/.pterm/pterm-hook")
 
     // Wait for the spawn to have happened at all, so this cannot pass by
     // reading an empty log — `status` is chained unconditionally.
@@ -200,7 +200,7 @@ describe('PtySession remain-on-exit', () => {
       cols: 80,
       rows: 24,
       command: 'sleep 30',
-      deathReporter: '/Users/paolo/.prcli/prcli-hook',
+      deathReporter: '/Users/paolo/.pterm/pterm-hook',
       tabId: "abc'; rm -rf /",
     })
     session.start()

@@ -7,14 +7,14 @@ import {
   type GitSyncResult,
   type MenuCommand,
   type OpenRequest,
-  type PrcliApi,
+  type PTermApi,
   type StatusEvent,
   type TabDescriptor,
   type UpdateCheckResult,
   type UpdateInfo,
 } from '../shared/ipc'
 
-const api: PrcliApi = {
+const api: PTermApi = {
   open: (request: OpenRequest) => ipcRenderer.invoke(CHANNELS.open, request),
   list: () => ipcRenderer.invoke(CHANNELS.list),
   restore: () => ipcRenderer.invoke(CHANNELS.restore),
@@ -101,6 +101,6 @@ const api: PrcliApi = {
     ipcRenderer.invoke(CHANNELS.gitSync, projectId),
 }
 
-contextBridge.exposeInMainWorld('prcli', api)
+contextBridge.exposeInMainWorld('pterm', api)
 
 export type { TabDescriptor }

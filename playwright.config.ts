@@ -21,7 +21,7 @@ export default defineConfig({
   // stopped saying anything — see projects.spec.ts for this suite's one known
   // pre-existing flake, which retries would only paper over. It is not an app
   // defect: macOS blocks the Electron launch in the "reopen windows?" alert
-  // before any PRCLI code runs, 2 in 43 full-suite runs on an idle machine and
+  // before any pTerm code runs, 2 in 43 full-suite runs on an idle machine and
   // higher when two suites run at once.
   retries: 0,
   reporter: [['list'], ['html', { open: 'never' }]],

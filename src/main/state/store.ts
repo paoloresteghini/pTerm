@@ -32,7 +32,7 @@ export interface ProjectRecord {
   activeTabId: string | null
 }
 
-export interface PrcliConfig {
+export interface PTermConfig {
   version: 8
   /** Array order is sidebar order, and the order ⌘1–9 follows. */
   projects: ProjectRecord[]
@@ -66,7 +66,7 @@ export const DEFAULT_NOTIFICATIONS: NotificationConfig = {
   quietHours: null,
 }
 
-const EMPTY: PrcliConfig = {
+const EMPTY: PTermConfig = {
   version: 8,
   projects: [],
   activeProjectId: null,
@@ -352,7 +352,7 @@ function normaliseNotifications(value: unknown): NotificationConfig {
  * that slug is the auto-create-from-slug behaviour M2b rejected, so migrated
  * panes belong to nothing and restore lists them under Unsorted.
  */
-function migrate(value: unknown): PrcliConfig {
+function migrate(value: unknown): PTermConfig {
   if (!hasVersion(value)) return { ...EMPTY }
   const candidate = value as {
     projects?: unknown
@@ -401,21 +401,21 @@ function migrate(value: unknown): PrcliConfig {
 }
 
 /**
- * The directory `PRCLI_CONFIG_DIR` names, defaulting to `~/.prcli`.
+ * The directory `PTERM_CONFIG_DIR` names, defaulting to `~/.pterm`.
  *
  * Exported because config.json is no longer the only thing that lives there:
  * the hook socket, the spool and the installed hook script are all siblings of
  * it, and every one of them must move with the escape hatch so a test never
- * reaches the real `~/.prcli`.
+ * reaches the real `~/.pterm`.
  */
 export function configRoot(): string {
-  return process.env.PRCLI_CONFIG_DIR ?? join(homedir(), '.prcli')
+  return process.env.PTERM_CONFIG_DIR ?? join(homedir(), '.pterm')
 }
 
 export class ConfigStore {
   constructor(private readonly filePath: string) {}
 
-  /** `PRCLI_CONFIG_DIR` exists so tests can point at a temp dir instead of the real config. */
+  /** `PTERM_CONFIG_DIR` exists so tests can point at a temp dir instead of the real config. */
   static defaultPath(): string {
     return join(configRoot(), 'config.json')
   }
@@ -424,7 +424,7 @@ export class ConfigStore {
    * Never throws. A missing or damaged config must not stop the app from
    * starting — the worst case is losing layout, which the user can rebuild.
    */
-  async read(): Promise<PrcliConfig> {
+  async read(): Promise<PTermConfig> {
     try {
       return migrate(JSON.parse(await readFile(this.filePath, 'utf8')))
     } catch {
@@ -450,7 +450,7 @@ export class ConfigStore {
   }
 
   /** Serialise first, then write to a temp file and rename over the target. */
-  async write(config: PrcliConfig): Promise<void> {
+  async write(config: PTermConfig): Promise<void> {
     // Before the guard, so unserialisable input still rejects rather than
     // being quietly swallowed by a refusal it has nothing to do with.
     const json = JSON.stringify(config, null, 2)
@@ -467,7 +467,7 @@ export class ConfigStore {
     const existing = await this.versionOnDisk()
     if (existing !== null && existing > config.version) {
       console.warn(
-        `PRCLI: refusing to overwrite ${this.filePath} — it is version ${existing} and this ` +
+        `pTerm: refusing to overwrite ${this.filePath} — it is version ${existing} and this ` +
           `build writes version ${config.version}. Run the newer build, or move that file aside.`,
       )
       return

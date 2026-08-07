@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { TmuxAdapter, TmuxNotInstalledError } from '../../src/main/tmux/adapter'
 
 const run = promisify(execFile)
-const SOCKET = 'prcli-test'
+const SOCKET = 'pterm-test'
 const adapter = new TmuxAdapter({ socket: SOCKET })
 
 let fakeBinDir: string | undefined
@@ -19,7 +19,7 @@ let fakeBinDir: string | undefined
  * "the session is absent".
  */
 async function fakeTmuxFailingWith(stderr: string): Promise<TmuxAdapter> {
-  fakeBinDir ??= await mkdtemp(join(tmpdir(), 'prcli-fake-tmux-'))
+  fakeBinDir ??= await mkdtemp(join(tmpdir(), 'pterm-fake-tmux-'))
   const bin = join(fakeBinDir, `tmux-${Math.random().toString(16).slice(2)}`)
   await writeFile(bin, `#!/bin/sh\nprintf '%s\\n' ${JSON.stringify(stderr)} >&2\nexit 1\n`, 'utf8')
   await chmod(bin, 0o755)
@@ -79,54 +79,54 @@ describe('TmuxAdapter.listSessions', () => {
   // tmux words this case differently depending on whether the socket file was
   // ever created, so both paths need covering.
   it('returns an empty array when the socket was never created', async () => {
-    const pristine = new TmuxAdapter({ socket: 'prcli-test-never-created' })
+    const pristine = new TmuxAdapter({ socket: 'pterm-test-never-created' })
     await expect(pristine.listSessions()).resolves.toEqual([])
   })
 
   it('returns an empty array after the server has been killed', async () => {
-    await createSession('prcli-lumio-a1b2c3d4e5f60718')
+    await createSession('pterm-lumio-a1b2c3d4e5f60718')
     await killServer()
     await expect(adapter.listSessions()).resolves.toEqual([])
   })
 
   it('lists session names', async () => {
-    await createSession('prcli-lumio-a1b2c3d4e5f60718')
+    await createSession('pterm-lumio-a1b2c3d4e5f60718')
     await createSession('someone-elses-session')
     const names = await adapter.listSessions()
-    expect(names.sort()).toEqual(['prcli-lumio-a1b2c3d4e5f60718', 'someone-elses-session'])
+    expect(names.sort()).toEqual(['pterm-lumio-a1b2c3d4e5f60718', 'someone-elses-session'])
   })
 })
 
-describe('TmuxAdapter.listPrcliSessions', () => {
+describe('TmuxAdapter.listPTermSessions', () => {
   it('excludes sessions that are not ours', async () => {
-    await createSession('prcli-lumio-a1b2c3d4e5f60718')
+    await createSession('pterm-lumio-a1b2c3d4e5f60718')
     await createSession('someone-elses-session')
-    await expect(adapter.listPrcliSessions()).resolves.toEqual([
-      'prcli-lumio-a1b2c3d4e5f60718',
+    await expect(adapter.listPTermSessions()).resolves.toEqual([
+      'pterm-lumio-a1b2c3d4e5f60718',
     ])
   })
 })
 
 describe('TmuxAdapter.hasSession', () => {
   it('is true for an existing session and false otherwise', async () => {
-    await createSession('prcli-lumio-a1b2c3d4e5f60718')
-    await expect(adapter.hasSession('prcli-lumio-a1b2c3d4e5f60718')).resolves.toBe(true)
-    await expect(adapter.hasSession('prcli-lumio-000000000000000f')).resolves.toBe(false)
+    await createSession('pterm-lumio-a1b2c3d4e5f60718')
+    await expect(adapter.hasSession('pterm-lumio-a1b2c3d4e5f60718')).resolves.toBe(true)
+    await expect(adapter.hasSession('pterm-lumio-000000000000000f')).resolves.toBe(false)
   })
 
   it('does not match on prefix', async () => {
-    await createSession('prcli-lumio-a1b2c3d4e5f60718')
-    await expect(adapter.hasSession('prcli-lumio')).resolves.toBe(false)
+    await createSession('pterm-lumio-a1b2c3d4e5f60718')
+    await expect(adapter.hasSession('pterm-lumio')).resolves.toBe(false)
   })
 
   it('is false when there is no server at all', async () => {
-    const pristine = new TmuxAdapter({ socket: 'prcli-test-never-created' })
-    await expect(pristine.hasSession('prcli-lumio-a1b2c3d4e5f60718')).resolves.toBe(false)
+    const pristine = new TmuxAdapter({ socket: 'pterm-test-never-created' })
+    await expect(pristine.hasSession('pterm-lumio-a1b2c3d4e5f60718')).resolves.toBe(false)
   })
 
   it('rethrows failures that do not mean the session is absent', async () => {
     const wedged = await fakeTmuxFailingWith('error connecting to /tmp/x (Permission denied)')
-    await expect(wedged.hasSession('prcli-lumio-a1b2c3d4e5f60718')).rejects.toThrow(
+    await expect(wedged.hasSession('pterm-lumio-a1b2c3d4e5f60718')).rejects.toThrow(
       /permission denied/i,
     )
   })
@@ -134,22 +134,22 @@ describe('TmuxAdapter.hasSession', () => {
 
 describe('TmuxAdapter.killSession', () => {
   it('removes the session', async () => {
-    await createSession('prcli-lumio-a1b2c3d4e5f60718')
-    await adapter.killSession('prcli-lumio-a1b2c3d4e5f60718')
-    await expect(adapter.hasSession('prcli-lumio-a1b2c3d4e5f60718')).resolves.toBe(false)
+    await createSession('pterm-lumio-a1b2c3d4e5f60718')
+    await adapter.killSession('pterm-lumio-a1b2c3d4e5f60718')
+    await expect(adapter.hasSession('pterm-lumio-a1b2c3d4e5f60718')).resolves.toBe(false)
   })
 
   it('is a no-op for a session that does not exist', async () => {
-    await createSession('prcli-lumio-a1b2c3d4e5f60718')
-    await expect(adapter.killSession('prcli-lumio-000000000000000f')).resolves.toBeUndefined()
+    await createSession('pterm-lumio-a1b2c3d4e5f60718')
+    await expect(adapter.killSession('pterm-lumio-000000000000000f')).resolves.toBeUndefined()
     // The kill must not have resolved by taking anything else with it.
-    await expect(adapter.hasSession('prcli-lumio-000000000000000f')).resolves.toBe(false)
-    await expect(adapter.hasSession('prcli-lumio-a1b2c3d4e5f60718')).resolves.toBe(true)
+    await expect(adapter.hasSession('pterm-lumio-000000000000000f')).resolves.toBe(false)
+    await expect(adapter.hasSession('pterm-lumio-a1b2c3d4e5f60718')).resolves.toBe(true)
   })
 
   it('rejects when the kill fails and the outcome cannot be verified', async () => {
     const wedged = await fakeTmuxFailingWith('error connecting to /tmp/x (Permission denied)')
-    await expect(wedged.killSession('prcli-lumio-a1b2c3d4e5f60718')).rejects.toThrow(
+    await expect(wedged.killSession('pterm-lumio-a1b2c3d4e5f60718')).rejects.toThrow(
       /permission denied/i,
     )
   })
@@ -157,17 +157,17 @@ describe('TmuxAdapter.killSession', () => {
 
 describe('TmuxAdapter session options', () => {
   it('sets and reads back a session option', async () => {
-    await createSession('prcli-lumio-a1b2c3d4e5f60718')
-    await adapter.setSessionOption('prcli-lumio-a1b2c3d4e5f60718', 'status', 'off')
-    await expect(adapter.getSessionOption('prcli-lumio-a1b2c3d4e5f60718', 'status'))
+    await createSession('pterm-lumio-a1b2c3d4e5f60718')
+    await adapter.setSessionOption('pterm-lumio-a1b2c3d4e5f60718', 'status', 'off')
+    await expect(adapter.getSessionOption('pterm-lumio-a1b2c3d4e5f60718', 'status'))
       .resolves.toBe('off')
   })
 
   it('targets exactly one session', async () => {
-    await createSession('prcli-lumio-a1b2c3d4e5f60718')
-    await createSession('prcli-lumio-00000000000000ff')
-    await adapter.setSessionOption('prcli-lumio-a1b2c3d4e5f60718', 'status', 'off')
-    await expect(adapter.getSessionOption('prcli-lumio-00000000000000ff', 'status'))
+    await createSession('pterm-lumio-a1b2c3d4e5f60718')
+    await createSession('pterm-lumio-00000000000000ff')
+    await adapter.setSessionOption('pterm-lumio-a1b2c3d4e5f60718', 'status', 'off')
+    await expect(adapter.getSessionOption('pterm-lumio-00000000000000ff', 'status'))
       .resolves.not.toBe('off')
   })
 
@@ -179,46 +179,46 @@ describe('TmuxAdapter session options', () => {
   // this look impossible, but the adapter is a general wrapper and the ids are
   // hex: a truncated or mistyped name is a prefix of a real one.
   it('refuses a name that is only a prefix, rather than hitting the longer session', async () => {
-    await createSession('prcli-lumio-a1b2c3d4e5f60718')
+    await createSession('pterm-lumio-a1b2c3d4e5f60718')
 
-    await expect(adapter.setSessionOption('prcli-lumio-a1b2c3d4e5f6071', 'status', 'off'))
+    await expect(adapter.setSessionOption('pterm-lumio-a1b2c3d4e5f6071', 'status', 'off'))
       .rejects.toThrow()
 
     // The real session is untouched, not merely still alive.
-    await expect(adapter.getSessionOption('prcli-lumio-a1b2c3d4e5f60718', 'status'))
+    await expect(adapter.getSessionOption('pterm-lumio-a1b2c3d4e5f60718', 'status'))
       .resolves.not.toBe('off')
   })
 })
 
 describe('TmuxAdapter.renameSession', () => {
   it('renames a session, keeping it alive', async () => {
-    await createSession('prcli-scratch-a1b2c3d4e5f60718')
-    await adapter.renameSession('prcli-scratch-a1b2c3d4e5f60718', 'prcli-lumio-a1b2c3d4e5f60718')
-    await expect(adapter.hasSession('prcli-lumio-a1b2c3d4e5f60718')).resolves.toBe(true)
-    await expect(adapter.hasSession('prcli-scratch-a1b2c3d4e5f60718')).resolves.toBe(false)
+    await createSession('pterm-scratch-a1b2c3d4e5f60718')
+    await adapter.renameSession('pterm-scratch-a1b2c3d4e5f60718', 'pterm-lumio-a1b2c3d4e5f60718')
+    await expect(adapter.hasSession('pterm-lumio-a1b2c3d4e5f60718')).resolves.toBe(true)
+    await expect(adapter.hasSession('pterm-scratch-a1b2c3d4e5f60718')).resolves.toBe(false)
   })
 
   it('throws when the source does not exist', async () => {
     await expect(
-      adapter.renameSession('prcli-scratch-a1b2c3d4e5f60718', 'prcli-lumio-a1b2c3d4e5f60718'),
+      adapter.renameSession('pterm-scratch-a1b2c3d4e5f60718', 'pterm-lumio-a1b2c3d4e5f60718'),
     ).rejects.toThrow()
   })
 
   it('throws rather than colliding with an existing name', async () => {
-    await createSession('prcli-scratch-a1b2c3d4e5f60718')
-    await createSession('prcli-lumio-00000000000000ff')
+    await createSession('pterm-scratch-a1b2c3d4e5f60718')
+    await createSession('pterm-lumio-00000000000000ff')
     await expect(
-      adapter.renameSession('prcli-scratch-a1b2c3d4e5f60718', 'prcli-lumio-00000000000000ff'),
+      adapter.renameSession('pterm-scratch-a1b2c3d4e5f60718', 'pterm-lumio-00000000000000ff'),
     ).rejects.toThrow()
     // The source must survive a refused rename.
-    await expect(adapter.hasSession('prcli-scratch-a1b2c3d4e5f60718')).resolves.toBe(true)
+    await expect(adapter.hasSession('pterm-scratch-a1b2c3d4e5f60718')).resolves.toBe(true)
   })
 
   it('targets exactly one session', async () => {
-    await createSession('prcli-scratch-a1b2c3d4e5f60718')
-    await createSession('prcli-scratch-00000000000000ff')
-    await adapter.renameSession('prcli-scratch-a1b2c3d4e5f60718', 'prcli-lumio-a1b2c3d4e5f60718')
-    await expect(adapter.hasSession('prcli-scratch-00000000000000ff')).resolves.toBe(true)
+    await createSession('pterm-scratch-a1b2c3d4e5f60718')
+    await createSession('pterm-scratch-00000000000000ff')
+    await adapter.renameSession('pterm-scratch-a1b2c3d4e5f60718', 'pterm-lumio-a1b2c3d4e5f60718')
+    await expect(adapter.hasSession('pterm-scratch-00000000000000ff')).resolves.toBe(true)
   })
 
   // Same weakness, same fix: with both names present a bare `-t` resolves the
@@ -226,14 +226,14 @@ describe('TmuxAdapter.renameSession', () => {
   // anything. A rename is the worse of the two to get wrong — it would move a
   // live session into another project silently.
   it('refuses to rename from a name that is only a prefix of a real session', async () => {
-    await createSession('prcli-scratch-a1b2c3d4e5f60718')
+    await createSession('pterm-scratch-a1b2c3d4e5f60718')
 
     await expect(
-      adapter.renameSession('prcli-scratch-a1b2c3d4e5f6071', 'prcli-lumio-a1b2c3d4e5f60718'),
+      adapter.renameSession('pterm-scratch-a1b2c3d4e5f6071', 'pterm-lumio-a1b2c3d4e5f60718'),
     ).rejects.toThrow()
 
-    await expect(adapter.hasSession('prcli-scratch-a1b2c3d4e5f60718')).resolves.toBe(true)
-    await expect(adapter.hasSession('prcli-lumio-a1b2c3d4e5f60718')).resolves.toBe(false)
+    await expect(adapter.hasSession('pterm-scratch-a1b2c3d4e5f60718')).resolves.toBe(true)
+    await expect(adapter.hasSession('pterm-lumio-a1b2c3d4e5f60718')).resolves.toBe(false)
   })
 })
 
@@ -243,11 +243,11 @@ describe('TmuxAdapter.killSession, exact targeting', () => {
   // happens to prefix. `killSession` treats "already gone" as success, so the
   // proof is that the *other* session is still there afterwards.
   it('does not kill a longer session when asked for a prefix that no longer exists', async () => {
-    await createSession('prcli-lumio-a1b2c3d4e5f60718')
+    await createSession('pterm-lumio-a1b2c3d4e5f60718')
 
-    await expect(adapter.killSession('prcli-lumio-a1b2c3d4e5f6071')).resolves.toBeUndefined()
+    await expect(adapter.killSession('pterm-lumio-a1b2c3d4e5f6071')).resolves.toBeUndefined()
 
-    await expect(adapter.hasSession('prcli-lumio-a1b2c3d4e5f60718')).resolves.toBe(true)
+    await expect(adapter.hasSession('pterm-lumio-a1b2c3d4e5f60718')).resolves.toBe(true)
   })
 })
 

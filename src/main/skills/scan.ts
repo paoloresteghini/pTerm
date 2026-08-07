@@ -16,12 +16,12 @@ import { pluginRoots, type PluginRoot } from './resolve'
  * Both are required overrides in tests: `tests/integration/skills.test.ts`
  * sets them directly, and `tests/e2e/harness.ts` takes `claudeHome` as a
  * required launch option, asserts it sits under the temp root before any
- * spawn, and passes it as `PRCLI_CLAUDE_HOME`. `e2eSafety.test.ts`'s
+ * spawn, and passes it as `PTERM_CLAUDE_HOME`. `e2eSafety.test.ts`'s
  * `GUARDED_VARS` enumerates it, so a launch site that drops it fails the
  * guard rather than silently reading the developer's real `~/.claude`.
  */
 export function claudeHome(): string {
-  return process.env.PRCLI_CLAUDE_HOME ?? join(homedir(), '.claude')
+  return process.env.PTERM_CLAUDE_HOME ?? join(homedir(), '.claude')
 }
 
 /**

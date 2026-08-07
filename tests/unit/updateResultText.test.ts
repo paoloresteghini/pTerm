@@ -13,7 +13,7 @@ describe('updateResultText', () => {
       info: { version: '1.2.3', url: 'https://example.com/releases/1.2.3' },
       message: null,
     }
-    expect(updateResultText(result)).toBe('PRCLI 1.2.3 is available')
+    expect(updateResultText(result)).toBe('pTerm 1.2.3 is available')
   })
 
   // A skipped version is still the newest one out there; Settings' explicit
@@ -26,12 +26,12 @@ describe('updateResultText', () => {
       info: { version: '1.2.3', url: 'https://example.com/releases/1.2.3' },
       message: null,
     }
-    expect(updateResultText(result)).toBe('PRCLI 1.2.3 is available')
+    expect(updateResultText(result)).toBe('pTerm 1.2.3 is available')
   })
 
   it('says the app is up to date on current', () => {
     const result: UpdateCheckResult = { status: 'current', info: null, message: null }
-    expect(updateResultText(result)).toBe('PRCLI is up to date')
+    expect(updateResultText(result)).toBe('pTerm is up to date')
   })
 
   it('surfaces the failure message', () => {
@@ -56,7 +56,7 @@ describe('updateResultText', () => {
       info: { version: '1.2.3', url: 'https://example.com/releases/1.2.3' },
       message: null,
     }
-    expect(updateResultText(result, '1.2.3')).toBe('PRCLI 1.2.3 is available (skipped)')
+    expect(updateResultText(result, '1.2.3')).toBe('pTerm 1.2.3 is available (skipped)')
   })
 
   it('does not append the suffix when the skipped version differs', () => {
@@ -65,12 +65,12 @@ describe('updateResultText', () => {
       info: { version: '1.2.3', url: 'https://example.com/releases/1.2.3' },
       message: null,
     }
-    expect(updateResultText(result, '1.0.0')).toBe('PRCLI 1.2.3 is available')
+    expect(updateResultText(result, '1.0.0')).toBe('pTerm 1.2.3 is available')
   })
 
   it('never appends the suffix to a "current" result, even if a version is skipped', () => {
     const result: UpdateCheckResult = { status: 'current', info: null, message: null }
-    expect(updateResultText(result, '1.2.3')).toBe('PRCLI is up to date')
+    expect(updateResultText(result, '1.2.3')).toBe('pTerm is up to date')
   })
 
   it('never appends the suffix to a "failed" result, even if a version is skipped', () => {
@@ -84,6 +84,6 @@ describe('updateResultText', () => {
       info: { version: '1.2.3', url: 'https://example.com/releases/1.2.3' },
       message: null,
     }
-    expect(updateResultText(result)).toBe('PRCLI 1.2.3 is available')
+    expect(updateResultText(result)).toBe('pTerm 1.2.3 is available')
   })
 })

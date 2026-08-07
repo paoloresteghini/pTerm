@@ -99,7 +99,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchApp, killServer, expandColumn } from './harness'
 
-const SOCKET = 'prcli-e2e-filetree'
+const SOCKET = 'pterm-e2e-filetree'
 
 let app: ElectronApplication
 let page: Page
@@ -113,11 +113,11 @@ let projectCwd: string
 let otherCwd: string
 
 test.beforeAll(async () => {
-  userDataDir = await mkdtemp(join(tmpdir(), 'prcli-tree-user-'))
-  configDir = await mkdtemp(join(tmpdir(), 'prcli-tree-config-'))
-  projectsRoot = await mkdtemp(join(tmpdir(), 'prcli-tree-root-'))
-  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'prcli-tree-settings-'))
-  claudeHome = await mkdtemp(join(tmpdir(), 'prcli-tree-claude-'))
+  userDataDir = await mkdtemp(join(tmpdir(), 'pterm-tree-user-'))
+  configDir = await mkdtemp(join(tmpdir(), 'pterm-tree-config-'))
+  projectsRoot = await mkdtemp(join(tmpdir(), 'pterm-tree-root-'))
+  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'pterm-tree-settings-'))
+  claudeHome = await mkdtemp(join(tmpdir(), 'pterm-tree-claude-'))
   claudeSettingsPath = join(claudeSettingsDir, 'settings.json')
   await writeFile(claudeSettingsPath, JSON.stringify({ enabledPlugins: {} }))
 
@@ -273,7 +273,7 @@ test('a file is not expandable', async () => {
   // ENOTDIR and `listDir` reports that as an empty list. What the guard
   // actually controls is whether the click ever reaches `expanded` at all,
   // so assert that directly.
-  const raw = await page.evaluate(() => localStorage.getItem('prcli:treeExpanded:p1'))
+  const raw = await page.evaluate(() => localStorage.getItem('pterm:treeExpanded:p1'))
   expect(raw === null ? [] : (JSON.parse(raw) as string[])).not.toContain('README.md')
 })
 

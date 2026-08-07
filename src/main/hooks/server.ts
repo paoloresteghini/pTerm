@@ -5,7 +5,7 @@ import { MAX_LINE_BYTES, parseHookLine, type HookLine } from './protocol'
 /**
  * macOS caps a unix socket path (`sun_path`) near 104 bytes. Past it, `bind`
  * fails with a bare `EINVAL` that says nothing about the length — which is
- * exactly the failure a deep `PRCLI_CONFIG_DIR` under a temp directory would
+ * exactly the failure a deep `PTERM_CONFIG_DIR` under a temp directory would
  * produce in CI.
  *
  * 104, not 103: measured directly against this machine's kernel (Darwin,
@@ -75,7 +75,7 @@ export class HookServer {
     if (Buffer.byteLength(this.socketPath, 'utf8') > MAX_SOCKET_PATH_BYTES) {
       throw new Error(
         `HookServer: socket path is too long for macOS (${Buffer.byteLength(this.socketPath, 'utf8')} bytes, ` +
-          `limit ${MAX_SOCKET_PATH_BYTES}): ${this.socketPath}. Set PRCLI_CONFIG_DIR to a shorter path.`,
+          `limit ${MAX_SOCKET_PATH_BYTES}): ${this.socketPath}. Set PTERM_CONFIG_DIR to a shorter path.`,
       )
     }
 
@@ -101,7 +101,7 @@ export class HookServer {
     // that failure alone does not say which of those two this is.
     // `requestSingleInstanceLock` does not settle it either: it guards one
     // Electron *app identity*, and this machine runs a packaged
-    // `/Applications/PRCLI.app` alongside a dev `electron-forge start` at the
+    // `/Applications/pTerm.app` alongside a dev `electron-forge start` at the
     // same time, each with its own identity and its own lock (the ledger
     // records this — it is how a config-mtime drift was explained). Under
     // that real condition, unlinking unconditionally would steal the socket

@@ -28,17 +28,17 @@ vi.mock('node:child_process', () => ({
 /**
  * Every E2E spec launches the real app, and five env vars are what keep that
  * launch off the developer's actual machine state rather than a directory
- * `rm -rf`'d at the end of the test: `PRCLI_CONFIG_DIR` (the real `~/.prcli`),
- * `PRCLI_PROJECTS_ROOT` (the real `~/Code`), `PRCLI_TMUX_SOCKET` (the
- * developer's default tmux socket), `PRCLI_CLAUDE_SETTINGS`, and
- * `PRCLI_CLAUDE_HOME` — the latter two read by every live Claude session on
+ * `rm -rf`'d at the end of the test: `PTERM_CONFIG_DIR` (the real `~/.pterm`),
+ * `PTERM_PROJECTS_ROOT` (the real `~/Code`), `PTERM_TMUX_SOCKET` (the
+ * developer's default tmux socket), `PTERM_CLAUDE_SETTINGS`, and
+ * `PTERM_CLAUDE_HOME` — the latter two read by every live Claude session on
  * the machine, and the two of the five that a spec can omit and still pass
  * every assertion it has, because nothing in the suite ever inspects the
  * real files they would otherwise fall back to.
  *
  * Until 2026-08-02 that env block was copy-pasted into all four specs and this
  * guard asked "does every spec set all four?" — three of the four had drifted
- * and dropped `PRCLI_CLAUDE_SETTINGS`. There is now one launch site,
+ * and dropped `PTERM_CLAUDE_SETTINGS`. There is now one launch site,
  * `tests/e2e/harness.ts`, so the question that keeps the property is a
  * different one, in two halves:
  *
@@ -69,12 +69,12 @@ vi.mock('node:child_process', () => ({
  * describing the harness — can neither satisfy nor trip an assertion.
  *
  * A var pointed at the *wrong path* is a hole neither half can see: a
- * `PRCLI_CLAUDE_SETTINGS` set to the developer's real file satisfies the token
- * check exactly as well as a temp path does, and so does a `PRCLI_TMUX_SOCKET`
+ * `PTERM_CLAUDE_SETTINGS` set to the developer's real file satisfies the token
+ * check exactly as well as a temp path does, and so does a `PTERM_TMUX_SOCKET`
  * of `''` — which is not "no socket" but the developer's default tmux server,
  * because `TmuxAdapter.baseArgs()` drops `-L` when the socket is falsy. That is
  * what the second describe below covers: `launchApp` and `killServer` now
- * reject a non-`prcli-e2e` socket and any override outside the temp root, and
+ * reject a non-`pterm-e2e` socket and any override outside the temp root, and
  * these tests pin that the rejection happens *before* `electron.launch` is
  * reached. They run against a mocked `electron.launch`, deliberately: the point
  * of the guard is a thing that must not be allowed to happen even once, so the
@@ -94,11 +94,11 @@ vi.mock('node:child_process', () => ({
  *   compares them to the temp paths it made.
  */
 const GUARDED_VARS = [
-  'PRCLI_CONFIG_DIR',
-  'PRCLI_PROJECTS_ROOT',
-  'PRCLI_TMUX_SOCKET',
-  'PRCLI_CLAUDE_SETTINGS',
-  'PRCLI_CLAUDE_HOME',
+  'PTERM_CONFIG_DIR',
+  'PTERM_PROJECTS_ROOT',
+  'PTERM_TMUX_SOCKET',
+  'PTERM_CLAUDE_SETTINGS',
+  'PTERM_CLAUDE_HOME',
 ]
 
 /** Ways of launching Electron that go around `launchApp` and its env block. */
@@ -183,7 +183,7 @@ function argArray(source: string, from: number): string | null {
  * `SOCKET_PREFIX` on purpose: importing it would make this test agree with the
  * harness by construction even if both were changed to `default` together.
  */
-const SOCKET_PREFIX = 'prcli-e2e'
+const SOCKET_PREFIX = 'pterm-e2e'
 
 const E2E_DIR = new URL('../e2e/', import.meta.url)
 const HARNESS = new URL('harness.ts', E2E_DIR)
@@ -262,13 +262,13 @@ describe('the E2E suite keeps its hands off the developer\'s real state', () => 
     expect(GUARDED_VARS.filter((envVar) => !source.includes(`${envVar}:`))).toEqual([])
   })
 
-  it('places PRCLI_CLAUDE_HOME under the temp root at the one launch site', () => {
+  it('places PTERM_CLAUDE_HOME under the temp root at the one launch site', () => {
     // ~/.claude holds 73 skills, 36 commands and the plugin registry that
     // every live Claude session on this machine reads. The app only ever
     // reads it, so the failure this prevents is not destruction — it is a
     // suite whose assertions depend on whatever was installed that week.
     const harness = readCode(HARNESS)
-    expect(harness).toContain('PRCLI_CLAUDE_HOME: opts.claudeHome')
+    expect(harness).toContain('PTERM_CLAUDE_HOME: opts.claudeHome')
     expect(harness).toContain("assertUnderTmp('claudeHome', opts.claudeHome)")
   })
 
@@ -465,17 +465,17 @@ type LaunchOpts = Parameters<typeof launchApp>[0]
 
 /** Every override a throwaway path, and a socket in the suite's own namespace. */
 const safeOpts = (): LaunchOpts => ({
-  socket: 'prcli-e2e-unit',
-  configDir: join(tmpdir(), 'prcli-unit-config'),
-  projectsRoot: join(tmpdir(), 'prcli-unit-root'),
-  claudeSettings: join(tmpdir(), 'prcli-unit-settings', 'settings.json'),
-  claudeHome: join(tmpdir(), 'prcli-unit-claude-home'),
-  userDataDir: join(tmpdir(), 'prcli-unit-user'),
+  socket: 'pterm-e2e-unit',
+  configDir: join(tmpdir(), 'pterm-unit-config'),
+  projectsRoot: join(tmpdir(), 'pterm-unit-root'),
+  claudeSettings: join(tmpdir(), 'pterm-unit-settings', 'settings.json'),
+  claudeHome: join(tmpdir(), 'pterm-unit-claude-home'),
+  userDataDir: join(tmpdir(), 'pterm-unit-user'),
 })
 
 // Strings only. Nothing in this file reads, writes or lists any of these — they
 // exist to be rejected, which is the entire point.
-const REAL_CONFIG_DIR = join(homedir(), '.prcli')
+const REAL_CONFIG_DIR = join(homedir(), '.pterm')
 const REAL_PROJECTS_ROOT = join(homedir(), 'Code')
 const REAL_CLAUDE_SETTINGS = join(homedir(), '.claude', 'settings.json')
 const REAL_CLAUDE_HOME = join(homedir(), '.claude')
@@ -499,10 +499,10 @@ describe('the harness rejects a real socket or a real path before it launches an
   it.each([
     ['an empty socket, which drops tmux\'s -L and means the real default server', ''],
     ['the default socket by name', 'default'],
-    ['a socket that only nearly matches the prefix', 'prcli-e2'],
+    ['a socket that only nearly matches the prefix', 'pterm-e2'],
   ])('refuses %s', async (_label, socket) => {
     await expect(launchApp({ ...safeOpts(), socket })).rejects.toThrow(
-      /E2E socket must start with "prcli-e2e"/,
+      /E2E socket must start with "pterm-e2e"/,
     )
     // The throw has to come first, not merely happen: an app already launched
     // against the developer's tmux server cannot be un-launched by an error.
@@ -526,15 +526,15 @@ describe('the harness rejects a real socket or a real path before it launches an
   // load-bearing one — a rejection that happened after the spawn would be no
   // use at all.
   it.each([[''], ['default']])('refuses to kill-server on socket "%s"', async (socket) => {
-    await expect(killServer(socket)).rejects.toThrow(/E2E socket must start with "prcli-e2e"/)
+    await expect(killServer(socket)).rejects.toThrow(/E2E socket must start with "pterm-e2e"/)
     expect(execFileSpy).not.toHaveBeenCalled()
   })
 
   // The matching control: a socket in the suite's namespace is allowed through,
   // with `-L` and the socket name intact.
-  it('kills a prcli-e2e socket, passing -L through', async () => {
-    await expect(killServer('prcli-e2e-unit')).resolves.toBeUndefined()
-    expect(execFileSpy).toHaveBeenCalledWith('tmux', ['-L', 'prcli-e2e-unit', 'kill-server'])
+  it('kills a pterm-e2e socket, passing -L through', async () => {
+    await expect(killServer('pterm-e2e-unit')).resolves.toBeUndefined()
+    expect(execFileSpy).toHaveBeenCalledWith('tmux', ['-L', 'pterm-e2e-unit', 'kill-server'])
   })
 
   // `sessionNames` is the defence-in-depth case, and it is pinned because an
@@ -547,15 +547,15 @@ describe('the harness rejects a real socket or a real path before it launches an
   // function's `try`, so it rejects rather than being swallowed into the `[]`
   // that "no server running" returns.
   it.each([[''], ['default']])('refuses to list sessions on socket "%s"', async (socket) => {
-    await expect(sessionNames(socket)).rejects.toThrow(/E2E socket must start with "prcli-e2e"/)
+    await expect(sessionNames(socket)).rejects.toThrow(/E2E socket must start with "pterm-e2e"/)
     expect(execFileSpy).not.toHaveBeenCalled()
   })
 
-  it('lists sessions on a prcli-e2e socket, passing -L through', async () => {
-    await expect(sessionNames('prcli-e2e-unit')).resolves.toEqual([])
+  it('lists sessions on a pterm-e2e socket, passing -L through', async () => {
+    await expect(sessionNames('pterm-e2e-unit')).resolves.toEqual([])
     expect(execFileSpy).toHaveBeenCalledWith('tmux', [
       '-L',
-      'prcli-e2e-unit',
+      'pterm-e2e-unit',
       'list-sessions',
       '-F',
       '#{session_name}',

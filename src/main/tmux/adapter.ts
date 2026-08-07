@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { isPrcliSession } from './names'
+import { isPTermSession } from './names'
 
 const run = promisify(execFile)
 
@@ -101,11 +101,11 @@ export class TmuxAdapter {
     }
   }
 
-  async listPrcliSessions(): Promise<string[]> {
-    return (await this.listSessions()).filter(isPrcliSession)
+  async listPTermSessions(): Promise<string[]> {
+    return (await this.listSessions()).filter(isPTermSession)
   }
 
-  /** `=name` is tmux's exact-match syntax; without it `prcli-lumio` matches by prefix. */
+  /** `=name` is tmux's exact-match syntax; without it `pterm-lumio` matches by prefix. */
   async hasSession(name: string): Promise<boolean> {
     try {
       await this.exec(['has-session', '-t', `=${name}`])
@@ -138,7 +138,7 @@ export class TmuxAdapter {
    * Rename a session in place. Everything running inside it is untouched —
    * this only changes the name, and with it which project the tab matches.
    *
-   * `=from` is exact-match syntax; without it `prcli-lumio` would match by
+   * `=from` is exact-match syntax; without it `pterm-lumio` would match by
    * prefix. Note the target here takes no trailing colon: unlike
    * `set-option`/`show-options`, `rename-session`'s `-t` is a session target
    * already.

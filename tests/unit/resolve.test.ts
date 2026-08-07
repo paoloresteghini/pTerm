@@ -16,8 +16,8 @@ async function writeFakeTmux(inDir: string): Promise<string> {
 }
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'prcli-resolve-path-'))
-  fallbackDir = await mkdtemp(join(tmpdir(), 'prcli-resolve-fallback-'))
+  dir = await mkdtemp(join(tmpdir(), 'pterm-resolve-path-'))
+  fallbackDir = await mkdtemp(join(tmpdir(), 'pterm-resolve-fallback-'))
 })
 
 afterEach(async () => {
@@ -43,9 +43,9 @@ describe('resolveTmuxBin', () => {
     expect(resolveTmuxBin({ PATH: dir }, [fallbackDir])).toBe(onPath)
   })
 
-  it('honours PRCLI_TMUX_BIN above everything else', async () => {
+  it('honours PTERM_TMUX_BIN above everything else', async () => {
     await writeFakeTmux(dir)
-    expect(resolveTmuxBin({ PATH: dir, PRCLI_TMUX_BIN: '/custom/tmux' }, [fallbackDir]))
+    expect(resolveTmuxBin({ PATH: dir, PTERM_TMUX_BIN: '/custom/tmux' }, [fallbackDir]))
       .toBe('/custom/tmux')
   })
 

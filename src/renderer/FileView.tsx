@@ -199,7 +199,7 @@ export function FileView({
     setRefused(null)
     mtime.current = null
     let live = true
-    window.prcli
+    window.pterm
       .fsRead(projectId, relPath)
       .then((found) => {
         if (!live) return
@@ -314,7 +314,7 @@ export function FileView({
     const current = view.current
     if (current === null || relPath === null || mtime.current === null) return
     const written = current.state.doc.toString()
-    const result = await window.prcli.fsWrite(projectId, relPath, written, mtime.current)
+    const result = await window.pterm.fsWrite(projectId, relPath, written, mtime.current)
     if (result.ok) {
       // **The invariant: the baseline is what is on disk, and the dirty flag is
       // the document compared against that same baseline, decided at the same
@@ -360,7 +360,7 @@ export function FileView({
    */
   const reload = useCallback(() => {
     if (relPath === null) return
-    window.prcli
+    window.pterm
       .fsRead(projectId, relPath)
       .then((found) => {
         if (found === null) {

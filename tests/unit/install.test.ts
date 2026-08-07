@@ -8,7 +8,7 @@ import {
 } from '../../src/main/hooks/install'
 import { HOOK_EVENTS } from '../../src/main/status/machine'
 
-const HOOK = '/Users/someone/.prcli/bin/prcli-hook'
+const HOOK = '/Users/someone/.pterm/bin/pterm-hook'
 
 /**
  * Modelled on the real ~/.claude/settings.json, not invented: twelve
@@ -67,7 +67,7 @@ describe('merge', () => {
     const beforeHooks = before.hooks as Record<string, unknown[]>
     const afterHooks = next.hooks as Record<string, unknown[]>
     for (const [event, groups] of Object.entries(beforeHooks)) {
-      // PRCLI appends, so the originals must still be the leading elements in
+      // pTerm appends, so the originals must still be the leading elements in
       // the same order — a matcher intact, two groups still two groups.
       expect(afterHooks[event]?.slice(0, groups.length)).toEqual(groups)
     }
@@ -112,7 +112,7 @@ describe('merge', () => {
     expect(merge([], HOOK).added).toHaveLength(HOOK_EVENTS.length)
   })
 
-  it("gives PRCLI's PreToolUse entry no matcher, so it sees every tool", () => {
+  it("gives pTerm's PreToolUse entry no matcher, so it sees every tool", () => {
     const { next } = merge(realistic(), HOOK)
     const groups = (next.hooks as Record<string, Record<string, unknown>[]>).PreToolUse ?? []
     const ours = groups.find((group) =>
@@ -176,7 +176,7 @@ describe('unmerge', () => {
   })
 
   it('removes only the hook path it was given', () => {
-    const other = '/Users/someone/.prcli-other/bin/prcli-hook'
+    const other = '/Users/someone/.pterm-other/bin/pterm-hook'
     const both = merge(merge(realistic(), HOOK).next, other).next
     const after = unmerge(both, HOOK).next
     expect(isInstalled(after, HOOK)).toBe(false)
@@ -194,7 +194,7 @@ describe('soundCollisions', () => {
     expect(found[0]?.command).toContain('afplay')
   })
 
-  it('ignores afplay on an event PRCLI does not subscribe to', () => {
+  it('ignores afplay on an event pTerm does not subscribe to', () => {
     const settings = { hooks: { PreCompact: [{ hooks: [{ type: 'command', command: 'afplay x' }] }] } }
     expect(soundCollisions(settings)).toEqual([])
   })
@@ -207,11 +207,11 @@ describe('soundCollisions', () => {
 
 /**
  * `settings` is `unknown` for a reason: this file is not ours, and nothing
- * guarantees it holds well-formed groups by the time PRCLI reads it. A
+ * guarantees it holds well-formed groups by the time pTerm reads it. A
  * half-finished install, a hand edit, or a future Claude Code version could
  * leave a group with no `hooks` array, a `hooks` value that is itself an
  * object rather than an array, a `command` that isn't a string, or a bare
- * `null` sitting where a group should be. None of that is PRCLI's to fix,
+ * `null` sitting where a group should be. None of that is pTerm's to fix,
  * but none of it should be able to throw while merging, unmerging, or
  * checking install state either — it should just contribute nothing.
  */

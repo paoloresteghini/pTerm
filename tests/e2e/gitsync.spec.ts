@@ -21,7 +21,7 @@ import { promisify } from 'node:util'
 import { launchApp, killServer } from './harness'
 
 const execFileAsync = promisify(execFile)
-const SOCKET = 'prcli-e2e-gitsync'
+const SOCKET = 'pterm-e2e-gitsync'
 
 let app: ElectronApplication
 let page: Page
@@ -65,12 +65,12 @@ async function commit(cwd: string, name: string): Promise<string> {
 }
 
 test.beforeAll(async () => {
-  userDataDir = await mkdtemp(join(tmpdir(), 'prcli-gitsync-user-'))
-  configDir = await mkdtemp(join(tmpdir(), 'prcli-gitsync-config-'))
-  projectsRoot = await mkdtemp(join(tmpdir(), 'prcli-gitsync-root-'))
-  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'prcli-gitsync-settings-'))
-  claudeHome = await mkdtemp(join(tmpdir(), 'prcli-gitsync-claude-'))
-  gitRoot = await mkdtemp(join(tmpdir(), 'prcli-gitsync-git-'))
+  userDataDir = await mkdtemp(join(tmpdir(), 'pterm-gitsync-user-'))
+  configDir = await mkdtemp(join(tmpdir(), 'pterm-gitsync-config-'))
+  projectsRoot = await mkdtemp(join(tmpdir(), 'pterm-gitsync-root-'))
+  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'pterm-gitsync-settings-'))
+  claudeHome = await mkdtemp(join(tmpdir(), 'pterm-gitsync-claude-'))
+  gitRoot = await mkdtemp(join(tmpdir(), 'pterm-gitsync-git-'))
   claudeSettingsPath = join(claudeSettingsDir, 'settings.json')
   await writeFile(claudeSettingsPath, JSON.stringify({ enabledPlugins: {} }))
 

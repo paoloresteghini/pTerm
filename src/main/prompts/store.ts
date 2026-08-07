@@ -8,11 +8,11 @@ import type { PromptEntry } from '../../shared/ipc'
  * The user's saved prompts, global rather than per project.
  *
  * A file of its own beside `config.json`, for the reason `update/store.ts`
- * gives: `PrcliConfig` is versioned and its migrations are on the path that
+ * gives: `PTermConfig` is versioned and its migrations are on the path that
  * decides what survives a relaunch, and this list is read by nothing else.
  *
  * `configRoot()` is read at call time, not at import, so a test pointing
- * `PRCLI_CONFIG_DIR` at a temp dir gets its own file.
+ * `PTERM_CONFIG_DIR` at a temp dir gets its own file.
  */
 export function promptsPath(): string {
   return join(configRoot(), 'prompts.json')
@@ -78,7 +78,7 @@ async function write(prompts: PromptEntry[]): Promise<void> {
  * Add and remove are both read-modify-write, and two windows (or one window
  * and a fast pair of clicks) interleaving them would lose whichever change
  * read first. This chain makes each one read the file after the previous write
- * landed. It does NOT defend against a second PRCLI process, which is the same
+ * landed. It does NOT defend against a second pTerm process, which is the same
  * bound `ConfigStore`'s own queue has.
  */
 let queue: Promise<unknown> = Promise.resolve()

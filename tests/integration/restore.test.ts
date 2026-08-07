@@ -8,7 +8,7 @@ import { TmuxAdapter } from '../../src/main/tmux/adapter'
 import { SessionManager, type PaneRecord } from '../../src/main/sessions/manager'
 import {
   ConfigStore,
-  type PrcliConfig,
+  type PTermConfig,
   type ProjectRecord,
   type TabRow,
 } from '../../src/main/state/store'
@@ -16,7 +16,7 @@ import { restoreWorkspace } from '../../src/main/ipc/restore'
 import { UNSORTED_ID, type TabDescriptor } from '../../src/shared/ipc'
 
 const run = promisify(execFile)
-const SOCKET = 'prcli-test'
+const SOCKET = 'pterm-test'
 
 /** The config write queue. Restore is the only caller under test, so running
  *  each operation immediately is equivalent to the real serialised queue. */
@@ -30,7 +30,7 @@ async function killServer(): Promise<void> {
   }
 }
 
-/** A prcli-shaped session created behind the app's back, as a crash would leave. */
+/** A pterm-shaped session created behind the app's back, as a crash would leave. */
 async function createStray(name: string): Promise<void> {
   await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-s', name, 'sleep', '600'])
 }
@@ -49,7 +49,7 @@ async function configWith(config: {
   activeProjectId: string | null
   tabs: V3Tab[]
 }): Promise<ConfigStore> {
-  const dir = await mkdtemp(join(tmpdir(), 'prcli-restore-'))
+  const dir = await mkdtemp(join(tmpdir(), 'pterm-restore-'))
   const file = join(dir, 'config.json')
   await writeFile(file, JSON.stringify({ version: 3, ...config }), 'utf8')
   return new ConfigStore(file)
@@ -64,7 +64,7 @@ function tab(id: string, slug = 'lumio') {
     id,
     projectSlug: slug,
     cwd: tmpdir(),
-    tmuxSession: `prcli-${slug}-${id}`,
+    tmuxSession: `pterm-${slug}-${id}`,
   }
 }
 
@@ -98,7 +98,7 @@ async function v5ConfigWith(config: {
   panes: PaneRecord[]
   tabs: TabRow[]
 }): Promise<{ store: ConfigStore; file: string }> {
-  const dir = await mkdtemp(join(tmpdir(), 'prcli-restore-v5-'))
+  const dir = await mkdtemp(join(tmpdir(), 'pterm-restore-v5-'))
   const file = join(dir, 'config.json')
   await writeFile(file, JSON.stringify({ version: 5, ...config }), 'utf8')
   return { store: new ConfigStore(file), file }
@@ -112,8 +112,8 @@ async function v5ConfigWith(config: {
  * dropped a pane and never redistributed its share would be repaired by the
  * reader and the test would pass on a defect.
  */
-async function written(file: string): Promise<PrcliConfig> {
-  return JSON.parse(await readFile(file, 'utf8')) as PrcliConfig
+async function written(file: string): Promise<PTermConfig> {
+  return JSON.parse(await readFile(file, 'utf8')) as PTermConfig
 }
 
 /** What tmux itself thinks the session's window measures. */
@@ -166,7 +166,7 @@ afterEach(killServer)
 
 describe('restoreWorkspace', () => {
   it('adopts a stray session that config has never heard of', async () => {
-    await createStray('prcli-lumio-a1b2c3d4e5f60718')
+    await createStray('pterm-lumio-a1b2c3d4e5f60718')
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
     const store = await configWith({ projects: [], activeProjectId: null, tabs: [] })
 
@@ -197,9 +197,9 @@ describe('restoreWorkspace', () => {
   })
 
   it('keeps config order and puts unknown strays after it', async () => {
-    await createStray('prcli-lumio-1111111111111111')
-    await createStray('prcli-lumio-2222222222222222')
-    await createStray('prcli-lumio-3333333333333333')
+    await createStray('pterm-lumio-1111111111111111')
+    await createStray('pterm-lumio-2222222222222222')
+    await createStray('pterm-lumio-3333333333333333')
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
     // Config knows 3 then 1, in that order, and not 2 at all.
     const store = await configWith({
@@ -219,8 +219,8 @@ describe('restoreWorkspace', () => {
   })
 
   it('preserves the saved active tab when its session survived', async () => {
-    await createStray('prcli-lumio-1111111111111111')
-    await createStray('prcli-lumio-2222222222222222')
+    await createStray('pterm-lumio-1111111111111111')
+    await createStray('pterm-lumio-2222222222222222')
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
     // v3: the active tab is claimed by a project rather than held globally.
     const store = await configWith({
@@ -236,7 +236,7 @@ describe('restoreWorkspace', () => {
   })
 
   it('falls back to the first tab when the saved active tab died', async () => {
-    await createStray('prcli-lumio-1111111111111111')
+    await createStray('pterm-lumio-1111111111111111')
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
     const store = await configWith({
       projects: [project('Lumio', 'lumio', tmpdir(), '2222222222222222')],
@@ -251,7 +251,7 @@ describe('restoreWorkspace', () => {
   })
 
   it('writes the reconciled workspace back to config', async () => {
-    await createStray('prcli-lumio-1111111111111111')
+    await createStray('pterm-lumio-1111111111111111')
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
     const store = await configWith({ projects: [], activeProjectId: null, tabs: [] })
 
@@ -281,9 +281,9 @@ describe('restoreWorkspace', () => {
   // every claude/preset tab back to plain shell on every relaunch, and
   // nothing above would notice.
   it('carries a v4 row\'s own type through the reconcile, not the shell default the orphan synthesises', async () => {
-    await createStray('prcli-lumio-1111111111111111')
+    await createStray('pterm-lumio-1111111111111111')
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
-    const dir = await mkdtemp(join(tmpdir(), 'prcli-restore-v4-'))
+    const dir = await mkdtemp(join(tmpdir(), 'pterm-restore-v4-'))
     const file = join(dir, 'config.json')
     await writeFile(
       file,
@@ -296,7 +296,7 @@ describe('restoreWorkspace', () => {
             id: '1111111111111111',
             projectSlug: 'lumio',
             cwd: tmpdir(),
-            tmuxSession: 'prcli-lumio-1111111111111111',
+            tmuxSession: 'pterm-lumio-1111111111111111',
             type: 'claude',
           },
         ],
@@ -315,7 +315,7 @@ describe('restoreWorkspace', () => {
 
 describe('restoreWorkspace projects', () => {
   it('groups a tab under the project whose slug it carries', async () => {
-    await createStray('prcli-lumio-1111111111111111')
+    await createStray('pterm-lumio-1111111111111111')
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
     const store = await configWith({
       projects: [project('Lumio', 'lumio', tmpdir())],
@@ -331,8 +331,8 @@ describe('restoreWorkspace projects', () => {
   })
 
   it('puts a tab matching no project under Unsorted, last', async () => {
-    await createStray('prcli-lumio-1111111111111111')
-    await createStray('prcli-scratch-2222222222222222')
+    await createStray('pterm-lumio-1111111111111111')
+    await createStray('pterm-scratch-2222222222222222')
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
     const store = await configWith({
       projects: [project('Lumio', 'lumio', tmpdir())],
@@ -348,7 +348,7 @@ describe('restoreWorkspace projects', () => {
   })
 
   it('omits Unsorted entirely when every tab matches', async () => {
-    await createStray('prcli-lumio-1111111111111111')
+    await createStray('pterm-lumio-1111111111111111')
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
     const store = await configWith({
       projects: [project('Lumio', 'lumio', tmpdir())],
@@ -363,9 +363,9 @@ describe('restoreWorkspace projects', () => {
   })
 
   it("resolves each project's active tab independently", async () => {
-    await createStray('prcli-lumio-1111111111111111')
-    await createStray('prcli-lumio-2222222222222222')
-    await createStray('prcli-gco-3333333333333333')
+    await createStray('pterm-lumio-1111111111111111')
+    await createStray('pterm-lumio-2222222222222222')
+    await createStray('pterm-gco-3333333333333333')
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
     const store = await configWith({
       projects: [
@@ -385,7 +385,7 @@ describe('restoreWorkspace projects', () => {
   })
 
   it("falls back to a project's first tab when its saved active tab died", async () => {
-    await createStray('prcli-lumio-1111111111111111')
+    await createStray('pterm-lumio-1111111111111111')
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
     const store = await configWith({
       projects: [project('Lumio', 'lumio', tmpdir(), '9999999999999999')],
@@ -426,7 +426,7 @@ describe('restoreWorkspace projects', () => {
   })
 
   it('can hold Unsorted as the selected project across a relaunch', async () => {
-    await createStray('prcli-scratch-2222222222222222')
+    await createStray('pterm-scratch-2222222222222222')
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
     const store = await configWith({ projects: [], activeProjectId: UNSORTED_ID, tabs: [] })
 
@@ -437,9 +437,9 @@ describe('restoreWorkspace projects', () => {
   })
 
   it("merges the repo's own presets under the user's", async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'prcli-repo-'))
+    const cwd = await mkdtemp(join(tmpdir(), 'pterm-repo-'))
     await writeFile(
-      join(cwd, '.prcli.json'),
+      join(cwd, '.pterm.json'),
       JSON.stringify({ presets: [{ label: 'queue', command: 'php artisan queue:work' }] }),
       'utf8',
     )
@@ -464,7 +464,7 @@ describe('restoreWorkspace projects', () => {
   })
 
   it('marks a project whose directory has gone as unavailable', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'prcli-gone-'))
+    const cwd = await mkdtemp(join(tmpdir(), 'pterm-gone-'))
     await rm(cwd, { recursive: true, force: true })
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
     const store = await configWith({
@@ -479,7 +479,7 @@ describe('restoreWorkspace projects', () => {
   })
 
   it('does not persist the synthetic Unsorted row', async () => {
-    await createStray('prcli-scratch-2222222222222222')
+    await createStray('pterm-scratch-2222222222222222')
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
     const store = await configWith({ projects: [], activeProjectId: null, tabs: [] })
 
@@ -490,7 +490,7 @@ describe('restoreWorkspace projects', () => {
   })
 
   it("writes each project's resolved active tab back to config", async () => {
-    await createStray('prcli-lumio-1111111111111111')
+    await createStray('pterm-lumio-1111111111111111')
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
     const store = await configWith({
       projects: [project('Lumio', 'lumio', tmpdir())],
@@ -527,8 +527,8 @@ describe('restoreWorkspace projects', () => {
   // project is visible. One project cannot show that: every mapping, right or
   // wrong, produces the same file.
   it('writes each resolved active tab against its own project row', async () => {
-    await createStray('prcli-lumio-1111111111111111')
-    await createStray('prcli-gco-3333333333333333')
+    await createStray('pterm-lumio-1111111111111111')
+    await createStray('pterm-gco-3333333333333333')
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
     const store = await configWith({
       projects: [
@@ -736,7 +736,7 @@ describe('restoreWorkspace panes and tabs', () => {
   // writing nothing at all: an implementation that kept every saved row would
   // write two, and one that wrote none would lose the survivor.
   it('drops a tab whose panes have all gone, and keeps the one that has not', async () => {
-    await createStray('prcli-lumio-1111111111111111')
+    await createStray('pterm-lumio-1111111111111111')
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
     const gone = [tab('00000000000000ff'), tab('00000000000000fe')]
     const { store, file } = await v5ConfigWith({
@@ -772,7 +772,7 @@ describe('restoreWorkspace panes and tabs', () => {
   })
 
   it('gives a pane config never knew about a one-pane tab of its own', async () => {
-    await createStray('prcli-lumio-a1b2c3d4e5f60718')
+    await createStray('pterm-lumio-a1b2c3d4e5f60718')
     const manager = new SessionManager(new TmuxAdapter({ socket: SOCKET }))
     const { store, file } = await v5ConfigWith({
       projects: [],
@@ -848,7 +848,7 @@ describe('restoreWorkspace panes and tabs', () => {
     expect(await windowIdOf(sessionOf(founder))).toBe(founderWindow)
 
     // The pruned member is not merely dropped from the tab — it is killed.
-    // Dropping alone leaves a live prcli session with no config row and no
+    // Dropping alone leaves a live pterm session with no config row and no
     // tab-bar entry, which every future restore prunes again and nothing can
     // ever reach: the spec's "a crashed or closed pane leaves no window and
     // no member session behind", failed permanently. Killing its SESSION is

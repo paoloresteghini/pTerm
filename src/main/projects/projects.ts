@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { slugify } from '../tmux/names'
-import type { PrcliConfig, Preset, ProjectRecord } from '../state/store'
+import type { PTermConfig, Preset, ProjectRecord } from '../state/store'
 import { UNSORTED_ID } from '../../shared/ipc'
 
 // The synthetic project that collects tabs whose slug matches nothing real,
@@ -33,9 +33,9 @@ export function allocateSlug(name: string, taken: Iterable<string>): string {
 }
 
 export function addProject(
-  config: PrcliConfig,
+  config: PTermConfig,
   input: { name: string; cwd: string },
-): { config: PrcliConfig; project: ProjectRecord } {
+): { config: PTermConfig; project: ProjectRecord } {
   if (config.projects.some((project) => project.cwd === input.cwd)) {
     throw new Error(`addProject: ${JSON.stringify(input.cwd)} is already a project`)
   }
@@ -62,7 +62,7 @@ export function addProject(
   }
 }
 
-export function removeProject(config: PrcliConfig, id: string): PrcliConfig {
+export function removeProject(config: PTermConfig, id: string): PTermConfig {
   const index = config.projects.findIndex((project) => project.id === id)
   if (index === -1) return config
   const projects = config.projects.filter((project) => project.id !== id)
@@ -79,10 +79,10 @@ export function removeProject(config: PrcliConfig, id: string): PrcliConfig {
 }
 
 export function updateProject(
-  config: PrcliConfig,
+  config: PTermConfig,
   id: string,
   patch: { name?: string; presets?: Preset[] },
-): PrcliConfig {
+): PTermConfig {
   if (!config.projects.some((project) => project.id === id)) return config
   return {
     ...config,
@@ -100,7 +100,7 @@ export function updateProject(
   }
 }
 
-export function reorderProjects(config: PrcliConfig, ids: string[]): PrcliConfig {
+export function reorderProjects(config: PTermConfig, ids: string[]): PTermConfig {
   const byId = new Map(config.projects.map((project) => [project.id, project]))
   const ordered: ProjectRecord[] = []
   for (const id of ids) {
@@ -115,6 +115,6 @@ export function reorderProjects(config: PrcliConfig, ids: string[]): PrcliConfig
   return { ...config, projects: ordered }
 }
 
-export function projectForSlug(config: PrcliConfig, slug: string): ProjectRecord | undefined {
+export function projectForSlug(config: PTermConfig, slug: string): ProjectRecord | undefined {
   return config.projects.find((project) => project.slug === slug)
 }

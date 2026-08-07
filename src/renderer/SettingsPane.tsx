@@ -58,7 +58,7 @@ export function SettingsPane({
     // surfacing one: the version is decoration next to a dialog that already
     // works, not something the user asked for, so a failed read just leaves
     // the ellipsis in place instead of needing a place to show an error.
-    window.prcli
+    window.pterm
       .appVersion()
       .then(setVersion)
       .catch(() => undefined)
@@ -68,21 +68,21 @@ export function SettingsPane({
   // successful Skip updates the result line without the user closing and
   // reopening the dialog.
   const refreshSkipped = (): void => {
-    window.prcli
+    window.pterm
       .skippedVersion()
       .then(setSkippedVersion)
       .catch(() => undefined)
   }
 
   // Refetched every time the pane opens, like `hooksState` just below: another
-  // PRCLI window's Skip button, or a hand edit of update.json, could have
+  // pTerm window's Skip button, or a hand edit of update.json, could have
   // changed what is skipped since this pane last read it.
   useEffect(() => {
     if (!open) return
     refreshSkipped()
   }, [open])
 
-  // Refetched every time the pane opens: another PRCLI window, or a hand
+  // Refetched every time the pane opens: another pTerm window, or a hand
   // edit, could have changed either file since it was last read. Both reads
   // share this one effect and its `cancelled` flag, but keep separate state
   // and error variables: settings.json and the rc file fail independently of
@@ -91,7 +91,7 @@ export function SettingsPane({
     if (!open) return
     let cancelled = false
     setHooksError(null)
-    window.prcli
+    window.pterm
       .hooksState()
       .then((state) => {
         if (!cancelled) setHooks(state)
@@ -103,7 +103,7 @@ export function SettingsPane({
         }
       })
     setShellHistoryError(null)
-    window.prcli
+    window.pterm
       .shellHistoryState()
       .then((state) => {
         if (!cancelled) setShellHistory(state)
@@ -144,7 +144,7 @@ export function SettingsPane({
   const updateRule = (state: TabState, patch: Partial<Rule>): void => {
     if (!notifications) return
     const rules = setGlobalRule(notifications.rules, state, patch)
-    window.prcli
+    window.pterm
       .updateNotifications({ rules })
       .then((config) => {
         setNotifError(null)
@@ -155,7 +155,7 @@ export function SettingsPane({
 
   const toggleMuteWhenFocused = (): void => {
     if (!notifications) return
-    window.prcli
+    window.pterm
       .updateNotifications({ muteWhenFocused: !notifications.muteWhenFocused })
       .then((config) => {
         setNotifError(null)
@@ -203,7 +203,7 @@ export function SettingsPane({
                     </p>
                   ))}
                   <p className="text-faint">
-                    PRCLI ships its own sounds off by default so they cannot double up with these.
+                    pTerm ships its own sounds off by default so they cannot double up with these.
                   </p>
                 </div>
               ) : null}
@@ -219,14 +219,14 @@ export function SettingsPane({
                 <Button
                   data-testid="hooks-install"
                   disabled={busy || hooks.installed}
-                  onClick={() => runHooksAction(() => window.prcli.installHooks())}
+                  onClick={() => runHooksAction(() => window.pterm.installHooks())}
                 >
                   Install
                 </Button>
                 <Button
                   data-testid="hooks-uninstall"
                   disabled={busy || !hooks.installed}
-                  onClick={() => runHooksAction(() => window.prcli.uninstallHooks())}
+                  onClick={() => runHooksAction(() => window.pterm.uninstallHooks())}
                 >
                   Uninstall
                 </Button>
@@ -283,8 +283,8 @@ export function SettingsPane({
                   NOT want to be recorded, and the paragraph above states the
                   same asymmetry for install. Uninstall rewrites .zshrc and
                   nothing else; a pane already running has sourced the script
-                  and holds prcli_history_preexec in its own
-                  `preexec_functions`, with PRCLI_HISTORY_FILE already set as a
+                  and holds pterm_history_preexec in its own
+                  `preexec_functions`, with PTERM_HISTORY_FILE already set as a
                   shell variable. Measured 2026-08-06 against the real rendered
                   script: a live interactive zsh went on recording after the
                   script file was DELETED under it, which is stronger than
@@ -310,14 +310,14 @@ export function SettingsPane({
                 <Button
                   data-testid="shell-history-install"
                   disabled={shellBusy || shellHistory.installed}
-                  onClick={() => runShellHistoryAction(() => window.prcli.installShellHistory())}
+                  onClick={() => runShellHistoryAction(() => window.pterm.installShellHistory())}
                 >
                   Install
                 </Button>
                 <Button
                   data-testid="shell-history-uninstall"
                   disabled={shellBusy || !shellHistory.installed}
-                  onClick={() => runShellHistoryAction(() => window.prcli.uninstallShellHistory())}
+                  onClick={() => runShellHistoryAction(() => window.pterm.uninstallShellHistory())}
                 >
                   Uninstall
                 </Button>
@@ -439,7 +439,7 @@ export function SettingsPane({
               disabled={checking}
               onClick={() => {
                 setChecking(true)
-                window.prcli
+                window.pterm
                   .checkForUpdate()
                   .then(setUpdateResult)
                   .catch((reason: unknown) =>
@@ -461,7 +461,7 @@ export function SettingsPane({
             {updateResult?.info ? (
               <Button
                 data-testid="update-download-settings"
-                onClick={() => void window.prcli.openExternal(updateResult.info!.url)}
+                onClick={() => void window.pterm.openExternal(updateResult.info!.url)}
               >
                 Download
               </Button>
@@ -475,7 +475,7 @@ export function SettingsPane({
               <Button
                 data-testid="update-skip-settings"
                 onClick={() => {
-                  void window.prcli.skipUpdate(updateResult.info!.version).then(refreshSkipped)
+                  void window.pterm.skipUpdate(updateResult.info!.version).then(refreshSkipped)
                 }}
               >
                 Skip this version

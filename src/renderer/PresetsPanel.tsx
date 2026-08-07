@@ -22,7 +22,7 @@ export function PresetsPanel({
   collapsed: boolean
   onToggle: () => void
 }) {
-  const { width, set, commit } = useColumnWidth('prcli:presetsWidth')
+  const { width, set, commit } = useColumnWidth('pterm:presetsWidth')
 
   if (collapsed) {
     return <PanelStrip testid="presets-toggle" label="Presets" onClick={onToggle} />
@@ -64,7 +64,7 @@ export function PresetsPanel({
             is never actually empty. */}
         {project && project.presets.length === 0 ? (
           <p className="px-2.5 py-1 text-faint">
-            No declared presets. Add a .prcli.json to the repository.
+            No declared presets. Add a .pterm.json to the repository.
           </p>
         ) : null}
       </div>

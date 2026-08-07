@@ -131,7 +131,7 @@ const config: ForgeConfig = {
      * E2E suite, because Gatekeeper only enforces a signature on a file
      * carrying the quarantine attribute (set when a file arrives via
      * download, not when it's built locally). A user who downloads the
-     * zipped app gets "PRCLI.app is damaged and can't be opened", with no
+     * zipped app gets "pTerm.app is damaged and can't be opened", with no
      * "Open Anyway" fallback.
      *
      * `postPackage` is the only hook that fires after electron-packager's

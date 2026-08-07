@@ -10,12 +10,12 @@ const run = promisify(execFile)
 /**
  * The prefix every socket this suite is allowed to touch must carry.
  *
- * Until now this was convention, held by four `const SOCKET = 'prcli-e2e…'`
+ * Until now this was convention, held by four `const SOCKET = 'pterm-e2e…'`
  * lines and nothing else, and both ways of breaking it are silent:
  *
  * - `TmuxAdapter.baseArgs()` is `this.socket ? ['-L', this.socket] : []`
  *   (`src/main/tmux/adapter.ts:76-78`, read 2026-08-02), so a falsy
- *   `PRCLI_TMUX_SOCKET` is not a broken socket — it drops `-L` entirely and the
+ *   `PTERM_TMUX_SOCKET` is not a broken socket — it drops `-L` entirely and the
  *   launched app talks to the developer's **default tmux server**, the one
  *   carrying every session they have open;
  * - `killServer` hands its argument straight to `tmux -L <socket> kill-server`,
@@ -25,7 +25,7 @@ const run = promisify(execFile)
  * `string`. This prefix is what catches them, and it is checked before anything
  * is launched or killed rather than after.
  */
-const SOCKET_PREFIX = 'prcli-e2e'
+const SOCKET_PREFIX = 'pterm-e2e'
 
 function assertTestSocket(socket: string): void {
   if (!socket.startsWith(SOCKET_PREFIX)) {
@@ -69,7 +69,7 @@ function assertUnderTmp(label: string, value: string): void {
  * The one place the app is launched from.
  *
  * Every one of the five overrides is REQUIRED, not optional-with-a-default.
- * Three of the four spec files went without `PRCLI_CLAUDE_SETTINGS` until
+ * Three of the four spec files went without `PTERM_CLAUDE_SETTINGS` until
  * 2026-08-02, which meant a single added click on `hooks-install` would have
  * rewritten the developer's real ~/.claude/settings.json. A required
  * parameter is the fix; a default would restore the hole with better manners.
@@ -99,7 +99,7 @@ export async function launchApp(opts: {
    * Where the shell inside a pane reads its startup files from, for a spec
    * that cares what its panes' shell actually does.
    *
-   * `PRCLI_ZSHRC` above is the file this APP edits; this is the directory the
+   * `PTERM_ZSHRC` above is the file this APP edits; this is the directory the
    * pane's zsh READS, and they are only the same file for a real user. A spec
    * that sets this owns the pane's prompt and the pane's own command history
    * instead of inheriting the developer's, which is what makes an assertion
@@ -107,7 +107,7 @@ export async function launchApp(opts: {
    *
    * How it gets there was measured 2026-08-06 rather than assumed, and it is
    * indirect: nothing in `SessionManager` passes it. Every `-e` it sends tmux
-   * carries `PRCLI_TAB_ID` and nothing else (`src/main/sessions/manager.ts`,
+   * carries `PTERM_TAB_ID` and nothing else (`src/main/sessions/manager.ts`,
    * four sites). What happens instead is that the tmux SERVER is started by
    * this Electron process, inherits its environment into the server's global
    * environment table, and hands that to the sessions it then creates:
@@ -169,27 +169,27 @@ export async function launchApp(opts: {
       // it would still paint without them was not measured, so do not read
       // their presence as proof they are load-bearing, or their removal as
       // safe.
-      ...(process.env.PRCLI_E2E_VISIBLE === '1'
+      ...(process.env.PTERM_E2E_VISIBLE === '1'
         ? []
         : ['--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding']),
     ],
     env: {
       ...process.env,
-      // Keep the app's config out of the real ~/.prcli during tests.
-      PRCLI_CONFIG_DIR: opts.configDir,
-      PRCLI_TMUX_SOCKET: opts.socket,
+      // Keep the app's config out of the real ~/.pterm during tests.
+      PTERM_CONFIG_DIR: opts.configDir,
+      PTERM_TMUX_SOCKET: opts.socket,
       // The default root is the developer's real ~/Code. Even the specs that
       // never open the add-project dialog set it: defending a directory that
       // must not be scanned costs one line.
-      PRCLI_PROJECTS_ROOT: opts.projectsRoot,
+      PTERM_PROJECTS_ROOT: opts.projectsRoot,
       // Read by every live Claude session on this machine, and one of the two
       // a spec could omit and still pass every assertion it has.
-      PRCLI_CLAUDE_SETTINGS: opts.claudeSettings,
+      PTERM_CLAUDE_SETTINGS: opts.claudeSettings,
       // Holds 73 skills, 36 commands and the plugin registry that every live
       // Claude session on this machine reads. Read-only from the app's side,
       // but a suite resolving against the real one asserts against whatever
       // was installed that week.
-      PRCLI_CLAUDE_HOME: opts.claudeHome,
+      PTERM_CLAUDE_HOME: opts.claudeHome,
       // Off in every spec. `scheduleUpdateChecks` otherwise fires ten seconds
       // after each launch, and every spec here launches a real app, so the
       // suite would put a request on api.github.com per launch and its
@@ -197,16 +197,16 @@ export async function launchApp(opts: {
       // rate limit. Once the update bar exists, an `available` reply would also
       // paint a bar over whatever the spec was asserting on, nondeterministically
       // and in specs that have nothing to do with updates.
-      PRCLI_UPDATE_CHECK: '0',
+      PTERM_UPDATE_CHECK: '0',
       // On by default, because the default is a run that owns the screen for
-      // its whole length. `PRCLI_E2E_VISIBLE=1` puts the window back where a
+      // its whole length. `PTERM_E2E_VISIBLE=1` puts the window back where a
       // developer can watch it, which is what debugging a spec wants.
-      ...(process.env.PRCLI_E2E_VISIBLE === '1' ? {} : { PRCLI_BACKGROUND_WINDOW: '1' }),
+      ...(process.env.PTERM_E2E_VISIBLE === '1' ? {} : { PTERM_BACKGROUND_WINDOW: '1' }),
       // Only set when a spec asks for it, so `readRc` in every other spec
       // still falls through to its own ENOENT-means-empty branch rather than
       // pointing at a path nothing wrote.
-      ...(opts.zshrc !== undefined ? { PRCLI_ZSHRC: opts.zshrc } : {}),
-      // Not a PRCLI_ variable: zsh's own, read by the shell in every pane
+      ...(opts.zshrc !== undefined ? { PTERM_ZSHRC: opts.zshrc } : {}),
+      // Not a PTERM_ variable: zsh's own, read by the shell in every pane
       // this launch's tmux server starts. See the option's comment for the
       // route it takes and for the one condition it depends on.
       ...(opts.zdotdir !== undefined ? { ZDOTDIR: opts.zdotdir } : {}),
@@ -282,6 +282,47 @@ export async function capturePane(socket: string, session: string): Promise<stri
   } catch {
     return ''
   }
+}
+
+/**
+ * Every mounted pane's buffer as text, in mount order — the e2e-side end of
+ * `window.__ptermTerminalTexts` in `src/renderer/Terminal.tsx`, which explains
+ * why the DOM cannot answer this any more (the WebGL renderer leaves
+ * `.xterm-rows` empty). Callers wanting "anywhere on screen" join the array;
+ * callers that mean one specific pane index into it, which is what
+ * `.locator('.xterm-rows').first()` used to express.
+ *
+ * A missing hook reads as `[]`, not a throw, so `expect.poll` can start
+ * asking before the renderer has finished mounting.
+ */
+export async function terminalTexts(page: Page): Promise<string[]> {
+  return page.evaluate(() => (window.__ptermTerminalTexts?.() ?? []).map((pane) => pane.text))
+}
+
+/**
+ * The visible tab's panes' buffers as one string — what `toContainText` on
+ * `terminal-active` used to read, including the half the old assertions
+ * leaned on silently: text on a HIDDEN tab does not count. The ids under the
+ * `terminal-active` element say which panes are the visible tab's; the hook
+ * says what each holds; the join is their intersection.
+ *
+ * Empty string when no tab is visible yet, for the same pollability reason
+ * `terminalTexts` returns `[]`.
+ */
+export async function activeTerminalText(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const active = document.querySelector('[data-testid="terminal-active"]')
+    if (!active) return ''
+    const ids = new Set(
+      [...active.querySelectorAll('[data-testid^="pane-"]')].map((el) =>
+        (el.getAttribute('data-testid') ?? '').slice('pane-'.length),
+      ),
+    )
+    return (window.__ptermTerminalTexts?.() ?? [])
+      .filter((pane) => ids.has(pane.id))
+      .map((pane) => pane.text)
+      .join('\n')
+  })
 }
 
 /**

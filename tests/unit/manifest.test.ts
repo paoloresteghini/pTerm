@@ -7,7 +7,7 @@ import { readManifest, mergePresets } from '../../src/main/projects/manifest'
 let dir: string
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'prcli-manifest-'))
+  dir = await mkdtemp(join(tmpdir(), 'pterm-manifest-'))
 })
 
 afterEach(async () => {
@@ -15,7 +15,7 @@ afterEach(async () => {
 })
 
 async function manifest(contents: string): Promise<void> {
-  await writeFile(join(dir, '.prcli.json'), contents, 'utf8')
+  await writeFile(join(dir, '.pterm.json'), contents, 'utf8')
 }
 
 describe('readManifest', () => {
@@ -57,8 +57,8 @@ describe('readManifest', () => {
     await expect(readManifest(join(dir, 'gone'))).resolves.toEqual([])
   })
 
-  it('returns nothing when .prcli.json is a directory', async () => {
-    await mkdir(join(dir, '.prcli.json'))
+  it('returns nothing when .pterm.json is a directory', async () => {
+    await mkdir(join(dir, '.pterm.json'))
     await expect(readManifest(dir)).resolves.toEqual([])
   })
 })

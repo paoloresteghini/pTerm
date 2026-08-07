@@ -37,7 +37,7 @@ import type { TabDescriptor, TabRow, TabShape } from '../../src/shared/ipc'
 const TAB = 'a'
 
 function pane(id: string): TabDescriptor {
-  return { id, projectSlug: 'proj', cwd: '/tmp', tmuxSession: `prcli-proj-${id}`, type: 'shell' }
+  return { id, projectSlug: 'proj', cwd: '/tmp', tmuxSession: `pterm-proj-${id}`, type: 'shell' }
 }
 
 /** A tab row over `kids`, at `ratio` — main's shape and the renderer's alike. */
@@ -529,7 +529,7 @@ describe('the whole-tab property, exhaustively', () => {
    * the MODEL — the dismiss step's renormalise, removed, must fail the dismiss
    * cases — rather than breaking production code. Neither A/B lives in this
    * file; both are recorded in the plan, in
-   * `.superpowers/sdd/2026-08-02-prcli-tombstone-membership/task-8-report.md`.
+   * `.superpowers/sdd/2026-08-02-pterm-tombstone-membership/task-8-report.md`.
    *
    * **What this does NOT show, and cannot: `inLiveFrame`.** The property is
    * asserted off `paneGroups` — what is actually drawn — and `inLiveFrame` is
@@ -544,7 +544,7 @@ describe('the whole-tab property, exhaustively', () => {
    * fixtures; it is why the first of this property's two A/Bs mutates the
    * `tombstonesOf` append in `carveRatio` instead, and the reasoning and the
    * measurements are recorded in the plan, in
-   * `.superpowers/sdd/2026-08-02-prcli-tombstone-membership/task-8-addendum.md`.
+   * `.superpowers/sdd/2026-08-02-pterm-tombstone-membership/task-8-addendum.md`.
    * `inLiveFrame` is pinned on the
    * wire instead, by `tests/unit/carveRatio.test.ts`, `tests/unit/shares.test.ts`,
    * and by this file's own wire-level assertions in the four-orderings,

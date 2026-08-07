@@ -11,7 +11,7 @@
  * and a parse that throws inside a render would be found by a user rather than
  * by a test.
  */
-const KEY = 'prcli:treeExpanded:'
+const KEY = 'pterm:treeExpanded:'
 
 /**
  * The open directories of `projectId`, as relative paths.

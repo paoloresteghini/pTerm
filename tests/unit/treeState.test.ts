@@ -55,11 +55,11 @@ describe('readExpanded and writeExpanded', () => {
   // localStorage is a text file by another name: a hand-edited or truncated
   // value must not throw inside a render.
   it('reads unparseable or wrongly shaped storage as nothing open', () => {
-    localStorage.setItem('prcli:treeExpanded:p1', '{not json')
+    localStorage.setItem('pterm:treeExpanded:p1', '{not json')
     expect([...readExpanded('p1')]).toEqual([])
-    localStorage.setItem('prcli:treeExpanded:p1', '{"src":true}')
+    localStorage.setItem('pterm:treeExpanded:p1', '{"src":true}')
     expect([...readExpanded('p1')]).toEqual([])
-    localStorage.setItem('prcli:treeExpanded:p1', '[1,2,3]')
+    localStorage.setItem('pterm:treeExpanded:p1', '[1,2,3]')
     expect([...readExpanded('p1')]).toEqual([])
   })
 })

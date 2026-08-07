@@ -1,7 +1,7 @@
 /**
  * The split surface, seen by a test for the first time.
  *
- * Nine tests on the `prcli-e2e-splits` socket. Three are about making a split:
+ * Nine tests on the `pterm-e2e-splits` socket. Three are about making a split:
  * ⌘D turns one pane into two inside a single tab, backed by two tmux sessions,
  * with the new pane taking the selection and ⌥⌘← giving it back; a ⌘D on a pane
  * too narrow to halve is refused, with the reason on screen and no second
@@ -194,7 +194,7 @@ import { join } from 'node:path'
 import { launchApp, killServer, sessionNames } from './harness'
 
 const run = promisify(execFile)
-const SOCKET = 'prcli-e2e-splits'
+const SOCKET = 'pterm-e2e-splits'
 
 /**
  * The floor `App.tsx` refuses a column split under, and the width at which
@@ -230,7 +230,7 @@ const launch = (): Promise<ElectronApplication> =>
  * the config file is seeded directly. Returns the project's directory.
  */
 async function seedProject(slug: string, name: string): Promise<string> {
-  const cwd = await mkdtemp(join(tmpdir(), `prcli-proj-${slug}-`))
+  const cwd = await mkdtemp(join(tmpdir(), `pterm-proj-${slug}-`))
   await writeFile(
     join(configDir, 'config.json'),
     JSON.stringify({
@@ -400,13 +400,13 @@ async function panePid(session: string): Promise<string> {
 
 test.beforeEach(async () => {
   await killServer(SOCKET)
-  userDataDir = await mkdtemp(join(tmpdir(), 'prcli-splits-user-'))
-  configDir = await mkdtemp(join(tmpdir(), 'prcli-splits-config-'))
-  projectsRoot = await mkdtemp(join(tmpdir(), 'prcli-splits-root-'))
+  userDataDir = await mkdtemp(join(tmpdir(), 'pterm-splits-user-'))
+  configDir = await mkdtemp(join(tmpdir(), 'pterm-splits-config-'))
+  projectsRoot = await mkdtemp(join(tmpdir(), 'pterm-splits-root-'))
   projectCwd = await seedProject('scratch', 'Scratch')
-  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'prcli-splits-settings-'))
+  claudeSettingsDir = await mkdtemp(join(tmpdir(), 'pterm-splits-settings-'))
   claudeSettingsPath = join(claudeSettingsDir, 'settings.json')
-  claudeHome = await mkdtemp(join(tmpdir(), 'prcli-splits-claude-'))
+  claudeHome = await mkdtemp(join(tmpdir(), 'pterm-splits-claude-'))
 })
 
 test.afterEach(async () => {
@@ -600,12 +600,12 @@ test('a killed pane leaves a tombstone where it was, and its tab keeps the other
 
   // The victim is named from the APP's own pane id and the slug `beforeEach`
   // seeded, never from whatever a session listing happened to return second —
-  // `SessionManager` names a member session `prcli-<projectSlug>-<paneId>`
-  // (see `tests/integration/pane-death.test.ts`'s `prcli-alpha-${founder.id}`).
+  // `SessionManager` names a member session `pterm-<projectSlug>-<paneId>`
+  // (see `tests/integration/pane-death.test.ts`'s `pterm-alpha-${founder.id}`).
   // Asserted to exist on THIS socket before its pid is looked up, so the
   // `kill` below cannot be aimed at anything this file did not create; see
   // `panePid` for the rest of the guard.
-  const victim = `prcli-scratch-${right}`
+  const victim = `pterm-scratch-${right}`
   expect(await sessionNames(SOCKET)).toContain(victim)
   await run('kill', ['-9', await panePid(victim)])
 
@@ -711,7 +711,7 @@ test('dragging the divider moves the seam, reflows tmux, and is written down on 
   const seamMiddle = seamBefore.x + seamBefore.width / 2
   expect(Math.abs(seamMiddle - (leftBefore.x + leftBefore.width))).toBeLessThan(6)
 
-  const colsBefore = await windowCols(`prcli-scratch-${left}`)
+  const colsBefore = await windowCols(`pterm-scratch-${left}`)
   // Non-finite first: every `toBeGreaterThan` below is false against `NaN`, so a
   // reading that failed to parse would turn the reflow poll into a guaranteed
   // timeout wearing the costume of a failed assertion.
@@ -801,14 +801,14 @@ test('dragging the divider moves the seam, reflows tmux, and is written down on 
   // Measured 2026-08-02, because it rests on something this project had never
   // checked: the two panes of a split are two tmux SESSIONS IN ONE SESSION
   // GROUP, and grouped sessions share a window list. Attaching two clients at
-  // 200 and 37 columns to a grouped pair on a scratch `prcli-e2e-probe` socket
+  // 200 and 37 columns to a grouped pair on a scratch `pterm-e2e-probe` socket
   // — each member bound to its own window by index, exactly as
   // `SessionManager.splitTab` binds them — reported `#{window_width}` of 200
   // and 37, and after resizing the clients to 240 and 20 reported 240 and 20.
   // Each session reports ITS OWN window. There is no shared minimum, so this
   // poll means what it says.
   await expect
-    .poll(async () => await windowCols(`prcli-scratch-${left}`), { timeout: 20_000 })
+    .poll(async () => await windowCols(`pterm-scratch-${left}`), { timeout: 20_000 })
     .toBeGreaterThan(colsBefore)
 
   // And written down, on release, to the founder pane's tab row.
@@ -986,7 +986,7 @@ test('a drag on a tab holding a tombstone is kept, and the tombstone keeps its n
   // seeded, and asserted to exist on THIS socket before its pid is looked up.
   // See `panePid` for the rest of the guard; this is the same derivation the
   // tombstone test above uses and there is deliberately no second path to it.
-  const victim = `prcli-scratch-${dead}`
+  const victim = `pterm-scratch-${dead}`
   expect(await sessionNames(SOCKET)).toContain(victim)
   await run('kill', ['-9', await panePid(victim)])
   await expect(window.getByTestId(`dead-${dead}`)).toBeVisible({ timeout: 20_000 })
