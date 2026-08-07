@@ -1649,9 +1649,17 @@ export function registerIpc(
         // A pane already showing this path and side is the answer, not a
         // reason to mint a second one. Returning the existing record makes
         // the renderer's `opened` action select it, which is the focus this
-        // gesture wants.
+        // gesture wants. Scoped to THIS project too: two projects can point
+        // into the same repository and resolve the same absolute filePath,
+        // and `workspace.ts`'s `opened` case derives which project to focus
+        // from the returned pane's `projectSlug`, so returning the other
+        // project's record would silently activate the wrong project's tab.
         const already = config.panes.find(
-          (row) => row.type === 'diff' && row.filePath === filePath && row.diffSide === side,
+          (row) =>
+            row.type === 'diff' &&
+            row.filePath === filePath &&
+            row.diffSide === side &&
+            row.projectSlug === project.slug,
         )
         if (already) return already
 

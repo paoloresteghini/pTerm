@@ -1,6 +1,15 @@
 import { useEffect, useState } from 'react'
 import type { DiffSide } from '../shared/ipc'
 import { PANE_COLOR_DEFAULT, type PaneColor } from '../shared/paneColors'
+import { classifyDiffLines, type DiffLineKind } from './lib/diffLines'
+
+const CLASS_FOR_KIND: Record<DiffLineKind, string> = {
+  header: 'whitespace-pre text-faint',
+  hunk: 'whitespace-pre text-label',
+  add: 'whitespace-pre text-ok',
+  remove: 'whitespace-pre text-danger',
+  context: 'whitespace-pre text-muted',
+}
 
 /**
  * One path's unified diff, read-only.
@@ -64,23 +73,13 @@ export function DiffView({
       ) : null}
       {text && text.trim() !== '' ? (
         <div data-testid="diff-content" className="p-2">
-          {text.split('\n').map((line, index) => (
+          {classifyDiffLines(text).map(({ line, kind }, index) => (
             <div
               // Index keys: these lines have no identity of their own, the
               // list is replaced wholesale on every read, and nothing in it is
               // reordered or focused.
               key={index}
-              className={
-                line.startsWith('+++') || line.startsWith('---')
-                  ? 'whitespace-pre text-faint'
-                  : line.startsWith('@@')
-                    ? 'whitespace-pre text-label'
-                    : line.startsWith('+')
-                      ? 'whitespace-pre text-ok'
-                      : line.startsWith('-')
-                        ? 'whitespace-pre text-danger'
-                        : 'whitespace-pre text-muted'
-              }
+              className={CLASS_FOR_KIND[kind]}
             >
               {line === '' ? ' ' : line}
             </div>

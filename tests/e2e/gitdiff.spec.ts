@@ -107,6 +107,50 @@ test('clicking the same file twice focuses the pane rather than adding one', asy
   expect(await page.locator('[data-testid^="tab-"]').count()).toBe(after)
 })
 
+// The dedup `find` in `openDiff` matched `filePath` and `diffSide` but not
+// which project asked, so two projects pointing into the same repository
+// (a supported configuration) resolved the same absolute `filePath` and the
+// second project's click silently returned the first project's pane.
+// `workspace.ts`'s `opened` case derives which project to focus from the
+// RETURNED pane's `projectSlug`, so the second project's screen never
+// changed at all: no new tab, no diff-content, nothing visibly happened.
+test('a project sharing a repository with another opens its own diff pane', async () => {
+  await writeFile(join(repo, 'tracked.txt'), 'two\n', 'utf8')
+  await writeFile(
+    join(configDir, 'config.json'),
+    JSON.stringify({
+      version: 3,
+      projects: [
+        { id: 'id-repo', name: 'Repo', slug: 'repo', cwd: repo, presets: [], activeTabId: null },
+        { id: 'id-repo2', name: 'Repo2', slug: 'repo2', cwd: repo, presets: [], activeTabId: null },
+      ],
+      activeProjectId: 'id-repo',
+      tabs: [],
+    }),
+    'utf8',
+  )
+  await open()
+  // Scoped to the ACTIVE group: once both projects have opened their own
+  // diff pane, `diff-content` matches twice (the other project's stays
+  // mounted, hidden), which is ambiguous for a plain `page.getByTestId`.
+  const active = () => page.getByTestId('terminal-active')
+
+  await page.getByTestId('gitpanel-unstaged-tracked.txt').click()
+  await expect(active().getByTestId('diff-content')).toBeVisible({ timeout: 15_000 })
+  expect(await page.locator('[data-testid^="tab-"]').count()).toBe(1)
+
+  await page.getByTestId('project-id-repo2').click()
+  await expect(page.getByTestId('gitpanel-unstaged-tracked.txt')).toBeVisible({ timeout: 15_000 })
+  await page.getByTestId('gitpanel-unstaged-tracked.txt').click()
+
+  await expect(active().getByTestId('diff-content')).toBeVisible({ timeout: 15_000 })
+  expect(await page.locator('[data-testid^="tab-"]').count()).toBe(1)
+
+  await page.getByTestId('project-id-repo').click()
+  await expect(active().getByTestId('diff-content')).toBeVisible({ timeout: 15_000 })
+  expect(await page.locator('[data-testid^="tab-"]').count()).toBe(1)
+})
+
 // The seam that silently erases a new pane type: sessionlessPanes.ts's filter.
 test('a diff pane survives a relaunch', async () => {
   await writeFile(join(repo, 'tracked.txt'), 'two\n', 'utf8')
