@@ -66,4 +66,44 @@ describe('the section-label colour', () => {
     expect(sidebar).toContain('uppercase tracking-wider text-label')
     expect(sidebar).not.toContain('uppercase tracking-wider text-faint')
   })
+
+  // The settings pane drew its section headings in `text-faint` on
+  // `bg-surface` until 2026-08-07, which is the same 1.86:1 pair this file
+  // exists because of. It was missed the first time because that fix went
+  // through `ui/Panel.tsx`, which the settings sections do not use.
+  //
+  // Since 2026-08-07's tab strip, Hooks is the only one of the four that
+  // still draws a heading: the strip already names Notifications, Shell
+  // history and Updates, so their own headings repeated the tab label and
+  // were dropped, while "Claude hooks" says something "Hooks" does not and
+  // stayed. So only Hooks is checked for the colour; the other three are
+  // checked only for the regression this file exists to catch, which is
+  // still a live risk for whatever text they do draw.
+  it('is what the settings sections draw their headings in', () => {
+    const dir = new URL('../../src/renderer/settings/', import.meta.url)
+    const hooks = readFileSync(new URL('HooksSection.tsx', dir), 'utf8')
+    // Ties the colour to the element that renders the heading text itself,
+    // not to any other `text-label` in the file: HooksSection also carries
+    // one on its collisions paragraph, which would keep this green even if
+    // the heading span were recoloured.
+    expect(hooks).toMatch(/className="[^"]*\btext-label\b[^"]*"[^>]*>Claude hooks/)
+    expect(hooks).not.toContain('text-faint')
+
+    // Every other file the settings pane renders, checked for the regression
+    // this file exists to catch. `SettingsTabs.tsx` and `SettingsPane.tsx`
+    // belong in this list too: the tab strip's inactive labels and the
+    // dialog's title and footer are exactly the kind of text a repalette
+    // could walk back to the unreadable colour, and neither file was in this
+    // loop before, so a repalette there would have shipped green.
+    for (const file of [
+      'ShellHistorySection.tsx',
+      'NotificationsSection.tsx',
+      'UpdatesSection.tsx',
+      'SettingsTabs.tsx',
+      'SettingsPane.tsx',
+    ]) {
+      const source = readFileSync(new URL(file, dir), 'utf8')
+      expect(source).not.toContain('text-faint')
+    }
+  })
 })

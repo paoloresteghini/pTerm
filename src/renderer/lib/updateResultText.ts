@@ -6,7 +6,7 @@ import type { UpdateCheckResult } from '../../shared/ipc'
  * Pulled out of the JSX rather than inlined, because the real check almost
  * never reaches `available`, `current` or `skipped` against this repo today
  * (see `tests/e2e/settingsUpdate.spec.ts`): the release feed 404s until a
- * repo and a release exist, so an inline ternary in `SettingsPane.tsx` would
+ * repo and a release exist, so an inline ternary in `UpdatesSection.tsx` would
  * have three of its four branches with no test of any kind, `failed` being
  * the only one an E2E run ever exercises. A pure function gives the other
  * three somewhere to be unit tested directly, with a fixture `UpdateCheckResult`

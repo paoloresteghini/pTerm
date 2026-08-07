@@ -98,6 +98,9 @@ test('settings names the version and answers a check', async () => {
   await expect(page.getByTestId('settings-pane')).toBeVisible()
   await expect(page.getByTestId('update-current-version')).toHaveText(/^\d+\.\d+\.\d+$/)
 
+  // Everything below is behind the Updates tab; the version above is not,
+  // which is the point of the footer.
+  await page.getByTestId('settings-tab-updates').click()
   await page.getByTestId('update-check-now').click()
   await expect(page.getByTestId('update-check-result')).toBeVisible({ timeout: 15_000 })
   await expect(page.getByTestId('update-check-result')).toHaveText(
