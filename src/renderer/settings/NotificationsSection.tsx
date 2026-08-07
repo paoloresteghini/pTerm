@@ -44,9 +44,6 @@ export function NotificationsSection({
 
   return (
     <section>
-      <div className="mb-2 text-[11px] uppercase tracking-wider text-label">
-        Notifications
-      </div>
       {notifError ? (
         <p data-testid="notifications-error" className="mb-2 text-[11px] text-danger">
           {notifError}

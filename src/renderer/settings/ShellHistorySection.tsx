@@ -44,8 +44,7 @@ export function ShellHistorySection() {
 
   return (
     <section>
-      <div className="mb-2 flex items-center justify-between">
-        <span className="text-[11px] uppercase tracking-wider text-label">Shell history</span>
+      <div className="mb-2 flex items-center">
         <span data-testid="shell-history-status" className="text-[11px] text-muted">
           {shellHistory ? (shellHistory.installed ? 'installed' : 'not installed') : '…'}
         </span>
