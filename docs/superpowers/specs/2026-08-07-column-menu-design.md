@@ -10,7 +10,7 @@ Plus one item that hides every column and restores the set you had.
 
 | Question | Decision |
 |---|---|
-| Which "panes" | The six side columns: Files, Skills, Presets, Prompts, Notes, Git |
+| Which "panes" | The six side columns: Files, Skills, Presets, Prompts, Git, Notes |
 | Menu items | Checkbox items showing real state, flat in View, not a submenu |
 | Accelerators | `⌥⌘F` `⌥⌘S` `⌥⌘P` `⌥⌘R` `⌥⌘N` `⌥⌘G`, all verified unclaimed |
 | Who handles the keystroke | The renderer, via `registerAccelerator: false` |
@@ -25,8 +25,8 @@ View
     Skills             ⌥⌘S
   ✓ Presets            ⌥⌘P
     Prompts            ⌥⌘R
-    Notes              ⌥⌘N
   ✓ Git                ⌥⌘G
+    Notes              ⌥⌘N
   ─────────────────────
     Hide All Columns   ⇧⌘\
   ─────────────────────
@@ -36,6 +36,12 @@ View
 ```
 
 Order matches the columns on screen, left to right, so the menu reads like the window.
+
+Corrected 2026-08-07, after implementation: this block and the row above originally listed
+Notes before Git, which is not the order they render in. `App.tsx` has rendered `GitPanel`
+before `NotesPanel` since the git column landed, and no `order-*` utility reorders the flex
+row, so the on-screen order is the one written above. Every downstream artifact copied the
+transposition from here before it was caught.
 
 ## Why the renderer handles the keystrokes
 

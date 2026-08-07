@@ -130,7 +130,17 @@ test('the hide-all item renames itself once everything is hidden', async () => {
 // Electron matches a registered accelerator against native menu items, so a
 // synthetic keypress never reaches that layer whether or not the item claims
 // the accelerator. Whether `registerAccelerator: false` still matters for a
-// REAL keystroke is not tested anywhere in this suite.
+// REAL keystroke cannot be tested from Playwright at all, for that reason.
+//
+// The property itself is gated, just not from here: `shortcuts.test.ts`'s
+// "never claims an accelerator from the window" asserts over the source text
+// of `src/main/index.ts` that every item naming an accelerator also carries
+// `registerAccelerator: false`. Measured on 2026-08-07 against this branch's
+// own `toggle-git` item, three ways: deleting its `registerAccelerator: false`
+// fails the per-item assertion, setting it to `true` fails the `not.toMatch`,
+// and giving `click` a braced body (which drops the item out of the per-item
+// regex) still fails the count assertion. So a regression here is caught by
+// `npm test`, not by this file.
 test('a column shortcut typed into a text field does not toggle the column', async () => {
   await clickMenuItem('toggle-notes')
   await expect(page.getByTestId('notes-panel')).toBeVisible()
