@@ -28,7 +28,7 @@ export function UpdatesSection() {
   return (
     <section>
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-[11px] uppercase tracking-wider text-faint">Updates</span>
+        <span className="text-[11px] uppercase tracking-wider text-label">Updates</span>
       </div>
 
       {/* The one place an update failure is visible. Everywhere else a

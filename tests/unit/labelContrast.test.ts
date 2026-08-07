@@ -66,4 +66,22 @@ describe('the section-label colour', () => {
     expect(sidebar).toContain('uppercase tracking-wider text-label')
     expect(sidebar).not.toContain('uppercase tracking-wider text-faint')
   })
+
+  // The settings pane drew its section headings in `text-faint` on
+  // `bg-surface` until 2026-08-07, which is the same 1.86:1 pair this file
+  // exists because of. It was missed the first time because that fix went
+  // through `ui/Panel.tsx`, which the settings sections do not use.
+  it('is what the settings sections draw their headings in', () => {
+    const dir = new URL('../../src/renderer/settings/', import.meta.url)
+    for (const file of [
+      'HooksSection.tsx',
+      'ShellHistorySection.tsx',
+      'NotificationsSection.tsx',
+      'UpdatesSection.tsx',
+    ]) {
+      const source = readFileSync(new URL(file, dir), 'utf8')
+      expect(source).toContain('text-label')
+      expect(source).not.toContain('text-faint')
+    }
+  })
 })

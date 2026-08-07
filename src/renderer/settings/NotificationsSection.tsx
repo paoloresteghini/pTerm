@@ -44,7 +44,7 @@ export function NotificationsSection({
 
   return (
     <section>
-      <div className="mb-2 text-[11px] uppercase tracking-wider text-faint">
+      <div className="mb-2 text-[11px] uppercase tracking-wider text-label">
         Notifications
       </div>
       {notifError ? (
@@ -54,7 +54,7 @@ export function NotificationsSection({
       ) : null}
       <table className="w-full text-[11px]">
         <thead>
-          <tr className="text-faint">
+          <tr className="text-label">
             <th className="pb-1 text-left font-normal">State</th>
             <th className="pb-1 text-left font-normal">Toast</th>
             <th className="pb-1 text-left font-normal">Sound</th>

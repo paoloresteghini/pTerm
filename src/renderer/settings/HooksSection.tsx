@@ -46,7 +46,7 @@ export function HooksSection() {
   return (
     <section>
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-[11px] uppercase tracking-wider text-faint">Claude hooks</span>
+        <span className="text-[11px] uppercase tracking-wider text-label">Claude hooks</span>
         <span data-testid="hooks-status" className="text-[11px] text-muted">
           {hooks ? (hooks.installed ? 'installed' : 'not installed') : '…'}
         </span>
@@ -67,7 +67,7 @@ export function HooksSection() {
                   {collision.event} already runs {collision.command}
                 </p>
               ))}
-              <p className="text-faint">
+              <p className="text-label">
                 pTerm ships its own sounds off by default so they cannot double up with these.
               </p>
             </div>
