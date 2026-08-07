@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, Menu, Notification } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, Notification } from 'electron'
 import type { MenuItemConstructorOptions } from 'electron'
 import { execFile } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
@@ -182,6 +182,35 @@ if (!isPrimaryInstance) {
  */
 function sendMenuCommand(command: MenuCommand): void {
   mainWindow?.webContents.send(CHANNELS.menuCommand, command)
+}
+
+/**
+ * Show the renderer's column state on the View menu.
+ *
+ * By id rather than by rebuilding the template: a rebuild would re-create
+ * every item on every column toggle, and the ids already exist for the tests
+ * to click through.
+ */
+function showColumns(collapsed: Record<string, boolean>): void {
+  const menu = Menu.getApplicationMenu()
+  if (!menu) return
+  const ids: Record<string, string> = {
+    files: 'toggle-files',
+    skills: 'toggle-skills',
+    presets: 'toggle-presets',
+    prompts: 'toggle-prompts',
+    notes: 'toggle-notes',
+    git: 'toggle-git',
+  }
+  let open = false
+  for (const [column, itemId] of Object.entries(ids)) {
+    const shut = collapsed[column] === true
+    if (!shut) open = true
+    const item = menu.getMenuItemById(itemId)
+    if (item) item.checked = !shut
+  }
+  const all = menu.getMenuItemById('hide-all-columns')
+  if (all) all.label = open ? 'Hide All Columns' : 'Show All Columns'
 }
 
 function installMenu(): void {
@@ -454,6 +483,9 @@ app.whenReady().then(async () => {
   }
 
   installMenu()
+  ipcMain.on(CHANNELS.columnsVisible, (_event, collapsed: Record<string, boolean>) => {
+    showColumns(collapsed)
+  })
 
   registerIpc(manager, () => mainWindow, registry, store, setAttendedTab, () =>
     router.refreshBadge(),

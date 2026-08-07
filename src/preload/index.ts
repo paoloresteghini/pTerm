@@ -125,6 +125,7 @@ const api: PTermApi = {
     ipcRenderer.invoke(CHANNELS.gitDiff, projectId, relPath, side),
   openDiff: (projectId: string, relPath: string, side: DiffSide): Promise<TabDescriptor | null> =>
     ipcRenderer.invoke(CHANNELS.openDiff, projectId, relPath, side),
+  columnsVisible: (collapsed) => ipcRenderer.send(CHANNELS.columnsVisible, collapsed),
 }
 
 contextBridge.exposeInMainWorld('pterm', api)

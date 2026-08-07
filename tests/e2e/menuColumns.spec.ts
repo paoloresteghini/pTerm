@@ -27,10 +27,19 @@ async function clickMenuItem(id: string): Promise<void> {
   }, id)
 }
 
-// `isChecked` and `labelOf` (checking a checkbox's state and reading a menu
-// item's label) belong here per the brief, but `tsconfig.json` has
-// `noUnusedLocals: true`, which rejects them unused. Task 4 adds them back
-// alongside the tests that call them.
+/** Whether a checkbox menu item is ticked, the way a look at the menu bar would show. */
+async function isChecked(id: string): Promise<boolean> {
+  return app.evaluate(({ Menu }, itemId) => {
+    return Menu.getApplicationMenu()?.getMenuItemById(itemId)?.checked ?? false
+  }, id)
+}
+
+/** A menu item's current label, for the hide-all item's two readings. */
+async function labelOf(id: string): Promise<string | undefined> {
+  return app.evaluate(({ Menu }, itemId) => {
+    return Menu.getApplicationMenu()?.getMenuItemById(itemId)?.label
+  }, id)
+}
 
 test.beforeEach(async () => {
   userDataDir = await mkdtemp(join(tmpdir(), 'pterm-e2e-'))
@@ -92,4 +101,37 @@ test('hide all closes every open column, and a second press restores exactly the
   // Exactly those two, not a default set.
   await expect(page.getByTestId('files-panel')).toHaveCount(0)
   await expect(page.getByTestId('skills-panel')).toHaveCount(0)
+})
+
+// Without the sync this fails while the column itself works fine, which is
+// exactly the gap Task 3 could not close on its own.
+test('opening a column by its strip ticks the menu item', async () => {
+  expect(await isChecked('toggle-git')).toBe(false)
+
+  await page.getByTestId('git-toggle').click()
+  await expect(page.getByTestId('git-panel')).toBeVisible()
+
+  await expect.poll(() => isChecked('toggle-git'), { timeout: 10_000 }).toBe(true)
+})
+
+test('the hide-all item renames itself once everything is hidden', async () => {
+  await clickMenuItem('toggle-git')
+  await expect.poll(() => labelOf('hide-all-columns'), { timeout: 10_000 }).toBe('Hide All Columns')
+
+  await clickMenuItem('hide-all-columns')
+  await expect.poll(() => labelOf('hide-all-columns'), { timeout: 10_000 }).toBe('Show All Columns')
+})
+
+// The reason every item sets `registerAccelerator: false`. An
+// Electron-registered accelerator fires everywhere, including while the user
+// is typing, which this app has shipped as a bug twice.
+test('a column shortcut typed into a text field does not toggle the column', async () => {
+  await clickMenuItem('toggle-notes')
+  await expect(page.getByTestId('notes-panel')).toBeVisible()
+
+  await page.getByTestId('notes-textarea').click()
+  await page.keyboard.press('Alt+Meta+G')
+  await page.waitForTimeout(500)
+
+  await expect(page.getByTestId('git-panel')).toHaveCount(0)
 })

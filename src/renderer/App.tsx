@@ -243,6 +243,20 @@ export function App() {
     }
   }, [filesCollapsed, skillsCollapsed, presetsCollapsed, promptsCollapsed, notesCollapsed, gitCollapsed])
 
+  // Main cannot read localStorage or React state, so the menu's checkmarks
+  // would otherwise be a guess. Sent on mount too, not only on change: a
+  // relaunch restores these from localStorage without any toggle firing.
+  useEffect(() => {
+    window.pterm.columnsVisible({
+      files: filesCollapsed,
+      skills: skillsCollapsed,
+      presets: presetsCollapsed,
+      prompts: promptsCollapsed,
+      notes: notesCollapsed,
+      git: gitCollapsed,
+    })
+  }, [filesCollapsed, skillsCollapsed, presetsCollapsed, promptsCollapsed, notesCollapsed, gitCollapsed])
+
   const project = activeProject(state)
   const currentTabId = activeTabId(state)
   const currentTabs = state.activeProjectId ? tabsOfProject(state, state.activeProjectId) : []

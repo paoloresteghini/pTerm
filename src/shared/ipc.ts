@@ -68,6 +68,7 @@ export const CHANNELS = {
   gitStash: 'pterm:gitStash',
   gitDiff: 'pterm:gitDiff',
   openDiff: 'pterm:openDiff',
+  columnsVisible: 'pterm:columnsVisible',
 } as const
 
 /**
@@ -1023,4 +1024,14 @@ export interface PTermApi {
    * path cannot be resolved.
    */
   openDiff(projectId: string, relPath: string, side: DiffSide): Promise<TabDescriptor | null>
+  /**
+   * Tell main which side columns are collapsed, so the View menu's checkboxes
+   * and its hide-all label can show the truth.
+   *
+   * Fire and forget, like `setActive`: main holds this only for display, and
+   * the renderer stays the source of truth. A dropped message costs a stale
+   * tick until the next change, never a wrong toggle, because every menu
+   * command still asks the renderer to flip its own state.
+   */
+  columnsVisible(collapsed: Record<string, boolean>): void
 }
