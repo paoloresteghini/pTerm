@@ -43,8 +43,11 @@ export function parseStatus(stdout: string): Omit<GitChanges, 'repo'> {
 
     if (field.startsWith('# branch.head ')) {
       const name = field.slice('# branch.head '.length).trim()
-      // git writes this literal for a detached HEAD, and a branch cannot be
-      // named with parentheses, so there is nothing real to confuse it with.
+      // git writes this literal for a detached HEAD. git does not forbid a
+      // branch literally named '(detached)' (measured: `git branch
+      // "(detached)"` succeeds), so such a branch would read identically to
+      // a real detached HEAD. That ambiguity is in the porcelain format
+      // itself and is accepted here as negligible.
       branch = name === '(detached)' ? null : name
       continue
     }

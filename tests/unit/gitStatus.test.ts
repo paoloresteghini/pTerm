@@ -9,6 +9,21 @@ const z = (...fields: string[]): string => `${fields.join('\0')}\0`
 
 const ORDINARY = '1 .M N... 100644 100644 100644 aaaa bbbb src/renderer/Terminal.tsx'
 
+/**
+ * A rename's original path, deliberately shaped like an untracked entry
+ * ('? '-prefixed) rather than a plain 'old.ts'.
+ *
+ * The parser's skip past this field is what stops it being read as an entry
+ * of its own. A plain 'old.ts' fixture cannot catch a regression of that
+ * skip: read as its own entry, 'old.ts' starts with 'o', which matches none
+ * of the recognised markers and is silently `continue`d, so the two tests
+ * below passed unchanged with the skip deleted. This value fails loudly
+ * instead: read as its own entry it takes the `? ` branch and adds a
+ * spurious row to `unstaged`, which the assertions below can see. Measured
+ * by deleting the skip in status.ts and watching both tests go red.
+ */
+const RENAME_FROM = '? old.ts'
+
 describe('parseStatus', () => {
   it('reads the branch and head from the header', () => {
     const changes = parseStatus(z('# branch.oid abc123', '# branch.head master'))
@@ -71,17 +86,17 @@ describe('parseStatus', () => {
   // entry, not part of it.
   it('reads a rename and its original path', () => {
     const changes = parseStatus(
-      z('2 R. N... 100644 100644 100644 aaaa bbbb R100 new.ts', 'old.ts'),
+      z('2 R. N... 100644 100644 100644 aaaa bbbb R100 new.ts', RENAME_FROM),
     )
     expect(changes.staged).toEqual([
-      { path: 'new.ts', staged: 'R', worktree: null, renamedFrom: 'old.ts' },
+      { path: 'new.ts', staged: 'R', worktree: null, renamedFrom: RENAME_FROM },
     ])
     expect(changes.unstaged).toEqual([])
   })
 
   it('does not mistake a rename original for an entry of its own', () => {
     const changes = parseStatus(
-      z('2 R. N... 100644 100644 100644 aaaa bbbb R100 new.ts', 'old.ts', ORDINARY),
+      z('2 R. N... 100644 100644 100644 aaaa bbbb R100 new.ts', RENAME_FROM, ORDINARY),
     )
     expect(changes.staged).toHaveLength(1)
     expect(changes.unstaged).toEqual([
