@@ -43,7 +43,7 @@ export function ShellHistorySection() {
   }
 
   return (
-    <section className="mb-4 border-b border-border pb-3">
+    <section>
       <div className="mb-2 flex items-center justify-between">
         <span className="text-[11px] uppercase tracking-wider text-faint">Shell history</span>
         <span data-testid="shell-history-status" className="text-[11px] text-muted">

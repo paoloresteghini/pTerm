@@ -92,6 +92,8 @@ test('names its rc and script, shows the real pending block, and round-trips the
   expect(SETTINGS_COMMAND).toBe('settings')
 
   await expect(page.getByTestId('settings-pane')).toBeVisible()
+  // The shell-history rows moved behind a tab; the pane opens on Notifications.
+  await page.getByTestId('settings-tab-shell-history').click()
   await expect(page.getByTestId('shell-history-status')).toHaveText('not installed')
 
   // Names the file it will edit and the script it will write, not just some

@@ -44,7 +44,7 @@ export function HooksSection() {
   }
 
   return (
-    <section className="mb-4 border-b border-border pb-3">
+    <section>
       <div className="mb-2 flex items-center justify-between">
         <span className="text-[11px] uppercase tracking-wider text-faint">Claude hooks</span>
         <span data-testid="hooks-status" className="text-[11px] text-muted">

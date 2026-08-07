@@ -5,21 +5,9 @@ import { errorMessage } from './errorMessage'
 import { updateResultText } from '../lib/updateResultText'
 
 export function UpdatesSection() {
-  const [version, setVersion] = useState<string | null>(null)
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null)
   const [checking, setChecking] = useState(false)
   const [skippedVersion, setSkippedVersion] = useState<string | null>(null)
-
-  useEffect(() => {
-    // Swallows its error rather than surfacing one, like refreshSkipped just
-    // below: the version is decoration next to a dialog that already works,
-    // not something the user asked for, so a failed read just leaves the
-    // ellipsis in place instead of needing a place to show an error.
-    window.pterm
-      .appVersion()
-      .then(setVersion)
-      .catch(() => undefined)
-  }, [])
 
   // Shared by the effect just below and the Skip button further down, so a
   // successful Skip updates the result line without the user closing and
@@ -38,12 +26,9 @@ export function UpdatesSection() {
   }, [])
 
   return (
-    <section className="mb-4 border-b border-border pb-3">
+    <section>
       <div className="mb-2 flex items-center justify-between">
         <span className="text-[11px] uppercase tracking-wider text-faint">Updates</span>
-        <span data-testid="update-current-version" className="text-[11px] text-muted">
-          {version ?? '…'}
-        </span>
       </div>
 
       {/* The one place an update failure is visible. Everywhere else a

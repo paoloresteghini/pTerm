@@ -679,6 +679,9 @@ test('install and uninstall leave an unrelated hook untouched', async () => {
   const window = await app.firstWindow()
 
   await window.getByTestId('settings-open').click()
+  // The hooks rows moved behind a tab. Notifications is what the pane opens
+  // on, so nothing under Hooks is in the DOM until this click.
+  await window.getByTestId('settings-tab-hooks').click()
   await expect(window.getByTestId('hooks-status')).toHaveText('not installed')
 
   await window.getByTestId('hooks-install').click()
