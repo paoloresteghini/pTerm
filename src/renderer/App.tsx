@@ -76,21 +76,22 @@ const MIN_PANE_COLS = 20
 const MIN_PANE_ROWS = 5
 
 /**
- * Collapse state for the five collapsible columns, in the same shape
- * `NotesPanel` stores its own: '0' means expanded, anything else (including
- * absent) means collapsed.
+ * Collapse state for the six collapsible columns: '0' means expanded,
+ * anything else (including absent) means collapsed.
  *
  * **Every one of them defaults collapsed**, so a fresh profile shows the
  * projects sidebar and the terminal and nothing else. Each expanded column
- * costs 208px, and five of them plus the sidebar leave under 40px of terminal
- * on the 1280px window `src/main/index.ts` opens, narrower than any splittable
- * pane. The state persists per column, so this is the first run only.
+ * costs 208px: six of them plus the 208px sidebar is 1456px, which already
+ * exceeds the 1280px window `src/main/index.ts` opens, so all six cannot be
+ * open at once. The state persists per column, so this is the first run
+ * only.
  */
 const SKILLS_KEY = 'pterm:skillsCollapsed'
 const PRESETS_KEY = 'pterm:presetsCollapsed'
 const FILES_KEY = 'pterm:filesCollapsed'
 const PROMPTS_KEY = 'pterm:promptsCollapsed'
 const GIT_KEY = 'pterm:gitCollapsed'
+const NOTES_KEY = 'pterm:notesCollapsed'
 
 /** Reads one of those keys, with the default applied when nothing is stored. */
 function storedCollapsed(key: string, fallback: boolean): boolean {
@@ -109,6 +110,7 @@ export function App() {
   const [filesCollapsed, setFilesCollapsed] = useState(() => storedCollapsed(FILES_KEY, true))
   const [promptsCollapsed, setPromptsCollapsed] = useState(() => storedCollapsed(PROMPTS_KEY, true))
   const [gitCollapsed, setGitCollapsed] = useState(() => storedCollapsed(GIT_KEY, true))
+  const [notesCollapsed, setNotesCollapsed] = useState(() => storedCollapsed(NOTES_KEY, true))
   const [paletteOpen, setPaletteOpen] = useState(false)
   // Set once the workspace exists. Until then this window knows nothing about
   // what is selected and must not say anything about it — see the effects.
@@ -142,7 +144,7 @@ export function App() {
   }, [])
 
   // Clicking a column's own heading or strip moves only that column. The
-  // localStorage write sits in the updater the way `NotesPanel`'s does; it is
+  // localStorage write sits in the updater, same shape for all six; it is
   // idempotent, so StrictMode's double invocation costs nothing.
   const toggleSkills = useCallback(() => {
     setSkillsCollapsed((was) => {
@@ -171,6 +173,12 @@ export function App() {
   const togglePresets = useCallback(() => {
     setPresetsCollapsed((was) => {
       localStorage.setItem(PRESETS_KEY, was ? '0' : '1')
+      return !was
+    })
+  }, [])
+  const toggleNotes = useCallback(() => {
+    setNotesCollapsed((was) => {
+      localStorage.setItem(NOTES_KEY, was ? '0' : '1')
       return !was
     })
   }, [])
@@ -1456,7 +1464,7 @@ export function App() {
           onOpenDiff={openDiff}
         />
 
-        <NotesPanel project={project} />
+        <NotesPanel project={project} collapsed={notesCollapsed} onToggle={toggleNotes} />
 
         <CommandPalette
           open={paletteOpen}
