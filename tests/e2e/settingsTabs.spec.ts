@@ -114,6 +114,9 @@ test('the version footer is on every tab', async () => {
   await expect(page.getByTestId('update-current-version')).toHaveText(/^\d+\.\d+\.\d+$/)
   for (const id of ['notifications', 'hooks', 'shell-history']) {
     await page.getByTestId(`settings-tab-${id}`).click()
+    // Proves the click actually moved the selection, not just that the
+    // footer's text (identical on every tab) happened to match again.
+    await expect(page.getByTestId(`settings-tab-${id}`)).toHaveAttribute('aria-selected', 'true')
     await expect(page.getByTestId('update-current-version')).toHaveText(/^\d+\.\d+\.\d+$/)
   }
 })
@@ -124,13 +127,21 @@ test('the arrow keys move the selection', async () => {
   await page.getByTestId('settings-tab-notifications').click()
   await expect(page.getByTestId('settings-tab-notifications')).toHaveAttribute('aria-selected', 'true')
 
+  // `locator.press()` focuses its own target before dispatching, so it can
+  // only seed the first key: used again on the second and third, it would
+  // plant focus itself and prove nothing about where the component actually
+  // left it. So only this first press comes from a locator; the rest go
+  // through `page.keyboard`, which fires wherever focus already is, and the
+  // `toBeFocused` right after it is what confirms the component moved focus
+  // there itself (`buttons.current[...].focus()` in SettingsTabs.tsx).
   await page.getByTestId('settings-tab-notifications').press('ArrowRight')
   await expect(page.getByTestId('settings-tab-hooks')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByTestId('settings-tab-hooks')).toBeFocused()
   await expect(page.getByTestId('hooks-status')).toBeVisible()
 
   // Wrapping backwards off the first tab reaches the last.
-  await page.getByTestId('settings-tab-hooks').press('ArrowLeft')
-  await page.getByTestId('settings-tab-notifications').press('ArrowLeft')
+  await page.keyboard.press('ArrowLeft')
+  await page.keyboard.press('ArrowLeft')
   await expect(page.getByTestId('settings-tab-updates')).toHaveAttribute('aria-selected', 'true')
 })
 

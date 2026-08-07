@@ -59,9 +59,13 @@ export function SettingsPane({
 
         <SettingsTabs active={tab} onSelect={setTab} />
 
-        {/* Only the selected section is mounted. Each one reads its own file
-            on mount, so selecting a tab is what gives it a fresh read, and a
-            tab nobody opens costs nothing. */}
+        {/* Only the selected section is mounted. Hooks, shell history and
+            Updates each read their own file on mount, so selecting one of
+            those tabs is what gives it a fresh read. Notifications takes its
+            data as a prop instead, fetched once at app startup, so it has no
+            mount read to trigger; it still unmounts and remounts with the
+            others, which just costs it nothing since there is no listener or
+            timer on it to clean up either. */}
         <div role="tabpanel" id={`settings-panel-${tab}`} aria-labelledby={`settings-tab-${tab}`}>
           {tab === 'notifications' ? (
             <NotificationsSection

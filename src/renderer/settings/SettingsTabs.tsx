@@ -20,8 +20,7 @@ export function SettingsTabs({
   onSelect: (id: SettingsTabId) => void
 }) {
   // Keyed by tab id so an arrow key can move focus to the tab it selects.
-  // Without this the roving tabIndex moves but the focus ring does not, and a
-  // second arrow press comes from the old button.
+  // Without this the roving tabIndex moves but the focus ring does not.
   const buttons = useRef<Partial<Record<SettingsTabId, HTMLButtonElement | null>>>({})
   const index = SETTINGS_TABS.findIndex((tab) => tab.id === active)
 
@@ -37,7 +36,10 @@ export function SettingsTabs({
           role="tab"
           id={`settings-tab-${tab.id}`}
           aria-selected={tab.id === active}
-          aria-controls={`settings-panel-${tab.id}`}
+          // Only one panel is ever in the DOM (see SettingsPane.tsx), so an
+          // inactive tab has no element to point at; a dangling IDREF there
+          // is worse than none.
+          aria-controls={tab.id === active ? `settings-panel-${tab.id}` : undefined}
           data-testid={`settings-tab-${tab.id}`}
           // Roving tabIndex: one stop for the whole strip, arrows move within
           // it. That is what a tablist is expected to do, and it keeps Tab
