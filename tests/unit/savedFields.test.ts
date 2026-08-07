@@ -33,4 +33,21 @@ describe('attachSavedFields', () => {
 
     expect(attachSavedFields(built, saved)[0]?.filePath).toBe('/tmp/demo/a.ts')
   })
+
+  it('carries diffSide from the saved row', () => {
+    const built: TabDescriptor[] = [
+      { id: 'd1', projectSlug: 'demo', cwd: '/tmp/demo', type: 'diff' },
+    ]
+    const saved: PaneRecord[] = [
+      {
+        id: 'd1',
+        projectSlug: 'demo',
+        cwd: '/tmp/demo',
+        type: 'diff',
+        diffSide: 'staged',
+      },
+    ]
+
+    expect(attachSavedFields(built, saved)[0]?.diffSide).toBe('staged')
+  })
 })

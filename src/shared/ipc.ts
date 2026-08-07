@@ -60,6 +60,14 @@ export const CHANNELS = {
   skippedVersion: 'pterm:skippedVersion',
   gitStatus: 'pterm:gitStatus',
   gitSync: 'pterm:gitSync',
+  gitChanges: 'pterm:gitChanges',
+  gitStage: 'pterm:gitStage',
+  gitUnstage: 'pterm:gitUnstage',
+  gitCommit: 'pterm:gitCommit',
+  gitDiscard: 'pterm:gitDiscard',
+  gitStash: 'pterm:gitStash',
+  gitDiff: 'pterm:gitDiff',
+  openDiff: 'pterm:openDiff',
 } as const
 
 /**
@@ -95,10 +103,10 @@ export type MenuCommand =
  * A declaration of intent, not a gate on status: it decides the launch command
  * and whether an expecting-hooks dot is drawn before any event has arrived.
  * Every tab carries PTERM_TAB_ID regardless, so a `claude` typed by hand into
- * a shell tab gets full status the moment its first hook lands. `editor` is
- * the exception: it has no launch command at all.
+ * a shell tab gets full status the moment its first hook lands. `editor` and
+ * `diff` are the exceptions: neither has a launch command at all.
  */
-export type TabType = 'claude' | 'preset' | 'shell' | 'editor'
+export type TabType = 'claude' | 'preset' | 'shell' | 'editor' | 'diff'
 
 /**
  * Whether a pane of this kind has a tmux session behind it.
@@ -116,9 +124,14 @@ export type TabType = 'claude' | 'preset' | 'shell' | 'editor'
  * the same question to answer before it kills anything, and two spellings of
  * "is this a terminal" is how a pane comes to be killable on one side of the
  * IPC boundary and not the other.
+ *
+ * Two sessionless kinds now: `editor` and `diff`. Neither ever had a tmux
+ * session to attach, restart, or kill.
  */
+const SESSIONLESS: readonly TabType[] = ['editor', 'diff']
+
 export function canHaveSession(pane: { type: TabType }): boolean {
-  return pane.type !== 'editor'
+  return !SESSIONLESS.includes(pane.type)
 }
 
 /** A notification rule, exactly as it is stored. */
@@ -251,13 +264,32 @@ export interface TabDescriptor {
    */
   color?: PaneColor
   /**
-   * The file an editor pane is showing, absolute. Absent on every terminal
-   * pane, and absent on an editor pane whose file could not be read.
+   * The file an editor or diff pane is showing, absolute. Absent on every
+   * terminal pane, and absent on an editor pane whose file could not be read.
    *
    * Absolute here and relative across `fsRead`: this is written by main and
    * read back by main, and never spelled by the renderer.
    */
   filePath?: string
+  /**
+   * Which side of the index a `diff` pane is showing. Absent on every other
+   * kind, and on a `diff` row that predates the field, where the working tree
+   * is the sensible reading.
+   */
+  diffSide?: DiffSide
+  /**
+   * The repo-relative path `gitDiff` needs, for a `diff` pane only.
+   *
+   * `filePath` above is resolved against the REPOSITORY root (see `openDiff`
+   * in `register.ts`), but `editorRelPath` in `App.tsx` derives a path
+   * relative to the PROJECT's cwd. Those two agree only when the project IS
+   * the repository root. Carrying the original repo-relative path here, set
+   * once at open time from the same string `gitChanges` reported, means the
+   * renderer never has to re-derive it and never gets it wrong for a project
+   * pointed at a subdirectory. Absent on a `diff` row that predates the
+   * field, where `App.tsx` falls back to `editorRelPath`.
+   */
+  diffRelPath?: string
 }
 
 export interface TabLayout {
@@ -603,6 +635,59 @@ export interface GitStatus {
 /** Whether a sync got all the way through, and git's own words if it did not. */
 export type GitSyncResult = { ok: true } | { ok: false; error: string }
 
+/** Which side of the index a diff is of. */
+export type DiffSide = 'staged' | 'worktree'
+
+/**
+ * One path that differs from HEAD, from the index, or from both.
+ *
+ * `staged` and `worktree` are git's own status letters for that path (`M`,
+ * `A`, `D`, `R`, `?` for untracked, `U` for unmerged), or null when that side
+ * has nothing to say. A path modified in both the index and the worktree has
+ * both set, and appears in both lists in `GitChanges`, which is what git
+ * reports and what VS Code shows.
+ */
+export interface GitFileChange {
+  path: string
+  staged: string | null
+  worktree: string | null
+  /** Where a rename came from. Only ever set alongside a staged `R`. */
+  renamedFrom?: string
+}
+
+/**
+ * Everything the git column draws, from one `git status` run.
+ *
+ * `head` is the commit the working tree was read against, and exists so a
+ * commit can refuse to run if the branch moved underneath it. It is null in a
+ * repository with no commits yet, where nothing can have moved.
+ *
+ * `repo` is the last segment of the repository root, which is not always the
+ * project's own name: a project can point at a subdirectory, and several
+ * projects can share one checkout. The column names it so that what is about
+ * to be committed to is on screen next to the branch.
+ */
+export interface GitChanges {
+  repo: string
+  branch: string | null
+  head: string | null
+  staged: GitFileChange[]
+  unstaged: GitFileChange[]
+}
+
+/**
+ * The answer to any mutating git channel.
+ *
+ * The new list travels with the answer rather than being fetched separately,
+ * so the renderer replaces its state from the reply instead of patching its
+ * own copy. `changes` is present on failure too, because a failed operation
+ * still leaves a list worth drawing, and null only when the list itself could
+ * not be read afterwards.
+ */
+export type GitMutation =
+  | { ok: true; changes: GitChanges }
+  | { ok: false; error: string; changes: GitChanges | null }
+
 export interface PTermApi {
   open(request: OpenRequest): Promise<TabDescriptor>
   list(): Promise<TabDescriptor[]>
@@ -876,4 +961,60 @@ export interface PTermApi {
    * merge commit nobody asked for.
    */
   gitSync(projectId: string): Promise<GitSyncResult>
+  /**
+   * Every uncommitted change in the active project's repository, or null when
+   * its cwd is not inside one.
+   *
+   * Keyed by project id rather than by a path, like every other channel here:
+   * the renderer never names a directory main then runs a subprocess in.
+   */
+  gitChanges(projectId: string): Promise<GitChanges | null>
+  /**
+   * Stage `paths`, and answer with the change list as it stands afterwards.
+   *
+   * Paths are repo-relative, as `gitChanges` reports them. A path that does
+   * not resolve inside the repository is dropped rather than run.
+   */
+  gitStage(projectId: string, paths: string[]): Promise<GitMutation>
+  /** Unstage `paths`. The mirror of `gitStage`, with the same path rules. */
+  gitUnstage(projectId: string, paths: string[]): Promise<GitMutation>
+  /**
+   * Commit, refusing if `expected` no longer describes the repository.
+   *
+   * `expected` is the branch and head from the `GitChanges` on screen. Passing
+   * what was shown rather than re-reading in the renderer is the point: the
+   * question is whether the repository moved since the user last saw it.
+   */
+  gitCommit(
+    projectId: string,
+    message: string,
+    expected: { branch: string | null; head: string | null },
+  ): Promise<GitMutation>
+  /**
+   * Undo the working-tree changes to `paths`, deleting any that are untracked.
+   *
+   * Irreversible. The caller is expected to have confirmed with the user
+   * first; nothing in main asks.
+   *
+   * `expectedUntracked` is the subset of `paths` the confirm dialog told the
+   * user would be deleted rather than restored. Main refuses the whole
+   * batch, with no path acted on, when a fresh read disagrees with it: see
+   * `discard` in `src/main/git/ops.ts` for why that check exists.
+   */
+  gitDiscard(projectId: string, paths: string[], expectedUntracked: string[]): Promise<GitMutation>
+  /** Stash every change, untracked included. Recoverable via `git stash`. */
+  gitStash(projectId: string): Promise<GitMutation>
+  /**
+   * The unified diff for one path, or null when there is none to show.
+   *
+   * An untracked file has no diff at all; main answers with the file's own
+   * contents rendered as wholly added, so the pane has something true to show
+   * rather than an error.
+   */
+  gitDiff(projectId: string, relPath: string, side: DiffSide): Promise<string | null>
+  /**
+   * Open a read-only diff pane for one path, or null when the project or the
+   * path cannot be resolved.
+   */
+  openDiff(projectId: string, relPath: string, side: DiffSide): Promise<TabDescriptor | null>
 }

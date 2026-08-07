@@ -510,9 +510,10 @@ test('⌘D on a pane too narrow to halve is refused, and says why', async () => 
   // `#{window_width}` IS that reported geometry and not a second opinion on it.
   //
   // 560px: the sidebar is 208px wide by default (`COLUMN_WIDTH_DEFAULT` in
-  // `lib/columnWidth.ts`, since the columns became draggable) and the four
-  // collapsible columns are `w-6` strips on a fresh profile, which every test
-  // here launches with (`App.tsx`'s collapse defaults), so ~330px never
+  // `lib/columnWidth.ts`, since the columns became draggable) and the six
+  // collapsible columns (Files, Skills, Presets, Prompts, Notes, Git) are
+  // `w-6` strips on a fresh profile, which every test here launches with
+  // (`App.tsx`'s and `NotesPanel`'s own collapse defaults), so ~360px never
   // reaches the terminal and the pane is left a strip far narrower than 40
   // columns. The
   // poll below is what makes the test depend on the column count rather than

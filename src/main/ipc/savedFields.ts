@@ -3,17 +3,18 @@ import type { PaneRecord } from '../sessions/manager'
 
 /**
  * Put the fields only config knows about back onto records built from live
- * tmux: the pane's title, its colour, and the file an editor pane is showing.
+ * tmux: the pane's title, its colour, the file an editor or diff pane is
+ * showing, and a diff pane's side and repo-relative path.
  *
  * `SessionManager` knows nothing about any of them and should not: a pane's
  * session is named `pterm-${slug}-${id}`, and that name is what restore matches
  * saved rows by. A title, a colour and a file path are display data stored
- * beside it. So a record the manager built carries none of them, and all three
- * are reattached here rather than threaded through `OpenInput` and back out
+ * beside it. So a record the manager built carries none of them, and every
+ * one is reattached here rather than threaded through `OpenInput` and back out
  * again. A pane with no saved row, or a row with none of the fields set, is
  * returned exactly as it came in.
  *
- * All three, in one pass, deliberately. This was `attachTitles` and carried
+ * All of them, in one pass, deliberately. This was `attachTitles` and carried
  * only the title, and adding the colour beside it as a second function is how a
  * pane would come back from a relaunch named but grey. That is not
  * hypothetical: it is what happened, and the e2e that caught it is
@@ -23,7 +24,7 @@ import type { PaneRecord } from '../sessions/manager'
  * that reopens blank rather than on its file, with nothing thrown. Anything
  * added to `PaneRecord` that the manager cannot derive belongs in this map too.
  *
- * **`filePath` is the one of the three that nothing currently depends on this
+ * **`filePath` is the one of this group that nothing currently depends on this
  * function for, and saying so is the point.** Measured 2026-08-04: deleting the
  * `filePath` line and running `editorRestore.spec.ts` leaves all three tests
  * passing. An editor pane reaches this function by a different route from the
@@ -85,6 +86,8 @@ export function attachSavedFields(panes: TabDescriptor[], records: PaneRecord[])
     if (row.title) next.title = row.title
     if (row.color) next.color = row.color
     if (row.filePath) next.filePath = row.filePath
+    if (row.diffSide) next.diffSide = row.diffSide
+    if (row.diffRelPath) next.diffRelPath = row.diffRelPath
     return next
   })
 }

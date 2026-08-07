@@ -4,6 +4,7 @@ import {
   canHaveSession,
   type Candidate,
   type DataEvent,
+  type DiffSide,
   type ExitEvent,
   type HistoryEntry,
   type HistoryScope,
@@ -57,6 +58,8 @@ import { addPrompt, readPrompts, removePrompt } from '../prompts/store'
 import { listDir, readFileInside, resolveInside, writeFileInside } from '../files/tree'
 import { readBranch } from '../git/branch'
 import { readCounts, syncBranch } from '../git/sync'
+import { readChanges, repoRoot } from '../git/status'
+import { commit, diffOf, discard, stage, stashAll, unstage } from '../git/ops'
 import { newSessionId } from '../tmux/names'
 import {
   addProject,
@@ -1440,6 +1443,84 @@ export function registerIpc(
     return syncBranch(project.cwd)
   })
 
+  // Outside `serialise`, like the git read above and for the same reason:
+  // this reads a repository and never touches pTerm's config, and it is
+  // polled by the column while it is open.
+  ipcMain.handle(CHANNELS.gitChanges, async (_event, projectId: string) => {
+    const config = await store.read()
+    const project = config.projects.find((row) => row.id === projectId)
+    if (!project) return null
+    return readChanges(project.cwd)
+  })
+
+  /**
+   * The repository root behind a project id, or null when there is no project
+   * or it is not in a repository. Every git mutation starts here, so that the
+   * renderer names a project and main decides which directory that means.
+   */
+  const rootOfProject = async (projectId: string): Promise<string | null> => {
+    const config = await store.read()
+    const project = config.projects.find((row) => row.id === projectId)
+    if (!project) return null
+    return repoRoot(project.cwd)
+  }
+
+  // Outside `serialise`, beside `gitChanges` and for the same reason: these
+  // read and write a repository, not pTerm's config.
+  ipcMain.handle(CHANNELS.gitStage, async (_event, projectId: string, paths: string[]) => {
+    const root = await rootOfProject(projectId)
+    if (root === null) return { ok: false as const, error: 'Not a git repository', changes: null }
+    return stage(root, paths)
+  })
+
+  ipcMain.handle(CHANNELS.gitUnstage, async (_event, projectId: string, paths: string[]) => {
+    const root = await rootOfProject(projectId)
+    if (root === null) return { ok: false as const, error: 'Not a git repository', changes: null }
+    return unstage(root, paths)
+  })
+
+  ipcMain.handle(
+    CHANNELS.gitCommit,
+    async (
+      _event,
+      projectId: string,
+      message: string,
+      expected: { branch: string | null; head: string | null },
+    ) => {
+      const root = await rootOfProject(projectId)
+      if (root === null) return { ok: false as const, error: 'Not a git repository', changes: null }
+      return commit(root, message, expected)
+    },
+  )
+
+  ipcMain.handle(
+    CHANNELS.gitDiscard,
+    async (_event, projectId: string, paths: string[], expectedUntracked: string[]) => {
+      const root = await rootOfProject(projectId)
+      if (root === null) {
+        return { ok: false as const, error: 'Not a git repository', changes: null }
+      }
+      return discard(root, paths, expectedUntracked)
+    },
+  )
+
+  ipcMain.handle(CHANNELS.gitStash, async (_event, projectId: string) => {
+    const root = await rootOfProject(projectId)
+    if (root === null) return { ok: false as const, error: 'Not a git repository', changes: null }
+    return stashAll(root)
+  })
+
+  // Outside `serialise`, beside the rest of the git handlers: reads a
+  // repository, writes no config.
+  ipcMain.handle(
+    CHANNELS.gitDiff,
+    async (_event, projectId: string, relPath: string, side: DiffSide) => {
+      const root = await rootOfProject(projectId)
+      if (root === null) return null
+      return diffOf(root, relPath, side)
+    },
+  )
+
   ipcMain.handle(CHANNELS.fsList, async (_event, projectId: string, relPath: string) => {
     const config = await store.read()
     const project = config.projects.find((row) => row.id === projectId)
@@ -1536,6 +1617,72 @@ export function registerIpc(
 
         // Both arrays in one write, for `splitPane`'s reason: a separate write
         // per array leaves a window in which the file holds a pane no tab lists.
+        await store.write({
+          ...config,
+          panes: [...config.panes, pane],
+          tabs: withTabRow(config.tabs, id, row),
+        })
+        return pane
+      }),
+  )
+
+  // Clones `openEditor` above, with three differences: `type: 'diff'`, the
+  // extra `diffSide`/`diffRelPath` fields, and no `readFileInside` pre-read.
+  // A diff's subject may be a file that has been deleted, which is exactly a
+  // change worth showing, and `readFileInside` would refuse it.
+  ipcMain.handle(
+    CHANNELS.openDiff,
+    (_event, projectId: string, relPath: string, side: DiffSide): Promise<TabDescriptor | null> =>
+      serialise(async () => {
+        const config = await store.read()
+        const project = config.projects.find((row) => row.id === projectId)
+        if (!project) return null
+
+        const root = await repoRoot(project.cwd)
+        if (root === null) return null
+        // Resolved against the REPOSITORY root, not the project cwd: status
+        // paths are repo-relative, and a project pointed at a subdirectory
+        // would reject every path outside it.
+        const filePath = resolveInside(root, relPath)
+        if (filePath === null) return null
+
+        // A pane already showing this path and side is the answer, not a
+        // reason to mint a second one. Returning the existing record makes
+        // the renderer's `opened` action select it, which is the focus this
+        // gesture wants. Scoped to THIS project too: two projects can point
+        // into the same repository and resolve the same absolute filePath,
+        // and `workspace.ts`'s `opened` case derives which project to focus
+        // from the returned pane's `projectSlug`, so returning the other
+        // project's record would silently activate the wrong project's tab.
+        const already = config.panes.find(
+          (row) =>
+            row.type === 'diff' &&
+            row.filePath === filePath &&
+            row.diffSide === side &&
+            row.projectSlug === project.slug,
+        )
+        if (already) return already
+
+        const id = newSessionId()
+        const pane: PaneRecord = {
+          id,
+          projectSlug: project.slug,
+          cwd: project.cwd,
+          type: 'diff',
+          filePath,
+          diffSide: side,
+          // The repo-relative string as-is, rather than re-derived from
+          // `filePath` later: `App.tsx`'s `editorRelPath` derives relative to
+          // the PROJECT cwd, which only agrees with this repo-root-relative
+          // path when the project IS the repository root.
+          diffRelPath: relPath,
+        }
+        const row: TabRow = {
+          id,
+          groupId: id,
+          activePaneId: id,
+          layout: { dir: 'row', ratio: [1], kids: [id] },
+        }
         await store.write({
           ...config,
           panes: [...config.panes, pane],

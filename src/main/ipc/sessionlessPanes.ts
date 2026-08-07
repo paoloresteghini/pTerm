@@ -1,5 +1,6 @@
 import type { PaneRecord } from '../sessions/manager'
 import type { TabRow } from '../state/store'
+import { canHaveSession } from '../../shared/ipc'
 import { sharesAroundClaims } from './shares'
 
 export interface MergeInput {
@@ -55,8 +56,12 @@ export function mergeSessionlessPanes(input: MergeInput): MergeResult {
 
   // By kind, never by "has no session". A terminal row missing its session was
   // already rejected by `isPane`, and treating absence as sessionlessness here
-  // would put exactly those malformed rows back.
-  const sessionless = savedPanes.filter((pane) => pane.type === 'editor')
+  // would put exactly those malformed rows back. Through the shared predicate
+  // rather than a second hardcoded list: two spellings of "is this a
+  // terminal" is exactly what `canHaveSession`'s own doc comment exists to
+  // prevent, and a pane kind missing from THIS list is silently written away
+  // by the `store.write` that follows a relaunch, with nothing logged.
+  const sessionless = savedPanes.filter((pane) => !canHaveSession(pane))
   if (sessionless.length === 0) return { panes: livePanes, tabs: liveTabs }
 
   const liveIds = new Set(livePanes.map((pane) => pane.id))

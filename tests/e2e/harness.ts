@@ -341,7 +341,7 @@ export async function activeTerminalText(page: Page): Promise<string> {
  */
 export async function expandColumn(
   page: Page,
-  name: 'files' | 'skills' | 'presets' | 'notes' | 'prompts',
+  name: 'files' | 'skills' | 'presets' | 'notes' | 'prompts' | 'git',
 ): Promise<void> {
   // Wait for the app to have painted BEFORE reading the panel's absence.
   // Without this the count is 0 on a window that has not rendered yet, and on

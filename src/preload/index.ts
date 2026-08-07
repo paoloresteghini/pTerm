@@ -2,7 +2,10 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import {
   CHANNELS,
   type DataEvent,
+  type DiffSide,
   type ExitEvent,
+  type GitChanges,
+  type GitMutation,
   type GitStatus,
   type GitSyncResult,
   type MenuCommand,
@@ -99,6 +102,29 @@ const api: PTermApi = {
     ipcRenderer.invoke(CHANNELS.gitStatus, projectId),
   gitSync: (projectId: string): Promise<GitSyncResult> =>
     ipcRenderer.invoke(CHANNELS.gitSync, projectId),
+  gitChanges: (projectId: string): Promise<GitChanges | null> =>
+    ipcRenderer.invoke(CHANNELS.gitChanges, projectId),
+  gitStage: (projectId: string, paths: string[]): Promise<GitMutation> =>
+    ipcRenderer.invoke(CHANNELS.gitStage, projectId, paths),
+  gitUnstage: (projectId: string, paths: string[]): Promise<GitMutation> =>
+    ipcRenderer.invoke(CHANNELS.gitUnstage, projectId, paths),
+  gitCommit: (
+    projectId: string,
+    message: string,
+    expected: { branch: string | null; head: string | null },
+  ): Promise<GitMutation> => ipcRenderer.invoke(CHANNELS.gitCommit, projectId, message, expected),
+  gitDiscard: (
+    projectId: string,
+    paths: string[],
+    expectedUntracked: string[],
+  ): Promise<GitMutation> =>
+    ipcRenderer.invoke(CHANNELS.gitDiscard, projectId, paths, expectedUntracked),
+  gitStash: (projectId: string): Promise<GitMutation> =>
+    ipcRenderer.invoke(CHANNELS.gitStash, projectId),
+  gitDiff: (projectId: string, relPath: string, side: DiffSide): Promise<string | null> =>
+    ipcRenderer.invoke(CHANNELS.gitDiff, projectId, relPath, side),
+  openDiff: (projectId: string, relPath: string, side: DiffSide): Promise<TabDescriptor | null> =>
+    ipcRenderer.invoke(CHANNELS.openDiff, projectId, relPath, side),
 }
 
 contextBridge.exposeInMainWorld('pterm', api)

@@ -9,6 +9,7 @@ import { FilesPanel } from './FilesPanel'
 import { SkillsPanel } from './SkillsPanel'
 import { PresetsPanel } from './PresetsPanel'
 import { PromptsPanel } from './PromptsPanel'
+import { GitPanel } from './GitPanel'
 import { NotesPanel } from './NotesPanel'
 import { AddProjectDialog } from './AddProjectDialog'
 import { ConfirmClosePane } from './ConfirmClosePane'
@@ -19,6 +20,7 @@ import { StatusBar } from './StatusBar'
 import { Welcome } from './Welcome'
 import { CommandPalette, type PaletteSession } from './CommandPalette'
 import { FileView, saveEditorPane } from './FileView'
+import { DiffView } from './DiffView'
 import { cn } from './lib/cn'
 import { tabLabel } from './lib/tabLabel'
 import { relativeToProject } from './lib/relativeToProject'
@@ -47,6 +49,7 @@ import { PANE_COLOR_DEFAULT, type PaneColor } from '../shared/paneColors'
 import { ColorSwatches } from './ColorSwatches'
 import {
   UNSORTED_ID,
+  type DiffSide,
   type HistoryEntry,
   type HistoryScope,
   type NotificationConfig,
@@ -73,20 +76,21 @@ const MIN_PANE_COLS = 20
 const MIN_PANE_ROWS = 5
 
 /**
- * Collapse state for the four collapsible columns, in the same shape
+ * Collapse state for the five collapsible columns, in the same shape
  * `NotesPanel` stores its own: '0' means expanded, anything else (including
  * absent) means collapsed.
  *
  * **Every one of them defaults collapsed**, so a fresh profile shows the
  * projects sidebar and the terminal and nothing else. Each expanded column
- * costs 208px, and four of them plus the sidebar leave under 420px of terminal
- * on the 1280px window `src/main/index.ts` opens, narrower than two splittable
- * panes. The state persists per column, so this is the first run only.
+ * costs 208px, and five of them plus the sidebar leave under 40px of terminal
+ * on the 1280px window `src/main/index.ts` opens, narrower than any splittable
+ * pane. The state persists per column, so this is the first run only.
  */
 const SKILLS_KEY = 'pterm:skillsCollapsed'
 const PRESETS_KEY = 'pterm:presetsCollapsed'
 const FILES_KEY = 'pterm:filesCollapsed'
 const PROMPTS_KEY = 'pterm:promptsCollapsed'
+const GIT_KEY = 'pterm:gitCollapsed'
 
 /** Reads one of those keys, with the default applied when nothing is stored. */
 function storedCollapsed(key: string, fallback: boolean): boolean {
@@ -104,6 +108,7 @@ export function App() {
   const [presetsCollapsed, setPresetsCollapsed] = useState(() => storedCollapsed(PRESETS_KEY, true))
   const [filesCollapsed, setFilesCollapsed] = useState(() => storedCollapsed(FILES_KEY, true))
   const [promptsCollapsed, setPromptsCollapsed] = useState(() => storedCollapsed(PROMPTS_KEY, true))
+  const [gitCollapsed, setGitCollapsed] = useState(() => storedCollapsed(GIT_KEY, true))
   const [paletteOpen, setPaletteOpen] = useState(false)
   // Set once the workspace exists. Until then this window knows nothing about
   // what is selected and must not say anything about it — see the effects.
@@ -148,6 +153,12 @@ export function App() {
   const togglePrompts = useCallback(() => {
     setPromptsCollapsed((was) => {
       localStorage.setItem(PROMPTS_KEY, was ? '0' : '1')
+      return !was
+    })
+  }, [])
+  const toggleGit = useCallback(() => {
+    setGitCollapsed((was) => {
+      localStorage.setItem(GIT_KEY, was ? '0' : '1')
       return !was
     })
   }, [])
@@ -253,6 +264,29 @@ export function App() {
           // it cannot read, and the renderer cannot tell those apart from a
           // null. Naming one would be a guess.
           fail(`Could not open ${relPath}`)
+        })
+        .catch(fail)
+    },
+    [project, fail],
+  )
+
+  /**
+   * Open a read-only diff pane for one path of the active project's
+   * repository, in a new tab.
+   *
+   * Mirrors `openFile` above: `relPath` here is repo-relative (it comes
+   * straight from `GitPanel`'s `change.path`, which `gitChanges` reported),
+   * not project-relative, which is why `openDiff` in main resolves it against
+   * the repository root rather than the project's `cwd`.
+   */
+  const openDiff = useCallback(
+    (relPath: string, side: DiffSide) => {
+      if (!project) return
+      window.pterm
+        .openDiff(project.id, relPath, side)
+        .then((tab) => {
+          if (tab) dispatch({ type: 'opened', tab })
+          else fail(`Could not open a diff for ${relPath}`)
         })
         .catch(fail)
     },
@@ -1219,10 +1253,23 @@ export function App() {
                     style={{ ...box.style, background: box.pane.color ?? PANE_COLOR_DEFAULT }}
                   >
                     {/* The pane's contents, by kind. Every pane was a terminal
-                        until this slice; an editor has no session to attach and
-                        mounting one for it would create the very tmux session
-                        the kind exists to do without. */}
-                    {box.pane.type === 'editor' ? (
+                        until this slice; an editor or diff pane has no session
+                        to attach and mounting one for it would create the very
+                        tmux session the kind exists to do without. */}
+                    {box.pane.type === 'diff' ? (
+                      <DiffView
+                        projectId={projectIdForTab(state.projects, box.pane)}
+                        // `diffRelPath` is repo-root-relative, set once by
+                        // `openDiff` in main; `editorRelPath` is relative to
+                        // the PROJECT cwd. The two agree only when the project
+                        // IS the repository root, so a saved row that already
+                        // carries `diffRelPath` is preferred and the derived
+                        // path is only a fallback for one that predates it.
+                        relPath={box.pane.diffRelPath ?? editorRelPath(box.pane)}
+                        side={box.pane.diffSide ?? 'worktree'}
+                        color={box.pane.color ?? PANE_COLOR_DEFAULT}
+                      />
+                    ) : box.pane.type === 'editor' ? (
                       <FileView
                         projectId={projectIdForTab(state.projects, box.pane)}
                         relPath={editorRelPath(box.pane)}
@@ -1366,7 +1413,7 @@ export function App() {
           </div>
         ) : null}
 
-        {/* Three independently collapsible columns. Each renders its own
+        {/* Four independently collapsible columns. Each renders its own
             vertical strip when collapsed, so none of them can vanish without
             leaving a way back. */}
         <SkillsPanel
@@ -1400,6 +1447,13 @@ export function App() {
           onInsert={(body) => {
             if (activePaneId) window.pterm.input(activePaneId, body)
           }}
+        />
+
+        <GitPanel
+          project={project}
+          collapsed={gitCollapsed}
+          onToggle={toggleGit}
+          onOpenDiff={openDiff}
         />
 
         <NotesPanel project={project} />
