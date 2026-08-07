@@ -68,3 +68,41 @@ export async function unstage(root: string, paths: string[]): Promise<GitMutatio
   if (safe.length === 0) return failed(root, 'Nothing to unstage')
   return operate(root, ['restore', '--staged', '--', ...safe])
 }
+
+/**
+ * Commit, refusing if the repository moved since the list was read.
+ *
+ * `expected` is the branch and head the column was showing. Several sessions
+ * share these checkouts, and a commit that lands on a branch the user was not
+ * looking at is a failure that leaves no trace and no error, so the cheap
+ * re-read is worth it.
+ *
+ * With something staged, only that is committed. With nothing staged, every
+ * TRACKED change is, which is the fallback VS Code offers and which keeps the
+ * common case one click. Untracked files are never swept in either way: `-a`
+ * does not add them, and that is deliberate rather than incidental.
+ */
+export async function commit(
+  root: string,
+  message: string,
+  expected: { branch: string | null; head: string | null },
+): Promise<GitMutation> {
+  if (message.trim() === '') return failed(root, 'Enter a commit message')
+
+  const now = await readChanges(root)
+  if (now === null) return { ok: false, error: 'Not a git repository', changes: null }
+  if (now.branch !== expected.branch || now.head !== expected.head) {
+    return {
+      ok: false,
+      error: 'The branch moved underneath you. The list has been refreshed.',
+      changes: now,
+    }
+  }
+  if (now.staged.length === 0 && now.unstaged.length === 0) {
+    return { ok: false, error: 'Nothing to commit', changes: now }
+  }
+
+  const args =
+    now.staged.length > 0 ? ['commit', '-m', message] : ['commit', '-a', '-m', message]
+  return operate(root, args)
+}

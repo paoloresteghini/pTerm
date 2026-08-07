@@ -63,6 +63,7 @@ export const CHANNELS = {
   gitChanges: 'pterm:gitChanges',
   gitStage: 'pterm:gitStage',
   gitUnstage: 'pterm:gitUnstage',
+  gitCommit: 'pterm:gitCommit',
 } as const
 
 /**
@@ -943,4 +944,16 @@ export interface PTermApi {
   gitStage(projectId: string, paths: string[]): Promise<GitMutation>
   /** Unstage `paths`. The mirror of `gitStage`, with the same path rules. */
   gitUnstage(projectId: string, paths: string[]): Promise<GitMutation>
+  /**
+   * Commit, refusing if `expected` no longer describes the repository.
+   *
+   * `expected` is the branch and head from the `GitChanges` on screen. Passing
+   * what was shown rather than re-reading in the renderer is the point: the
+   * question is whether the repository moved since the user last saw it.
+   */
+  gitCommit(
+    projectId: string,
+    message: string,
+    expected: { branch: string | null; head: string | null },
+  ): Promise<GitMutation>
 }

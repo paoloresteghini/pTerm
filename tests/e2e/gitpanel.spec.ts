@@ -128,3 +128,63 @@ test('unstaging puts it back', async () => {
   await expect(page.getByTestId('gitpanel-unstaged-tracked.txt')).toBeVisible({ timeout: 15_000 })
   await expect(page.getByTestId('gitpanel-staged-tracked.txt')).toHaveCount(0)
 })
+
+test('commits the staged set and clears the message box', async () => {
+  await writeFile(join(repo, 'tracked.txt'), 'two\n', 'utf8')
+  await gitIn(repo, ['add', 'tracked.txt'])
+  await open()
+
+  await expect(page.getByTestId('gitpanel-staged-tracked.txt')).toBeVisible({ timeout: 15_000 })
+  await page.getByTestId('gitpanel-message').fill('a real message')
+  await page.getByTestId('gitpanel-commit').click()
+
+  await expect(page.getByTestId('gitpanel-empty')).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByTestId('gitpanel-message')).toHaveValue('')
+
+  const { stdout } = await run('git', ['log', '-1', '--pretty=%s'], { cwd: repo })
+  expect(stdout.trim()).toBe('a real message')
+})
+
+// The commit-all fallback, which is what makes the common case one click.
+test('commits every tracked change when nothing is staged', async () => {
+  await writeFile(join(repo, 'tracked.txt'), 'two\n', 'utf8')
+  await writeFile(join(repo, 'fresh.txt'), 'new\n', 'utf8')
+  await open()
+
+  await expect(page.getByTestId('gitpanel-unstaged-tracked.txt')).toBeVisible({ timeout: 15_000 })
+  await page.getByTestId('gitpanel-message').fill('sweep the tracked ones')
+  await page.getByTestId('gitpanel-commit').click()
+
+  // The untracked file is deliberately NOT swept in, so it survives as the
+  // only remaining change.
+  await expect(page.getByTestId('gitpanel-unstaged-fresh.txt')).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByTestId('gitpanel-unstaged-tracked.txt')).toHaveCount(0)
+})
+
+test('refuses an empty message', async () => {
+  await writeFile(join(repo, 'tracked.txt'), 'two\n', 'utf8')
+  await open()
+  await expect(page.getByTestId('gitpanel-unstaged-tracked.txt')).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByTestId('gitpanel-commit')).toBeDisabled()
+})
+
+// The guard against a peer session moving HEAD under the column. The list is
+// read at one commit; the repository is then moved on behind the app's back;
+// the commit must refuse rather than land somewhere the user never saw.
+test('refuses to commit when the branch moved underneath it', async () => {
+  await writeFile(join(repo, 'tracked.txt'), 'two\n', 'utf8')
+  await open()
+  await expect(page.getByTestId('gitpanel-unstaged-tracked.txt')).toBeVisible({ timeout: 15_000 })
+
+  await page.getByTestId('gitpanel-message').fill('mine')
+  // Behind the app's back, between the read and the click.
+  await writeFile(join(repo, 'other.txt'), 'other\n', 'utf8')
+  await gitIn(repo, ['add', 'other.txt'])
+  await gitIn(repo, ['commit', '-m', 'theirs'])
+
+  await page.getByTestId('gitpanel-commit').click()
+  await expect(page.getByTestId('gitpanel-error')).toContainText('moved', { timeout: 15_000 })
+
+  const { stdout } = await run('git', ['log', '-1', '--pretty=%s'], { cwd: repo })
+  expect(stdout.trim()).toBe('theirs')
+})

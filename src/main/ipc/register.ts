@@ -58,7 +58,7 @@ import { listDir, readFileInside, resolveInside, writeFileInside } from '../file
 import { readBranch } from '../git/branch'
 import { readCounts, syncBranch } from '../git/sync'
 import { readChanges, repoRoot } from '../git/status'
-import { stage, unstage } from '../git/ops'
+import { commit, stage, unstage } from '../git/ops'
 import { newSessionId } from '../tmux/names'
 import {
   addProject,
@@ -1477,6 +1477,20 @@ export function registerIpc(
     if (root === null) return { ok: false as const, error: 'Not a git repository', changes: null }
     return unstage(root, paths)
   })
+
+  ipcMain.handle(
+    CHANNELS.gitCommit,
+    async (
+      _event,
+      projectId: string,
+      message: string,
+      expected: { branch: string | null; head: string | null },
+    ) => {
+      const root = await rootOfProject(projectId)
+      if (root === null) return { ok: false as const, error: 'Not a git repository', changes: null }
+      return commit(root, message, expected)
+    },
+  )
 
   ipcMain.handle(CHANNELS.fsList, async (_event, projectId: string, relPath: string) => {
     const config = await store.read()

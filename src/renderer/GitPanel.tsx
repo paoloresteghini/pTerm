@@ -79,6 +79,7 @@ export function GitPanel({
   const [loaded, setLoaded] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [message, setMessage] = useState('')
 
   // Owns `busy` across a project switch that abandons a stage/unstage still
   // in flight: see `mutationGuard.ts` for why that needs a dedicated guard
@@ -176,6 +177,20 @@ export function GitPanel({
     [mutate],
   )
 
+  const onCommit = useCallback((): void => {
+    if (changes === null) return
+    const expected = { branch: changes.branch, head: changes.head }
+    const text = message
+    mutate((id) =>
+      window.pterm.gitCommit(id, text, expected).then((result) => {
+        // Cleared only on success: a refused commit must not throw away the
+        // message the user typed.
+        if (result.ok) setMessage('')
+        return result
+      }),
+    )
+  }, [changes, message, mutate])
+
   if (collapsed) {
     return <PanelStrip testid="git-toggle" label="Git" onClick={onToggle} />
   }
@@ -196,6 +211,33 @@ export function GitPanel({
             {changes.branch}
           </p>
         ) : null}
+
+        <div className="flex flex-col gap-1 px-2.5 py-2">
+          <textarea
+            data-testid="gitpanel-message"
+            value={message}
+            onChange={(event) => setMessage(event.target.value)}
+            // ⌘Enter commits, which is what VS Code's own placeholder
+            // promises and the only key this panel claims.
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && event.metaKey) {
+                event.preventDefault()
+                onCommit()
+              }
+            }}
+            rows={2}
+            placeholder="Message (⌘Enter to commit)"
+            className="scroll-thin resize-none rounded border border-border bg-bg px-1.5 py-1 font-mono text-[11px] text-fg placeholder:text-faint focus:outline-none"
+          />
+          <button
+            data-testid="gitpanel-commit"
+            disabled={busy || message.trim() === '' || changes === null}
+            onClick={onCommit}
+            className="cursor-default rounded border border-border bg-transparent px-2 py-1 text-muted hover:text-fg disabled:opacity-40"
+          >
+            Commit
+          </button>
+        </div>
 
         {error ? (
           <p data-testid="gitpanel-error" title={error} className="truncate px-2.5 py-1 text-danger">

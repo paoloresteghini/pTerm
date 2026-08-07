@@ -107,6 +107,11 @@ const api: PTermApi = {
     ipcRenderer.invoke(CHANNELS.gitStage, projectId, paths),
   gitUnstage: (projectId: string, paths: string[]): Promise<GitMutation> =>
     ipcRenderer.invoke(CHANNELS.gitUnstage, projectId, paths),
+  gitCommit: (
+    projectId: string,
+    message: string,
+    expected: { branch: string | null; head: string | null },
+  ): Promise<GitMutation> => ipcRenderer.invoke(CHANNELS.gitCommit, projectId, message, expected),
 }
 
 contextBridge.exposeInMainWorld('pterm', api)
