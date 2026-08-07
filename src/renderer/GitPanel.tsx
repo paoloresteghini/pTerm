@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { GitChanges, GitFileChange, GitMutation, ProjectDescriptor } from '../shared/ipc'
 import { useColumnWidth } from './lib/columnWidth'
+import { createMutationGuard } from './lib/mutationGuard'
 import { ColumnResizer, PanelHeading, PanelStrip } from './ui/Panel'
 
 /** How often the list is re-read while the column is open. */
@@ -79,15 +80,22 @@ export function GitPanel({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Owns `busy` across a project switch that abandons a stage/unstage still
+  // in flight: see `mutationGuard.ts` for why that needs a dedicated guard
+  // rather than the mutation's own `.finally()`.
+  const guard = useRef(createMutationGuard(setBusy)).current
+
   // Which project the state on screen belongs to. Every reply re-checks this
   // before landing, so a project switch mid-request cannot put the old
   // repository's list under the new name.
   const shown = useRef<string | undefined>(project?.id)
   useEffect(() => {
     shown.current = project?.id
+    guard.projectSwitched()
     setChanges(null)
     setLoaded(false)
-  }, [project?.id])
+    setError(null)
+  }, [project?.id, guard])
 
   const refresh = useCallback((): void => {
     const asked = project?.id
@@ -129,28 +137,34 @@ export function GitPanel({
    * Non-optimistic on purpose, following `PromptsPanel`: the reply IS the
    * list, so a refused stage leaves the row where it was instead of showing a
    * move that did not happen.
+   *
+   * Gated by `guard.isCurrent`, not by `shown.current === asked`: a switch
+   * away and back to the same project id would make that string comparison
+   * true again while this call is still the EARLIER visit's, and its (now
+   * stale) reply would land as if it were fresh. The guard's generation
+   * tells the two visits apart even when their project id does not.
    */
   const mutate = useCallback(
     (call: (projectId: string) => Promise<GitMutation>): void => {
       const asked = project?.id
-      if (!asked || busy) return
-      setBusy(true)
+      if (!asked || guard.isBusy()) return
+      const token = guard.started()
       setError(null)
       call(asked)
         .then((result) => {
-          if (shown.current !== asked) return
+          if (!guard.isCurrent(token)) return
           if (result.changes !== null) setChanges(result.changes)
           if (!result.ok) setError(result.error)
         })
         .catch((reason: unknown) => {
-          if (shown.current !== asked) return
+          if (!guard.isCurrent(token)) return
           setError(reason instanceof Error ? reason.message : String(reason))
         })
         .finally(() => {
-          if (shown.current === asked) setBusy(false)
+          guard.settled(token)
         })
     },
-    [project?.id, busy],
+    [project?.id, guard],
   )
 
   const onStage = useCallback(
