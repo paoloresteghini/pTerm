@@ -168,6 +168,34 @@ test('refuses an empty message', async () => {
   await expect(page.getByTestId('gitpanel-commit')).toBeDisabled()
 })
 
+// ⌘Enter is a second entry point to the same action the Commit button
+// guards. An empty box must refuse through the keyboard exactly like a
+// disabled button refuses a click: no IPC round trip at all, and therefore
+// no 'Enter a commit message' error either. Without the fix, ⌘Enter called
+// onCommit unconditionally, which still landed no commit (main's own guard
+// catches an empty message too) but DID round-trip and surface that error,
+// which is what this asserts against.
+//
+// `waitForTimeout` rather than an auto-retrying assertion: `not.toBeVisible`
+// only waits for a CHANGE away from visible, and the error starts invisible
+// either way, so it would pass before the round trip even lands. A fixed
+// settle is what actually gives a bypassed guard time to show itself.
+test('refuses an empty message on Cmd+Enter too', async () => {
+  await writeFile(join(repo, 'tracked.txt'), 'two\n', 'utf8')
+  await open()
+  await expect(page.getByTestId('gitpanel-unstaged-tracked.txt')).toBeVisible({ timeout: 15_000 })
+
+  const before = await run('git', ['log', '--oneline'], { cwd: repo })
+
+  await page.getByTestId('gitpanel-message').press('Meta+Enter')
+  await page.waitForTimeout(500)
+
+  await expect(page.getByTestId('gitpanel-error')).toHaveCount(0)
+  await expect(page.getByTestId('gitpanel-unstaged-tracked.txt')).toBeVisible()
+  const after = await run('git', ['log', '--oneline'], { cwd: repo })
+  expect(after.stdout.trim().split('\n').length).toBe(before.stdout.trim().split('\n').length)
+})
+
 // The guard against a peer session moving HEAD under the column. The list is
 // read at one commit; the repository is then moved on behind the app's back;
 // the commit must refuse rather than land somewhere the user never saw.

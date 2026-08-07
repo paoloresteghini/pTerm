@@ -177,8 +177,12 @@ export function GitPanel({
     [mutate],
   )
 
+  // The one place that decides whether a commit may proceed: both the button
+  // and the ⌘Enter key handler call this rather than duplicating its checks,
+  // so the two entry points can never disagree about what is allowed. Mirrors
+  // the button's own `disabled` expression exactly.
   const onCommit = useCallback((): void => {
-    if (changes === null) return
+    if (busy || message.trim() === '' || changes === null) return
     const expected = { branch: changes.branch, head: changes.head }
     const text = message
     mutate((id) =>
@@ -189,7 +193,7 @@ export function GitPanel({
         return result
       }),
     )
-  }, [changes, message, mutate])
+  }, [busy, changes, message, mutate])
 
   if (collapsed) {
     return <PanelStrip testid="git-toggle" label="Git" onClick={onToggle} />
