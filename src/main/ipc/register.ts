@@ -58,7 +58,7 @@ import { listDir, readFileInside, resolveInside, writeFileInside } from '../file
 import { readBranch } from '../git/branch'
 import { readCounts, syncBranch } from '../git/sync'
 import { readChanges, repoRoot } from '../git/status'
-import { commit, stage, unstage } from '../git/ops'
+import { commit, discard, stage, stashAll, unstage } from '../git/ops'
 import { newSessionId } from '../tmux/names'
 import {
   addProject,
@@ -1491,6 +1491,18 @@ export function registerIpc(
       return commit(root, message, expected)
     },
   )
+
+  ipcMain.handle(CHANNELS.gitDiscard, async (_event, projectId: string, paths: string[]) => {
+    const root = await rootOfProject(projectId)
+    if (root === null) return { ok: false as const, error: 'Not a git repository', changes: null }
+    return discard(root, paths)
+  })
+
+  ipcMain.handle(CHANNELS.gitStash, async (_event, projectId: string) => {
+    const root = await rootOfProject(projectId)
+    if (root === null) return { ok: false as const, error: 'Not a git repository', changes: null }
+    return stashAll(root)
+  })
 
   ipcMain.handle(CHANNELS.fsList, async (_event, projectId: string, relPath: string) => {
     const config = await store.read()

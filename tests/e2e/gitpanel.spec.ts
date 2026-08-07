@@ -216,3 +216,59 @@ test('refuses to commit when the branch moved underneath it', async () => {
   const { stdout } = await run('git', ['log', '-1', '--pretty=%s'], { cwd: repo })
   expect(stdout.trim()).toBe('theirs')
 })
+
+test('discarding asks first, and cancelling changes nothing', async () => {
+  await writeFile(join(repo, 'tracked.txt'), 'two\n', 'utf8')
+  await open()
+  await expect(page.getByTestId('gitpanel-unstaged-tracked.txt')).toBeVisible({ timeout: 15_000 })
+
+  await page.getByTestId('gitpanel-discard-tracked.txt').click()
+  await expect(page.getByTestId('confirm-discard')).toBeVisible()
+  await expect(page.getByTestId('confirm-discard')).toContainText('tracked.txt')
+
+  await page.getByTestId('confirm-discard-cancel').click()
+  await expect(page.getByTestId('confirm-discard')).toHaveCount(0)
+  await expect(page.getByTestId('gitpanel-unstaged-tracked.txt')).toBeVisible()
+  const kept = await run('git', ['diff', '--name-only'], { cwd: repo })
+  expect(kept.stdout.trim()).toBe('tracked.txt')
+})
+
+test('confirming a discard restores a tracked file', async () => {
+  await writeFile(join(repo, 'tracked.txt'), 'two\n', 'utf8')
+  await open()
+  await expect(page.getByTestId('gitpanel-unstaged-tracked.txt')).toBeVisible({ timeout: 15_000 })
+
+  await page.getByTestId('gitpanel-discard-tracked.txt').click()
+  await page.getByTestId('confirm-discard-go').click()
+
+  await expect(page.getByTestId('gitpanel-empty')).toBeVisible({ timeout: 15_000 })
+  const after = await run('git', ['diff', '--name-only'], { cwd: repo })
+  expect(after.stdout.trim()).toBe('')
+})
+
+// The half `git restore` cannot do: an untracked file has no committed state
+// to return to, so discarding it is a deletion.
+test('confirming a discard deletes an untracked file', async () => {
+  await writeFile(join(repo, 'fresh.txt'), 'new\n', 'utf8')
+  await open()
+  await expect(page.getByTestId('gitpanel-unstaged-fresh.txt')).toBeVisible({ timeout: 15_000 })
+
+  await page.getByTestId('gitpanel-discard-fresh.txt').click()
+  await page.getByTestId('confirm-discard-go').click()
+
+  await expect(page.getByTestId('gitpanel-empty')).toBeVisible({ timeout: 15_000 })
+  const listed = await run('git', ['status', '--porcelain'], { cwd: repo })
+  expect(listed.stdout.trim()).toBe('')
+})
+
+test('stashing clears the list without asking', async () => {
+  await writeFile(join(repo, 'tracked.txt'), 'two\n', 'utf8')
+  await open()
+  await expect(page.getByTestId('gitpanel-unstaged-tracked.txt')).toBeVisible({ timeout: 15_000 })
+
+  await page.getByTestId('gitpanel-stash').click()
+
+  await expect(page.getByTestId('gitpanel-empty')).toBeVisible({ timeout: 15_000 })
+  const stashes = await run('git', ['stash', 'list'], { cwd: repo })
+  expect(stashes.stdout.trim()).not.toBe('')
+})

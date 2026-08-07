@@ -64,6 +64,8 @@ export const CHANNELS = {
   gitStage: 'pterm:gitStage',
   gitUnstage: 'pterm:gitUnstage',
   gitCommit: 'pterm:gitCommit',
+  gitDiscard: 'pterm:gitDiscard',
+  gitStash: 'pterm:gitStash',
 } as const
 
 /**
@@ -956,4 +958,13 @@ export interface PTermApi {
     message: string,
     expected: { branch: string | null; head: string | null },
   ): Promise<GitMutation>
+  /**
+   * Undo the working-tree changes to `paths`, deleting any that are untracked.
+   *
+   * Irreversible. The caller is expected to have confirmed with the user
+   * first; nothing in main asks.
+   */
+  gitDiscard(projectId: string, paths: string[]): Promise<GitMutation>
+  /** Stash every change, untracked included. Recoverable via `git stash`. */
+  gitStash(projectId: string): Promise<GitMutation>
 }

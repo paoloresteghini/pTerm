@@ -1,4 +1,5 @@
-import { relative, resolve, sep } from 'node:path'
+import { unlink } from 'node:fs/promises'
+import { relative, resolve, sep, join } from 'node:path'
 import { git, describeFailure } from './sync'
 import { readChanges } from './status'
 import type { GitMutation } from '../../shared/ipc'
@@ -105,4 +106,58 @@ export async function commit(
   const args =
     now.staged.length > 0 ? ['commit', '-m', message] : ['commit', '-a', '-m', message]
   return operate(root, args)
+}
+
+/**
+ * Undo the working-tree changes to `paths`.
+ *
+ * Two operations wearing one label, and the difference is not cosmetic. A
+ * tracked file is restored from the index, which is reversible only in the
+ * sense that the content came from somewhere. An untracked file has no
+ * committed state to return to, so discarding it means deleting it, and
+ * nothing anywhere can bring it back.
+ *
+ * Which is which is decided HERE, from a fresh status read, rather than taken
+ * from the renderer: a stale list arriving as "this one is untracked" would
+ * turn a restore into a deletion.
+ */
+export async function discard(root: string, paths: string[]): Promise<GitMutation> {
+  const safe = safePaths(root, paths)
+  if (safe.length === 0) return failed(root, 'Nothing to discard')
+
+  const before = await readChanges(root)
+  if (before === null) return { ok: false, error: 'Not a git repository', changes: null }
+
+  const untracked = new Set(
+    before.unstaged.filter((c) => c.worktree === '?').map((c) => c.path),
+  )
+  const toDelete = safe.filter((path) => untracked.has(path))
+  const toRestore = safe.filter((path) => !untracked.has(path))
+
+  if (toRestore.length > 0) {
+    const run = await git(root, ['restore', '--', ...toRestore])
+    if (run.code !== 0) return failed(root, describeFailure(run.stderr, run.stdout))
+  }
+
+  for (const path of toDelete) {
+    try {
+      await unlink(join(root, path))
+    } catch {
+      // A file already gone is the state the caller asked for. Anything else
+      // shows up as the row still being there after the refresh below, which
+      // is a truer report than a message about one path in a batch.
+    }
+  }
+
+  return settled(root)
+}
+
+/**
+ * Stash everything, untracked included.
+ *
+ * No confirm, unlike discard: a stash is recoverable, and `git stash list` is
+ * where it is recovered from. Popping is deliberately not offered here.
+ */
+export async function stashAll(root: string): Promise<GitMutation> {
+  return operate(root, ['stash', 'push', '--include-untracked'])
 }

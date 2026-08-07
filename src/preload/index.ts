@@ -112,6 +112,10 @@ const api: PTermApi = {
     message: string,
     expected: { branch: string | null; head: string | null },
   ): Promise<GitMutation> => ipcRenderer.invoke(CHANNELS.gitCommit, projectId, message, expected),
+  gitDiscard: (projectId: string, paths: string[]): Promise<GitMutation> =>
+    ipcRenderer.invoke(CHANNELS.gitDiscard, projectId, paths),
+  gitStash: (projectId: string): Promise<GitMutation> =>
+    ipcRenderer.invoke(CHANNELS.gitStash, projectId),
 }
 
 contextBridge.exposeInMainWorld('pterm', api)

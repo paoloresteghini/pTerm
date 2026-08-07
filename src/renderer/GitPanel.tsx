@@ -3,6 +3,7 @@ import type { GitChanges, GitFileChange, GitMutation, ProjectDescriptor } from '
 import { useColumnWidth } from './lib/columnWidth'
 import { createMutationGuard } from './lib/mutationGuard'
 import { ColumnResizer, PanelHeading, PanelStrip } from './ui/Panel'
+import { ConfirmGitDiscard } from './ConfirmGitDiscard'
 
 /** How often the list is re-read while the column is open. */
 const POLL_MS = 5000
@@ -25,12 +26,14 @@ function Row({
   busy,
   onStage,
   onUnstage,
+  onDiscard,
 }: {
   change: GitFileChange
   section: 'staged' | 'unstaged'
   busy: boolean
   onStage: (path: string) => void
   onUnstage: (path: string) => void
+  onDiscard: (path: string) => void
 }) {
   const letter = change.staged ?? change.worktree ?? '?'
   const dir = dirOf(change.path)
@@ -44,6 +47,17 @@ function Row({
       {dir === '' ? null : <span className="truncate text-faint">{dir}</span>}
       {/* Revealed on hover so a resting list reads as file names rather than
           as a wall of controls. `group-hover` needs the `group` class above. */}
+      {section === 'unstaged' ? (
+        <button
+          data-testid={`gitpanel-discard-${change.path}`}
+          disabled={busy}
+          onClick={() => onDiscard(change.path)}
+          title="Discard"
+          className="shrink-0 cursor-default border-none bg-transparent px-1 text-faint opacity-0 group-hover:opacity-100 hover:text-danger disabled:opacity-40"
+        >
+          ↺
+        </button>
+      ) : null}
       <button
         data-testid={`gitpanel-${section === 'staged' ? 'unstage' : 'stage'}-${change.path}`}
         disabled={busy}
@@ -80,6 +94,7 @@ export function GitPanel({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState('')
+  const [pendingDiscard, setPendingDiscard] = useState<string[] | null>(null)
 
   // Owns `busy` across a project switch that abandons a stage/unstage still
   // in flight: see `mutationGuard.ts` for why that needs a dedicated guard
@@ -177,6 +192,15 @@ export function GitPanel({
     [mutate],
   )
 
+  const requestDiscard = useCallback((path: string) => setPendingDiscard([path]), [])
+
+  const confirmDiscard = useCallback(() => {
+    const paths = pendingDiscard
+    setPendingDiscard(null)
+    if (paths === null) return
+    mutate((id) => window.pterm.gitDiscard(id, paths))
+  }, [pendingDiscard, mutate])
+
   // The one place that decides whether a commit may proceed: both the button
   // and the ⌘Enter key handler call this rather than duplicating its checks,
   // so the two entry points can never disagree about what is allowed. Mirrors
@@ -201,6 +225,11 @@ export function GitPanel({
 
   const clean =
     changes !== null && changes.staged.length === 0 && changes.unstaged.length === 0
+
+  const untrackedNow = new Set(
+    (changes?.unstaged ?? []).filter((c) => c.worktree === '?').map((c) => c.path),
+  )
+  const pending = pendingDiscard ?? []
 
   return (
     <div
@@ -269,7 +298,7 @@ export function GitPanel({
             </p>
             {changes.staged.map((change) => (
               <Row key={`staged-${change.path}`} change={change} section="staged"
-                busy={busy} onStage={onStage} onUnstage={onUnstage} />
+                busy={busy} onStage={onStage} onUnstage={onUnstage} onDiscard={requestDiscard} />
             ))}
           </>
         ) : null}
@@ -278,15 +307,33 @@ export function GitPanel({
           <>
             <p className="flex justify-between px-2.5 pt-3 pb-1 text-[10px] uppercase tracking-wider text-label">
               <span>Changes</span>
-              <span data-testid="gitpanel-unstaged-count">{changes.unstaged.length}</span>
+              <span className="flex items-center gap-2">
+                <button
+                  data-testid="gitpanel-stash"
+                  disabled={busy}
+                  onClick={() => mutate((id) => window.pterm.gitStash(id))}
+                  title="Stash all changes"
+                  className="cursor-default border-none bg-transparent px-1 text-faint hover:text-fg disabled:opacity-40"
+                >
+                  Stash
+                </button>
+                <span data-testid="gitpanel-unstaged-count">{changes.unstaged.length}</span>
+              </span>
             </p>
             {changes.unstaged.map((change) => (
               <Row key={`unstaged-${change.path}`} change={change} section="unstaged"
-                busy={busy} onStage={onStage} onUnstage={onUnstage} />
+                busy={busy} onStage={onStage} onUnstage={onUnstage} onDiscard={requestDiscard} />
             ))}
           </>
         ) : null}
       </div>
+      <ConfirmGitDiscard
+        open={pendingDiscard !== null}
+        tracked={pending.filter((path) => !untrackedNow.has(path))}
+        untracked={pending.filter((path) => untrackedNow.has(path))}
+        onCancel={() => setPendingDiscard(null)}
+        onDiscard={confirmDiscard}
+      />
       <ColumnResizer
         testid="resize-git"
         side="right"
