@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import type { PaneColor } from '../shared/paneColors'
+import { findLinks, followsLink, linkRange } from './lib/terminalLinks'
 
 /**
  * Every mounted pane's terminal, by tab id.
@@ -211,6 +212,47 @@ export function Terminal({
       return !historyRef.current(tabId)
     })
 
+    /*
+     * ⌘-click a url to open it in the browser.
+     *
+     * xterm 6's own `registerLinkProvider` rather than
+     * `@xterm/addon-web-links`: that addon's stable line (0.12.0) predates
+     * xterm 6 and the only builds for it are betas, so this avoids a beta
+     * dependency for thirty lines of provider.
+     *
+     * `translateToString(true)` trims trailing whitespace, which is what makes
+     * the offsets `findLinks` returns line up with the cells: it only ever
+     * removes cells AFTER the last non-space one, and a url is never there.
+     * A wrapped url is not handled — the second half is a different buffer
+     * line, and each is offered on its own — so a link broken across the right
+     * edge opens only the part the click landed on.
+     *
+     * The `activate` gate and the scheme filter both sit in
+     * `lib/terminalLinks.ts` under unit test, because nothing past this point
+     * is observable from an e2e: `shell.openExternal` cannot be intercepted
+     * from a spec. Main validates the scheme again in the `openExternal`
+     * handler, which is the boundary that actually protects the user.
+     */
+    const linkDisposable = term.registerLinkProvider({
+      provideLinks(bufferLineNumber, callback) {
+        const line = term.buffer.active.getLine(bufferLineNumber - 1)
+        if (!line) return callback(undefined)
+        const text = line.translateToString(true)
+        const found = findLinks(text)
+        if (found.length === 0) return callback(undefined)
+        callback(
+          found.map(({ url, start, end }) => ({
+            range: linkRange({ start, end }, bufferLineNumber),
+            text: url,
+            activate(event) {
+              if (!followsLink(event)) return
+              void window.pterm.openExternal(url)
+            },
+          })),
+        )
+      },
+    })
+
     const offData = window.pterm.onData(({ id, data }) => {
       if (id === tabId) term.write(data)
     })
@@ -241,6 +283,7 @@ export function Terminal({
 
     return () => {
       observer.disconnect()
+      linkDisposable.dispose()
       inputDisposable.dispose()
       offData()
       term.dispose()
