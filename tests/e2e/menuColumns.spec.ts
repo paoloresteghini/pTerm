@@ -64,7 +64,10 @@ test.beforeEach(async () => {
   app = await launchApp({ socket: SOCKET, configDir, projectsRoot,
     claudeSettings: claudeSettingsPath, claudeHome, userDataDir })
   page = await app.firstWindow()
-  await expect(page.getByTestId('git-toggle')).toBeVisible()
+  // The title bar rather than a column's toggle: every column starts hidden
+  // and a hidden column now renders nothing, so there is no per-column element
+  // to wait on before the first menu click.
+  await expect(page.getByTestId('titlebar')).toBeVisible()
 })
 
 test.afterEach(async () => {
@@ -103,15 +106,39 @@ test('hide all closes every open column, and a second press restores exactly the
   await expect(page.getByTestId('skills-panel')).toHaveCount(0)
 })
 
-// Without the sync this fails while the column itself works fine, which is
-// exactly the gap Task 3 could not close on its own.
-test('opening a column by its strip ticks the menu item', async () => {
+/*
+ * Without the sync this fails while the column itself works fine, which is
+ * exactly the gap Task 3 could not close on its own.
+ *
+ * Driven by the SHORTCUT rather than by a strip. The strip is gone — a hidden
+ * column renders nothing now — so the shortcut is what stands for "the column
+ * was opened by something other than the menu", which is the thing the menu
+ * has to notice.
+ */
+test('opening a column by its shortcut ticks the menu item', async () => {
   expect(await isChecked('toggle-git')).toBe(false)
 
-  await page.getByTestId('git-toggle').click()
+  await page.keyboard.press('Alt+Meta+g')
   await expect(page.getByTestId('git-panel')).toBeVisible()
 
   await expect.poll(() => isChecked('toggle-git'), { timeout: 10_000 }).toBe(true)
+})
+
+/*
+ * The regression that prompted removing the strip: a column turned off in the
+ * View menu must take up no room at all. Asserted on the toggle's absence
+ * rather than by measuring, because the strip WAS the toggle — while it
+ * existed, a hidden column kept a 24px vertical label on screen and six of
+ * them cost about 144px of chrome with everything switched off.
+ */
+test('a column hidden from the menu leaves nothing behind', async () => {
+  await clickMenuItem('toggle-git')
+  await expect(page.getByTestId('git-panel')).toBeVisible()
+  await expect(page.getByTestId('git-toggle')).toBeVisible()
+
+  await clickMenuItem('toggle-git')
+  await expect(page.getByTestId('git-panel')).toHaveCount(0)
+  await expect(page.getByTestId('git-toggle')).toHaveCount(0)
 })
 
 test('the hide-all item renames itself once everything is hidden', async () => {

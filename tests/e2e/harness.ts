@@ -339,17 +339,35 @@ export async function activeTerminalText(page: Page): Promise<string> {
  * are the same control), so clicking it blind would close a column a previous
  * test had opened.
  */
+/**
+ * The ⌥⌘ letter each column answers to, as `App.tsx`'s keydown handler reads
+ * them. `prompts` is R rather than P, which P already spends on presets.
+ */
+const COLUMN_KEY: Record<string, string> = {
+  files: 'f',
+  skills: 's',
+  presets: 'p',
+  prompts: 'r',
+  git: 'g',
+  notes: 'n',
+}
+
 export async function expandColumn(
   page: Page,
   name: 'files' | 'skills' | 'presets' | 'notes' | 'prompts' | 'git',
 ): Promise<void> {
   // Wait for the app to have painted BEFORE reading the panel's absence.
   // Without this the count is 0 on a window that has not rendered yet, and on
-  // a relaunch, where the collapse state is restored from localStorage and
-  // the column may already be open, the click then CLOSES it. Measured: that
-  // is exactly how `prompts.spec.ts`'s relaunch test first failed.
-  await expect(page.getByTestId(`${name}-toggle`)).toBeVisible()
+  // a relaunch, where the state is restored from localStorage and the column
+  // may already be open, the toggle then CLOSES it. Measured: that is exactly
+  // how `prompts.spec.ts`'s relaunch test first failed.
+  //
+  // The anchor is the title bar rather than the column's own toggle. A hidden
+  // column renders nothing at all now — there is no strip to wait for, and no
+  // strip to click — so the keyboard shortcut is the way in, the same one the
+  // View menu item carries.
+  await expect(page.getByTestId('titlebar')).toBeVisible()
   if ((await page.getByTestId(`${name}-panel`).count()) > 0) return
-  await page.getByTestId(`${name}-toggle`).click()
+  await page.keyboard.press(`Alt+Meta+${COLUMN_KEY[name]}`)
   await expect(page.getByTestId(`${name}-panel`)).toBeVisible()
 }

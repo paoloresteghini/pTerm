@@ -509,15 +509,16 @@ test('⌘D on a pane too narrow to halve is refused, and says why', async () => 
   // a pixel width maps to a column count. See `windowCols` for why tmux's
   // `#{window_width}` IS that reported geometry and not a second opinion on it.
   //
-  // 560px: the sidebar is 208px wide by default (`COLUMN_WIDTH_DEFAULT` in
-  // `lib/columnWidth.ts`, since the columns became draggable) and the six
-  // collapsible columns (Files, Skills, Presets, Prompts, Notes, Git) are
-  // `w-6` strips on a fresh profile, which every test here launches with
-  // (all six default collapsed in `App.tsx`, which now owns every column's
-  // collapse state), so ~360px never reaches the terminal and the pane is
-  // left a strip far narrower than 40 columns. The
-  // poll below is what makes the test depend on the column count rather than
-  // on that arithmetic being right.
+  // 416px: the projects sidebar is 208px wide by default
+  // (`COLUMN_WIDTH_DEFAULT` in `lib/columnWidth.ts`, since the columns became
+  // draggable), and the six collapsible columns (Files, Skills, Presets,
+  // Prompts, Notes, Git) cost NOTHING on a fresh profile, which every test
+  // here launches with — all six default to hidden in `App.tsx`, and a hidden
+  // column now renders nothing at all. It used to render a `w-6` strip, and
+  // this number was 560 to pay for six of them; removing the strips handed
+  // the terminal ~144px back and the pane measured 42 columns, which is not
+  // narrow enough to refuse. The poll below is what makes the test depend on
+  // the column count rather than on this arithmetic being right.
   //
   // `app.evaluate` + `BrowserWindow.setSize` because Playwright cannot resize
   // an Electron BrowserWindow through the page API. This is not a mechanism
@@ -539,7 +540,7 @@ test('⌘D on a pane too narrow to halve is refused, and says why', async () => 
   // reasons rather than the load-bearing one — every other test in this file
   // measures against 1280x800 and says so in its own numbers.
   await app.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows()[0].setSize(560, 800)
+    BrowserWindow.getAllWindows()[0].setSize(416, 800)
   })
   await expect
     .poll(() => windowCols(session), { timeout: 20_000 })

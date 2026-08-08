@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { PromptEntry } from '../shared/ipc'
 import { useColumnWidth } from './lib/columnWidth'
-import { ColumnResizer, PanelHeading, PanelStrip } from './ui/Panel'
+import { ColumnResizer, PanelHeading} from './ui/Panel'
 import { NewPromptDialog } from './NewPromptDialog'
 
 /**
@@ -61,7 +61,16 @@ export function PromptsPanel({
   }, [])
 
   if (collapsed) {
-    return <PanelStrip testid="prompts-toggle" label="Prompts" onClick={onToggle} />
+    /*
+     * A hidden column renders NOTHING, not a strip.
+     *
+     * It used to collapse to a 24px vertical label, which meant six columns
+     * cost about 144px of permanent chrome even with every one of them turned
+     * off — the opposite of what the View menu's items are for. The menu and
+     * the ⌥⌘ shortcuts are now the only way back, which is what the strip's
+     * click used to be for.
+     */
+    return null
   }
 
   return (

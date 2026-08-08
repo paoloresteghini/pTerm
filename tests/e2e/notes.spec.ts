@@ -10,7 +10,7 @@ import { test, expect, type ElectronApplication, type Page } from '@playwright/t
 import { mkdtemp, rm, writeFile, mkdir, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchApp, killServer } from './harness'
+import { launchApp, killServer, expandColumn } from './harness'
 
 const SOCKET = 'pterm-e2e-notes'
 const ALPHA_NOTE = 'startup: npm run dev'
@@ -79,8 +79,9 @@ test('a note typed under one project survives a switch away and back', async () 
   // test, not setup noise.
   await expect(page.getByTestId('notes-panel')).toHaveCount(0)
   await expect(page.getByTestId('notes-textarea')).toHaveCount(0)
-  await expect(page.getByTestId('notes-toggle')).toBeVisible()
-  await page.getByTestId('notes-toggle').click()
+  // Hidden means hidden: there is no strip left behind to wait for or click,
+  // so the way in is the shortcut the View menu item carries.
+  await expandColumn(page, 'notes')
 
   const textarea = page.getByTestId('notes-textarea')
   // Enabled is "loaded": the component disables the textarea until the fetch
@@ -120,14 +121,19 @@ test('a note typed under beta does not leak into alpha', async () => {
   expect(await readFile(join(configDir, 'notes', 'id-alpha.md'), 'utf8')).toBe(ALPHA_NOTE)
 })
 
-test('the toggle collapses the panel to a strip and expands it back', async () => {
+test('the heading hides the column completely, and the shortcut brings it back', async () => {
   await expect(page.getByTestId('notes-textarea')).toBeVisible()
+  // The heading is the same testid as the old strip was, and clicking it while
+  // the column is open still hides it.
   await page.getByTestId('notes-toggle').click()
-  // Collapsed is a strip: the panel and its textarea are gone, the toggle
-  // itself is what remains.
   await expect(page.getByTestId('notes-panel')).toHaveCount(0)
   await expect(page.getByTestId('notes-textarea')).toHaveCount(0)
-  await page.getByTestId('notes-toggle').click()
+  // The assertion this test exists for since the strip was removed: nothing is
+  // left behind. A hidden column used to keep a 24px vertical label, and six
+  // of those cost about 144px of chrome with everything turned off.
+  await expect(page.getByTestId('notes-toggle')).toHaveCount(0)
+
+  await expandColumn(page, 'notes')
   await expect(page.getByTestId('notes-textarea')).toBeVisible()
 })
 

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { ProjectDescriptor, SkillEntry } from '../shared/ipc'
 import { filterEntries } from './lib/match'
 import { useColumnWidth } from './lib/columnWidth'
-import { ColumnResizer, PanelHeading, PanelStrip } from './ui/Panel'
+import { ColumnResizer, PanelHeading} from './ui/Panel'
 
 /**
  * Was the top half of `RightPanel`, which owned Skills and Presets in one
@@ -60,7 +60,16 @@ export function SkillsPanel({
   const matched = filterEntries(query, skills ?? [])
 
   if (collapsed) {
-    return <PanelStrip testid="skills-toggle" label="Skills" onClick={onToggle} />
+    /*
+     * A hidden column renders NOTHING, not a strip.
+     *
+     * It used to collapse to a 24px vertical label, which meant six columns
+     * cost about 144px of permanent chrome even with every one of them turned
+     * off — the opposite of what the View menu's items are for. The menu and
+     * the ⌥⌘ shortcuts are now the only way back, which is what the strip's
+     * click used to be for.
+     */
+    return null
   }
 
   return (

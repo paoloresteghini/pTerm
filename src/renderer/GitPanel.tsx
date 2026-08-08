@@ -8,7 +8,7 @@ import type {
 } from '../shared/ipc'
 import { useColumnWidth } from './lib/columnWidth'
 import { createMutationGuard } from './lib/mutationGuard'
-import { ColumnResizer, PanelHeading, PanelStrip } from './ui/Panel'
+import { ColumnResizer, PanelHeading} from './ui/Panel'
 import { ConfirmGitDiscard } from './ConfirmGitDiscard'
 
 /** How often the list is re-read while the column is open. */
@@ -292,7 +292,16 @@ export function GitPanel({
   }, [busy, changes, message, mutate])
 
   if (collapsed) {
-    return <PanelStrip testid="git-toggle" label="Git" onClick={onToggle} />
+    /*
+     * A hidden column renders NOTHING, not a strip.
+     *
+     * It used to collapse to a 24px vertical label, which meant six columns
+     * cost about 144px of permanent chrome even with every one of them turned
+     * off — the opposite of what the View menu's items are for. The menu and
+     * the ⌥⌘ shortcuts are now the only way back, which is what the strip's
+     * click used to be for.
+     */
+    return null
   }
 
   const clean =

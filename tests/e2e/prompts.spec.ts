@@ -90,7 +90,8 @@ test.afterAll(async () => {
 
 test('the column starts collapsed and opens to an empty list', async () => {
   await expect(page.getByTestId('prompts-panel')).toHaveCount(0)
-  await expect(page.getByTestId('prompts-toggle')).toBeVisible()
+  // And nothing in its place: a hidden column renders no strip at all.
+  await expect(page.getByTestId('prompts-toggle')).toHaveCount(0)
   await expandColumn(page, 'prompts')
   await expect(page.getByTestId('prompts-empty')).toContainText('No prompts yet')
   await expect(page.locator('[data-testid^="prompt-"]')).toHaveCount(0)

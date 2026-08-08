@@ -2,8 +2,14 @@ import { useCallback, useEffect, useRef } from 'react'
 import { cn } from '../lib/cn'
 
 /**
- * The chrome every side column shares: the vertical label it collapses to, the
- * heading it collapses from, and the strip its width is dragged by.
+ * The chrome every side column shares: the heading it hides from, and the
+ * strip its width is dragged by.
+ *
+ * There is no collapsed form any more. A column used to shrink to a 24px
+ * vertical label; six of those cost about 144px of chrome with every column
+ * turned off, which is the opposite of what turning them off is for. A
+ * hidden column now renders nothing and comes back from the View menu or its
+ * ⌥⌘ shortcut.
  *
  * One file rather than a copy per column because they are the same three
  * controls with a different word in them, and the label colour is a thing this
@@ -16,7 +22,6 @@ import { cn } from '../lib/cn'
  */
 export type PanelSide = 'left' | 'right'
 
-/** The collapsed form of a column: a vertical label, clicked to bring it back. */
 export function PanelStrip({
   testid,
   label,

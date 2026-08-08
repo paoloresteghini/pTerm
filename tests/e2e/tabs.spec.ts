@@ -522,9 +522,10 @@ test('the File and View menu items do what their accelerators do', async () => {
   const presets = window.getByTestId('presets-panel')
   await expect(skills).toHaveCount(0)
   await expect(presets).toHaveCount(0)
-  // Collapsed is a strip, not an absence: both ways back are on screen.
-  await expect(window.getByTestId('skills-toggle')).toBeVisible()
-  await expect(window.getByTestId('presets-toggle')).toBeVisible()
+  // Hidden is an absence, not a strip: nothing of either column is on screen,
+  // and the View menu items below are the way back.
+  await expect(window.getByTestId('skills-toggle')).toHaveCount(0)
+  await expect(window.getByTestId('presets-toggle')).toHaveCount(0)
 
   await clickMenuItem(app, 'toggle-presets')
   await expect(presets).toBeVisible()

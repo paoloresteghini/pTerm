@@ -1,6 +1,6 @@
 import type { ProjectDescriptor, TabType } from '../shared/ipc'
 import { useColumnWidth } from './lib/columnWidth'
-import { ColumnResizer, PanelHeading, PanelStrip } from './ui/Panel'
+import { ColumnResizer, PanelHeading} from './ui/Panel'
 
 /**
  * Was the bottom half of `RightPanel`, sharing a column (and a collapse) with
@@ -25,7 +25,16 @@ export function PresetsPanel({
   const { width, set, commit } = useColumnWidth('pterm:presetsWidth')
 
   if (collapsed) {
-    return <PanelStrip testid="presets-toggle" label="Presets" onClick={onToggle} />
+    /*
+     * A hidden column renders NOTHING, not a strip.
+     *
+     * It used to collapse to a 24px vertical label, which meant six columns
+     * cost about 144px of permanent chrome even with every one of them turned
+     * off — the opposite of what the View menu's items are for. The menu and
+     * the ⌥⌘ shortcuts are now the only way back, which is what the strip's
+     * click used to be for.
+     */
+    return null
   }
 
   return (

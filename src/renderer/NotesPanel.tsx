@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ProjectDescriptor } from '../shared/ipc'
 import { createNoteSaver } from './lib/noteSaver'
 import { useColumnWidth } from './lib/columnWidth'
-import { ColumnResizer, PanelHeading, PanelStrip } from './ui/Panel'
+import { ColumnResizer, PanelHeading} from './ui/Panel'
 
 export function NotesPanel({
   project,
@@ -54,7 +54,16 @@ export function NotesPanel({
   }, [projectId, saver])
 
   if (collapsed) {
-    return <PanelStrip testid="notes-toggle" label="Notes" onClick={onToggle} />
+    /*
+     * A hidden column renders NOTHING, not a strip.
+     *
+     * It used to collapse to a 24px vertical label, which meant six columns
+     * cost about 144px of permanent chrome even with every one of them turned
+     * off — the opposite of what the View menu's items are for. The menu and
+     * the ⌥⌘ shortcuts are now the only way back, which is what the strip's
+     * click used to be for.
+     */
+    return null
   }
 
   return (
