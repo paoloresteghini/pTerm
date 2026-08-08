@@ -1,7 +1,7 @@
 /**
  * The app starting, drawing a terminal, and finding its session again.
  *
- * Six tests, each against the packaged build (`npm run package`, run once for
+ * Seven tests, each against the packaged build (`npm run package`, run once for
  * the whole suite by `tests/e2e/global-setup.ts`) and a real tmux server on
  * the `pterm-e2e` socket: typed input reaches the shell and its output comes
  * back; a quit and relaunch reattaches the same session with its scrollback;
@@ -14,7 +14,9 @@
  * something; a fifth that opens no session either, asserting the title
  * bar computes to a draggable region and holds nothing interactive; and a
  * sixth that types Shift+Return into `cat -v` and asserts the pty received
- * ESC CR rather than a bare Return.
+ * ESC CR rather than a bare Return; and a seventh that pins the other half of
+ * that claim, redirecting `cat -uv` to a file so the tty's own echo cannot
+ * inflate the count, and asserting nothing follows the ESC CR.
  *
  * The matching guard for a BARE Up reaching the pty is NOT here: it only bites
  * when the history overlay has entries to show, and this file seeds none, so a
@@ -86,7 +88,7 @@
  *   and resize behaviour are all outside it.
  */
 import { test, expect, type ElectronApplication } from '@playwright/test'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchApp, killServer, sessionNames, terminalTexts } from './harness'
@@ -231,6 +233,73 @@ test('Shift+Return reaches the pty as ESC CR, not a bare Return', async () => {
   await expect
     .poll(async () => (await terminalTexts(window)).join('\n'), { timeout: 20_000 })
     .toContain('^[')
+
+  await app.close()
+})
+
+/**
+ * That Shift+Return sends ESC CR and NOTHING AFTER IT.
+ *
+ * Separate from the test above because it needs a different oracle. On screen
+ * a single ESC appears TWICE — once echoed by the line discipline (ECHOCTL)
+ * and once printed by `cat -v` — so counting `^[` in the pane cannot say how
+ * many were sent, and an assertion that tried to (`toBe(1)`) was wrong about
+ * the terminal rather than about the app. Redirecting to a file takes the echo
+ * out of the picture: what lands there is exactly what `cat` read.
+ *
+ * The defect this pins, measured 2026-08-07: returning `false` from xterm's
+ * custom key handler stops xterm HANDLING the key but leaves the browser's
+ * default action alone, so the hidden textarea sent a bare Return of its own
+ * straight after our ESC CR. A program behind the pty read "newline, then
+ * submit" — Claude Code taking the line the keystroke exists to keep open.
+ * `-u` because `cat` block-buffers when its stdout is a file, and a buffered
+ * byte is one this test would wait out the full timeout for.
+ */
+test('Shift+Return sends ESC CR and nothing after it', async () => {
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  await window.getByTestId('new-tab').click()
+  const terminal = window.getByTestId('terminal')
+  await expect(terminal).toBeVisible()
+  await terminal.click()
+
+  await expect
+    .poll(async () => (await terminalTexts(window)).join('\n'), { timeout: 20_000 })
+    .toMatch(/[$%#]/)
+
+  const out = join(userDataDir, 'shift-return.out')
+  const received = async (): Promise<string> => readFile(out, 'utf8').catch(() => '')
+
+  await window.keyboard.type(`cat -u -v > ${out}`)
+  // Waited for, not assumed: the poll above matches a prompt-ish character,
+  // which the shell can print before it is reading. A command typed ahead of
+  // that is lost, and every assertion below would then be against an empty
+  // file for a reason that has nothing to do with Shift+Return.
+  await expect
+    .poll(async () => (await terminalTexts(window)).join('\n'), { timeout: 20_000 })
+    .toContain('cat -u -v')
+  await window.keyboard.press('Enter')
+
+  // Readiness and the control in one step, because the tty is in canonical
+  // mode: `cat` is handed a line at a time, so a lone 'X' reaches it only once
+  // something terminates the line. Measured 2026-08-07 in a plain tmux pane —
+  // after typing 'X' the file is still 0 bytes, and it becomes `X^[\n` the
+  // moment an ESC CR arrives. So this Return is both the proof that `cat` is
+  // reading and the control that fixes what a plain Return costs: one CR,
+  // which the tty's ICRNL turns into one LF.
+  await window.keyboard.type('X')
+  await window.keyboard.press('Enter')
+  await expect.poll(received, { timeout: 20_000 }).toBe('X\n')
+
+  // The claim. ESC, then the CR that ICRNL makes an LF, and nothing else. The
+  // trailing bare Return this test exists for lands as a second '\n'.
+  await window.keyboard.press('Shift+Enter')
+  await expect.poll(received, { timeout: 20_000 }).toBe('X\n^[\n')
+  // Settled: a stray Return still in flight would arrive after the poll first
+  // matched, so the same value has to still hold once the pty has gone quiet.
+  await window.waitForTimeout(750)
+  expect(await received()).toBe('X\n^[\n')
   await app.close()
 })
 

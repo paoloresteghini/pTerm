@@ -197,6 +197,13 @@ export function Terminal({
       // through xterm, which has no way to send input it did not synthesise.
       if (event.key === 'Enter' && event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey) {
         window.pterm.input(tabId, '\x1b\r')
+        // Returning false stops xterm HANDLING the key; it does not stop the
+        // browser's default action, and the hidden textarea still produced a
+        // Return of its own. Measured 2026-08-07: one Shift+Return emitted the
+        // ESC CR above and then `onData "\r"`, so a program behind the pty saw
+        // "newline, then submit" — which is Claude Code taking the line the
+        // keystroke was meant to keep open.
+        event.preventDefault()
         return false
       }
       if (event.key !== 'ArrowUp') return true
