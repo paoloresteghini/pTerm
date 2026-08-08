@@ -185,7 +185,36 @@ test('lists the active project at the top level, folders first', async () => {
   // 2026-08-04 (`'.env' < 'README.md'`). `tests/unit/fileTree.test.ts` asserts
   // the same sort rule against the same shapes.
   await expect(rows).toHaveCount(4, { timeout: 10_000 })
-  expect(await rows.allInnerTexts()).toEqual(['docs', 'src', '.env', 'README.md'])
+  // Read off the name spans rather than the rows: a row also holds a twist
+  // and an icon now, so its inner text carries the chevron too. `tree-name-`
+  // deliberately does not share the `tree-row-` prefix this file counts with.
+  expect(await page.locator('[data-testid^="tree-name-"]').allInnerTexts()).toEqual([
+    'docs',
+    'src',
+    '.env',
+    'README.md',
+  ])
+})
+
+/*
+ * Every row draws an icon, and a directory draws a twist.
+ *
+ * Asserted on the SVG's presence rather than on which shape it is: the mapping
+ * from a name to a kind is `tests/unit/fileIcon.test.ts`'s job, and duplicating
+ * it here would mean two places to change for one new file type. What this
+ * cannot see is whether the icon is the right one — only that a row is not
+ * silently drawing nothing, which is what a broken import would look like.
+ */
+test('every row draws an icon, and only directories draw a twist', async () => {
+  const dir = page.getByTestId('tree-row-src')
+  const file = page.getByTestId('tree-row-README.md')
+  await expect(dir.locator('svg')).toHaveCount(1)
+  await expect(file.locator('svg')).toHaveCount(1)
+
+  // The twist is text, so it is read rather than counted. A file's slot is
+  // there but empty, which is what keeps every name starting at the same x.
+  expect((await dir.innerText()).startsWith('▸')).toBe(true)
+  expect((await file.innerText()).trim()).toBe('README.md')
 })
 
 test('hides .git and node_modules and shows other dotfiles', async () => {

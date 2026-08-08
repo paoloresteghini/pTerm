@@ -4,6 +4,7 @@ import { readExpanded, writeExpanded, toggled } from './lib/treeState'
 import { cn } from './lib/cn'
 import { PanelHeading } from './ui/Panel'
 import { FileTreeMenu, type FileTreeAction } from './FileTreeMenu'
+import { FileIcon } from './ui/FileIcon'
 
 /**
  * The active project's working tree.
@@ -305,11 +306,21 @@ export function FileTree({
           // Indent by depth, in the same 10px step the sidebar's tab rows use.
           style={{ paddingLeft: `${10 + depth * 10}px` }}
           className={cn(
-            'block w-full cursor-default truncate border-none bg-transparent py-0.5 pr-2.5 text-left',
+            // `flex` rather than `block`: the row now holds a chevron, an icon
+            // and the name, and the name is the only part that truncates.
+            'flex w-full cursor-default items-center border-none bg-transparent py-0.5 pr-2.5 text-left',
             entry.dir ? 'text-muted hover:text-fg' : 'text-faint hover:text-fg',
           )}
         >
-          {entry.name}
+          {/* A directory's twist, and a fixed-width blank for a file, so every
+              name in a directory starts at the same x whatever its kind. */}
+          <span className="mr-0.5 w-3 shrink-0 text-center text-[9px] leading-none text-faint">
+            {entry.dir ? (open ? '▾' : '▸') : ''}
+          </span>
+          <FileIcon name={entry.name} isDir={entry.dir} />
+          <span data-testid={`tree-name-${relPath}`} className="truncate">
+            {entry.name}
+          </span>
         </button>,
         ...(open ? rows(relPath, depth + 1) : []),
       ]
