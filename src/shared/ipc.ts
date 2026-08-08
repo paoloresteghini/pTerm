@@ -56,6 +56,10 @@ export const CHANNELS = {
   fsReveal: 'pterm:fsReveal',
   fsCopyPath: 'pterm:fsCopyPath',
   fsCreate: 'pterm:fsCreate',
+  projectFiles: 'pterm:projectFiles',
+  statusSince: 'pterm:statusSince',
+  clipboardRead: 'pterm:clipboardRead',
+  clipboardWrite: 'pterm:clipboardWrite',
   openEditor: 'pterm:openEditor',
   openExternal: 'pterm:openExternal',
   updateAvailable: 'pterm:updateAvailable',
@@ -403,6 +407,11 @@ export interface StatusEvent {
   tabId: string
   /** Null means the tab was forgotten — dismissed, or killed on purpose. */
   state: TabState | null
+  /**
+   * When the tab entered this state, epoch ms, for the elapsed label. Null
+   * alongside a null state, and for a transition that carries no clock.
+   */
+  since: number | null
 }
 
 /**
@@ -709,6 +718,17 @@ export type GitMutation =
  */
 export type FsResult = { ok: true } | { ok: false; error: string }
 
+/**
+ * A project's files, for the palette's fuzzy open.
+ *
+ * `truncated` is surfaced rather than swallowed: a repo over the cap should
+ * look like a palette missing files, not like a project without them.
+ */
+export interface ProjectFileList {
+  files: string[]
+  truncated: boolean
+}
+
 export interface PTermApi {
   open(request: OpenRequest): Promise<TabDescriptor>
   list(): Promise<TabDescriptor[]>
@@ -938,6 +958,34 @@ export interface PTermApi {
     name: string,
     kind: 'file' | 'directory',
   ): Promise<FsResult>
+
+  /**
+   * Every file in one project, as paths relative to its root.
+   *
+   * A snapshot per call with no watcher: the palette asks when it opens, the
+   * way it already asks for skills, and a stale entry costs one failed open.
+   */
+  projectFiles(projectId: string): Promise<ProjectFileList>
+
+  /**
+   * The clipboard's text, for the pane menu's Paste.
+   *
+   * Main rather than the renderer: `navigator.clipboard.readText` needs a
+   * permission this app never prompts for, and returns a rejected promise
+   * without one. Electron's `clipboard` in main has no such gate.
+   */
+  /**
+   * When each tab entered its current state, epoch ms, keyed by tab id.
+   *
+   * Its own call rather than a widening of `status`: that map's shape is read
+   * in several places and one label is not worth changing all of them.
+   */
+  statusSince(): Promise<Record<string, number>>
+
+  clipboardRead(): Promise<string>
+
+  /** Put text on the clipboard, for the pane menu's Copy. */
+  clipboardWrite(text: string): Promise<void>
   /**
    * Open one file of one project in an editor pane of its own, in a new tab.
    *

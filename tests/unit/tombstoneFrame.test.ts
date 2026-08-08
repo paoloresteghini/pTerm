@@ -142,6 +142,7 @@ function priorState(stillDead: string | null): WorkspaceState {
     tabs: [STARTING_ROW],
     activeProjectId: null,
     status: {},
+    since: {},
     dead: stillDead ? { [stillDead]: 0 } : {},
   }
 }
@@ -699,6 +700,7 @@ describe('the whole-tab property, exhaustively', () => {
         tabs: [STARTING_ROW],
         activeProjectId: null,
         status: {},
+        since: {},
         dead: {},
       }
       for (const id of deathOrder) {

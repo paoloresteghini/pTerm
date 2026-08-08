@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { canHaveSession, type TabDescriptor, type TabState } from '../shared/ipc'
 import { StatusDot } from './StatusDot'
+import { elapsedLabel } from './lib/elapsed'
 import { cn } from './lib/cn'
 import { tabLabel } from './lib/tabLabel'
 import { ColorSwatches } from './ColorSwatches'
@@ -10,6 +11,8 @@ export function TabBar({
   tabs,
   activeId,
   status,
+  since,
+  now,
   dead,
   dirty,
   onActivate,
@@ -24,6 +27,10 @@ export function TabBar({
   tabs: TabDescriptor[]
   activeId: string | null
   status: Record<string, TabState>
+  /** When each tab entered its state, epoch ms. Absent means no label. */
+  since: Record<string, number>
+  /** Ticked by `App` on a coarse interval, so this component holds no timer. */
+  now: number
   dead: Record<string, number>
   dirty: Record<string, boolean>
   onActivate: (id: string) => void
@@ -162,6 +169,20 @@ export function TabBar({
             )}
           >
             <StatusDot state={status[tab.id] ?? null} testid={`dot-${tab.id}`} />
+            {/* How long this tab has been in its state, on the tab itself but
+                only while it is NOT idle. An idle session is not one anybody
+                is waiting on, and a duration on every tab in the bar is a row
+                of numbers rather than a signal. */}
+            {(() => {
+              const state = status[tab.id] ?? null
+              if (state === null || state === 'idle') return null
+              const label = elapsedLabel(since[tab.id] ?? null, now)
+              return label === null ? null : (
+                <span data-testid={`elapsed-${tab.id}`} className="ml-1 text-faint">
+                  {label}
+                </span>
+              )
+            })()}
             {renamingId === tab.id ? (
               <input
                 data-testid={`tabinput-${tab.id}`}

@@ -95,6 +95,10 @@ const api: PTermApi = {
     ipcRenderer.invoke(CHANNELS.fsCopyPath, projectId, relPath, kind),
   fsCreate: (projectId, relDir, name, kind) =>
     ipcRenderer.invoke(CHANNELS.fsCreate, projectId, relDir, name, kind),
+  projectFiles: (projectId) => ipcRenderer.invoke(CHANNELS.projectFiles, projectId),
+  statusSince: () => ipcRenderer.invoke(CHANNELS.statusSince),
+  clipboardRead: () => ipcRenderer.invoke(CHANNELS.clipboardRead),
+  clipboardWrite: (text) => ipcRenderer.invoke(CHANNELS.clipboardWrite, text),
   openEditor: (projectId, relPath) => ipcRenderer.invoke(CHANNELS.openEditor, projectId, relPath),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke(CHANNELS.openExternal, url),
   /*

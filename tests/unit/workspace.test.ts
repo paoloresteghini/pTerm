@@ -76,6 +76,7 @@ const three: WorkspaceState = {
   tabs: [],
   activeProjectId: 'p1',
   status: {},
+  since: {},
   dead: {},
 }
 
@@ -115,6 +116,7 @@ describe('tabsOfProject', () => {
       tabs: [],
       activeProjectId: 'p1',
       status: {},
+      since: {},
       dead: {},
     }
     expect(tabsOfProject(state, 'p1').map((t) => t.id)).toEqual(['aaa', 'ccc'])
@@ -127,6 +129,7 @@ describe('tabsOfProject', () => {
       tabs: [],
       activeProjectId: 'p1',
       status: {},
+      since: {},
       dead: {},
     }
     expect(tabsOfProject(state, UNSORTED_ID).map((t) => t.id)).toEqual(['bbb', 'ccc'])
@@ -496,6 +499,7 @@ describe('a dead pane', () => {
     // their shares" apart from "the survivors were re-evened". These can.
     tabs: [ratioRow('aaa', ['aaa', 'bbb', 'ccc'], [0.5, 0.25, 0.25])],
     projects: [project('p1', 'lumio', 'aaa')],
+    since: {},
     dead: { bbb: 0 },
   }
 
@@ -585,6 +589,7 @@ describe('an editor pane', () => {
       // id collision, and the overlay they would raise offers a restart of
       // nothing.
       status: { e2: 'crashed' },
+      since: {},
       dead: { e1: 0, e2: 1 },
     }
 
@@ -603,6 +608,7 @@ describe('an editor pane', () => {
       tabs: [ratioRow('aaa', ['aaa', 'e1'], [0.5, 0.5])],
       activeProjectId: 'p1',
       status: {},
+      since: {},
       dead: { aaa: 0, e1: 0 },
     }
 
@@ -620,6 +626,7 @@ describe('an editor pane', () => {
       tabs: [],
       activeProjectId: 'p1',
       status: { e1: 'waiting', e2: 'crashed', aaa: 'waiting' },
+      since: {},
       dead: {},
     }
 
@@ -645,6 +652,7 @@ describe("a tab's dot", () => {
     tabs: [tabRow('aaa', ['aaa', 'bbb'])],
     activeProjectId: 'p1',
     status: {},
+    since: {},
     dead: {},
   }
 
@@ -763,6 +771,7 @@ describe('workspaceReducer', () => {
       tabs: [],
       activeProjectId: null,
       status: {},
+      since: {},
       dead: {},
     })
   })
@@ -848,6 +857,7 @@ describe('workspaceReducer', () => {
       tabs: [],
       activeProjectId: 'p1',
       status: {},
+      since: {},
       dead: {},
     }
     const next = workspaceReducer(one, { type: 'removed', id: 'aaa' })
@@ -877,6 +887,7 @@ describe('workspaceReducer', () => {
       tabs: [],
       activeProjectId: 'p2',
       status: {},
+      since: {},
       dead: {},
     }
     const next = workspaceReducer(state, { type: 'removed', id: 'aaa' })
@@ -916,6 +927,7 @@ describe('workspaceReducer', () => {
       tabs: [],
       activeProjectId: 'p1',
       status: {},
+      since: {},
       dead: {},
     }
     const next = workspaceReducer(state, {
@@ -936,6 +948,7 @@ describe('workspaceReducer', () => {
       tabs: [],
       activeProjectId: 'p1',
       status: {},
+      since: {},
       dead: {},
     }
     const next = workspaceReducer(state, {
@@ -958,6 +971,7 @@ describe('workspaceReducer', () => {
       tabs: [],
       activeProjectId: UNSORTED_ID,
       status: {},
+      since: {},
       dead: {},
     }
     const next = workspaceReducer(state, {
@@ -976,6 +990,7 @@ describe('workspaceReducer', () => {
       tabs: [],
       activeProjectId: 'p2',
       status: {},
+      since: {},
       dead: {},
     }
     const next = workspaceReducer(state, {
@@ -1270,6 +1285,7 @@ describe('workspaceReducer', () => {
         tabs: [tabRow('aaa', ['aaa'])],
         activeProjectId: 'p2',
         status: {},
+        since: {},
         dead: {},
       }
       const next = workspaceReducer(state, {
@@ -1392,6 +1408,7 @@ describe('a tombstone when its tab is split or closed', () => {
     tabs: [ratioRow('aaa', ['aaa', 'bbb'], [0.5, 0.5])],
     activeProjectId: 'p1',
     status: { aaa: 'crashed', bbb: 'idle' },
+    since: {},
     dead: { aaa: 0 },
   }
 
@@ -1521,6 +1538,7 @@ describe('a tombstone when its tab is split or closed', () => {
       panes: [tab('aaa'), tab('bbb'), tab('ccc')],
       tabs: [ratioRow('aaa', ['aaa', 'bbb', 'ccc'], [0.4, 0.2, 0.4])],
       status: { aaa: 'idle', bbb: 'crashed', ccc: 'idle' },
+      since: {},
       dead: { bbb: 0 },
     }
     const next = workspaceReducer(state, {
@@ -1547,6 +1565,7 @@ describe('a tombstone when its tab is split or closed', () => {
       panes: [tab('zzz'), tab('aaa'), tab('ccc')],
       tabs: [ratioRow('zzz', ['zzz', 'aaa', 'ccc'], [0.2, 0.4, 0.4])],
       status: { zzz: 'crashed', aaa: 'idle', ccc: 'idle' },
+      since: {},
       dead: { zzz: 0 },
     }
     const next = workspaceReducer(state, {
@@ -1573,6 +1592,7 @@ describe('a tombstone when its tab is split or closed', () => {
       panes: [tab('aaa'), tab('bbb'), tab('ccc')],
       tabs: [ratioRow('aaa', ['aaa', 'bbb', 'ccc'], [0.5, 0.25, 0.25])],
       status: { aaa: 'crashed', bbb: 'ended', ccc: 'idle' },
+      since: {},
       dead: { aaa: 0, bbb: 0 },
     }
     const next = workspaceReducer(state, {
@@ -1632,6 +1652,7 @@ describe('a tombstone when its tab is split or closed', () => {
       panes: [tab('aaa'), tab('bbb'), tab('ccc')],
       tabs: [ratioRow('aaa', ['aaa', 'bbb', 'ccc'], [0.5, 0.25, 0.25])],
       status: { aaa: 'crashed', bbb: 'idle', ccc: 'idle' },
+      since: {},
       dead: { aaa: 0 },
     }
     const next = workspaceReducer(state, { type: 'dismissed', id: 'aaa' })
@@ -1652,6 +1673,7 @@ describe('a tombstone when its tab is split or closed', () => {
       ...deadFounder,
       panes: [tab('aaa'), tab('bbb'), tab('ccc')],
       tabs: [ratioRow('aaa', ['aaa', 'bbb', 'ccc'], [0.5, 0.25, 0.25])],
+      since: {},
       dead: { aaa: 0 },
     }
     const row = workspaceReducer(state, { type: 'dismissed', id: 'aaa' }).tabs[0]
@@ -1794,6 +1816,7 @@ describe('grabFor', () => {
       pane: tab(ids[index]),
       share,
       style: { flexBasis: `${share * 100}%` },
+      since: {},
       dead: false,
     }))
   const grid = () => ({ cols: 100, rows: 30 })
@@ -1997,6 +2020,7 @@ describe('panesMerged', () => {
       panes: [tab('aaa', 'lumio'), tab('bbb', 'lumio')],
       tabs: [tabRow('aaa', ['aaa']), tabRow('bbb', ['bbb'])],
       activeProjectId: 'p1',
+      since: {},
       dead: { bbb: 0 },
     }
     const next = workspaceReducer(before, {

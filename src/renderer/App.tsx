@@ -20,6 +20,7 @@ import { StatusBar } from './StatusBar'
 import { Welcome } from './Welcome'
 import { CommandPalette, type PaletteSession } from './CommandPalette'
 import { FileView, saveEditorPane } from './FileView'
+import { clearTerminal, selectionOf } from './Terminal'
 import { DiffView } from './DiffView'
 import { cn } from './lib/cn'
 import { tabLabel } from './lib/tabLabel'
@@ -811,11 +812,40 @@ export function App() {
   // covers what had already happened before the renderer mounted.
   useEffect(
     () =>
-      window.pterm.onStatus(({ tabId, state: tabState }) =>
-        dispatch({ type: 'statusChanged', tabId, state: tabState }),
+      window.pterm.onStatus(({ tabId, state: tabState, since }) =>
+        dispatch({ type: 'statusChanged', tabId, state: tabState, since }),
       ),
     [],
   )
+
+  /*
+   * A coarse clock for the elapsed labels.
+   *
+   * Fifteen seconds, not one. The labels are whole minutes, so a tick per
+   * second would re-render every tab and sidebar row sixty times for each
+   * change any of them can show. Fifteen means a label is at worst that stale,
+   * which is invisible at minute resolution.
+   */
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 15_000)
+    return () => clearInterval(timer)
+  }, [])
+
+  // The clocks for tabs that were already in a state before this window
+  // existed. `restore` brings back the states; without this the labels would
+  // all be blank until each tab's next transition, which for an idle session
+  // could be hours.
+  useEffect(() => {
+    window.pterm
+      .statusSince()
+      .then((since) => dispatch({ type: 'statusSnapshot', status: state.status, since }))
+      // Swallowed: a missing clock costs a label, not correctness.
+      .catch(() => {})
+    // Once, on mount. `state.status` is read rather than depended on, so a
+    // status arriving later does not refetch every clock.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // The one place that tells the main process what is selected, so every path
   // is covered — including the ones nothing calls directly, like a close or a
@@ -1234,6 +1264,8 @@ export function App() {
           tabsOf={(id) => tabsOfProject(state, id)}
           activeTabId={currentTabId}
           status={state.status}
+          since={state.since}
+          now={now}
           projectStateOf={(id) => stateOfProject(state, id)}
           needsYou={needsYou(state)}
           onSelectNeedy={(tab) => {
@@ -1289,6 +1321,8 @@ export function App() {
             tabs={currentTabs}
             activeId={currentTabId}
             status={state.status}
+            since={state.since}
+            now={now}
             dead={state.dead}
             dirty={dirty}
             onActivate={(id) => dispatch({ type: 'activatedTab', id })}
@@ -1546,6 +1580,89 @@ export function App() {
             style={{ left: paneMenu.left, top: paneMenu.top }}
             className="fixed z-30 flex flex-col border border-border bg-bg py-0.5 text-[11px]"
           >
+            {/* Terminal actions above the swatches, and only for a pane that
+                has a terminal: an editor pane has no selection to copy and
+                nothing to paste into, and offering it these would be four
+                items that quietly do nothing.
+
+                `selectionOf` is read at render, so Copy reflects the selection
+                as it stood when the menu opened. That is the selection the
+                right-click was made against — a right-click inside a pane does
+                not clear it — so there is nothing later to re-read. */}
+            {state.panes.find((pane) => pane.id === paneMenu.id)?.type === 'shell' ? (
+              <>
+                <button
+                  data-testid={`pmenu-copy-${paneMenu.id}`}
+                  disabled={selectionOf(paneMenu.id) === ''}
+                  onClick={() => {
+                    const text = selectionOf(paneMenu.id)
+                    setPaneMenu(null)
+                    if (text !== '') void window.pterm.clipboardWrite(text)
+                  }}
+                  className="cursor-default border-none bg-transparent px-2 py-1 text-left text-fg hover:bg-hover disabled:text-faint disabled:hover:bg-transparent"
+                >
+                  Copy
+                </button>
+                <button
+                  data-testid={`pmenu-paste-${paneMenu.id}`}
+                  onClick={() => {
+                    const id = paneMenu.id
+                    setPaneMenu(null)
+                    // Written to the pty rather than into xterm: xterm has no
+                    // way to send input it did not synthesise, which is the
+                    // same reason Shift+Return goes out this way.
+                    void window.pterm
+                      .clipboardRead()
+                      .then((text) => {
+                        if (text !== '') window.pterm.input(id, text)
+                      })
+                      .catch(fail)
+                  }}
+                  className="cursor-default border-none bg-transparent px-2 py-1 text-left text-fg hover:bg-hover"
+                >
+                  Paste
+                </button>
+                <button
+                  data-testid={`pmenu-clear-${paneMenu.id}`}
+                  // Named for what it does. tmux keeps the deeper history and
+                  // is untouched, and "Clear" alone reads as destroying it.
+                  title="Clears this pane's scrollback. tmux keeps its own history."
+                  onClick={() => {
+                    const id = paneMenu.id
+                    setPaneMenu(null)
+                    clearTerminal(id)
+                  }}
+                  className="cursor-default border-none bg-transparent px-2 py-1 text-left text-fg hover:bg-hover"
+                >
+                  Clear scrollback
+                </button>
+                <div className="my-0.5 border-t border-border" />
+                <button
+                  data-testid={`pmenu-split-${paneMenu.id}`}
+                  onClick={() => {
+                    setPaneMenu(null)
+                    splitActive('row')
+                  }}
+                  className="cursor-default border-none bg-transparent px-2 py-1 text-left text-fg hover:bg-hover"
+                >
+                  Split
+                </button>
+                <button
+                  data-testid={`pmenu-close-${paneMenu.id}`}
+                  onClick={() => {
+                    const id = paneMenu.id
+                    setPaneMenu(null)
+                    // Through `requestClosePane`, not `closePane`: it is the
+                    // one that asks first when a pane has unsaved work.
+                    requestClosePane(id)
+                  }}
+                  className="cursor-default border-none bg-transparent px-2 py-1 text-left text-fg hover:bg-hover"
+                >
+                  Close pane
+                </button>
+                <div className="my-0.5 border-t border-border" />
+              </>
+            ) : null}
             <ColorSwatches
               paneId={paneMenu.id}
               selected={
@@ -1609,6 +1726,8 @@ export function App() {
           onOpenChange={setPaletteOpen}
           sessions={paletteSessions}
           projectCwd={project?.cwd}
+          projectId={project?.id}
+          onOpenFile={openFile}
           onSelectSession={(id) => {
             const tab = state.panes.find((candidate) => candidate.id === id)
             if (!tab) return

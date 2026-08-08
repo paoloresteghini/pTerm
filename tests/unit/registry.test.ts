@@ -469,3 +469,83 @@ describe('StatusRegistry', () => {
     expect(seen).toEqual([])
   })
 })
+
+/**
+ * `since`: when each tab entered the state it is in.
+ *
+ * The clock is injected so these assert exact values rather than sleeping. The
+ * behaviour worth pinning is not that a transition writes a timestamp — it is
+ * that a REPEAT does not, because Claude re-fires `Notification` about once a
+ * minute while a prompt sits unanswered, and a clock that restarted on each
+ * re-fire would show "waiting 0m" forever on the one session most worth
+ * noticing.
+ */
+describe('since', () => {
+  /** A clock the test moves by hand. */
+  function clock(): { now: () => number; set: (ms: number) => void } {
+    let value = 1_000
+    return { now: () => value, set: (ms) => (value = ms) }
+  }
+
+  it('has no clock for a tab it has never seen', () => {
+    expect(new StatusRegistry().sinceOf(ID)).toBeNull()
+  })
+
+  it('records the time of a transition', () => {
+    const time = clock()
+    const registry = new StatusRegistry(time.now)
+    time.set(5_000)
+    registry.applyHook(hook(ID, 'UserPromptSubmit'))
+    expect(registry.sinceOf(ID)).toBe(5_000)
+  })
+
+  it('moves the clock when the state actually changes', () => {
+    const time = clock()
+    const registry = new StatusRegistry(time.now)
+    registry.applyHook(hook(ID, 'UserPromptSubmit'))
+    time.set(9_000)
+    registry.applyHook(hook(ID, 'Notification'))
+    expect(registry.get(ID)).toBe('waiting')
+    expect(registry.sinceOf(ID)).toBe(9_000)
+  })
+
+  /*
+   * The one that matters. A second `Notification` is the same state, so `set`
+   * returns before writing, and the clock must still read the moment the wait
+   * began rather than the moment of the latest re-fire.
+   */
+  it('does NOT move the clock on a repeat of the same state', () => {
+    const time = clock()
+    const registry = new StatusRegistry(time.now)
+    time.set(2_000)
+    registry.applyHook(hook(ID, 'Notification'))
+    expect(registry.sinceOf(ID)).toBe(2_000)
+
+    time.set(60_000)
+    registry.applyHook(hook(ID, 'Notification'))
+    time.set(120_000)
+    registry.applyHook(hook(ID, 'Notification'))
+    expect(registry.sinceOf(ID)).toBe(2_000)
+  })
+
+  it('drops the clock when a tab is forgotten', () => {
+    const time = clock()
+    const registry = new StatusRegistry(time.now)
+    registry.applyHook(hook(ID, 'UserPromptSubmit'))
+    registry.forget(ID)
+    expect(registry.sinceOf(ID)).toBeNull()
+  })
+
+  it('carries every tab in the snapshot, as a copy', () => {
+    const time = clock()
+    const registry = new StatusRegistry(time.now)
+    time.set(7_000)
+    registry.applyHook(hook(ID, 'UserPromptSubmit'))
+    const snapshot = registry.sinceSnapshot()
+    expect(snapshot).toEqual({ [ID]: 7_000 })
+
+    // A caller that mutated the answer must not rewrite the registry.
+    snapshot[ID] = 0
+    expect(registry.sinceOf(ID)).toBe(7_000)
+  })
+})

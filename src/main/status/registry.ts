@@ -47,6 +47,20 @@ export interface StatusTransition {
  */
 export class StatusRegistry {
   private readonly states = new Map<string, TabState>()
+  /**
+   * When each tab entered the state it is in, epoch ms.
+   *
+   * For the vitals label: "thinking 4m" needs a start, and neither the state
+   * map nor the wire carried one. Written only on a REAL transition — `set`
+   * returns early on `from === to`, so Claude's minute-by-minute `Notification`
+   * re-fires do not keep resetting the clock on a prompt that has been sitting
+   * unanswered for an hour, which is exactly the session the label is for.
+   *
+   * Not persisted. A relaunch re-establishes every state from scratch and the
+   * clock restarts with it; a timestamp read off disk would claim knowledge of
+   * what a session did while the app was closed.
+   */
+  private readonly since = new Map<string, number>()
   private readonly listeners = new Set<(transition: StatusTransition) => void>()
   /**
    * Tabs whose death has been explained by the pane that died.
@@ -61,6 +75,13 @@ export class StatusRegistry {
    * and must not be allowed to overwrite the answer with `ended`.
    */
   private readonly explained = new Set<string>()
+
+  /**
+   * Injected so tests can assert on `since` without sleeping. Defaults to the
+   * real clock, so nothing outside a test passes one.
+   */
+  constructor(private readonly now: () => number = Date.now) {}
+
   /**
    * Tabs whose Needs You row has been ticked off and has not yet had a
    * reason to come back.
@@ -100,6 +121,8 @@ export class StatusRegistry {
     // about, so only changes are transitions.
     if (from === to) return
     this.states.set(tabId, to)
+    // After the `from === to` return above, so a repeat does not restart it.
+    this.since.set(tabId, this.now())
     // A spooled event replayed at launch describes a past, not a present —
     // the final state still has to be right (that is what stops a `waiting`
     // session coming back blank), but a hundred of them firing a toast apiece
@@ -177,6 +200,7 @@ export class StatusRegistry {
     const from = this.states.get(tabId)
     if (from === undefined) return
     this.states.delete(tabId)
+    this.since.delete(tabId)
     for (const listener of this.listeners) listener({ tabId, from, to: null })
   }
 
@@ -206,9 +230,25 @@ export class StatusRegistry {
     return this.states.get(tabId) ?? null
   }
 
+  /** When `tabId` entered its current state, or null if it has no state. */
+  sinceOf(tabId: string): number | null {
+    return this.since.get(tabId) ?? null
+  }
+
   /** A copy: a caller that mutated this would silently rewrite the truth. */
   snapshot(): Record<string, TabState> {
     return Object.fromEntries(this.states)
+  }
+
+  /**
+   * Every tab's `since`, as a copy, for the restore payload.
+   *
+   * Separate from `snapshot` rather than folded into it: `snapshot`'s shape is
+   * what `CHANNELS.status` and the restore result already carry, and widening
+   * it would touch every reader of a state map for the sake of one label.
+   */
+  sinceSnapshot(): Record<string, number> {
+    return Object.fromEntries(this.since)
   }
 
   /** What the dock badge shows: the tabs that are blocking a human. */

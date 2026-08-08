@@ -45,6 +45,15 @@ const MAX_GAP_PENALTY = 4
  * scoring, and it is deliberate: it is linear, it is deterministic, and the
  * alternative buys nothing a user of a list this size would notice.
  */
+/**
+ * What a basename match is worth over the same match buried in a path.
+ *
+ * Large enough to outrank the segment-start bonuses a directory match collects
+ * on the way (`src/`, `app/`, `nested/` each start a segment), because those
+ * add up and would otherwise win.
+ */
+const BASENAME_BONUS = 100
+
 export function scoreEntry(query: string, name: string): number | null {
   const needle = query.toLowerCase()
   const haystack = name.toLowerCase()
@@ -143,4 +152,53 @@ export function rankSessions<T extends { name: string; severity: number }>(
     return byName(a.session, b.session)
   })
   return scored.map((item) => item.session)
+}
+
+/** One file offered by the palette: its path, and the basename shown first. */
+export interface RankedFile {
+  path: string
+  name: string
+}
+
+/**
+ * File paths matching `query`, best first.
+ *
+ * Scored TWICE, against the basename and against the whole path, and the better
+ * of the two wins with the basename given a head start. A path is not a name:
+ * without that head start, typing `app` ranks `src/app/nested/other.ts` above
+ * `App.tsx`, because the buried match happens to score well on segment starts.
+ * What you name is almost always the file, not a directory on the way to it.
+ *
+ * The whole-path score is kept rather than dropped so a directory can still be
+ * typed: `nested` finds the file under `nested/` even though its basename
+ * contains no such run.
+ *
+ * Ties break on path, which is total, so the list cannot reshuffle between two
+ * keystrokes that did not change the query — `index.ts` under six directories
+ * is ordinary, and an unstable order there is visible jitter.
+ */
+export function rankFiles(query: string, files: string[]): RankedFile[] {
+  const entries = files.map((path) => ({ path, name: path.slice(path.lastIndexOf('/') + 1) }))
+  if (query.length === 0) {
+    return [...entries].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+  }
+
+  const scored: { entry: RankedFile; score: number }[] = []
+  for (const entry of entries) {
+    const onName = scoreEntry(query, entry.name)
+    const onPath = scoreEntry(query, entry.path)
+    if (onName === null && onPath === null) continue
+    const best = Math.max(
+      onName === null ? -Infinity : onName + BASENAME_BONUS,
+      onPath === null ? -Infinity : onPath,
+    )
+    scored.push({ entry, score: best })
+  }
+
+  return scored
+    .sort((a, b) => {
+      if (a.score !== b.score) return b.score - a.score
+      return a.entry.path < b.entry.path ? -1 : a.entry.path > b.entry.path ? 1 : 0
+    })
+    .map(({ entry }) => entry)
 }

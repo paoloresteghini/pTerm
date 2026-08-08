@@ -28,6 +28,14 @@ export interface WorkspaceState {
    */
   status: Record<string, TabState>
   /**
+   * When each tab entered its current state, epoch ms, for the elapsed label.
+   *
+   * A map beside `status` rather than a field on it: `status`'s shape is read
+   * in several places and widening it for one label would touch all of them.
+   * A tab absent here simply gets no label.
+   */
+  since: Record<string, number>
+  /**
    * Panes whose tmux session has died, by exit code, kept in the bar until
    * the user restarts or dismisses them.
    *
@@ -72,8 +80,8 @@ export type WorkspaceAction =
   | { type: 'activatedProject'; id: string }
   | { type: 'movedTab'; panes: TabDescriptor[]; projects: ProjectDescriptor[] }
   | { type: 'panesMerged'; panes: TabDescriptor[] }
-  | { type: 'statusSnapshot'; status: Record<string, TabState> }
-  | { type: 'statusChanged'; tabId: string; state: TabState | null }
+  | { type: 'statusSnapshot'; status: Record<string, TabState>; since?: Record<string, number> }
+  | { type: 'statusChanged'; tabId: string; state: TabState | null; since?: number | null }
   | { type: 'died'; id: string; code: number }
   | { type: 'dismissed'; id: string }
   /** What `splitPane` resolved to: the new pane, and the tab's replacement row. */
@@ -99,6 +107,7 @@ export const INITIAL_WORKSPACE_STATE: WorkspaceState = {
   tabs: [],
   activeProjectId: null,
   status: {},
+  since: {},
   dead: {},
 }
 
@@ -1012,6 +1021,7 @@ export function workspaceReducer(
         tabs: action.tabs,
         activeProjectId: action.activeProjectId,
         status: action.status ?? {},
+        since: state.since,
         dead: {},
       }
 
@@ -1104,7 +1114,7 @@ export function workspaceReducer(
     }
 
     case 'statusSnapshot':
-      return { ...state, status: action.status }
+      return { ...state, status: action.status, since: action.since ?? state.since }
 
     case 'statusChanged': {
       // Null means the pane was forgotten — dismissed, or killed on purpose —
@@ -1115,9 +1125,20 @@ export function workspaceReducer(
       // `statusChanged` has written it.
       if (action.state === null) {
         const { [action.tabId]: _dropped, ...status } = state.status
-        return { ...state, status }
+        // The clock goes with it, for the reason above: nothing else removes a
+        // key once written, so a forgotten tab would keep a `since` forever and
+        // hand it to whatever id happened to reuse the slot.
+        const { [action.tabId]: _forgotten, ...since } = state.since
+        return { ...state, status, since }
       }
-      return { ...state, status: { ...state.status, [action.tabId]: action.state } }
+      return {
+        ...state,
+        status: { ...state.status, [action.tabId]: action.state },
+        since:
+          action.since === null || action.since === undefined
+            ? state.since
+            : { ...state.since, [action.tabId]: action.since },
+      }
     }
 
     case 'died':

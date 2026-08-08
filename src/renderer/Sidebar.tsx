@@ -10,6 +10,7 @@ import { cn } from './lib/cn'
 import { Button } from './ui/Button'
 import { NeedsYou } from './NeedsYou'
 import { StatusDot } from './StatusDot'
+import { elapsedLabel } from './lib/elapsed'
 import { tabLabel } from './lib/tabLabel'
 import { useColumnWidth } from './lib/columnWidth'
 import { ColumnResizer } from './ui/Panel'
@@ -20,6 +21,8 @@ export function Sidebar({
   tabsOf,
   activeTabId,
   status,
+  since,
+  now,
   projectStateOf,
   needsYou,
   onSelectNeedy,
@@ -40,6 +43,10 @@ export function Sidebar({
   tabsOf: (projectId: string) => TabDescriptor[]
   activeTabId: string | null
   status: Record<string, TabState>
+  /** When each tab entered its state, epoch ms. Absent means no label. */
+  since: Record<string, number>
+  /** Ticked by `App`, so this component holds no timer of its own. */
+  now: number
   projectStateOf: (projectId: string) => TabState | null
   needsYou: TabDescriptor[]
   onSelectNeedy: (tab: TabDescriptor) => void
@@ -228,6 +235,21 @@ export function Sidebar({
                 ? tabs.map((tab) => (
                     <div key={tab.id} className="flex items-center gap-1 pl-8 pr-2.5">
                       <StatusDot state={status[tab.id] ?? null} testid={`sdot-${tab.id}`} />
+                      {/* Every state here, idle included: this list is where
+                          "nothing has happened on that one for two hours" is
+                          the thing worth seeing, which is exactly the idle
+                          case the tab bar leaves out. */}
+                      {(() => {
+                        const label = elapsedLabel(since[tab.id] ?? null, now)
+                        return label === null ? null : (
+                          <span
+                            data-testid={`selapsed-${tab.id}`}
+                            className="ml-1 shrink-0 text-faint"
+                          >
+                            {label}
+                          </span>
+                        )
+                      })()}
                       <div
                         data-testid={`stab-${tab.id}`}
                         onClick={() => onSelectTab(tab.id)}

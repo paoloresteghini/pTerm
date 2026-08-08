@@ -12,6 +12,7 @@ import {
   type NotificationConfig,
   type OpenRequest,
   type Preset,
+  type ProjectFileList,
   type ProjectDescriptor,
   type RestartRequest,
   type RestoreResult,
@@ -58,6 +59,7 @@ import { isOpenable } from '../update/openable'
 import { addPrompt, readPrompts, removePrompt } from '../prompts/store'
 import { listDir, readFileInside, resolveInside, writeFileInside } from '../files/tree'
 import { createEntry, pathsFor, renameEntry } from '../files/ops'
+import { projectFiles } from '../files/projectFiles'
 import { readBranch } from '../git/branch'
 import { readCounts, syncBranch } from '../git/sync'
 import { readChanges, repoRoot } from '../git/status'
@@ -505,11 +507,15 @@ export function registerIpc(
   const tombstones = new Map<string, Claim>()
 
   registry.onTransition(({ tabId, to }) => {
-    const payload: StatusEvent = { tabId, state: to }
+    // `sinceOf` read here rather than carried on the transition: the registry
+    // has already written it by the time listeners run, and reading it keeps
+    // one source for the clock instead of two that could disagree.
+    const payload: StatusEvent = { tabId, state: to, since: registry.sinceOf(tabId) }
     send(CHANNELS.statusChanged, payload)
   })
 
   ipcMain.handle(CHANNELS.status, () => registry.snapshot())
+  ipcMain.handle(CHANNELS.statusSince, () => registry.sinceSnapshot())
 
   /**
    * Whether the tmux session outlived the client that just stopped.
@@ -1639,6 +1645,26 @@ export function registerIpc(
       const project = config.projects.find((row) => row.id === projectId)
       if (!project) return { ok: false, error: 'No such project' }
       return createEntry(project.cwd, relDir, name, kind)
+    },
+  )
+
+  // The clipboard, for the pane menu. In main because the renderer's own
+  // `navigator.clipboard.readText` needs a permission this app never prompts
+  // for and rejects without it.
+  ipcMain.handle(CHANNELS.clipboardRead, (): string => clipboard.readText())
+  ipcMain.handle(CHANNELS.clipboardWrite, (_event, text: string): void => {
+    clipboard.writeText(text)
+  })
+
+  // Outside `serialise` with the rest of the `fs*` reads: it spawns git and
+  // writes no config.
+  ipcMain.handle(
+    CHANNELS.projectFiles,
+    async (_event, projectId: string): Promise<ProjectFileList> => {
+      const config = await store.read()
+      const project = config.projects.find((row) => row.id === projectId)
+      if (!project) return { files: [], truncated: false }
+      return projectFiles(project.cwd)
     },
   )
 

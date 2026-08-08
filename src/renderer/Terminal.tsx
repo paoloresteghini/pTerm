@@ -88,6 +88,30 @@ export function focusTerminal(tabId: string): void {
   mounted.get(tabId)?.focus()
 }
 
+/**
+ * `tabId`'s current selection, or '' when it has none.
+ *
+ * For the pane menu's Copy, which is disabled on an empty answer. Reads
+ * through the same `mounted` map as `paneGrid` and `focusTerminal`, and
+ * answers '' rather than null for a pane with no terminal: an editor pane has
+ * no xterm, and asking it for a selection is not an error.
+ */
+export function selectionOf(tabId: string): string {
+  return mounted.get(tabId)?.getSelection() ?? ''
+}
+
+/**
+ * Empty `tabId`'s scrollback.
+ *
+ * xterm's own buffer only. tmux keeps the deeper history and is untouched, so
+ * this is "clear what I am looking at" and not "destroy the record" — the menu
+ * item says as much, because the two are easy to confuse and only one is
+ * recoverable.
+ */
+export function clearTerminal(tabId: string): void {
+  mounted.get(tabId)?.clear()
+}
+
 export function Terminal({
   tabId,
   visible,
