@@ -128,6 +128,17 @@ export async function launchApp(opts: {
    * `ZDOTDIR` both survives and redirects the history file with it.
    */
   zdotdir?: string
+  /*
+   * How many panes may hold a WebGL context at once, overriding the app's
+   * budget of twelve.
+   *
+   * Only `webgl.spec.ts` sets it, and only because the real budget cannot be
+   * driven through this UI: the tab bar scrolls once about fifteen tabs are in
+   * it and `+` ends up behind it, so a spec that wanted a thirteenth pane
+   * could not click its way to one. Turned down to two, the same eviction and
+   * recovery happens on the third pane.
+   */
+  webglLimit?: number
 }): Promise<ElectronApplication> {
   assertTestSocket(opts.socket)
   assertUnderTmp('configDir', opts.configDir)
@@ -210,6 +221,9 @@ export async function launchApp(opts: {
       // this launch's tmux server starts. See the option's comment for the
       // route it takes and for the one condition it depends on.
       ...(opts.zdotdir !== undefined ? { ZDOTDIR: opts.zdotdir } : {}),
+      // Unset everywhere else, so every other spec runs the budget the user
+      // runs and none of them can be reading a number this one left behind.
+      ...(opts.webglLimit !== undefined ? { PTERM_WEBGL_LIMIT: String(opts.webglLimit) } : {}),
     },
   })
 }

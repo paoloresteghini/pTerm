@@ -429,6 +429,23 @@ function createWindow(): void {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      /*
+       * `PTERM_WEBGL_LIMIT` handed to the preload as an argument rather than
+       * read there.
+       *
+       * The preload CANNOT read it itself, which is not obvious and cost a
+       * green test run to find: vite compiles that bundle with `process.env`
+       * replaced by an empty object literal (`var s={}` in
+       * `.vite/build/preload.js`), so `process.env.ANYTHING` there is
+       * statically undefined and fails silently. `process.argv` is untouched
+       * by that substitution, so this is the route that works. The main
+       * process is a different bundle and reads its own env normally, which is
+       * why every other `PTERM_*` variable is consumed on this side.
+       */
+      additionalArguments:
+        process.env.PTERM_WEBGL_LIMIT === undefined
+          ? []
+          : [`--pterm-webgl-limit=${process.env.PTERM_WEBGL_LIMIT}`],
     },
   })
 

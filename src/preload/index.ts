@@ -150,6 +150,15 @@ const api: PTermApi = {
   openDiff: (projectId: string, relPath: string, side: DiffSide): Promise<TabDescriptor | null> =>
     ipcRenderer.invoke(CHANNELS.openDiff, projectId, relPath, side),
   columnsVisible: (collapsed) => ipcRenderer.send(CHANNELS.columnsVisible, collapsed),
+  // Off `process.argv`, not `process.env`: vite compiles this bundle with
+  // `process.env` replaced by an empty object literal, so reading the variable
+  // here would be statically undefined and silently do nothing. `createWindow`
+  // in `src/main/index.ts` puts it on the command line for exactly that
+  // reason, and its comment is the long version. See the field in
+  // `shared/ipc.ts` for why it is a value and not a call.
+  webglLimit: process.argv
+    .find((arg) => arg.startsWith('--pterm-webgl-limit='))
+    ?.slice('--pterm-webgl-limit='.length),
 }
 
 contextBridge.exposeInMainWorld('pterm', api)

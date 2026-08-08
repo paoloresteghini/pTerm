@@ -433,16 +433,20 @@ test('the title bar is a draggable region, which is the only way to move the win
 /**
  * That a pane really is on the WebGL renderer.
  *
- * The addon is best effort — its constructor throws when WebGL is unavailable,
- * and Chromium caps live WebGL contexts per process — and the fallback was
- * silent until it was made to report itself. It matters because the DOM
- * renderer cannot draw `customGlyphs`, so a pane that quietly fell back starts
- * rendering the box and block characters in Claude Code's status line as
- * underscore slivers. That was found by looking at a screenshot, which is not
- * a test.
+ * The addon is best effort — its constructor throws when WebGL is unavailable
+ * — and the fallback was silent until it was made to report itself. It matters
+ * because the DOM renderer cannot draw `customGlyphs`, so a pane that quietly
+ * fell back starts rendering the box and block characters in Claude Code's
+ * status line as underscore slivers. That was found by looking at a
+ * screenshot, which is not a test.
  *
  * Measured 2026-08-08: an e2e pane reports `webgl`, so this suite does cover
  * the renderer the user runs rather than a headless substitute.
+ *
+ * This is the one-pane floor and nothing more. What happens once there are
+ * MORE panes than contexts to go round — Chromium's cap of 16, who gives one
+ * up, and what a pane's grid does when its renderer changes underneath it — is
+ * `webgl.spec.ts`, which drives that with the budget turned down.
  */
 test('a pane gets the WebGL renderer, not the DOM fallback', async () => {
   const app = await launch()

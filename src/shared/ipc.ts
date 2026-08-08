@@ -1139,6 +1139,17 @@ export interface PTermApi {
    * command still asks the renderer to flip its own state.
    */
   columnsVisible(collapsed: ColumnVisibility): void
+  /**
+   * `PTERM_WEBGL_LIMIT`, verbatim, or undefined when it is unset.
+   *
+   * A value rather than a call, and read in the preload rather than over IPC:
+   * `Terminal.tsx` needs it while a pane is mounting, which is not a moment
+   * that can wait for a round trip, and the variable cannot change while the
+   * app is running. `webglPaneBudget` in `renderer/lib/webglBudget.ts` is what
+   * interprets it — this end deliberately does no parsing, so there is one
+   * place that decides what a bad value means.
+   */
+  webglLimit: string | undefined
 }
 
 /**

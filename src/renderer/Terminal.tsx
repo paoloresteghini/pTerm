@@ -6,6 +6,7 @@ import '@xterm/xterm/css/xterm.css'
 import type { PaneColor } from '../shared/paneColors'
 import { findLinks, followsLink, linkRange } from './lib/terminalLinks'
 import { dropText } from './lib/shellQuote'
+import { leastRecentlyUsed, webglPaneBudget } from './lib/webglBudget'
 
 /**
  * Every mounted pane's terminal, by tab id.
@@ -21,14 +22,160 @@ const mounted = new Map<string, XTerm>()
  * Which renderer each mounted pane actually got.
  *
  * The WebGL addon is best effort: its constructor throws when WebGL is
- * unavailable, and Chromium caps live WebGL contexts per process, so past a
- * dozen or so panes every new one falls back. That fallback used to be
- * completely silent, which is why a pane drawing block characters as
- * underscores could only be noticed by eye — the DOM renderer cannot draw
- * `customGlyphs`, so the context bar in Claude Code's status line degrades
- * exactly when this map says `dom`.
+ * unavailable at all. That fallback used to be completely silent, which is why
+ * a pane drawing block characters as underscores could only be noticed by eye
+ * — the DOM renderer cannot draw `customGlyphs`, so the context bar in Claude
+ * Code's status line degrades exactly when this map says `dom`.
  */
 const renderers = new Map<string, 'webgl' | 'dom'>()
+
+/**
+ * The addon each pane is holding, so a pane can be asked to give it up again.
+ *
+ * Keyed the same as `renderers`, and the two are written together: an id in
+ * here is an id `renderers` says is on `webgl`.
+ */
+const addons = new Map<string, WebglAddon>()
+
+/**
+ * When each pane was last used, on a counter that only goes up.
+ *
+ * A counter and not a clock: two panes touched in the same millisecond still
+ * order, and no eviction can be changed by the machine's clock moving.
+ */
+const lastUsed = new Map<string, number>()
+let useTick = 0
+
+/**
+ * The panes on the tab that is on screen.
+ *
+ * Kept because a pane the user can SEE must never be the one that gives up its
+ * context: it would carry on drawing, on a renderer whose cells are a
+ * different width from the grid it was last measured for. Every other pane can
+ * lose one silently and get it back on the way in.
+ */
+const onScreen = new Set<string>()
+
+function markUsed(tabId: string): void {
+  lastUsed.set(tabId, ++useTick)
+}
+
+/**
+ * Give up `tabId`'s WebGL context.
+ *
+ * Deliberately does NOT re-measure the pane afterwards, which is the opposite
+ * of what it looks like it should do and cost a red test run to establish.
+ * **Measured 2026-08-08:** the two renderers disagree about how wide a cell
+ * is. The WebGL renderer rounds it to whole DEVICE pixels — 15 device, 7.5 css
+ * at this display's ratio of 2 — where the DOM renderer uses the font's true
+ * advance of about 7.83. Over the same 1035px pane that is 138 columns against
+ * 133, and `FitAddon` divides by whichever the render service currently
+ * reports.
+ *
+ * A hidden tab in this app is `visibility: hidden` and not `display: none`
+ * precisely so it stays laid out and can keep measuring itself (`App.tsx`, the
+ * group's class list). So a re-fit here does NOT quietly no-op on a background
+ * pane the way one might expect — it runs, and pushes 133 to a tmux session
+ * nobody is looking at, which Claude Code answers by rewrapping its entire
+ * scrollback. Then the pane comes back on screen, takes a context, and rewraps
+ * it all again at 138. Leaving the grid alone is what spares the user both.
+ *
+ * The pane is left drawing a 138-column grid with 7.83px cells until it is
+ * next shown, at which point `claimRenderer` runs BEFORE the fit and the two
+ * agree again. Nobody is looking at it in between — that is what `onScreen`
+ * above guarantees about who can be picked.
+ */
+function releaseRenderer(tabId: string): void {
+  const addon = addons.get(tabId)
+  if (addon === undefined) return
+  addons.delete(tabId)
+  renderers.set(tabId, 'dom')
+  addon.dispose()
+}
+
+/**
+ * Put `tabId`'s terminal on the WebGL renderer, taking a context from the pane
+ * that has gone longest without use if the budget is already full.
+ *
+ * Why there is a budget at all: Chromium caps live WebGL contexts per renderer
+ * process at 16, and past that it does not fail the request — it force-loses
+ * one of the contexts that already exist, choosing by its own
+ * least-recently-DRAWN order. An idle Claude Code session draws nothing while
+ * it waits, so the pane Chromium picks is routinely one the user is sitting
+ * and looking at, and xterm's fallback to the DOM renderer is permanent once
+ * it happens. Keeping the count under the cap ourselves is what takes that
+ * decision back, and ordering it by USE rather than by paint is what makes the
+ * panes someone is working in the ones that keep the renderer.
+ *
+ * Idempotent: a pane that already holds a context keeps the one it has, so the
+ * `visible` effect can call this on every tab switch without any attach and
+ * dispose churn.
+ *
+ * Does NOT re-measure the pane; both callers fit afterwards, and the contract
+ * is only that the claim comes FIRST. The renderers disagree about cell width
+ * (see `releaseRenderer`), so a fit taken while the pane is still on the old
+ * one pushes that renderer's column count to tmux and nothing later corrects
+ * it. How much later the fit happens does not matter: the mount effect's is
+ * synchronous and the `visible` effect's is a frame away, and measured
+ * 2026-08-08 the render service already reports the new cell width on the
+ * statement after `loadAddon`, so neither needs a delay to be right.
+ */
+function claimRenderer(tabId: string, term: XTerm): void {
+  if (addons.has(tabId)) return
+  const budget = webglPaneBudget(window.pterm.webglLimit)
+  while (addons.size >= budget) {
+    const victim = leastRecentlyUsed(
+      [...addons.keys()].filter((id) => id !== tabId && !onScreen.has(id)),
+      lastUsed,
+    )
+    // Nothing left that can be taken from without a pane on screen changing
+    // renderer under the user. Reachable when one tab holds more panes than
+    // the budget: the ones past it stay on the DOM renderer, measure
+    // themselves for it, and draw Claude Code's block characters as slivers —
+    // which is the honest outcome, and better than making a pane the user is
+    // reading do the same. Also the guard that stops this loop running forever.
+    //
+    // Recorded as `dom` on the way out rather than left unset: a pane missing
+    // from `renderers` reads as a pane that does not exist, and this is the
+    // one path that reaches the DOM renderer without an error to go with it.
+    if (victim === null) {
+      renderers.set(tabId, 'dom')
+      return
+    }
+    releaseRenderer(victim)
+  }
+  try {
+    const webgl = new WebglAddon()
+    webgl.onContextLoss(() => {
+      // Only when this is still the pane's live addon. `releaseRenderer`
+      // disposes through the same object, and xterm's own dispose loses the
+      // context on the way out, which comes back through here — without this
+      // the eviction path would dispose twice and throw.
+      if (addons.get(tabId) !== webgl) return
+      addons.delete(tabId)
+      renderers.set(tabId, 'dom')
+      webgl.dispose()
+      // No re-fit, for the same reason `releaseRenderer` gives none: the grid
+      // is left as it is until the pane is next shown, which re-claims first
+      // and measures after. Reaching here at all means something outside this
+      // app's budget took a context, since the budget is set below the cap
+      // Chromium enforces.
+      //
+      // Said out loud: a pane that silently drops to the DOM renderer starts
+      // drawing box and block characters as underscore slivers, and nothing
+      // else in the app would ever mention it.
+      console.warn(`pTerm: pane ${tabId} lost its WebGL context; falling back to the DOM renderer`)
+    })
+    term.loadAddon(webgl)
+    addons.set(tabId, webgl)
+    renderers.set(tabId, 'webgl')
+  } catch (error) {
+    // WebGL unavailable at all — headless GL, a driver that refuses. Keep the
+    // DOM renderer, degraded but working.
+    renderers.set(tabId, 'dom')
+    console.warn(`pTerm: pane ${tabId} could not start the WebGL renderer`, error)
+  }
+}
 
 declare global {
   interface Window {
@@ -215,30 +362,15 @@ export function Terminal({
     // atlas and draws box/block characters itself (`customGlyphs`, on by
     // default), which the DOM renderer explicitly cannot do.
     //
-    // Both failure paths land on the DOM renderer, degraded but working: a
-    // thrown constructor is caught here, and a lost context disposes the
-    // addon, which is xterm's own documented fallback. No `webgl.dispose()`
-    // in the unmount cleanup: `term.dispose()` below already disposes
-    // registered addons, and a second dispose after context loss would throw.
-    try {
-      const webgl = new WebglAddon()
-      webgl.onContextLoss(() => {
-        webgl.dispose()
-        renderers.set(tabId, 'dom')
-        // Said out loud: a pane that silently drops to the DOM renderer starts
-        // drawing box and block characters as underscore slivers, and nothing
-        // else in the app would ever mention it.
-        console.warn(`pTerm: pane ${tabId} lost its WebGL context; falling back to the DOM renderer`)
-      })
-      term.loadAddon(webgl)
-      renderers.set(tabId, 'webgl')
-    } catch (error) {
-      // WebGL unavailable (headless GL, exhausted contexts): keep DOM renderer.
-      // Chromium caps live WebGL contexts per process, so this is what a
-      // thirteenth pane hits rather than a broken machine.
-      renderers.set(tabId, 'dom')
-      console.warn(`pTerm: pane ${tabId} could not start the WebGL renderer`, error)
-    }
+    // Marked used first, so a pane opening into a full budget takes its
+    // context from some older pane and not from itself.
+    //
+    // No `webgl.dispose()` in the unmount cleanup: `term.dispose()` below
+    // already disposes registered addons. What the cleanup does have to do is
+    // forget the entry in `addons`, or the next eviction would dispose an
+    // addon belonging to a terminal that is already gone.
+    markUsed(tabId)
+    claimRenderer(tabId, term)
     termRef.current = term
     mounted.set(tabId, term)
 
@@ -362,8 +494,13 @@ export function Terminal({
       linkDisposable.dispose()
       inputDisposable.dispose()
       offData()
+      // Before `term.dispose()`, which disposes the addon with it: an entry
+      // left behind would let a later eviction dispose it a second time.
+      addons.delete(tabId)
       term.dispose()
       renderers.delete(tabId)
+      lastUsed.delete(tabId)
+      onScreen.delete(tabId)
       fitRef.current = null
       termRef.current = null
       // Only if it is still this terminal's entry. Nothing schedules a mount
@@ -387,22 +524,50 @@ export function Terminal({
     term.options.theme = { ...term.options.theme, background: color }
   }, [color])
 
+  // A tab coming back on screen is what makes its panes recently used, and the
+  // moment to take a WebGL context back for them: a pane that gave one up
+  // while it was hidden is drawing Claude Code's block characters as
+  // underscores until it does. Claiming BEFORE the fit rather than after is
+  // the ordering the whole thing turns on — the two renderers disagree about
+  // the width of a cell, so a fit measured under the wrong one pushes the
+  // wrong column count to tmux. See `releaseRenderer` for the numbers.
+  //
+  // A no-op for a pane that never lost its context, which is every pane in an
+  // app small enough not to reach the budget.
   useEffect(() => {
-    if (!visible) return
+    if (!visible) {
+      onScreen.delete(tabId)
+      return
+    }
+    onScreen.add(tabId)
+    markUsed(tabId)
+    const term = termRef.current
+    if (term) claimRenderer(tabId, term)
+    // The claim above happens BEFORE this fit and not inside it. That order is
+    // the one thing in this effect that must not be swapped, and it is
+    // measured: moving the claim into the frame leaves the pane measured under
+    // the renderer it is about to stop using, and `webgl.spec.ts`'s size
+    // assertion goes red at 133 columns where it should read 138.
     const frame = requestAnimationFrame(() => {
       fitRef.current?.()
     })
     return () => cancelAnimationFrame(frame)
-  }, [visible])
+  }, [visible, tabId])
 
   // Typing has to land in the pane the app says is active, or it goes to
   // whichever terminal happened to hold focus. This only ever takes focus, and
   // only on the way in: nothing here blurs a pane, and a pane that is not on
   // screen is never asked for focus because the caller passes false for one.
+  //
+  // Also the finest-grained "this one is in use" the app has: `visible` is
+  // true for every pane on the active tab at once, so without this a split
+  // the user has been typing in for an hour orders the same as its idle
+  // neighbour and could lose its renderer first.
   useEffect(() => {
     if (!focused) return
+    markUsed(tabId)
     termRef.current?.focus()
-  }, [focused])
+  }, [focused, tabId])
 
   return (
     <div
