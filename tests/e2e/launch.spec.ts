@@ -1,7 +1,7 @@
 /**
  * The app starting, drawing a terminal, and finding its session again.
  *
- * Seven tests, each against the packaged build (`npm run package`, run once for
+ * Eight tests, each against the packaged build (`npm run package`, run once for
  * the whole suite by `tests/e2e/global-setup.ts`) and a real tmux server on
  * the `pterm-e2e` socket: typed input reaches the shell and its output comes
  * back; a quit and relaunch reattaches the same session with its scrollback;
@@ -16,7 +16,8 @@
  * sixth that types Shift+Return into `cat -v` and asserts the pty received
  * ESC CR rather than a bare Return; and a seventh that pins the other half of
  * that claim, redirecting `cat -uv` to a file so the tty's own echo cannot
- * inflate the count, and asserting nothing follows the ESC CR.
+ * inflate the count, and asserting nothing follows the ESC CR; and an eighth that asserts a pane
+ * actually got the WebGL renderer.
  *
  * The matching guard for a BARE Up reaching the pty is NOT here: it only bites
  * when the history overlay has entries to show, and this file seeds none, so a
@@ -426,5 +427,41 @@ test('the title bar is a draggable region, which is the only way to move the win
   // someone discovering a dead button.
   await expect(titlebar.locator('button, a, input, select, textarea')).toHaveCount(0)
 
+  await app.close()
+})
+
+/**
+ * That a pane really is on the WebGL renderer.
+ *
+ * The addon is best effort — its constructor throws when WebGL is unavailable,
+ * and Chromium caps live WebGL contexts per process — and the fallback was
+ * silent until it was made to report itself. It matters because the DOM
+ * renderer cannot draw `customGlyphs`, so a pane that quietly fell back starts
+ * rendering the box and block characters in Claude Code's status line as
+ * underscore slivers. That was found by looking at a screenshot, which is not
+ * a test.
+ *
+ * Measured 2026-08-08: an e2e pane reports `webgl`, so this suite does cover
+ * the renderer the user runs rather than a headless substitute.
+ */
+test('a pane gets the WebGL renderer, not the DOM fallback', async () => {
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  await window.getByTestId('new-tab').click()
+  await expect(window.getByTestId('terminal')).toBeVisible({ timeout: 20_000 })
+
+  // `globalThis`, not `window`: this file names its Playwright page `window`,
+  // which shadows the browser global inside the callback and made this resolve
+  // to a `Page` at type-check time.
+  const renderers = await window.evaluate(
+    () =>
+      (globalThis as unknown as { __ptermRenderers?: () => Record<string, string> })
+        .__ptermRenderers?.() ?? {},
+  )
+  const kinds = Object.values(renderers)
+  // One pane, and it is on WebGL. Asserted as a whole map rather than by id so
+  // a build that recorded nothing at all fails here too.
+  expect(kinds).toEqual(['webgl'])
   await app.close()
 })

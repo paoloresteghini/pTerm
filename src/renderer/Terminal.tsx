@@ -17,6 +17,28 @@ import { dropText } from './lib/shellQuote'
  */
 const mounted = new Map<string, XTerm>()
 
+/**
+ * Which renderer each mounted pane actually got.
+ *
+ * The WebGL addon is best effort: its constructor throws when WebGL is
+ * unavailable, and Chromium caps live WebGL contexts per process, so past a
+ * dozen or so panes every new one falls back. That fallback used to be
+ * completely silent, which is why a pane drawing block characters as
+ * underscores could only be noticed by eye — the DOM renderer cannot draw
+ * `customGlyphs`, so the context bar in Claude Code's status line degrades
+ * exactly when this map says `dom`.
+ */
+const renderers = new Map<string, 'webgl' | 'dom'>()
+
+declare global {
+  interface Window {
+    /** See `renderers`. Read by the e2e suite and useful from a devtools console. */
+    __ptermRenderers?: () => Record<string, 'webgl' | 'dom'>
+  }
+}
+
+window.__ptermRenderers = () => Object.fromEntries(renderers)
+
 declare global {
   interface Window {
     /** See the assignment below. Optional so a page without this module loaded reads undefined, not a type lie. */
@@ -149,7 +171,24 @@ export function Terminal({
     if (!container) return
 
     const term = new XTerm({
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+      /*
+       * The monospace faces first, then a symbol face, then the generic.
+       *
+       * Claude Code's chrome prints characters no macOS monospace font has a
+       * glyph for — `⏵⏵` (U+23F5) for auto mode is the one that shows, and
+       * `⚠`, `●` and the braille spinner are the same class. xterm rasterises
+       * into a canvas atlas, and where a family has no glyph it takes a
+       * substitute whose metrics do not fit the cell, which clips to a sliver
+       * that reads on screen as a stray underscore. Terminal.app and iTerm2
+       * run a full CoreText fallback instead, which is why the same session
+       * looks correct there and wrong here.
+       *
+       * `Apple Symbols` is appended rather than inserted: it is not
+       * monospaced, so putting it ahead of Menlo would change the metrics of
+       * ordinary text. Last before the generic, it is consulted only for
+       * characters nothing above it can draw.
+       */
+      fontFamily: "ui-monospace, SFMono-Regular, Menlo, 'Apple Symbols', monospace",
       fontSize: 13,
       allowProposedApi: true,
       // Bounded per-pane so twelve live panes cannot grow without limit.
@@ -183,10 +222,22 @@ export function Terminal({
     // registered addons, and a second dispose after context loss would throw.
     try {
       const webgl = new WebglAddon()
-      webgl.onContextLoss(() => webgl.dispose())
+      webgl.onContextLoss(() => {
+        webgl.dispose()
+        renderers.set(tabId, 'dom')
+        // Said out loud: a pane that silently drops to the DOM renderer starts
+        // drawing box and block characters as underscore slivers, and nothing
+        // else in the app would ever mention it.
+        console.warn(`pTerm: pane ${tabId} lost its WebGL context; falling back to the DOM renderer`)
+      })
       term.loadAddon(webgl)
-    } catch {
+      renderers.set(tabId, 'webgl')
+    } catch (error) {
       // WebGL unavailable (headless GL, exhausted contexts): keep DOM renderer.
+      // Chromium caps live WebGL contexts per process, so this is what a
+      // thirteenth pane hits rather than a broken machine.
+      renderers.set(tabId, 'dom')
+      console.warn(`pTerm: pane ${tabId} could not start the WebGL renderer`, error)
     }
     termRef.current = term
     mounted.set(tabId, term)
@@ -312,6 +363,7 @@ export function Terminal({
       inputDisposable.dispose()
       offData()
       term.dispose()
+      renderers.delete(tabId)
       fitRef.current = null
       termRef.current = null
       // Only if it is still this terminal's entry. Nothing schedules a mount
