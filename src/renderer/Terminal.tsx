@@ -5,6 +5,7 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import type { PaneColor } from '../shared/paneColors'
 import { findLinks, followsLink, linkRange } from './lib/terminalLinks'
+import { dropText } from './lib/shellQuote'
 
 /**
  * Every mounted pane's terminal, by tab id.
@@ -327,5 +328,34 @@ export function Terminal({
     termRef.current?.focus()
   }, [focused])
 
-  return <div data-testid="terminal" ref={containerRef} className="h-full w-full" />
+  return (
+    <div
+      data-testid="terminal"
+      ref={containerRef}
+      className="h-full w-full"
+      /*
+       * Dropping files onto a pane types their paths at the cursor.
+       *
+       * `preventDefault` on dragover is what makes this element a drop target
+       * at all: without it the browser refuses the drop and Electron falls
+       * back to navigating the window to the file, which replaces the app with
+       * the file's contents and reads as a crash. `App.tsx` swallows drops
+       * everywhere else for that same reason; this is the one place a drop
+       * does something.
+       */
+      onDragOver={(event) => {
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'copy'
+      }}
+      onDrop={(event) => {
+        event.preventDefault()
+        const text = dropText([...event.dataTransfer.files].map(window.pterm.pathForFile))
+        // Nothing typed for a drag that carried no resolvable file — a text
+        // selection, or a drag from another app. A stray space in a
+        // half-written command is worse than doing nothing.
+        if (text === '') return
+        window.pterm.input(tabId, text)
+      }}
+    />
+  )
 }

@@ -51,6 +51,11 @@ export const CHANNELS = {
   fsList: 'pterm:fsList',
   fsRead: 'pterm:fsRead',
   fsWrite: 'pterm:fsWrite',
+  fsRename: 'pterm:fsRename',
+  fsTrash: 'pterm:fsTrash',
+  fsReveal: 'pterm:fsReveal',
+  fsCopyPath: 'pterm:fsCopyPath',
+  fsCreate: 'pterm:fsCreate',
   openEditor: 'pterm:openEditor',
   openExternal: 'pterm:openExternal',
   updateAvailable: 'pterm:updateAvailable',
@@ -695,6 +700,15 @@ export type GitMutation =
   | { ok: true; changes: GitChanges }
   | { ok: false; error: string; changes: GitChanges | null }
 
+/**
+ * What a mutating file tree call answers.
+ *
+ * A message rather than a boolean, because every refusal here is something the
+ * user typed or clicked and can act on: a name that is already taken, a file
+ * another process removed. The renderer shows it and leaves the row alone.
+ */
+export type FsResult = { ok: true } | { ok: false; error: string }
+
 export interface PTermApi {
   open(request: OpenRequest): Promise<TabDescriptor>
   list(): Promise<TabDescriptor[]>
@@ -888,6 +902,42 @@ export interface PTermApi {
     text: string,
     expectedMtimeMs: number,
   ): Promise<WriteResult>
+
+  /**
+   * Rename one entry, keeping it in the directory it is already in.
+   *
+   * `newName` is a single name, not a path: a separator in it would make this
+   * a move, which the tree does not offer, and is refused rather than
+   * sanitised. Like every `fs*` call the renderer names the entry by a
+   * relative path and main resolves it under the project.
+   */
+  fsRename(projectId: string, relPath: string, newName: string): Promise<FsResult>
+
+  /** Move one entry to the system Trash, where it stays recoverable. */
+  fsTrash(projectId: string, relPath: string): Promise<FsResult>
+
+  /** Show one entry in Finder. */
+  fsReveal(projectId: string, relPath: string): Promise<FsResult>
+
+  /**
+   * Put one entry's path on the clipboard, absolute or relative to the project
+   * root. Main writes the clipboard because main is the only side that holds
+   * the absolute path.
+   */
+  fsCopyPath(projectId: string, relPath: string, kind: 'absolute' | 'relative'): Promise<FsResult>
+
+  /**
+   * Create an empty file or a directory called `name` inside `relDir`.
+   *
+   * Refuses a name that already exists rather than truncating what is there,
+   * which is the one way this could destroy data.
+   */
+  fsCreate(
+    projectId: string,
+    relDir: string,
+    name: string,
+    kind: 'file' | 'directory',
+  ): Promise<FsResult>
   /**
    * Open one file of one project in an editor pane of its own, in a new tab.
    *
@@ -912,6 +962,13 @@ export interface PTermApi {
    * app on this machine.
    */
   openExternal(url: string): Promise<void>
+
+  /**
+   * The absolute path of a file dropped onto the window, or '' when it cannot
+   * be resolved. Synchronous: a drop handler must read its files before the
+   * event's list goes stale. See the preload for why this cannot be `File.path`.
+   */
+  pathForFile(file: File): string
   /**
    * A release newer than this build, pushed by main when it finds one.
    *

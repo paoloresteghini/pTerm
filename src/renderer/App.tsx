@@ -492,6 +492,29 @@ export function App() {
     [historyPane, state.panes, historyEntries],
   )
 
+  /*
+   * A file dropped anywhere that is not a terminal pane does nothing.
+   *
+   * Electron's default for a file dropped on a page is to NAVIGATE to it, which
+   * replaces the whole app with the file's contents and no way back short of a
+   * relaunch — the window has no address bar. The panes' own handlers call
+   * `preventDefault` and type the paths; this is the backstop for every other
+   * pixel of the window, including the gaps between panes.
+   *
+   * Capture phase, so it runs before anything inside can let the event through
+   * by not handling it. It does not stop propagation: a pane's own handler
+   * still runs and still types.
+   */
+  useEffect(() => {
+    const swallow = (event: DragEvent): void => event.preventDefault()
+    window.addEventListener('dragover', swallow, true)
+    window.addEventListener('drop', swallow, true)
+    return () => {
+      window.removeEventListener('dragover', swallow, true)
+      window.removeEventListener('drop', swallow, true)
+    }
+  }, [])
+
   // Switching pane or tab takes the overlay with it. It is anchored inside one
   // pane's box and is unmounted the moment that pane stops being the active
   // one, so leaving `historyPane` set would make the next Up on it a no-op:

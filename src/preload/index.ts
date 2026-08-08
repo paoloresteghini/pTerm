@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import {
   CHANNELS,
   type DataEvent,
@@ -87,8 +87,28 @@ const api: PTermApi = {
   fsRead: (projectId, relPath) => ipcRenderer.invoke(CHANNELS.fsRead, projectId, relPath),
   fsWrite: (projectId, relPath, text, expectedMtimeMs) =>
     ipcRenderer.invoke(CHANNELS.fsWrite, projectId, relPath, text, expectedMtimeMs),
+  fsRename: (projectId, relPath, newName) =>
+    ipcRenderer.invoke(CHANNELS.fsRename, projectId, relPath, newName),
+  fsTrash: (projectId, relPath) => ipcRenderer.invoke(CHANNELS.fsTrash, projectId, relPath),
+  fsReveal: (projectId, relPath) => ipcRenderer.invoke(CHANNELS.fsReveal, projectId, relPath),
+  fsCopyPath: (projectId, relPath, kind) =>
+    ipcRenderer.invoke(CHANNELS.fsCopyPath, projectId, relPath, kind),
+  fsCreate: (projectId, relDir, name, kind) =>
+    ipcRenderer.invoke(CHANNELS.fsCreate, projectId, relDir, name, kind),
   openEditor: (projectId, relPath) => ipcRenderer.invoke(CHANNELS.openEditor, projectId, relPath),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke(CHANNELS.openExternal, url),
+  /*
+   * The absolute path of a dropped file.
+   *
+   * Synchronous and not an IPC round trip: `webUtils` answers in the renderer
+   * process, and a drop handler has to build its text before the event's file
+   * list goes stale. `File.path` was removed in Electron 32 and this app is on
+   * 43, so this is the only way the renderer can learn a dropped file's path.
+   *
+   * Answers '' for anything it cannot resolve, which includes every `File` a
+   * test page constructs. `dropText` drops empties for that reason.
+   */
+  pathForFile: (file: File): string => webUtils.getPathForFile(file),
   onUpdateAvailable: (listener: (info: UpdateInfo) => void) => {
     const handler = (_event: IpcRendererEvent, payload: UpdateInfo): void => listener(payload)
     ipcRenderer.on(CHANNELS.updateAvailable, handler)

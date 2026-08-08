@@ -284,3 +284,68 @@ test('an unsaved edit is gone after a relaunch, and the tab is clean', async () 
   await expect(reopened.getByTestId('editor-dirty-e1')).toHaveCount(0)
   await second.close()
 })
+
+/**
+ * Two editor panes open on the SAME file, and the mtime check between them.
+ *
+ * Moved here from `editor.spec.ts`, where it built the two panes by clicking
+ * one tree row twice. `openEditor` now returns the pane a file already has, so
+ * that route makes one tab and the test could no longer construct its subject.
+ * The panes are seeded instead, which is a state a config from before the
+ * dedup still holds, and the behaviour under test is unchanged: a save from
+ * one pane must refuse from the other rather than silently overwrite it.
+ */
+test('two seeded editor panes on one file: a save from one refuses the other', async () => {
+  // This file's own config, rewritten before the launch rather than added to
+  // the shared `beforeEach`: a second editor tab present for every test in
+  // this file changes which pane is active and which tab is last, and it broke
+  // two of them when it was seeded there.
+  const config = JSON.parse(await readFile(join(configDir, 'config.json'), 'utf8'))
+  config.panes.push({
+    id: 'e2',
+    projectSlug: 'demo',
+    cwd: projectCwd,
+    type: 'editor',
+    filePath: seededFile,
+  })
+  config.tabs.push({
+    id: 'tabE2',
+    groupId: 'tabE2',
+    activePaneId: 'e2',
+    layout: { dir: 'row', ratio: [1], kids: ['e2'] },
+  })
+  await writeFile(join(configDir, 'config.json'), JSON.stringify(config), 'utf8')
+
+  const app = await launch()
+  const page = await app.firstWindow()
+  const visible = (id: string) => page.getByTestId(`pane-${id}`)
+
+  await expect(visible('e1')).toBeVisible({ timeout: 20_000 })
+
+  // Edit and save from e1.
+  await page.getByTestId('tab-e1').click()
+  await visible('e1').getByTestId('editor-content').locator('.cm-content').click()
+  await page.keyboard.press('ControlOrMeta+End')
+  await page.keyboard.type('\nfrom one')
+  await page.keyboard.press('Meta+s')
+  await expect(page.getByTestId('editor-dirty-e1')).toHaveCount(0)
+  await expect.poll(() => readFile(seededFile, 'utf8'), { timeout: 10_000 }).toContain('from one')
+
+  // e2 is NOT silently refreshed: it still shows what it read at launch, which
+  // predates e1's write. Asserted before the save, so a pane that had quietly
+  // reloaded would fail here rather than make the refusal below look wrong.
+  await page.getByTestId('tab-e2').click()
+  const second = visible('e2').getByTestId('editor-content')
+  await expect(second).toContainText('const seeded = 1')
+  await expect(second).not.toContainText('from one')
+
+  // And its save refuses: it holds the mtime it opened with, and the file's
+  // moved when e1 wrote it.
+  await second.locator('.cm-content').click()
+  await page.keyboard.type('from two')
+  await page.keyboard.press('Meta+s')
+  await expect(visible('e2').getByTestId('editor-refused')).toBeVisible({ timeout: 10_000 })
+  expect(await readFile(seededFile, 'utf8')).not.toContain('from two')
+
+  await app.close()
+})

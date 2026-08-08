@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
+import { app, clipboard, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
 import {
   CHANNELS,
   canHaveSession,
@@ -6,6 +6,7 @@ import {
   type DataEvent,
   type DiffSide,
   type ExitEvent,
+  type FsResult,
   type HistoryEntry,
   type HistoryScope,
   type NotificationConfig,
@@ -56,6 +57,7 @@ import { readSkipped, writeSkipped } from '../update/store'
 import { isOpenable } from '../update/openable'
 import { addPrompt, readPrompts, removePrompt } from '../prompts/store'
 import { listDir, readFileInside, resolveInside, writeFileInside } from '../files/tree'
+import { createEntry, pathsFor, renameEntry } from '../files/ops'
 import { readBranch } from '../git/branch'
 import { readCounts, syncBranch } from '../git/sync'
 import { readChanges, repoRoot } from '../git/status'
@@ -1552,6 +1554,94 @@ export function registerIpc(
     },
   )
 
+  /*
+   * The mutating half of the file tree.
+   *
+   * Outside `serialise`, beside `fsList` and `fsRead` and for the same reason:
+   * these touch the filesystem and write no config. Each resolves the entry
+   * through `files/ops`, which applies `resolveInside` and, where there is a
+   * name, refuses one that is not a single plain name — so a rename cannot
+   * become a move and nothing here can address outside the project.
+   *
+   * Each answers a message rather than throwing. A refusal is something the
+   * user typed or clicked at, and the row it came from is still on screen.
+   */
+  ipcMain.handle(
+    CHANNELS.fsRename,
+    async (_event, projectId: string, relPath: string, newName: string): Promise<FsResult> => {
+      const config = await store.read()
+      const project = config.projects.find((row) => row.id === projectId)
+      if (!project) return { ok: false, error: 'No such project' }
+      return renameEntry(project.cwd, relPath, newName)
+    },
+  )
+
+  ipcMain.handle(
+    CHANNELS.fsTrash,
+    async (_event, projectId: string, relPath: string): Promise<FsResult> => {
+      const config = await store.read()
+      const project = config.projects.find((row) => row.id === projectId)
+      if (!project) return { ok: false, error: 'No such project' }
+      const target = resolveInside(project.cwd, relPath)
+      if (target === null) return { ok: false, error: 'That path is not in this project' }
+      try {
+        // Trash rather than unlink, which is why there is no confirmation
+        // dialog in front of this: the entry stays recoverable from Finder.
+        await shell.trashItem(target)
+        return { ok: true }
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : 'Delete failed' }
+      }
+    },
+  )
+
+  ipcMain.handle(
+    CHANNELS.fsReveal,
+    async (_event, projectId: string, relPath: string): Promise<FsResult> => {
+      const config = await store.read()
+      const project = config.projects.find((row) => row.id === projectId)
+      if (!project) return { ok: false, error: 'No such project' }
+      const target = resolveInside(project.cwd, relPath)
+      if (target === null) return { ok: false, error: 'That path is not in this project' }
+      shell.showItemInFolder(target)
+      return { ok: true }
+    },
+  )
+
+  ipcMain.handle(
+    CHANNELS.fsCopyPath,
+    async (
+      _event,
+      projectId: string,
+      relPath: string,
+      kind: 'absolute' | 'relative',
+    ): Promise<FsResult> => {
+      const config = await store.read()
+      const project = config.projects.find((row) => row.id === projectId)
+      if (!project) return { ok: false, error: 'No such project' }
+      const paths = pathsFor(project.cwd, relPath)
+      if (paths === null) return { ok: false, error: 'That path is not in this project' }
+      clipboard.writeText(kind === 'absolute' ? paths.absolute : paths.relative)
+      return { ok: true }
+    },
+  )
+
+  ipcMain.handle(
+    CHANNELS.fsCreate,
+    async (
+      _event,
+      projectId: string,
+      relDir: string,
+      name: string,
+      kind: 'file' | 'directory',
+    ): Promise<FsResult> => {
+      const config = await store.read()
+      const project = config.projects.find((row) => row.id === projectId)
+      if (!project) return { ok: false, error: 'No such project' }
+      return createEntry(project.cwd, relDir, name, kind)
+    },
+  )
+
   // Inside `serialise`, unlike `fsList` and `fsRead` just above: this one
   // writes a pane row and a tab row, and two of them racing would interleave
   // two read-modify-write cycles over one config file.
@@ -1590,6 +1680,29 @@ export function registerIpc(
         // that could only ever say so. The cost is one read of a file the pane
         // is about to read again, paid once per deliberate click.
         if ((await readFileInside(project.cwd, relPath)) === null) return null
+
+        /*
+         * A file already open gets its existing pane back, not a second one.
+         *
+         * Every click on a tree row used to mint a fresh pane and a fresh tab,
+         * so re-opening a file put a SECOND tab of that name in the bar. The
+         * renderer needs nothing for this: `opened` already replaces a pane it
+         * already knows in place and makes it active, so handing back the
+         * existing record focuses that tab.
+         *
+         * Matched on the resolved absolute path and the project's slug. The
+         * path alone would be enough today, since it is absolute and two
+         * projects cannot resolve to one file without a symlink, but the slug
+         * is what `PaneRecord` uses everywhere else to say which project a pane
+         * belongs to and leaving it out would be the odd one.
+         */
+        const already = config.panes.find(
+          (pane) =>
+            pane.type === 'editor' &&
+            pane.projectSlug === project.slug &&
+            pane.filePath === filePath,
+        )
+        if (already) return already
 
         const id = newSessionId()
         const pane: PaneRecord = {

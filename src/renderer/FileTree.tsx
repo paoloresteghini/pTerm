@@ -3,6 +3,7 @@ import type { FileEntry } from '../shared/ipc'
 import { readExpanded, writeExpanded, toggled } from './lib/treeState'
 import { cn } from './lib/cn'
 import { PanelHeading } from './ui/Panel'
+import { FileTreeMenu, type FileTreeAction } from './FileTreeMenu'
 
 /**
  * The active project's working tree.
@@ -85,6 +86,43 @@ export function FileTree({
     for (const path of open) load(projectId, path)
   }, [projectId, load])
 
+  // The open menu, with the row it belongs to and the viewport coordinates it
+  // is drawn at. `TabBar` holds its menu the same way and for the same reason.
+  const [menu, setMenu] = useState<{
+    relPath: string
+    isDir: boolean
+    left: number
+    top: number
+  } | null>(null)
+
+  /*
+   * The inline field, which is one field doing two jobs.
+   *
+   * A rename edits the name of `relPath`; a create makes a new entry inside
+   * `parent`. Held as one piece of state rather than two so the two can never
+   * both be open, which is what a second right-click during a rename would
+   * otherwise produce.
+   */
+  const [editing, setEditing] = useState<
+    | { mode: 'rename'; relPath: string; parent: string; initial: string }
+    | { mode: 'create'; parent: string; kind: 'file' | 'directory' }
+    | null
+  >(null)
+
+  // The last refusal from main, shown until the next action. Every mutating
+  // call answers a message rather than throwing, and a rename that quietly did
+  // nothing would look like the app ignoring the keystroke.
+  const [error, setError] = useState<string | null>(null)
+
+  // Closes the menu on a click anywhere else, like `TabBar`'s. The menu's own
+  // items stop propagation, so choosing one does not race this.
+  useEffect(() => {
+    if (menu === null) return
+    const close = (): void => setMenu(null)
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [menu])
+
   const toggle = (entry: FileEntry, relPath: string): void => {
     if (!projectId) return
     // A file opens; only a directory expands. Returning here rather than
@@ -122,16 +160,148 @@ export function FileTree({
     for (const path of expanded) load(projectId, path)
   }
 
+  /** The parent directory of a row, '' for one at the project root. */
+  const parentOf = (relPath: string): string => {
+    const cut = relPath.lastIndexOf('/')
+    return cut === -1 ? '' : relPath.slice(0, cut)
+  }
+
+  /** The last segment of a row's path, which is the name the field starts on. */
+  const nameOf = (relPath: string): string => relPath.slice(relPath.lastIndexOf('/') + 1)
+
+  /*
+   * Where a New file or New folder lands.
+   *
+   * Inside a directory row, and beside a file row: right-clicking a file and
+   * asking for a new file next to it is the common case, and creating it
+   * inside a file is not a thing. A collapsed directory is expanded first, or
+   * the field would open into rows that are not on screen.
+   */
+  const createIn = (relPath: string, isDir: boolean): string => {
+    if (!isDir) return parentOf(relPath)
+    if (!expanded.has(relPath) && projectId) {
+      const next = toggled(expanded, relPath)
+      setExpanded(next)
+      writeExpanded(projectId, next)
+      if (loaded[relPath] === undefined) load(projectId, relPath)
+    }
+    return relPath
+  }
+
+  const settle = (result: { ok: boolean; error?: string }): void => {
+    setError(result.ok ? null : (result.error ?? 'That did not work'))
+    if (result.ok) reload()
+  }
+
+  const choose = (action: FileTreeAction, relPath: string, isDir: boolean): void => {
+    setMenu(null)
+    setError(null)
+    if (!projectId) return
+    switch (action) {
+      case 'open':
+        onOpenFile(relPath)
+        return
+      case 'rename':
+        setEditing({
+          mode: 'rename',
+          relPath,
+          parent: parentOf(relPath),
+          initial: nameOf(relPath),
+        })
+        return
+      case 'delete':
+        void window.pterm.fsTrash(projectId, relPath).then(settle)
+        return
+      case 'reveal':
+        void window.pterm.fsReveal(projectId, relPath).then(settle)
+        return
+      case 'copy-path':
+        void window.pterm.fsCopyPath(projectId, relPath, 'absolute').then(settle)
+        return
+      case 'copy-relative':
+        void window.pterm.fsCopyPath(projectId, relPath, 'relative').then(settle)
+        return
+      case 'new-file':
+        setEditing({ mode: 'create', parent: createIn(relPath, isDir), kind: 'file' })
+        return
+      case 'new-folder':
+        setEditing({ mode: 'create', parent: createIn(relPath, isDir), kind: 'directory' })
+        return
+    }
+  }
+
+  const commit = (value: string): void => {
+    const current = editing
+    setEditing(null)
+    if (!projectId || current === null) return
+    const name = value.trim()
+    // An empty field is a cancel, not an error: it is what a user who opened
+    // the field by mistake and cleared it means.
+    if (name === '') return
+    if (current.mode === 'rename') {
+      void window.pterm.fsRename(projectId, current.relPath, name).then(settle)
+    } else {
+      void window.pterm.fsCreate(projectId, current.parent, name, current.kind).then(settle)
+    }
+  }
+
+  /*
+   * The field itself, shared by both modes.
+   *
+   * `autoFocus` because it appears in response to a menu choice and is the only
+   * thing the user can mean to do next. Blur commits rather than cancels, which
+   * matches the tab rename field: clicking away from a name you have typed
+   * reads as accepting it.
+   */
+  const field = (key: string, depth: number, initial: string, testid: string): ReactNode => (
+    <input
+      key={key}
+      data-testid={testid}
+      autoFocus
+      defaultValue={initial}
+      onBlur={(event) => commit(event.currentTarget.value)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          commit(event.currentTarget.value)
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          setEditing(null)
+        }
+      }}
+      style={{ paddingLeft: `${10 + depth * 10}px` }}
+      className="block w-full border-none bg-hover py-0.5 pr-2.5 text-left font-mono text-[11px] text-fg outline-none"
+    />
+  )
+
   /** One directory's rows, then each expanded child's, depth first. */
-  const rows = (parent: string, depth: number): ReactNode[] =>
-    (loaded[parent] ?? []).flatMap((entry) => {
+  const rows = (parent: string, depth: number): ReactNode[] => [
+    // A create inside this directory draws its field at the top of it, where a
+    // new entry is easiest to see. Keyed apart from any row so React never
+    // reuses a row's DOM node for the field.
+    ...(editing?.mode === 'create' && editing.parent === parent
+      ? [field(`create-${parent}`, depth, '', 'tree-create')]
+      : []),
+    ...(loaded[parent] ?? []).flatMap((entry) => {
       const relPath = parent === '' ? entry.name : `${parent}/${entry.name}`
       const open = expanded.has(relPath)
+      if (editing?.mode === 'rename' && editing.relPath === relPath) {
+        return [field(`rename-${relPath}`, depth, editing.initial, 'tree-rename')]
+      }
       return [
         <button
           key={relPath}
           data-testid={`tree-row-${relPath}`}
           onClick={() => toggle(entry, relPath)}
+          onContextMenu={(event) => {
+            event.preventDefault()
+            // The row's own box, so the menu hangs off its left edge and its
+            // bottom the way it looks like it does.
+            const box = event.currentTarget.getBoundingClientRect()
+            setEditing(null)
+            setMenu({ relPath, isDir: entry.dir, left: box.left, top: box.bottom })
+          }}
           // Indent by depth, in the same 10px step the sidebar's tab rows use.
           style={{ paddingLeft: `${10 + depth * 10}px` }}
           className={cn(
@@ -143,7 +313,8 @@ export function FileTree({
         </button>,
         ...(open ? rows(relPath, depth + 1) : []),
       ]
-    })
+    }),
+  ]
 
   return (
     <>
@@ -205,6 +376,21 @@ export function FileTree({
           rows('', 0)
         )}
       </div>
+      {error === null ? null : (
+        // Below the scroller rather than inside it, so a refusal about a row
+        // that has scrolled away is still readable.
+        <div data-testid="tree-error" className="px-2.5 py-1 text-[11px] text-danger">
+          {error}
+        </div>
+      )}
+      {menu === null ? null : (
+        <FileTreeMenu
+          left={menu.left}
+          top={menu.top}
+          isDir={menu.isDir}
+          onChoose={(action) => choose(action, menu.relPath, menu.isDir)}
+        />
+      )}
     </>
   )
 }
