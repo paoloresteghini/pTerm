@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useReducer,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from 'react'
 import { Terminal, paneGrid, focusTerminal } from './Terminal'
 import { HistoryOverlay } from './HistoryOverlay'
 import { PaneDivider } from './PaneDivider'
@@ -103,6 +111,27 @@ const PROMPTS_KEY = 'pterm:promptsCollapsed'
 const GIT_KEY = 'pterm:gitCollapsed'
 const NOTES_KEY = 'pterm:notesCollapsed'
 
+/*
+ * A column has THREE states, and these keys hold the second of the two flags.
+ *
+ * HIDDEN is the View menu's doing and renders nothing at all. COLLAPSED is the
+ * heading's doing and renders the 24px strip, which is one click from open.
+ * They were briefly the same thing, and setting a column aside then meant
+ * losing the only way to bring it back without the menu.
+ *
+ * Separate keys rather than one tri-state value so a profile written by a
+ * build that only knew `collapsed` still reads correctly: the hidden flags
+ * simply default, and nothing has to migrate.
+ */
+const HIDDEN_KEYS: Record<ColumnId, string> = {
+  files: 'pterm:filesHidden',
+  skills: 'pterm:skillsHidden',
+  presets: 'pterm:presetsHidden',
+  prompts: 'pterm:promptsHidden',
+  git: 'pterm:gitHidden',
+  notes: 'pterm:notesHidden',
+}
+
 /** Reads one of those keys, with the default applied when nothing is stored. */
 function storedCollapsed(key: string, fallback: boolean): boolean {
   const stored = localStorage.getItem(key)
@@ -121,6 +150,16 @@ export function App() {
   const [promptsCollapsed, setPromptsCollapsed] = useState(() => storedCollapsed(PROMPTS_KEY, true))
   const [gitCollapsed, setGitCollapsed] = useState(() => storedCollapsed(GIT_KEY, true))
   const [notesCollapsed, setNotesCollapsed] = useState(() => storedCollapsed(NOTES_KEY, true))
+  // Every column starts hidden on a fresh profile, which is what shipped: the
+  // window opens on terminal, not on six columns of chrome.
+  const [hiddenColumns, setHiddenColumns] = useState<ColumnVisibility>(() => ({
+    files: storedCollapsed(HIDDEN_KEYS.files, true),
+    skills: storedCollapsed(HIDDEN_KEYS.skills, true),
+    presets: storedCollapsed(HIDDEN_KEYS.presets, true),
+    prompts: storedCollapsed(HIDDEN_KEYS.prompts, true),
+    git: storedCollapsed(HIDDEN_KEYS.git, true),
+    notes: storedCollapsed(HIDDEN_KEYS.notes, true),
+  }))
   const [paletteOpen, setPaletteOpen] = useState(false)
   // Set once the workspace exists. Until then this window knows nothing about
   // what is selected and must not say anything about it — see the effects.
@@ -156,42 +195,75 @@ export function App() {
   // Clicking a column's own heading or strip moves only that column. The
   // localStorage write sits in the updater, same shape for all six; it is
   // idempotent, so StrictMode's double invocation costs nothing.
+  /**
+   * Show or hide one column outright, which is what the View menu's items and
+   * their shortcuts do.
+   *
+   * Showing also un-collapses: a column asked for from the menu should arrive
+   * open rather than as a strip the user has to click again. Hiding leaves the
+   * collapse flag alone, so a column set aside and then hidden comes back as
+   * the strip it was.
+   */
+  const setColumnHidden = useCallback((id: ColumnId, hidden: boolean) => {
+    setHiddenColumns((was) => ({ ...was, [id]: hidden }))
+    localStorage.setItem(HIDDEN_KEYS[id], hidden ? '1' : '0')
+    if (!hidden) {
+      setColumn[id](false)
+      localStorage.setItem(COLUMN_KEY[id], '0')
+    }
+  }, [])
+
+  /**
+   * Collapse a column to its strip, or open it from one.
+   *
+   * The panel HEADING and the strip both call this. It never hides: setting a
+   * column aside and not wanting it at all are different intents, and for a
+   * while they were the same click, which left the strip — the only way back
+   * without the menu — gone the moment you used it.
+   */
+  const toggleColumnCollapsed = useCallback((id: ColumnId) => {
+    setColumn[id]((was: boolean) => {
+      localStorage.setItem(COLUMN_KEY[id], was ? '0' : '1')
+      return !was
+    })
+  }, [])
+
   const toggleSkills = useCallback(() => {
-    setSkillsCollapsed((was) => {
-      localStorage.setItem(SKILLS_KEY, was ? '0' : '1')
-      return !was
-    })
-  }, [])
+    // The View menu's item and its shortcut both land here, and both
+    // mean presence: show the column, or take it off screen entirely.
+    // Collapsing to the strip is the heading's job, not this one's.
+    setColumnHidden('skills', !hiddenColumns.skills)
+  }, [hiddenColumns.skills, setColumnHidden])
   const togglePrompts = useCallback(() => {
-    setPromptsCollapsed((was) => {
-      localStorage.setItem(PROMPTS_KEY, was ? '0' : '1')
-      return !was
-    })
-  }, [])
+    // The View menu's item and its shortcut both land here, and both
+    // mean presence: show the column, or take it off screen entirely.
+    // Collapsing to the strip is the heading's job, not this one's.
+    setColumnHidden('prompts', !hiddenColumns.prompts)
+  }, [hiddenColumns.prompts, setColumnHidden])
   const toggleGit = useCallback(() => {
-    setGitCollapsed((was) => {
-      localStorage.setItem(GIT_KEY, was ? '0' : '1')
-      return !was
-    })
-  }, [])
+    // The View menu's item and its shortcut both land here, and both
+    // mean presence: show the column, or take it off screen entirely.
+    // Collapsing to the strip is the heading's job, not this one's.
+    setColumnHidden('git', !hiddenColumns.git)
+  }, [hiddenColumns.git, setColumnHidden])
   const toggleFiles = useCallback(() => {
-    setFilesCollapsed((was) => {
-      localStorage.setItem(FILES_KEY, was ? '0' : '1')
-      return !was
-    })
-  }, [])
+    // The View menu's item and its shortcut both land here, and both
+    // mean presence: show the column, or take it off screen entirely.
+    // Collapsing to the strip is the heading's job, not this one's.
+    setColumnHidden('files', !hiddenColumns.files)
+  }, [hiddenColumns.files, setColumnHidden])
   const togglePresets = useCallback(() => {
-    setPresetsCollapsed((was) => {
-      localStorage.setItem(PRESETS_KEY, was ? '0' : '1')
-      return !was
-    })
-  }, [])
+    // The View menu's item and its shortcut both land here, and both
+    // mean presence: show the column, or take it off screen entirely.
+    // Collapsing to the strip is the heading's job, not this one's.
+    setColumnHidden('presets', !hiddenColumns.presets)
+  }, [hiddenColumns.presets, setColumnHidden])
   const toggleNotes = useCallback(() => {
-    setNotesCollapsed((was) => {
-      localStorage.setItem(NOTES_KEY, was ? '0' : '1')
-      return !was
-    })
-  }, [])
+    // The View menu's item and its shortcut both land here, and both
+    // mean presence: show the column, or take it off screen entirely.
+    // Collapsing to the strip is the heading's job, not this one's.
+    setColumnHidden('notes', !hiddenColumns.notes)
+  }, [hiddenColumns.notes, setColumnHidden])
 
   // What was open when hide-all last closed everything. A ref, not state:
   // nothing renders from it, and it must not be persisted, because it answers
@@ -199,7 +271,10 @@ export function App() {
   // not that.
   const rememberedColumns = useRef<ColumnId[]>([])
 
-  const setColumn: Record<ColumnId, (collapsed: boolean) => void> = {
+  // `Dispatch<SetStateAction<boolean>>` rather than `(collapsed: boolean) =>
+  // void`: these are React setters and `toggleColumnCollapsed` hands them an
+  // updater, which the narrower type rejected.
+  const setColumn: Record<ColumnId, Dispatch<SetStateAction<boolean>>> = {
     files: setFilesCollapsed,
     skills: setSkillsCollapsed,
     presets: setPresetsCollapsed,
@@ -224,40 +299,26 @@ export function App() {
    * one item and the one keystroke cover both directions.
    */
   const hideAllColumns = useCallback(() => {
-    const now: ColumnVisibility = {
-      files: filesCollapsed,
-      skills: skillsCollapsed,
-      presets: presetsCollapsed,
-      prompts: promptsCollapsed,
-      notes: notesCollapsed,
-      git: gitCollapsed,
-    }
-    const next = anyOpen(now)
+    // Reads and writes the HIDDEN flags, not the collapse ones: this item is
+    // the menu's, and the menu's business is presence.
+    const next = anyOpen(hiddenColumns)
       ? (() => {
-          const closed = hideAll(now)
+          const closed = hideAll(hiddenColumns)
           rememberedColumns.current = closed.remembered
           return closed.next
         })()
-      : restore(now, rememberedColumns.current)
-    for (const id of COLUMN_IDS) {
-      setColumn[id](next[id])
-      localStorage.setItem(COLUMN_KEY[id], next[id] ? '1' : '0')
-    }
-  }, [filesCollapsed, skillsCollapsed, presetsCollapsed, promptsCollapsed, notesCollapsed, gitCollapsed])
+      : restore(hiddenColumns, rememberedColumns.current)
+    for (const id of COLUMN_IDS) setColumnHidden(id, next[id])
+  }, [hiddenColumns, setColumnHidden])
 
   // Main cannot read localStorage or React state, so the menu's checkmarks
   // would otherwise be a guess. Sent on mount too, not only on change: a
   // relaunch restores these from localStorage without any toggle firing.
   useEffect(() => {
-    window.pterm.columnsVisible({
-      files: filesCollapsed,
-      skills: skillsCollapsed,
-      presets: presetsCollapsed,
-      prompts: promptsCollapsed,
-      notes: notesCollapsed,
-      git: gitCollapsed,
-    })
-  }, [filesCollapsed, skillsCollapsed, presetsCollapsed, promptsCollapsed, notesCollapsed, gitCollapsed])
+    // The HIDDEN flags: a checkmark means the column is on screen, and a
+    // column collapsed to its strip is still on screen.
+    window.pterm.columnsVisible(hiddenColumns)
+  }, [hiddenColumns])
 
   const project = activeProject(state)
   const currentTabId = activeTabId(state)
@@ -1251,12 +1312,14 @@ export function App() {
       <div className="flex min-h-0 flex-1">
         {/* Left of the sidebar, so the tree reads as the outermost thing and
             gets the full window height. */}
-        <FilesPanel
-          projectId={state.activeProjectId ?? undefined}
-          onOpenFile={openFile}
-          collapsed={filesCollapsed}
-          onToggle={toggleFiles}
-        />
+        {hiddenColumns.files ? null : (
+          <FilesPanel
+            projectId={state.activeProjectId ?? undefined}
+            onOpenFile={openFile}
+            collapsed={filesCollapsed}
+            onToggle={() => toggleColumnCollapsed('files')}
+          />
+        )}
 
         <Sidebar
           projects={state.projects}
@@ -1679,47 +1742,61 @@ export function App() {
         {/* Five independently collapsible columns (Files, above, is the
             sixth). Each renders its own vertical strip when collapsed, so
             none of them can vanish without leaving a way back. */}
-        <SkillsPanel
-          project={project}
-          collapsed={skillsCollapsed}
-          onToggle={toggleSkills}
-          // No trailing `\r`: this types the invocation and leaves the user
-          // to decide, per the spec. A submitted `/name` would run a skill
-          // nobody had finished choosing.
-          onInsert={(name) => {
-            if (activePaneId) window.pterm.input(activePaneId, `/${name}`)
-          }}
-        />
+        {hiddenColumns.skills ? null : (
+          <SkillsPanel
+            project={project}
+            collapsed={skillsCollapsed}
+            onToggle={() => toggleColumnCollapsed('skills')}
+            // No trailing `\r`: this types the invocation and leaves the user
+            // to decide, per the spec. A submitted `/name` would run a skill
+            // nobody had finished choosing.
+            onInsert={(name) => {
+              if (activePaneId) window.pterm.input(activePaneId, `/${name}`)
+            }}
+          />
+        )}
 
-        <PresetsPanel
-          project={project}
-          collapsed={presetsCollapsed}
-          onToggle={togglePresets}
-          onRun={(command, type) => launch(command, type)}
-        />
+        {hiddenColumns.presets ? null : (
+          <PresetsPanel
+            project={project}
+            collapsed={presetsCollapsed}
+            onToggle={() => toggleColumnCollapsed('presets')}
+            onRun={(command, type) => launch(command, type)}
+          />
+        )}
 
         {/* Global, unlike every other column here: the prompts a user keeps
             are ways of working rather than facts about a repository, so this
             takes no project. */}
-        <PromptsPanel
-          collapsed={promptsCollapsed}
-          onToggle={togglePrompts}
-          canInsert={activePaneId !== null}
-          // Typed, never submitted, exactly like a skill. `input` is the same
-          // channel the skills list uses.
-          onInsert={(body) => {
-            if (activePaneId) window.pterm.input(activePaneId, body)
-          }}
-        />
+        {hiddenColumns.prompts ? null : (
+          <PromptsPanel
+            collapsed={promptsCollapsed}
+            onToggle={() => toggleColumnCollapsed('prompts')}
+            canInsert={activePaneId !== null}
+            // Typed, never submitted, exactly like a skill. `input` is the same
+            // channel the skills list uses.
+            onInsert={(body) => {
+              if (activePaneId) window.pterm.input(activePaneId, body)
+            }}
+          />
+        )}
 
-        <GitPanel
-          project={project}
-          collapsed={gitCollapsed}
-          onToggle={toggleGit}
-          onOpenDiff={openDiff}
-        />
+        {hiddenColumns.git ? null : (
+          <GitPanel
+            project={project}
+            collapsed={gitCollapsed}
+            onToggle={() => toggleColumnCollapsed('git')}
+            onOpenDiff={openDiff}
+          />
+        )}
 
-        <NotesPanel project={project} collapsed={notesCollapsed} onToggle={toggleNotes} />
+        {hiddenColumns.notes ? null : (
+          <NotesPanel
+            project={project}
+            collapsed={notesCollapsed}
+            onToggle={() => toggleColumnCollapsed('notes')}
+          />
+        )}
 
         <CommandPalette
           open={paletteOpen}

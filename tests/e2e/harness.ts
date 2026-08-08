@@ -368,6 +368,15 @@ export async function expandColumn(
   // View menu item carries.
   await expect(page.getByTestId('titlebar')).toBeVisible()
   if ((await page.getByTestId(`${name}-panel`).count()) > 0) return
-  await page.keyboard.press(`Alt+Meta+${COLUMN_KEY[name]}`)
+
+  // Three states, so two ways in. A HIDDEN column renders nothing and only the
+  // shortcut reaches it; a COLLAPSED one is showing its strip, and pressing the
+  // shortcut there would hide it outright. The strip's presence is what tells
+  // the two apart.
+  if ((await page.getByTestId(`${name}-toggle`).count()) > 0) {
+    await page.getByTestId(`${name}-toggle`).click()
+  } else {
+    await page.keyboard.press(`Alt+Meta+${COLUMN_KEY[name]}`)
+  }
   await expect(page.getByTestId(`${name}-panel`)).toBeVisible()
 }

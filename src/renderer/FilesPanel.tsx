@@ -1,6 +1,6 @@
 import { FileTree } from './FileTree'
 import { useColumnWidth } from './lib/columnWidth'
-import { ColumnResizer} from './ui/Panel'
+import { ColumnResizer, PanelStrip } from './ui/Panel'
 
 /**
  * The file tree's column, left of the projects sidebar.
@@ -30,16 +30,7 @@ export function FilesPanel({
   const { width, set, commit } = useColumnWidth('pterm:filesWidth')
 
   if (collapsed) {
-    /*
-     * A hidden column renders NOTHING, not a strip.
-     *
-     * It used to collapse to a 24px vertical label, which meant six columns
-     * cost about 144px of permanent chrome even with every one of them turned
-     * off — the opposite of what the View menu's items are for. The menu and
-     * the ⌥⌘ shortcuts are now the only way back, which is what the strip's
-     * click used to be for.
-     */
-    return null
+    return <PanelStrip testid="files-toggle" label="Files" side="left" onClick={onToggle} />
   }
 
   return (

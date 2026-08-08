@@ -121,16 +121,31 @@ test('a note typed under beta does not leak into alpha', async () => {
   expect(await readFile(join(configDir, 'notes', 'id-alpha.md'), 'utf8')).toBe(ALPHA_NOTE)
 })
 
-test('the heading hides the column completely, and the shortcut brings it back', async () => {
+/*
+ * The two gestures a column has, and the difference between them.
+ *
+ * The heading SETS ASIDE: the panel goes and the strip stays, one click from
+ * open. The View menu's item and its shortcut REMOVE: the strip goes too. They
+ * were briefly the same thing, and setting a column aside then took away the
+ * only way back that is not the menu.
+ */
+test('the heading collapses to a strip, and the shortcut hides the column outright', async () => {
   await expect(page.getByTestId('notes-textarea')).toBeVisible()
-  // The heading is the same testid as the old strip was, and clicking it while
-  // the column is open still hides it.
+
+  // Aside: panel gone, strip kept. The strip carries the same testid the
+  // heading does, so its presence is what separates the two states.
   await page.getByTestId('notes-toggle').click()
   await expect(page.getByTestId('notes-panel')).toHaveCount(0)
   await expect(page.getByTestId('notes-textarea')).toHaveCount(0)
-  // The assertion this test exists for since the strip was removed: nothing is
-  // left behind. A hidden column used to keep a 24px vertical label, and six
-  // of those cost about 144px of chrome with everything turned off.
+  await expect(page.getByTestId('notes-toggle')).toBeVisible()
+
+  // And back, by clicking that strip.
+  await page.getByTestId('notes-toggle').click()
+  await expect(page.getByTestId('notes-textarea')).toBeVisible()
+
+  // Removed: nothing left at all, which is what the menu item is for.
+  await page.keyboard.press('Alt+Meta+n')
+  await expect(page.getByTestId('notes-panel')).toHaveCount(0)
   await expect(page.getByTestId('notes-toggle')).toHaveCount(0)
 
   await expandColumn(page, 'notes')
