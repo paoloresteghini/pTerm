@@ -16,6 +16,11 @@
  * sixth that types Shift+Return into `cat -v` and asserts the pty received
  * ESC CR rather than a bare Return.
  *
+ * The matching guard for a BARE Up reaching the pty is NOT here: it only bites
+ * when the history overlay has entries to show, and this file seeds none, so a
+ * copy of it living here passed against a deliberately reintroduced bug
+ * (measured 2026-08-07). It lives in `history.spec.ts`, next to `seedHistory`.
+ *
  * **Measured, 2026-08-02, this file run alone** (`npx playwright test
  * tests/e2e/launch.spec.ts`), against the three tests that existed at the
  * time: renaming `data-testid="terminal"` to `terminal-box` in

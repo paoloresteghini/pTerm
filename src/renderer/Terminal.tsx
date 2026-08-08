@@ -166,21 +166,23 @@ export function Terminal({
     mounted.set(tabId, term)
 
     // The two keys this app takes off xterm, each only when there is
-    // something to put in its place: Shift+Return (replaced by ESC CR) and a
-    // bare Up (offered to the history overlay). Returning `true` is xterm's
+    // something to put in its place: Shift+Return (replaced by ESC CR) and
+    // ⌘↑ (offered to the history overlay). Returning `true` is xterm's
     // untouched behaviour, so every other branch leaves this terminal exactly
     // as it was before this handler existed.
     //
-    // A modified Up is left alone because every combination already means
-    // something. ⌥⌘↑ is this app's own pane navigation, in the window keydown
-    // handler in `App.tsx`. The rest belong to the pane: read in
+    // ⌘↑ is the one Up this app can spend. Read in
     // `node_modules/@xterm/xterm/lib/xterm.js` on 2026-08-06,
     // `evaluateKeyboardEvent` builds `(shiftKey?1:0)|(altKey?2:0)|(ctrlKey?4:0)|(metaKey?8:0)`
     // and `case 38` emits `ESC[1;<that+1>A` whenever it is non-zero, so ⇧↑, ⌃↑
     // and ⌥↑ are each a DISTINCT sequence sent to whatever is running in the
-    // pane. Swallowing one would take a keystroke away from that program.
-    // (⌘↑ is the exception xterm makes for itself: `case 38` breaks on
-    // `metaKey` and sends nothing at all.)
+    // pane, and a BARE Up is the plain `ESC[A`/`ESC OA` that every shell,
+    // editor and TUI reads as "previous". Swallowing any of those takes a
+    // keystroke away from that program — which is exactly what claiming a bare
+    // Up for this overlay used to do to Claude Code, vim and less. ⌘↑ is the
+    // exception xterm makes for itself: `case 38` breaks on `metaKey` and
+    // sends nothing at all, so this is the only Up whose interception costs
+    // the program in the pane nothing.
     term.attachCustomKeyEventHandler((event) => {
       if (event.type !== 'keydown') return true
       // Shift+Return goes to the pty as ESC CR, not the bare CR xterm would
@@ -198,7 +200,7 @@ export function Terminal({
         return false
       }
       if (event.key !== 'ArrowUp') return true
-      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return true
+      if (!event.metaKey || event.altKey || event.ctrlKey || event.shiftKey) return true
       return !historyRef.current(tabId)
     })
 

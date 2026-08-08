@@ -265,7 +265,7 @@ test('Up opens history, arrows move, and Enter types the command without running
   ])
   const { window, session } = await openPane()
 
-  await window.keyboard.press('ArrowUp')
+  await window.keyboard.press('Meta+ArrowUp')
   await expect(window.getByTestId('history-overlay')).toBeVisible()
 
   // Newest first, and the newest starts selected.
@@ -355,7 +355,7 @@ test('Esc dismisses without typing anything', async () => {
   ])
   const { window, session } = await openPane()
 
-  await window.keyboard.press('ArrowUp')
+  await window.keyboard.press('Meta+ArrowUp')
   await expect(window.getByTestId('history-overlay')).toBeVisible()
   await window.keyboard.press('Escape')
   await expect(window.getByTestId('history-overlay')).toBeHidden()
@@ -389,7 +389,7 @@ test('a click keeps the keyboard, a click on a row picks it, and a click on the 
   ])
   const { window, session } = await openPane()
 
-  await window.keyboard.press('ArrowUp')
+  await window.keyboard.press('Meta+ArrowUp')
   await expect(window.getByTestId('history-overlay')).toBeVisible()
 
   // A click on a part of the overlay that is not a row must leave the keyboard
@@ -406,7 +406,7 @@ test('a click keeps the keyboard, a click on a row picks it, and a click on the 
 
   // Clicking a row picks that row, not the selected one: this reopens at row 0
   // and clicks row 1.
-  await window.keyboard.press('ArrowUp')
+  await window.keyboard.press('Meta+ArrowUp')
   await expect(window.getByTestId('history-overlay')).toBeVisible()
   await expect(window.getByTestId('history-row-0')).toHaveAttribute('data-selected', 'true')
   await window.getByTestId('history-row-1').click()
@@ -419,7 +419,7 @@ test('a click keeps the keyboard, a click on a row picks it, and a click on the 
   // stop: a click on the part of the terminal still showing above it. xterm
   // takes focus, so this counts as dismissing the overlay rather than stranding
   // it. Positioned near the top corner because the overlay owns the bottom.
-  await window.keyboard.press('ArrowUp')
+  await window.keyboard.press('Meta+ArrowUp')
   await expect(window.getByTestId('history-overlay')).toBeVisible()
   await window.getByTestId('terminal').click({ position: { x: 20, y: 8 } })
   await expect(window.getByTestId('history-overlay')).toBeHidden()
@@ -439,7 +439,7 @@ test('typing filters the list, and Tab widens the scope to every project', async
   ])
   const { window } = await openPane()
 
-  await window.keyboard.press('ArrowUp')
+  await window.keyboard.press('Meta+ArrowUp')
   await expect(window.getByTestId('history-overlay')).toBeVisible()
 
   // Scoped to this project: the entry recorded elsewhere is not offered.
@@ -475,13 +475,49 @@ test('typing filters the list, and Tab widens the scope to every project', async
   await expect(window.getByTestId('history-row-0')).toHaveText(/(just now|\d+[mhd] ago)$/)
 })
 
-// The rule from the spec, not an optimisation: with nothing to show, Up still
-// belongs to zsh. Swallowing it would take the shell's own recall away and
-// give nothing back.
+/*
+ * The regression this whole binding exists for, and the reason it is here
+ * rather than in `launch.spec.ts`: history is SEEDED, so the overlay has
+ * something to show and genuinely wants the key. A copy of this test in a file
+ * that seeds nothing passes even with the bug reintroduced, because
+ * `requestHistory` declines an empty list anyway (measured 2026-08-07).
+ *
+ * `cat` rather than a bare prompt so the Up is visible: it leaves the tty in
+ * canonical mode with echo on, so xterm's escape sequence is echoed back in
+ * caret notation, and typing the marker straight after pins both onto one
+ * line — the marker can only share a line with the arrow if the arrow arrived.
+ */
+test('a bare Up reaches the program in the pane even when the overlay has entries', async () => {
+  await seedHistory([{ ts: 1, cwd: projectCwd, cmd: NEWER }])
+  const { window, session } = await openPane()
+
+  await window.keyboard.type('cat')
+  await window.keyboard.press('Enter')
+  await expect
+    .poll(async () => await capturePane(SOCKET, session), { timeout: 20_000 })
+    .toContain('cat')
+
+  await window.keyboard.press('ArrowUp')
+  // The overlay must not have taken it, and the pty must have received it.
+  await expect(window.getByTestId('history-overlay')).toHaveCount(0)
+  await window.keyboard.type('BAREUPMARKER')
+  await expect
+    .poll(async () => await capturePane(SOCKET, session), { timeout: 20_000 })
+    .toContain('^[[ABAREUPMARKER')
+})
+
+// The rule from the spec, not an optimisation: with nothing to show, ⌘↑ opens
+// nothing, and a bare Up belongs to zsh either way. Two presses because they
+// now fail for different reasons: since the overlay moved off a bare Up, that
+// key never reaches `requestHistory` at all, so only the ⌘↑ below can catch a
+// build that stopped checking whether the list is empty.
 test('Up reaches the shell when there is no history to show', async () => {
   // No history.jsonl at all, which is also the state of a machine that has
   // never installed the shell integration.
   const { window, session } = await openPane()
+
+  await window.keyboard.press('Meta+ArrowUp')
+  await expect(window.getByTestId('history-overlay')).toHaveCount(0)
 
   await window.keyboard.press('ArrowUp')
   await expect(window.getByTestId('history-overlay')).toHaveCount(0)
@@ -533,7 +569,7 @@ test('history that appears after launch becomes reachable without a restart', as
   const { window } = await openPane()
 
   // The empty side, pinned: this is a real starting state, not an assumption.
-  await window.keyboard.press('ArrowUp')
+  await window.keyboard.press('Meta+ArrowUp')
   await expect(window.getByTestId('history-overlay')).toHaveCount(0)
 
   // What installing the hook and running one command amounts to, with no
@@ -546,7 +582,7 @@ test('history that appears after launch becomes reachable without a restart', as
   // here however many times Up is pressed, which is the whole point.
   await expect
     .poll(async () => {
-      await window.keyboard.press('ArrowUp')
+      await window.keyboard.press('Meta+ArrowUp')
       return await window.getByTestId('history-overlay').count()
     }, { timeout: 20_000 })
     .toBe(1)
@@ -565,7 +601,10 @@ test('history that appears after launch becomes reachable without a restart', as
  *
  * The seeded `history.jsonl` is what makes this discriminating rather than
  * decorative: it holds an entry for this project, so the overlay has something
- * to show and a build that stopped checking the pane's type would open it here.
+ * to show and a build that stopped checking the pane's type would open it on
+ * the ⌘↑ below. The bare Up after it carries none of that weight — since the
+ * overlay moved off a bare Up, that key cannot reach `requestHistory` on any
+ * pane — and is here only to assert the keystroke still reaches the program.
  */
 test('Up reaches a preset pane rather than opening the overlay', async () => {
   await seedHistory([{ ts: 1, cwd: projectCwd, cmd: NEWER }])
@@ -588,6 +627,9 @@ test('Up reaches a preset pane rather than opening the overlay', async () => {
   await expect
     .poll(async () => await capturePane(SOCKET, session), { timeout: 20_000 })
     .toContain(PRESET_READY)
+
+  await window.keyboard.press('Meta+ArrowUp')
+  await expect(window.getByTestId('history-overlay')).toHaveCount(0)
 
   await window.keyboard.press('ArrowUp')
   await expect(window.getByTestId('history-overlay')).toHaveCount(0)
