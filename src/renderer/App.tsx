@@ -271,6 +271,12 @@ export function App() {
     // Collapsing to the strip is the heading's job, not this one's.
     setColumnHidden('notes', !hiddenColumns.notes)
   }, [hiddenColumns.notes, setColumnHidden])
+  const toggleTabs = useCallback(() => {
+    // The View menu's item lands here, and means presence: show the column,
+    // or take it off screen entirely. There is no shortcut for this one, so
+    // unlike its siblings only the menu ever calls it.
+    setColumnHidden('tabs', !hiddenColumns.tabs)
+  }, [hiddenColumns.tabs, setColumnHidden])
 
   // What was open when hide-all last closed everything. A ref, not state:
   // nothing renders from it, and it must not be persisted, because it answers
@@ -1100,6 +1106,9 @@ export function App() {
           case 'toggleFiles':
             toggleFiles()
             return
+          case 'toggleTabs':
+            toggleTabs()
+            return
           case 'toggleSkills':
             toggleSkills()
             return
@@ -1129,6 +1138,7 @@ export function App() {
       splitActive,
       focusPane,
       toggleFiles,
+      toggleTabs,
       toggleSkills,
       togglePresets,
       togglePrompts,
