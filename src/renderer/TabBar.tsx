@@ -141,10 +141,11 @@ export function TabBar({
         const tombstoned = canHaveSession(tab) && dead[tab.id] !== undefined
         // `dirty` is keyed by PANE id, and so is every row this bar renders,
         // unconditionally rather than only while tabs hold one pane each.
-        // `App.tsx` passes `tabsOfProject`, which is a filter over the flat
-        // `state.panes` array (`workspace.ts`), so each `tab` here IS a pane
-        // and `tab.id` IS its pane id. `tabs.spec.ts` says the same thing in
-        // its own words: "A tab here is a pane wearing a tab's name."
+        // `App.tsx` passes `tabEntries`, `groupedTabs`' output over the flat
+        // `state.panes` array (`workspace.ts`) reordered into groups — one
+        // entry per pane either way — so each `tab` here IS a pane and
+        // `tab.id` IS its pane id. `tabs.spec.ts` says the same thing in its
+        // own words: "A tab here is a pane wearing a tab's name."
         //
         // Which settles what ⌘D on an editor pane will need, since an earlier
         // version of this comment predicted the opposite: a split adds a pane
@@ -161,7 +162,12 @@ export function TabBar({
             // here rather than a nested element: the e2e suite counts tabs
             // with `[data-testid^="tab-"]`, so a second element per tab under
             // that prefix would inflate every one of those counts.
-            data-group-id={entry.groupId ?? undefined}
+            //
+            // Gated on `pos`, not just `entry.groupId`: `restore.ts` files
+            // every pane under a row after a relaunch, including one-pane
+            // rows, so `groupId` is non-null for an ungrouped tab too — only
+            // `pos` says whether there is actually a split to frame.
+            data-group-id={entry.pos !== null ? (entry.groupId ?? undefined) : undefined}
             data-group-pos={entry.pos ?? undefined}
             onClick={() => onActivate(tab.id)}
             onContextMenu={(event) => {
