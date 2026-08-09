@@ -190,3 +190,88 @@ follow-up and is a feature in its own right, not a detail of this one.
 
 Inline rename, colour swatches, a right-click menu, drag-to-reorder, naming panes
 by their command, and any cross-project view.
+
+## As built
+
+All six implementation tasks and the end-to-end coverage task landed
+(`367cb3d..56ab4df`). This section records what was actually measured, not what
+was expected, and fixes the two places above that turned out incomplete once the
+column existed.
+
+**Default state, observed.** The tabs column starts hidden, the same as every
+other column: `App.tsx:162` seeds `hiddenColumns.tabs` from `storedCollapsed(HIDDEN_KEYS.tabs, true)`.
+`tests/e2e/verticalTabs.spec.ts`'s first test opens it via the `toggle-tabs` menu
+item and confirms the bar was there beforehand and returns on close. The
+"defaults hidden like every other column" line above held exactly as written.
+
+**The three predictions in "What this is expected to break," checked one by
+one, all held:**
+- `columnVisibility.test.ts` broke as predicted, on the `COLUMN_IDS` length
+  assertion, and was updated in the task that added the seventh id
+  (`tests/unit/columnVisibility.test.ts`, Task 2). One loose end this caused:
+  the test's title still read "lists the six columns" against a seven-item
+  assertion for one task longer than intended, fixed in a follow-up commit
+  (`1446c3f`) rather than in the same change that widened the array. Cosmetic,
+  but it means "updated as part of the task that adds the id" was true of the
+  assertion and one task later of the title.
+- `menuColumns.spec.ts` did not break, and was never touched: `git diff --stat
+  367cb3d..HEAD` shows no entry for that file anywhere on the branch. It ran
+  green (32/32, bundled with `splits.spec.ts` and `tabs.spec.ts`) as part of
+  Task 6's at-risk-spec pass.
+- `splits.spec.ts` stayed green, all 11 of its tests, in that same Task 6 run,
+  confirming the hidden-by-default column left its pixel arithmetic
+  undisturbed, exactly as this section predicted.
+
+**Three hand-written unit and e2e tests turned out unable to fail, each caught
+only because sabotage was mandatory on every task, not because anyone went
+looking for them.** This is a finding about the plan's own test authorship,
+stated plainly:
+- Task 1, `tabTree`'s "resolves a pane claimed by two rows to the first,
+  matching groupedTabs": both candidate rows in the original test named only
+  the one contested kid, so first-wins and last-wins produced the same
+  `present[0]` fallback and the test passed under either order. Rewritten with
+  two rows that overlap on one kid but differ in their other kid, so the
+  result now depends on which one wins (commit `e816fc4`).
+- Task 3, `showsTabBar`'s "ignores every other column": the original input
+  happened to produce the same answer under the correct `collapsed.tabs`
+  check and the mutant `anyOpen(collapsed)` check, so the mutation passed
+  clean. Rewritten with an input (tabs collapsed, every other column open)
+  where the two checks genuinely disagree, `false` versus `true` (commit
+  `40c3777`).
+- Task 6, the brief's fourth e2e test ("clicking a child row moves the
+  keyboard to that pane"): as literally specified it clicked a child pane
+  that a preceding ⌘D had already made active, which is both a `selectPane`
+  no-op and, per the implementer's own measurement, a real DOM blur to
+  `<body>` from clicking a non-focusable row, so the marker landed nowhere
+  under correct code either. It could not pass as written, let alone
+  distinguish its mutation. Fixed by clicking the tab row first (a real
+  transition) before clicking the child, which is what makes the following
+  child click a real transition too instead of a no-op (commit `56ab4df`,
+  reviewed and confirmed independently in `review-task6-findings.md`).
+
+**Two corrections to this design, found during the Tasks 4-5 review, not
+predicted above:**
+- The "Row part | Source" table's `close` row said only `requestClosePane(id)`,
+  as if every row always offers a close control. The first cut of `TabsPanel`
+  did exactly that, unconditionally, which meant closing a dead pane's row
+  reached `manager.kill()` on a session that no longer existed and threw. The
+  design should have said what `TabBar` already does: a tombstoned pane
+  (`canHaveSession(pane) && dead[pane.id] !== undefined`) gets no close
+  control at all, the same way `TabBar` swaps in Restart/Dismiss over the pane
+  body instead. Fixed in `TabsPanel.tsx` (commit `5b37084`); this column
+  offers neither Restart nor Dismiss itself; a dead pane stays manageable
+  because those controls are still reachable on the pane body per
+  `DeadPane.tsx`'s own docblock.
+- The "Three cases" under the row model left out a fourth, added as a guard
+  during Task 1's review rather than predicted up front: two rows claiming the
+  same kid, which would otherwise emit that pane as two separate top-level
+  nodes. `tabRows` (`src/main/state/store.ts`) already dedupes kids across
+  rows when loading from disk, so this is unreachable through today's only
+  write path, the same as the equivalent guard `groupedTabs` already carried.
+  It is cheap insurance, not a bug found in practice, and it is now covered by
+  its own test and mutation in `tabGroups.test.ts` (commit `045dc75`).
+
+Everything else in this design, the row model's shape, the interactions table,
+the testid prefixes, and the "It shows the active project only" and "It is a
+column, not a setting" decisions, matched what shipped with no correction
+needed.
