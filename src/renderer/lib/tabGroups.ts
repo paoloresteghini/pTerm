@@ -100,3 +100,65 @@ export function groupedTabs(panes: TabDescriptor[], rows: TabRow[]): TabGroupEnt
 
   return entries
 }
+
+/**
+ * One node per tab, with that tab's other panes nested under it.
+ *
+ * The nested counterpart to `groupedTabs`, from the same two inputs and using
+ * the same first-wins pane-to-row convention, and living in this file so the
+ * flat and nested readings of "what is a group" cannot drift apart.
+ *
+ * The parent is a PANE, not the row. `TabRow` carries no name of its own: a
+ * title lives on `TabDescriptor.title` and `renameTab` renames a pane, so a row
+ * has nothing to label itself with. The founding pane (`TabRow.id`) is the
+ * parent, which is also what a terminal list looks like elsewhere: a terminal
+ * with its splits beneath it, not an abstract heading.
+ *
+ * `TabRow.id` is never rewritten, so it can name a pane that has since been
+ * closed while its siblings live on. The first present kid is promoted in that
+ * case, because a tab whose panes are all still open must not lose its node.
+ */
+export interface TabTreeNode {
+  pane: TabDescriptor
+  children: TabDescriptor[]
+}
+
+export function tabTree(panes: TabDescriptor[], rows: TabRow[]): TabTreeNode[] {
+  const byId = new Map(panes.map((pane) => [pane.id, pane]))
+  const rowByPaneId = new Map<string, TabRow>()
+  // First-wins, the same rule `groupedTabs` above applies, for the same reason.
+  for (const row of rows) {
+    for (const kid of row.layout.kids) {
+      if (!rowByPaneId.has(kid)) rowByPaneId.set(kid, row)
+    }
+  }
+
+  const emitted = new Set<string>()
+  const nodes: TabTreeNode[] = []
+
+  for (const pane of panes) {
+    if (emitted.has(pane.id)) continue
+
+    const row = rowByPaneId.get(pane.id)
+    if (!row) {
+      emitted.add(pane.id)
+      nodes.push({ pane, children: [] })
+      continue
+    }
+
+    // In `kids` order and present only, so a kid belonging to another project
+    // or since dropped by main never reaches the screen.
+    const present = row.layout.kids
+      .map((kid) => byId.get(kid))
+      .filter((kid): kid is TabDescriptor => kid !== undefined)
+    for (const kid of present) emitted.add(kid.id)
+
+    const founder = present.find((kid) => kid.id === row.id) ?? present[0]
+    nodes.push({
+      pane: founder,
+      children: present.filter((kid) => kid.id !== founder.id),
+    })
+  }
+
+  return nodes
+}

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { TabDescriptor, TabRow } from '../../src/shared/ipc'
-import { groupedTabs } from '../../src/renderer/lib/tabGroups'
+import { groupedTabs, tabTree } from '../../src/renderer/lib/tabGroups'
 
 /**
  * The order the tab bar draws panes in, and which of them it frames together.
@@ -137,5 +137,65 @@ describe('groupedTabs', () => {
     const entries = groupedTabs(panes, [row(['a', 'a2'])])
     expect(entries).toHaveLength(panes.length)
     expect(new Set(order(entries)).size).toBe(panes.length)
+  })
+})
+
+describe('tabTree', () => {
+  // A minimal pane. The real TabDescriptor has many more fields; only `id` is
+  // read by tabTree, and building the full shape here would tie these tests to
+  // fields they say nothing about.
+  const pane = (id: string): TabDescriptor => ({ id }) as TabDescriptor
+  const row = (id: string, kids: string[]): TabRow =>
+    ({ id, layout: { kids } }) as unknown as TabRow
+
+  it('gives a pane in no row a node of its own with no children', () => {
+    expect(tabTree([pane('a')], [])).toEqual([{ pane: pane('a'), children: [] }])
+  })
+
+  it('gives a row holding one pane no children, so a plain tab grows no twist', () => {
+    expect(tabTree([pane('a')], [row('a', ['a'])])).toEqual([
+      { pane: pane('a'), children: [] },
+    ])
+  })
+
+  it('nests a row\'s other kids under its founding pane, in kids order', () => {
+    const tree = tabTree(
+      [pane('a'), pane('b'), pane('c')],
+      [row('a', ['a', 'b', 'c'])],
+    )
+    expect(tree).toEqual([
+      { pane: pane('a'), children: [pane('b'), pane('c')] },
+    ])
+  })
+
+  it('anchors a group at its earliest member, not at the founding pane', () => {
+    // `applyTabShape` appends new panes, so a split of the first of two tabs
+    // puts its sibling last in `panes`. The group must still draw where its
+    // earliest member sat.
+    const tree = tabTree(
+      [pane('a'), pane('z'), pane('b')],
+      [row('a', ['a', 'b'])],
+    )
+    expect(tree.map((node) => node.pane.id)).toEqual(['a', 'z'])
+    expect(tree[0].children.map((kid) => kid.id)).toEqual(['b'])
+  })
+
+  it('promotes the first present kid when the founding pane is gone', () => {
+    // Reachable: the founding pane can be closed while its siblings live on.
+    // `TabRow.id` is never rewritten, so it can name a pane that is no longer
+    // in the tab.
+    const tree = tabTree([pane('b'), pane('c')], [row('a', ['a', 'b', 'c'])])
+    expect(tree).toEqual([{ pane: pane('b'), children: [pane('c')] }])
+  })
+
+  it('drops a kid that is not among the panes given', () => {
+    // Another project's pane, or one main has since dropped.
+    const tree = tabTree([pane('a')], [row('a', ['a', 'gone'])])
+    expect(tree).toEqual([{ pane: pane('a'), children: [] }])
+  })
+
+  it('resolves a pane claimed by two rows to the first, matching groupedTabs', () => {
+    const tree = tabTree([pane('a')], [row('r1', ['a']), row('r2', ['a'])])
+    expect(tree).toEqual([{ pane: pane('a'), children: [] }])
   })
 })
