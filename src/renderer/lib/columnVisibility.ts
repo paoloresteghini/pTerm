@@ -68,3 +68,21 @@ export function restore(state: ColumnVisibility, remembered: ColumnId[]): Column
   for (const id of remembered) next[id] = false
   return next
 }
+
+/**
+ * Whether the horizontal tab bar should be on screen.
+ *
+ * The bar shows unless the tabs column is fully OPEN, which is the one rule
+ * that keeps a tab always reachable: every state that takes the column away
+ * (collapsed to its strip, or hidden by the View menu) puts the bar back, so
+ * there is no combination in which the workspace has no tab surface at all.
+ *
+ * Remember that `ColumnVisibility`'s booleans mean COLLAPSED, not visible, so
+ * open is `!collapsed.tabs && !hidden.tabs`.
+ */
+export function showsTabBar(
+  collapsed: ColumnVisibility,
+  hidden: Record<ColumnId, boolean>,
+): boolean {
+  return collapsed.tabs || hidden.tabs
+}
