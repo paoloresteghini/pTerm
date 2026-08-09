@@ -139,6 +139,29 @@ export async function launchApp(opts: {
    * recovery happens on the third pane.
    */
   webglLimit?: number
+  /**
+   * Overrides the `gh` binary `src/main/gh/run.ts` shells out to, for a spec
+   * that wants to control what the issues column reads without a real GitHub
+   * CLI or network. Unset in every other spec, so `ghBin()`'s own `?? 'gh'`
+   * fallback is what they run — the real CLI, if the machine has one.
+   */
+  ghBin?: string
+  /**
+   * The three knobs `tests/e2e/fixtures/gh-stub.mjs` reads out of its own
+   * environment: which canned failure to answer with, the fixture file to
+   * echo back on success, and where to append every argv it was called with.
+   *
+   * Opts here rather than read straight from this process's `process.env`,
+   * even though the stub would see the same values either way through the
+   * `...process.env` spread below: a spec that mutated the real `process.env`
+   * would leak its mode into whatever spec runs next in the same worker,
+   * which is exactly the kind of cross-spec bleed this file's socket and path
+   * checks exist to catch. An explicit opt is scoped to the one launch it is
+   * passed to.
+   */
+  ghStubMode?: string
+  ghStubFixture?: string
+  ghStubLog?: string
 }): Promise<ElectronApplication> {
   assertTestSocket(opts.socket)
   assertUnderTmp('configDir', opts.configDir)
@@ -224,6 +247,13 @@ export async function launchApp(opts: {
       // Unset everywhere else, so every other spec runs the budget the user
       // runs and none of them can be reading a number this one left behind.
       ...(opts.webglLimit !== undefined ? { PTERM_WEBGL_LIMIT: String(opts.webglLimit) } : {}),
+      ...(opts.ghBin !== undefined ? { PTERM_GH_BIN: opts.ghBin } : {}),
+      // The stub reads these out of its own environment, which is this one:
+      // `execFile` in `src/main/gh/run.ts` inherits `process.env` rather than
+      // replacing it, and this launch's env is what that process.env IS.
+      ...(opts.ghStubMode !== undefined ? { PTERM_GH_STUB_MODE: opts.ghStubMode } : {}),
+      ...(opts.ghStubFixture !== undefined ? { PTERM_GH_STUB_FIXTURE: opts.ghStubFixture } : {}),
+      ...(opts.ghStubLog !== undefined ? { PTERM_GH_STUB_LOG: opts.ghStubLog } : {}),
     },
   })
 }
@@ -381,11 +411,12 @@ const COLUMN_KEY: Record<string, string> = {
   prompts: 'r',
   git: 'g',
   notes: 'n',
+  issues: 'i',
 }
 
 export async function expandColumn(
   page: Page,
-  name: 'files' | 'skills' | 'presets' | 'notes' | 'prompts' | 'git',
+  name: 'files' | 'skills' | 'presets' | 'notes' | 'prompts' | 'git' | 'issues',
 ): Promise<void> {
   // Wait for the app to have painted BEFORE reading the panel's absence.
   // Without this the count is 0 on a window that has not rendered yet, and on
