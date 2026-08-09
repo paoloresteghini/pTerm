@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { PromptEntry } from '../shared/ipc'
 import { useColumnWidth } from './lib/columnWidth'
+import { cn } from './lib/cn'
 import { ColumnResizer, PanelHeading, PanelStrip, type PanelSide } from './ui/Panel'
 import { NewPromptDialog } from './NewPromptDialog'
 
@@ -80,7 +81,10 @@ export function PromptsPanel({
   return (
     <div
       data-testid="prompts-panel"
-      className="relative flex shrink-0 flex-col border-l border-border bg-surface font-mono text-[11px] select-none"
+      className={cn(
+        'relative flex shrink-0 flex-col border-border bg-surface font-mono text-[11px] select-none',
+        side === 'left' ? 'border-r' : 'border-l',
+      )}
       style={{ width }}
     >
       {/* Heading and `+` as siblings: a button inside a button is invalid HTML

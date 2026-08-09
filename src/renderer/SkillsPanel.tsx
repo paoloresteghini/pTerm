@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { ProjectDescriptor, SkillEntry } from '../shared/ipc'
 import { filterEntries } from './lib/match'
 import { useColumnWidth } from './lib/columnWidth'
+import { cn } from './lib/cn'
 import { ColumnResizer, PanelHeading, PanelStrip, type PanelSide } from './ui/Panel'
 
 /**
@@ -79,8 +80,11 @@ export function SkillsPanel({
   return (
     <div
       data-testid="skills-panel"
-      // `relative` for the resizer over this column's left border.
-      className="relative flex shrink-0 flex-col border-l border-border bg-surface font-mono text-[11px] select-none"
+      // `relative` for the resizer, positioned off `side`.
+      className={cn(
+        'relative flex shrink-0 flex-col border-border bg-surface font-mono text-[11px] select-none',
+        side === 'left' ? 'border-r' : 'border-l',
+      )}
       style={{ width }}
     >
       <PanelHeading

@@ -1,17 +1,20 @@
 import { FileTree } from './FileTree'
 import { useColumnWidth } from './lib/columnWidth'
+import { cn } from './lib/cn'
 import { ColumnResizer, PanelStrip, type PanelSide } from './ui/Panel'
 
 /**
- * The file tree's column, left of the projects sidebar.
+ * The file tree's column. Draggable to any position in the row now, so
+ * "left of the projects sidebar" is only where it starts, not where it stays.
  *
  * The tree used to sit under the projects list inside `Sidebar`, sharing that
  * column's height and capped at 40% of it so the two lists did not starve each
  * other. Its own column gives it the whole window height and a way to be given
  * up entirely, which a section wedged into someone else's column cannot have.
  *
- * `border-r`, and placed before the sidebar in the flex row: this is the
- * leftmost column, so the seam it draws is on its right like the sidebar's.
+ * The seam it draws follows `side`, like every other column: whichever edge
+ * faces the terminal, not a fixed `border-r` for a position this column no
+ * longer holds.
  */
 export function FilesPanel({
   projectId,
@@ -50,8 +53,11 @@ export function FilesPanel({
     <div
       data-testid="files-panel"
       // `relative` for the resizer, which is absolutely positioned over this
-      // column's right border and takes no space in the flex row.
-      className="relative flex shrink-0 flex-col border-r border-border bg-surface font-mono text-[11px] select-none"
+      // column's border and takes no space in the flex row.
+      className={cn(
+        'relative flex shrink-0 flex-col border-border bg-surface font-mono text-[11px] select-none',
+        side === 'left' ? 'border-r' : 'border-l',
+      )}
       style={{ width }}
     >
       <FileTree

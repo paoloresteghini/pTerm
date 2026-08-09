@@ -77,6 +77,21 @@ function columnOrderOf(target: Page): Promise<string[]> {
   )
 }
 
+/** A panel's own computed border widths, in px. The whole-branch review's
+ *  Important finding was that a panel's container never read `side` at all,
+ *  so nothing in this suite had ever asserted on a border before. */
+async function borderWidthsOf(
+  target: Page,
+  testid: string,
+): Promise<{ left: number; right: number }> {
+  return target.evaluate((id) => {
+    const el = document.querySelector(`[data-testid="${id}"]`)
+    if (!el) throw new Error(`${id} not found`)
+    const style = getComputedStyle(el)
+    return { left: parseFloat(style.borderLeftWidth), right: parseFloat(style.borderRightWidth) }
+  }, testid)
+}
+
 /**
  * Drag the column whose handle carries `handleTestid` to the gap at
  * `dropIndex` (`column-gap-<dropIndex>`, `App.tsx`'s `gap` helper).
@@ -229,6 +244,11 @@ test('dragging a column rightward across the terminal lands where the gap indica
   // Files sits left of `terminal`, so `resizerSideFor` gives it `side:
   // 'left'`, which puts the handle on the panel's RIGHT edge.
   expect(Math.abs(resizerBefore.x - (panelBefore.x + panelBefore.width))).toBeLessThan(10)
+  // And its own border on the same edge (facing the terminal), none on the
+  // left (facing the window frame, in this position).
+  const bordersBefore = await borderWidthsOf(page, 'files-panel')
+  expect(bordersBefore.right).toBeGreaterThan(0)
+  expect(bordersBefore.left).toBe(0)
 
   // Drop on gap(6): the sliver between `skills` and `presets`, right of the
   // terminal. Pre-removal that is index 6; post-removal (files taken out of
@@ -247,6 +267,14 @@ test('dragging a column rightward across the terminal lands where the gap indica
   const resizerAfter = await boxOf(page, 'resize-files')
   expect(Math.abs(resizerAfter.x - panelAfter.x)).toBeLessThan(10)
   expect(Math.abs(resizerAfter.x - resizerBefore.x)).toBeGreaterThan(50)
+  // And the border flips with it: left now (facing the terminal, which is
+  // behind it), none on the right. This is the whole-branch review's
+  // Important finding, that the panel container never read `side` at all,
+  // so an expanded column crossing the terminal drew its only border
+  // against the window frame instead.
+  const bordersAfter = await borderWidthsOf(page, 'files-panel')
+  expect(bordersAfter.left).toBeGreaterThan(0)
+  expect(bordersAfter.right).toBe(0)
 })
 
 test('a column drag does not change the terminal container width', async () => {

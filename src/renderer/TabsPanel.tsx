@@ -121,7 +121,10 @@ export function TabsPanel({
   return (
     <div
       data-testid="tabs-panel"
-      className="relative flex shrink-0 flex-col border-r border-border bg-bg"
+      className={cn(
+        'relative flex shrink-0 flex-col border-border bg-bg',
+        side === 'left' ? 'border-r' : 'border-l',
+      )}
       style={{ width }}
     >
       <PanelHeading

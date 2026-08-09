@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ProjectDescriptor } from '../shared/ipc'
 import { createNoteSaver } from './lib/noteSaver'
 import { useColumnWidth } from './lib/columnWidth'
+import { cn } from './lib/cn'
 import { ColumnResizer, PanelHeading, PanelStrip, type PanelSide } from './ui/Panel'
 
 export function NotesPanel({
@@ -73,7 +74,14 @@ export function NotesPanel({
   return (
     <div
       data-testid="notes-panel"
-      className="relative flex shrink-0 flex-col border-l border-border bg-surface font-mono text-[11px] select-none"
+      className={cn(
+        'relative flex shrink-0 flex-col border-border bg-surface font-mono text-[11px] select-none',
+        // The seam faces the terminal either way, same rule `PanelStrip`
+        // follows: a left column drawing `border-l` puts its only border
+        // against the window frame, which is how this shipped with no
+        // visible edge at all before every panel container read `side`.
+        side === 'left' ? 'border-r' : 'border-l',
+      )}
       style={{ width }}
     >
       <PanelHeading

@@ -62,6 +62,10 @@ export function Sidebar({
   onMoveTab: (tabId: string, projectId: string) => void
   onAdd: () => void
   onOpenSettings: () => void
+  /** Always `'left'` in practice: `App.tsx`'s `moveColumn` refuses to move
+   *  `projects`, so unlike every other column this one never has a `side`
+   *  to derive from `columnOrder`. A prop instead of a literal here anyway,
+   *  for the same shape the other seven columns take. */
   side: PanelSide
 }) {
   // Resizable like every other column, though this one never collapses:

@@ -1,5 +1,6 @@
 import type { ProjectDescriptor, TabType } from '../shared/ipc'
 import { useColumnWidth } from './lib/columnWidth'
+import { cn } from './lib/cn'
 import { ColumnResizer, PanelHeading, PanelStrip, type PanelSide } from './ui/Panel'
 
 /**
@@ -44,7 +45,10 @@ export function PresetsPanel({
   return (
     <div
       data-testid="presets-panel"
-      className="relative flex shrink-0 flex-col border-l border-border bg-surface font-mono text-[11px] select-none"
+      className={cn(
+        'relative flex shrink-0 flex-col border-border bg-surface font-mono text-[11px] select-none',
+        side === 'left' ? 'border-r' : 'border-l',
+      )}
       style={{ width }}
     >
       <PanelHeading
