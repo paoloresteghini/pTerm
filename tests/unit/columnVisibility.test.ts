@@ -4,6 +4,8 @@ import {
   anyOpen,
   hideAll,
   restore,
+  showsTabBar,
+  type ColumnId,
   type ColumnVisibility,
 } from '../../src/renderer/lib/columnVisibility'
 
@@ -25,7 +27,7 @@ const withOpen = (...open: Array<keyof ColumnVisibility>): ColumnVisibility => {
 }
 
 describe('COLUMN_IDS', () => {
-  it('lists the six columns in on-screen order', () => {
+  it('lists the seven columns in on-screen order', () => {
     // `tabs` leads because the column sits leftmost, immediately right of the
     // projects sidebar, and this array is documented as on-screen order.
     expect(COLUMN_IDS).toEqual(['tabs', 'files', 'skills', 'presets', 'prompts', 'git', 'notes'])
@@ -98,5 +100,36 @@ describe('the round trip', () => {
     const start = withOpen('skills', 'prompts', 'notes')
     const { next, remembered } = hideAll(start)
     expect(restore(next, remembered)).toEqual(start)
+  })
+})
+
+describe('showsTabBar', () => {
+  const allCollapsed: ColumnVisibility = {
+    tabs: true, files: true, skills: true, presets: true, prompts: true, git: true, notes: true,
+  }
+  const noneHidden: Record<ColumnId, boolean> = {
+    tabs: false, files: false, skills: false, presets: false, prompts: false, git: false, notes: false,
+  }
+
+  it('shows the bar when the tabs column is collapsed to its strip', () => {
+    expect(showsTabBar(allCollapsed, noneHidden)).toBe(true)
+  })
+
+  it('shows the bar when the tabs column is hidden outright', () => {
+    expect(showsTabBar({ ...allCollapsed, tabs: false }, { ...noneHidden, tabs: true })).toBe(true)
+  })
+
+  it('hides the bar only when the tabs column is fully open', () => {
+    expect(showsTabBar({ ...allCollapsed, tabs: false }, noneHidden)).toBe(false)
+  })
+
+  it('ignores every other column', () => {
+    // A guard against reading the wrong key: opening all six of the others
+    // must not touch the bar. Without this, `some(id => !state[id])` would
+    // pass the other three tests and still be wrong.
+    const othersOpen: ColumnVisibility = {
+      tabs: true, files: false, skills: false, presets: false, prompts: false, git: false, notes: false,
+    }
+    expect(showsTabBar(othersOpen, noneHidden)).toBe(true)
   })
 })
