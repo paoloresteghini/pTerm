@@ -9,6 +9,7 @@ import {
 
 /** Every column collapsed, which is what a fresh profile looks like. */
 const ALL_SHUT: ColumnVisibility = {
+  tabs: true,
   files: true,
   skills: true,
   presets: true,
@@ -25,7 +26,9 @@ const withOpen = (...open: Array<keyof ColumnVisibility>): ColumnVisibility => {
 
 describe('COLUMN_IDS', () => {
   it('lists the six columns in on-screen order', () => {
-    expect(COLUMN_IDS).toEqual(['files', 'skills', 'presets', 'prompts', 'git', 'notes'])
+    // `tabs` leads because the column sits leftmost, immediately right of the
+    // projects sidebar, and this array is documented as on-screen order.
+    expect(COLUMN_IDS).toEqual(['tabs', 'files', 'skills', 'presets', 'prompts', 'git', 'notes'])
   })
 })
 
@@ -58,6 +61,7 @@ describe('hideAll', () => {
       presets: true,
       skills: true,
       files: false,
+      tabs: true,
     }
     expect(hideAll(opened).remembered).toEqual(['files', 'git'])
   })

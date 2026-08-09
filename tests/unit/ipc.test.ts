@@ -4,6 +4,7 @@ import { columnIsCollapsed, type ColumnVisibility } from '../../src/shared/ipc'
 describe('columnIsCollapsed', () => {
   it('reads an explicit false as open', () => {
     const collapsed: ColumnVisibility = {
+      tabs: true,
       files: true,
       skills: true,
       presets: true,
@@ -16,6 +17,7 @@ describe('columnIsCollapsed', () => {
 
   it('reads an explicit true as collapsed', () => {
     const collapsed: ColumnVisibility = {
+      tabs: true,
       files: true,
       skills: true,
       presets: true,

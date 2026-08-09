@@ -23,6 +23,7 @@ export type { ColumnId, ColumnVisibility }
 
 /** Left to right as they appear on screen, which is the order the menu lists. */
 export const COLUMN_IDS: readonly ColumnId[] = [
+  'tabs',
   'files',
   'skills',
   'presets',
