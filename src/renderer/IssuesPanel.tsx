@@ -108,7 +108,7 @@ export function IssuesPanel({
   // refresh button), unlike `NotesPanel`'s single fetch site, so a closured
   // `cancelled` boolean cannot be shared between them. A token ref generalises
   // the same idea: each call captures the counter's value at the moment it
-  // started, and a reply only lands if nothing newer has started since —
+  // started, and a reply only lands if nothing newer has started since:
   // project switch, state change, and a second click of refresh all invalidate
   // whatever was already in flight the same way.
   const requestId = useRef(0)
@@ -158,8 +158,8 @@ export function IssuesPanel({
   // Mount (while expanded), project change and state change all fall out of
   // this one effect: `load`'s identity changes exactly when `project?.id` or
   // `state` does, and collapsing/expanding toggles `collapsed` itself. Rows
-  // already on screen are left alone here — see `load`, which never clears
-  // them before a fetch lands — so this never blanks the list it is
+  // already on screen are left alone here, see `load`, which never clears
+  // them before a fetch lands, so this never blanks the list it is
   // refreshing.
   useEffect(() => {
     if (collapsed) return

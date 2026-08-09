@@ -143,7 +143,7 @@ export async function launchApp(opts: {
    * Overrides the `gh` binary `src/main/gh/run.ts` shells out to, for a spec
    * that wants to control what the issues column reads without a real GitHub
    * CLI or network. Unset in every other spec, so `ghBin()`'s own `?? 'gh'`
-   * fallback is what they run — the real CLI, if the machine has one.
+   * fallback is what they run: the real CLI, if the machine has one.
    */
   ghBin?: string
   /**
