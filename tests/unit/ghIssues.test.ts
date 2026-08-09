@@ -26,6 +26,18 @@ const LIST = JSON.stringify([
   },
 ])
 
+const GOOD_ROW = {
+  number: 1,
+  title: 'Good row',
+  state: 'OPEN',
+  stateReason: '',
+  labels: [],
+  assignees: [],
+  comments: [],
+  updatedAt: '2026-08-09T10:00:00Z',
+  author: { login: 'paolo' },
+}
+
 describe('parseSummaries', () => {
   it('reads number, title, state and reason', () => {
     const rows = parseSummaries(LIST)
@@ -60,6 +72,24 @@ describe('parseSummaries', () => {
   it('drops an entry with no number rather than emitting NaN', () => {
     expect(parseSummaries('[{"title":"x"}]')).toEqual([])
   })
+
+  it('drops a null entry in the list rather than throwing', () => {
+    const rows = parseSummaries(JSON.stringify([null, GOOD_ROW]))
+    expect(rows).toHaveLength(1)
+    expect(rows[0].number).toBe(1)
+  })
+
+  it('drops a null label rather than throwing', () => {
+    const row = { ...GOOD_ROW, labels: [null, { name: 'bug', color: 'd73a4a' }] }
+    const rows = parseSummaries(JSON.stringify([row]))
+    expect(rows[0].labels).toEqual([{ name: 'bug', color: 'd73a4a' }])
+  })
+
+  it('drops a null assignee rather than throwing', () => {
+    const row = { ...GOOD_ROW, assignees: [null, { login: 'paolo' }] }
+    const rows = parseSummaries(JSON.stringify([row]))
+    expect(rows[0].assignees).toEqual([{ login: 'paolo' }])
+  })
 })
 
 describe('parseDetail', () => {
@@ -91,5 +121,16 @@ describe('parseDetail', () => {
 
   it('returns null on malformed JSON', () => {
     expect(parseDetail('{')).toBeNull()
+  })
+
+  it('drops a null comment rather than throwing', () => {
+    const detail = JSON.parse(DETAIL)
+    detail.comments = [
+      null,
+      { author: { login: 'paolo' }, body: 'ok', createdAt: '2026-08-09T11:00:00Z' },
+    ]
+    const parsed = parseDetail(JSON.stringify(detail))
+    expect(parsed?.comments).toHaveLength(1)
+    expect(parsed?.comments[0].body).toBe('ok')
   })
 })

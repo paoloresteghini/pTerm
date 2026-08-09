@@ -17,18 +17,31 @@ const LIST_FIELDS = 'number,title,state,stateReason,labels,assignees,comments,up
 const DETAIL_FIELDS = `${LIST_FIELDS},body,url,createdAt`
 
 /**
+ * True for a value that can safely have its properties read, i.e. an object
+ * that is not `null`. `entry as SomeShape` is a compile-time-only cast and
+ * does nothing at runtime, so a `null` array element sails through it and
+ * throws on the first property read; every place below that reads a field
+ * off an untrusted array element filters through this first.
+ */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+/**
  * Narrows one raw JSON row from `gh issue list` or `gh issue view` to an
  * `IssueSummary`, defaulting anything missing or mistyped rather than
  * throwing. Returns null when the row has no numeric `number`: without one
  * there is nothing to key the row on, and a coerced NaN would be worse than
- * dropping it.
+ * dropping it. A `null` or non-object element inside `labels` or
+ * `assignees` is dropped rather than defaulted, since there is nothing in
+ * it to default from.
  */
 function summary(row: Record<string, unknown>): IssueSummary | null {
   const number = row.number
   if (typeof number !== 'number') return null
   const comments = Array.isArray(row.comments) ? row.comments : []
-  const labels = Array.isArray(row.labels) ? row.labels : []
-  const assignees = Array.isArray(row.assignees) ? row.assignees : []
+  const labels = (Array.isArray(row.labels) ? row.labels : []).filter(isRecord)
+  const assignees = (Array.isArray(row.assignees) ? row.assignees : []).filter(isRecord)
   const author = (row.author ?? {}) as { login?: unknown }
   return {
     number,
@@ -57,7 +70,12 @@ function summary(row: Record<string, unknown>): IssueSummary | null {
   }
 }
 
-/** Parses a `gh issue list --json ...` reply. Never throws: malformed JSON or a non-array reply reads as an empty list rather than surfacing a parse error the caller cannot act on. */
+/**
+ * Parses a `gh issue list --json ...` reply. Never throws: malformed JSON, a
+ * non-array reply, and a `null` or otherwise non-object element within an
+ * array that is itself well-formed all read as a dropped row rather than
+ * surfacing a parse error the caller cannot act on.
+ */
 export function parseSummaries(stdout: string): IssueSummary[] {
   let parsed: unknown
   try {
@@ -68,13 +86,20 @@ export function parseSummaries(stdout: string): IssueSummary[] {
   if (!Array.isArray(parsed)) return []
   const rows: IssueSummary[] = []
   for (const entry of parsed) {
-    const one = summary(entry as Record<string, unknown>)
+    if (!isRecord(entry)) continue
+    const one = summary(entry)
     if (one) rows.push(one)
   }
   return rows
 }
 
-/** Parses a `gh issue view --json ...` reply. Returns null on malformed JSON, a non-object reply, or a row with no numeric `number`, mirroring `parseSummaries`. */
+/**
+ * Parses a `gh issue view --json ...` reply. Returns null on malformed
+ * JSON, a non-object reply, or a row with no numeric `number`, mirroring
+ * `parseSummaries`. A `null` or otherwise non-object element within
+ * `comments` is dropped rather than defaulted, for the same reason a
+ * malformed label or assignee is.
+ */
 export function parseDetail(stdout: string): IssueDetail | null {
   let parsed: unknown
   try {
@@ -86,7 +111,7 @@ export function parseDetail(stdout: string): IssueDetail | null {
   const row = parsed as Record<string, unknown>
   const base = summary(row)
   if (!base) return null
-  const comments = Array.isArray(row.comments) ? row.comments : []
+  const comments = (Array.isArray(row.comments) ? row.comments : []).filter(isRecord)
   return {
     ...base,
     body: typeof row.body === 'string' ? row.body : '',
