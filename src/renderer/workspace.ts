@@ -7,6 +7,7 @@ import {
   type TabShape,
 } from '../shared/ipc'
 import { worst, type TabState } from '../shared/status'
+import { groupedTabs } from './lib/tabGroups'
 
 export interface WorkspaceState {
   /** Sidebar order. Unsorted, when present, is last. */
@@ -114,6 +115,12 @@ export const INITIAL_WORKSPACE_STATE: WorkspaceState = {
 /**
  * Which tab to show once `id` goes away: the one to its right, or its left
  * when it was last. Null when it was the only one.
+ *
+ * Purely positional in `tabs`, so "right" means what is on screen only when
+ * `tabs` is already in the bar's own order. A split's sibling is not next to
+ * its founder in raw `state.panes` order (`applyTabShape`, `workspace.ts:875`
+ * appends it), so both call sites below pass `groupedTabs`' output rather
+ * than a bare `tabsOfProject` filter.
  */
 export function neighbourOf(tabs: TabDescriptor[], id: string): string | null {
   const index = tabs.findIndex((tab) => tab.id === id)
@@ -917,7 +924,11 @@ function removeTab(state: WorkspaceState, id: string): WorkspaceState {
   const owner = projectIdForTab(state.projects, tab)
   // Only the owning project's selection moves; every other project keeps
   // whichever tab it was on.
-  const siblings = tabsOfProject(state, owner)
+  //
+  // Grouped, not the raw `tabsOfProject` filter: `neighbourOf` picks by
+  // position, and a split's sibling sits elsewhere in `state.panes` than it
+  // does in the bar (see `neighbourOf`'s own doc comment).
+  const siblings = groupedTabs(tabsOfProject(state, owner), state.tabs).map((entry) => entry.pane)
   const project = state.projects.find((candidate) => candidate.id === owner)
   const nextActive =
     project?.activeTabId === id ? neighbourOf(siblings, id) : (project?.activeTabId ?? null)
@@ -1205,12 +1216,18 @@ export function workspaceReducer(
       // Main's own answer first — `closePane` names the survivor that takes
       // over in the row it hands back — and the tab bar's neighbour rule when
       // there is no row left to name one, which is a tab that has closed
-      // entirely. `neighbourOf` is asked over the panes from BEFORE the close,
-      // since it finds the neighbour by the closed pane's own position.
+      // entirely. `neighbourOf` is asked over the GROUPED panes from BEFORE
+      // the close — the bar's own order, same as `groupedTabs` produces for
+      // `TabBar` — since it finds the neighbour by the closed pane's own
+      // on-screen position, not its position in raw `state.panes`.
       return setActiveTab(
         next,
         owner,
-        nextRow?.activePaneId ?? neighbourOf(tabsOfProject(state, owner), action.paneId),
+        nextRow?.activePaneId ??
+          neighbourOf(
+            groupedTabs(tabsOfProject(state, owner), state.tabs).map((entry) => entry.pane),
+            action.paneId,
+          ),
       )
     }
 

@@ -1317,6 +1317,35 @@ describe('workspaceReducer', () => {
       expect(next.panes.map((p) => p.id)).toEqual(['bbb', 'ccc'])
       expect(next.tabs).toEqual([])
     })
+
+    it('hands the fallback selection to the tab beside it ON SCREEN, not two entries away through a split', () => {
+      // Split aaa first: `state.panes` becomes [aaa, bbb, ccc, aaa2] — the new
+      // sibling appended at the END, per `applyTabShape` — but the bar draws
+      // it right next to aaa, i.e. [aaa, aaa2, bbb, ccc].
+      const split = workspaceReducer(three, {
+        type: 'split',
+        shape: {
+          panes: [tab('aaa'), tab('aaa2')],
+          tabs: [tabRow('aaa', ['aaa', 'aaa2'])],
+        },
+      })
+      const state: WorkspaceState = {
+        ...split,
+        projects: [project('p1', 'lumio', 'ccc')],
+      }
+      // Close ccc, the tab bar's last entry and the tab's own last pane, so
+      // there is no row left to name a survivor and the fallback runs.
+      const next = workspaceReducer(state, {
+        type: 'closedPane',
+        paneId: 'ccc',
+        shape: { panes: [], tabs: [] },
+      })
+      // On screen ccc sat beside bbb, not beside aaa2 — a `neighbourOf` fed
+      // raw `state.panes` order would land on aaa2, two entries to the left
+      // of where ccc actually was.
+      expect(activeTabId(next)).toBe('bbb')
+      expect(activeTabId(next)).not.toBe('aaa2')
+    })
   })
 
   describe('activatedPane', () => {
