@@ -1,6 +1,6 @@
 import { FileTree } from './FileTree'
 import { useColumnWidth } from './lib/columnWidth'
-import { ColumnResizer, PanelStrip } from './ui/Panel'
+import { ColumnResizer, PanelStrip, type PanelSide } from './ui/Panel'
 
 /**
  * The file tree's column, left of the projects sidebar.
@@ -18,19 +18,21 @@ export function FilesPanel({
   onOpenFile,
   collapsed,
   onToggle,
+  side,
 }: {
   projectId: string | undefined
   /** A file row clicked in the tree, by its path relative to the project. */
   onOpenFile: (relPath: string) => void
   collapsed: boolean
   onToggle: () => void
+  side: PanelSide
 }) {
   // Above the collapsed return, because a hook cannot be conditional. The read
   // is cheap and the value is what the column comes back at.
   const { width, set, commit } = useColumnWidth('pterm:filesWidth')
 
   if (collapsed) {
-    return <PanelStrip testid="files-toggle" label="Files" side="left" onClick={onToggle} />
+    return <PanelStrip testid="files-toggle" label="Files" side={side} onClick={onToggle} />
   }
 
   return (
@@ -44,7 +46,7 @@ export function FilesPanel({
       <FileTree projectId={projectId} onOpenFile={onOpenFile} onToggle={onToggle} />
       <ColumnResizer
         testid="resize-files"
-        side="left"
+        side={side}
         width={width}
         onResize={set}
         onCommit={commit}

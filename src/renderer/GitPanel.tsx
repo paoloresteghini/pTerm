@@ -8,7 +8,7 @@ import type {
 } from '../shared/ipc'
 import { useColumnWidth } from './lib/columnWidth'
 import { createMutationGuard } from './lib/mutationGuard'
-import { ColumnResizer, PanelHeading, PanelStrip } from './ui/Panel'
+import { ColumnResizer, PanelHeading, PanelStrip, type PanelSide } from './ui/Panel'
 import { ConfirmGitDiscard } from './ConfirmGitDiscard'
 
 /** How often the list is re-read while the column is open. */
@@ -115,11 +115,13 @@ export function GitPanel({
   collapsed,
   onToggle,
   onOpenDiff,
+  side,
 }: {
   project: ProjectDescriptor | undefined
   collapsed: boolean
   onToggle: () => void
   onOpenDiff: (relPath: string, side: DiffSide) => void
+  side: PanelSide
 }) {
   const { width, set, commit } = useColumnWidth('pterm:gitWidth')
   const [changes, setChanges] = useState<GitChanges | null>(null)
@@ -292,7 +294,7 @@ export function GitPanel({
   }, [busy, changes, message, mutate])
 
   if (collapsed) {
-    return <PanelStrip testid="git-toggle" label="Git" onClick={onToggle} />
+    return <PanelStrip testid="git-toggle" label="Git" side={side} onClick={onToggle} />
   }
 
   const clean =
@@ -424,7 +426,7 @@ export function GitPanel({
       />
       <ColumnResizer
         testid="resize-git"
-        side="right"
+        side={side}
         width={width}
         onResize={set}
         onCommit={commit}

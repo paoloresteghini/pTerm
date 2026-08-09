@@ -13,7 +13,7 @@ import { StatusDot } from './StatusDot'
 import { elapsedLabel } from './lib/elapsed'
 import { tabLabel } from './lib/tabLabel'
 import { useColumnWidth } from './lib/columnWidth'
-import { ColumnResizer } from './ui/Panel'
+import { ColumnResizer, type PanelSide } from './ui/Panel'
 
 export function Sidebar({
   projects,
@@ -37,6 +37,7 @@ export function Sidebar({
   onMoveTab,
   onAdd,
   onOpenSettings,
+  side,
 }: {
   projects: ProjectDescriptor[]
   activeProjectId: string | null
@@ -61,6 +62,7 @@ export function Sidebar({
   onMoveTab: (tabId: string, projectId: string) => void
   onAdd: () => void
   onOpenSettings: () => void
+  side: PanelSide
 }) {
   // Resizable like every other column, though this one never collapses:
   // it is the only way to reach a project, and a workspace with no visible
@@ -323,7 +325,7 @@ export function Sidebar({
       </div>
       <ColumnResizer
         testid="resize-sidebar"
-        side="left"
+        side={side}
         width={width}
         onResize={set}
         onCommit={commit}

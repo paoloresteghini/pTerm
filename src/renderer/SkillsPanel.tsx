@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { ProjectDescriptor, SkillEntry } from '../shared/ipc'
 import { filterEntries } from './lib/match'
 import { useColumnWidth } from './lib/columnWidth'
-import { ColumnResizer, PanelHeading, PanelStrip } from './ui/Panel'
+import { ColumnResizer, PanelHeading, PanelStrip, type PanelSide } from './ui/Panel'
 
 /**
  * Was the top half of `RightPanel`, which owned Skills and Presets in one
@@ -19,11 +19,13 @@ export function SkillsPanel({
   onInsert,
   collapsed,
   onToggle,
+  side,
 }: {
   project: ProjectDescriptor | undefined
   onInsert: (name: string) => void
   collapsed: boolean
   onToggle: () => void
+  side: PanelSide
 }) {
   const [skills, setSkills] = useState<SkillEntry[] | null>(null)
   const [query, setQuery] = useState('')
@@ -60,7 +62,7 @@ export function SkillsPanel({
   const matched = filterEntries(query, skills ?? [])
 
   if (collapsed) {
-    return <PanelStrip testid="skills-toggle" label="Skills" onClick={onToggle} />
+    return <PanelStrip testid="skills-toggle" label="Skills" side={side} onClick={onToggle} />
   }
 
   return (
@@ -119,7 +121,7 @@ export function SkillsPanel({
       </div>
       <ColumnResizer
         testid="resize-skills"
-        side="right"
+        side={side}
         width={width}
         onResize={set}
         onCommit={commit}

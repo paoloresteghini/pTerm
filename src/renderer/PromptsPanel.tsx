@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { PromptEntry } from '../shared/ipc'
 import { useColumnWidth } from './lib/columnWidth'
-import { ColumnResizer, PanelHeading, PanelStrip } from './ui/Panel'
+import { ColumnResizer, PanelHeading, PanelStrip, type PanelSide } from './ui/Panel'
 import { NewPromptDialog } from './NewPromptDialog'
 
 /**
@@ -22,6 +22,7 @@ export function PromptsPanel({
   canInsert,
   collapsed,
   onToggle,
+  side,
 }: {
   /** Types a prompt's body into the active pane. Never submits it. */
   onInsert: (body: string) => void
@@ -29,6 +30,7 @@ export function PromptsPanel({
   canInsert: boolean
   collapsed: boolean
   onToggle: () => void
+  side: PanelSide
 }) {
   // null is "still reading", which renders as an ellipsis rather than as the
   // empty-state text: "no prompts yet" during the first read would be wrong on
@@ -61,7 +63,7 @@ export function PromptsPanel({
   }, [])
 
   if (collapsed) {
-    return <PanelStrip testid="prompts-toggle" label="Prompts" onClick={onToggle} />
+    return <PanelStrip testid="prompts-toggle" label="Prompts" side={side} onClick={onToggle} />
   }
 
   return (
@@ -147,7 +149,7 @@ export function PromptsPanel({
       />
       <ColumnResizer
         testid="resize-prompts"
-        side="right"
+        side={side}
         width={width}
         onResize={set}
         onCommit={commit}

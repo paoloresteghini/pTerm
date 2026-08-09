@@ -5,7 +5,7 @@ import { StatusDot } from './StatusDot'
 import { elapsedLabel } from './lib/elapsed'
 import { tabLabel } from './lib/tabLabel'
 import { useColumnWidth } from './lib/columnWidth'
-import { ColumnResizer, PanelHeading, PanelStrip } from './ui/Panel'
+import { ColumnResizer, PanelHeading, PanelStrip, type PanelSide } from './ui/Panel'
 import { cn } from './lib/cn'
 
 /**
@@ -33,6 +33,7 @@ export function TabsPanel({
   onToggle,
   onSelect,
   onClose,
+  side,
 }: {
   nodes: TabTreeNode[]
   activeId: string | null
@@ -45,6 +46,7 @@ export function TabsPanel({
   onToggle: () => void
   onSelect: (paneId: string) => void
   onClose: (paneId: string) => void
+  side: PanelSide
 }) {
   const { width, set, commit } = useColumnWidth('pterm:tabsWidth', 208)
   // Which tabs are twisted shut. Local and not persisted: it is a glance-level
@@ -52,7 +54,7 @@ export function TabsPanel({
   // user has forgotten they closed the twist on.
   const [shut, setShut] = useState<Set<string>>(() => new Set())
 
-  if (collapsed) return <PanelStrip testid="tabs-toggle" label="Tabs" side="left" onClick={onToggle} />
+  if (collapsed) return <PanelStrip testid="tabs-toggle" label="Tabs" side={side} onClick={onToggle} />
 
   const row = (pane: TabDescriptor, depth: number, last: boolean, twist: ReactNode) => {
     const label = elapsedLabel(since[pane.id] ?? null, now)
@@ -153,7 +155,7 @@ export function TabsPanel({
           )
         })}
       </div>
-      <ColumnResizer testid="tabs-resizer" side="left" width={width} onResize={set} onCommit={commit} />
+      <ColumnResizer testid="tabs-resizer" side={side} width={width} onResize={set} onCommit={commit} />
     </div>
   )
 }

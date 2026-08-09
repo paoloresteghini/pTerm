@@ -1,6 +1,6 @@
 import type { ProjectDescriptor, TabType } from '../shared/ipc'
 import { useColumnWidth } from './lib/columnWidth'
-import { ColumnResizer, PanelHeading, PanelStrip } from './ui/Panel'
+import { ColumnResizer, PanelHeading, PanelStrip, type PanelSide } from './ui/Panel'
 
 /**
  * Was the bottom half of `RightPanel`, sharing a column (and a collapse) with
@@ -16,16 +16,18 @@ export function PresetsPanel({
   onRun,
   collapsed,
   onToggle,
+  side,
 }: {
   project: ProjectDescriptor | undefined
   onRun: (command: string, type: TabType) => void
   collapsed: boolean
   onToggle: () => void
+  side: PanelSide
 }) {
   const { width, set, commit } = useColumnWidth('pterm:presetsWidth')
 
   if (collapsed) {
-    return <PanelStrip testid="presets-toggle" label="Presets" onClick={onToggle} />
+    return <PanelStrip testid="presets-toggle" label="Presets" side={side} onClick={onToggle} />
   }
 
   return (
@@ -70,7 +72,7 @@ export function PresetsPanel({
       </div>
       <ColumnResizer
         testid="resize-presets"
-        side="right"
+        side={side}
         width={width}
         onResize={set}
         onCommit={commit}

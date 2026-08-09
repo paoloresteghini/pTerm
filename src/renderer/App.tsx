@@ -1,10 +1,12 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useReducer,
   useRef,
   useState,
   type Dispatch,
+  type ReactNode,
   type SetStateAction,
 } from 'react'
 import { Terminal, paneGrid, focusTerminal } from './Terminal'
@@ -44,6 +46,7 @@ import {
   type ColumnId,
   type ColumnVisibility,
 } from './lib/columnVisibility'
+import { COLUMN_ORDER_DEFAULT, resizerSideFor, type ColumnSlot } from './lib/columnOrder'
 import {
   INITIAL_WORKSPACE_STATE,
   activeProject,
@@ -1324,6 +1327,433 @@ export function App() {
     }
   })
 
+  // Cut, not rewritten, from the row it used to sit in directly: this is the
+  // one slot `renderSlot` cannot build inline, since a fragment case that
+  // returned it verbatim would be indistinguishable from the JSX it replaced.
+  const terminalColumn = (
+    <div className="flex min-w-0 flex-1 flex-col">
+      {showsTabBar(collapsedColumns, hiddenColumns) ? (
+        <TabBar
+          tabs={tabEntries}
+          activeId={currentTabId}
+          status={state.status}
+          since={state.since}
+          now={now}
+          dead={state.dead}
+          dirty={dirty}
+          onActivate={(id) => dispatch({ type: 'activatedTab', id })}
+          onClose={requestClosePane}
+          onRestart={restartTab}
+          onDismiss={dismissTab}
+          onNew={openTab}
+          onRename={renameTab}
+          onRecolor={recolorPane}
+          canOpen={canOpen}
+        />
+      ) : null}
+      {error ? (
+        <pre
+          data-testid="startup-error"
+          className="m-0 whitespace-pre-wrap p-2 font-mono text-[13px] text-danger"
+        >
+          {error}
+        </pre>
+      ) : null}
+      <div className="relative min-h-0 flex-1">
+        {showWelcome ? <Welcome hint={welcomeHint(state)} /> : null}
+        {/* Every terminal stays mounted, across every project and every tab:
+            both maps below are unconditional, and neither list is filtered
+            down to what is on screen. Unmounting would dispose an xterm and
+            lose its scrollback on each switch. `paneGroups` decides the
+            arrangement; see its tests for the arithmetic. */}
+        {groups.map((group) => (
+          <div
+            key={group.id}
+            data-testid={group.visible ? 'terminal-active' : `terminal-${group.id}`}
+            className={cn(
+              // `visibility`, not `display`: a hidden tab must stay laid
+              // out so it can measure itself, or it attaches at 80×24 and
+              // tmux shrinks the real session to match.
+              // The hairline `gap` between panes is the only thing the axis
+              // spends on itself. It overflows the bases, which sum to the
+              // whole container, by one pixel; flex shrinking is weighted by
+              // base size, so that pixel comes off the panes in the same
+              // proportion as the ratios and leaves them intact.
+              //
+              // That gap is also what draws the seam. This background is
+              // painted, each pane paints `bg-bg` over its own box, and the
+              // only place the colour survives is the one pixel between two
+              // panes. Done here rather than on `PaneDivider` because the
+              // strip is centred on a computed offset that misses the real
+              // seam by up to `n − 1.5` pixels (its own comment measures
+              // it), so a line drawn on the handle would sit beside the gap
+              // on a lopsided three- or four-pane tab. The gap IS the seam.
+              //
+              // `bg-clip-content` so the colour stops at the content box.
+              // A background paints the padding box by default, which would
+              // turn the `p-2` frame into an 8px border around every tab
+              // instead of a hairline between panes.
+              'absolute inset-0 flex gap-px bg-border bg-clip-content p-2',
+              group.visible ? 'visible z-10' : 'invisible z-0 pointer-events-none',
+            )}
+            style={group.style}
+          >
+            {group.panes.map((box) => (
+              <div
+                key={box.pane.id}
+                data-testid={`pane-${box.pane.id}`}
+                data-active={box.pane.id === activePaneId ? 'true' : 'false'}
+                // Clicking a pane makes it the one the keyboard talks to.
+                // `onMouseDown` rather than `onClick` so the app has recorded
+                // it before the click moves DOM focus into that pane's
+                // textarea — and so a drag that starts a selection inside a
+                // pane counts as choosing it too.
+                onMouseDown={() => selectPane(box.pane.id)}
+                // Right-click opens the colour menu. Nothing else in the
+                // app listened for `contextmenu` on a pane, and xterm does
+                // not take it either, so this claims a gesture that did
+                // nothing rather than displacing one.
+                onContextMenu={(event) => {
+                  event.preventDefault()
+                  selectPane(box.pane.id)
+                  setPaneMenu({ id: box.pane.id, left: event.clientX, top: event.clientY })
+                }}
+                className={cn(
+                  // `relative`: the dead-pane chrome below positions itself
+                  // against this box, and an overlay that escaped to the
+                  // group container would land on whichever pane happened to
+                  // be at that corner.
+                  //
+                  // The background confines the container's seam colour to
+                  // the gaps, and it is the PANE'S colour rather than a
+                  // fixed `bg-bg` (see `style` below, which sets it). Both
+                  // halves matter: xterm's fit leaves a sub-cell remainder
+                  // at each edge, so a pane whose canvas is tinted and
+                  // whose box is not wears a strip of the old background
+                  // down one side and along the bottom.
+                  'relative',
+                  // `min-w-0 min-h-0`: a flex item's automatic minimum size
+                  // is its content's, not zero, so an xterm canvas still
+                  // sized for the whole tab could hold this box open past its
+                  // share — and the fit that would resize that canvas
+                  // measures this box, so it would have nothing to correct
+                  // itself to.
+                  'min-h-0 min-w-0',
+                  // Which pane is listening, said out loud — but only where
+                  // there is a choice to make. An inset ring rather than a
+                  // border: it takes no space, so marking a pane cannot
+                  // resize it and set off a fit of the real tmux session.
+                  group.panes.length > 1 &&
+                    box.pane.id === activePaneId &&
+                    'shadow-[inset_0_0_0_1px_var(--color-accent)]',
+                )}
+                style={{ ...box.style, background: box.pane.color ?? PANE_COLOR_DEFAULT }}
+              >
+                {/* The pane's contents, by kind. Every pane was a terminal
+                    until this slice; an editor or diff pane has no session
+                    to attach and mounting one for it would create the very
+                    tmux session the kind exists to do without. */}
+                {box.pane.type === 'diff' ? (
+                  <DiffView
+                    projectId={projectIdForTab(state.projects, box.pane)}
+                    // `diffRelPath` is repo-root-relative, set once by
+                    // `openDiff` in main; `editorRelPath` is relative to
+                    // the PROJECT cwd. The two agree only when the project
+                    // IS the repository root, so a saved row that already
+                    // carries `diffRelPath` is preferred and the derived
+                    // path is only a fallback for one that predates it.
+                    relPath={box.pane.diffRelPath ?? editorRelPath(box.pane)}
+                    side={box.pane.diffSide ?? 'worktree'}
+                    color={box.pane.color ?? PANE_COLOR_DEFAULT}
+                  />
+                ) : box.pane.type === 'editor' ? (
+                  <FileView
+                    projectId={projectIdForTab(state.projects, box.pane)}
+                    relPath={editorRelPath(box.pane)}
+                    color={box.pane.color ?? PANE_COLOR_DEFAULT}
+                    paneId={box.pane.id}
+                    onDirtyChange={onDirtyChange}
+                  />
+                ) : (
+                  <Terminal
+                    tabId={box.pane.id}
+                    color={box.pane.color ?? PANE_COLOR_DEFAULT}
+                    visible={group.visible}
+                    // Never for a tab that is off screen: taking focus into one
+                    // would move typing to a terminal the user cannot see.
+                    focused={group.visible && box.pane.id === activePaneId}
+                    onHistoryRequested={requestHistory}
+                  />
+                )}
+                {/* Inside the pane box, which is the whole point: it rises
+                    from the bottom edge of the pane the Up was typed at,
+                    not from the window. Only ever one at a time, and only
+                    ever on the active pane: `requestHistory` sets this to
+                    the pane that asked, and the effect beside it clears it
+                    as soon as the selection moves elsewhere. */}
+                {historyPane === box.pane.id ? (
+                  <HistoryOverlay
+                    entries={historyEntries}
+                    scope={historyScope}
+                    onScopeChange={setHistoryScope}
+                    onDismiss={() => closeHistory(box.pane.id)}
+                    // Typed, never submitted, on the same channel the
+                    // skills and prompts columns insert with.
+                    onPick={(cmd) => {
+                      window.pterm.input(box.pane.id, cmd)
+                      closeHistory(box.pane.id)
+                    }}
+                  />
+                ) : null}
+                {/* Only the pane's session has died — the box, the xterm and
+                    the scrollback in it are all still here, which is why this
+                    draws over the pane instead of collapsing it. See
+                    `paneGroups`, which says why that is the opposite of what
+                    restore does with a pane whose session is gone.
+
+                    Gated on `box.dead` rather than on `state.dead[...]` read
+                    again here: `paneGroups` decides it, once, down both of
+                    its branches, and that is where it is tested. */}
+                {box.dead ? (
+                  <DeadPane
+                    pane={box.pane}
+                    state={state.status[box.pane.id] ?? null}
+                    onRestart={restartTab}
+                    onDismiss={dismissTab}
+                  />
+                ) : null}
+              </div>
+            ))}
+            {/* The dividers, in an overlay of their own rather than among the
+                panes, and `inset-2` is the container's `p-2` written a second
+                time on purpose. An absolutely positioned element resolves its
+                percentages — and reports its parent's `offsetWidth` — against
+                its containing block's PADDING box, while the panes lay out in
+                the CONTENT box. As direct children of the padded container the
+                strips missed the real seam by up to the padding and measured a
+                drag axis two paddings too long, so every drag ran slow and
+                crept away from the cursor. This overlay IS the content box, so
+                both resolve against the right one. The duplication is real and
+                is the price; `dividers.test.ts` pins the two numbers together
+                so they cannot drift apart quietly.
+
+                `pointer-events-none` so the overlay is invisible to the mouse
+                everywhere the strips are not — each strip opts back in — and
+                no `key` juggling: a divider is keyed by the pane it precedes,
+                in a list of its own, so nothing here can disturb a pane box's
+                key or unmount a terminal.
+
+                That opting back in reaches further than this overlay, and it
+                is worth knowing which guard it leans on. A hidden tab carries
+                `pointer-events-none` on the container above, and a descendant
+                that sets `pointer-events: auto` is not covered by it — so what
+                actually keeps an off-screen divider from being grabbed is the
+                `invisible` beside it: `visibility: hidden` is not hit-tested,
+                and nothing in here sets `visibility: visible` to undo it. That
+                class is therefore load-bearing for input as well as for what is
+                drawn, and is not to be traded for something weaker. None of it
+                is new with the dividers — `DeadPane`'s ↻ and × are
+                `pointer-events-auto` inside the same hidden container and have
+                always rested on the same thing — which is why this is written
+                down here rather than fixed by drawing the overlay only for the
+                visible group. */}
+            <div
+              data-testid={`dividers-${group.id}`}
+              className="pointer-events-none absolute inset-2 z-20"
+            >
+              {group.panes.map((box, index) =>
+                index > 0 ? (
+                  <PaneDivider
+                    key={box.pane.id}
+                    dir={group.style.flexDirection === 'column' ? 'col' : 'row'}
+                    offset={group.panes
+                      .slice(0, index)
+                      .reduce((sum, earlier) => sum + earlier.share, 0)}
+                    onGrab={() => grabPane(group.id, index, group.panes)}
+                    onDrag={dragPane}
+                    onCommit={() => commitLayout(group.id)}
+                  />
+                ) : null,
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+
+  // The row's order, and the case that draws each slot from it. `switch`, not
+  // a lookup object, and no `default`: a slot with no matching case fails to
+  // compile instead of rendering nothing, which is what makes `ColumnSlot`
+  // gaining a member later a build error here rather than a silent blank
+  // column.
+  const columnOrder: readonly ColumnSlot[] = COLUMN_ORDER_DEFAULT
+
+  const renderSlot = (slot: ColumnSlot): ReactNode => {
+    switch (slot) {
+      case 'terminal':
+        return terminalColumn
+      case 'projects':
+        // Never derived: Projects does not move, so its side is a fact about
+        // the column rather than something read off `columnOrder`.
+        return (
+          <Sidebar
+            side="left"
+            projects={state.projects}
+            activeProjectId={state.activeProjectId}
+            // Grouped, same as the bar: the sidebar draws the same panes in the
+            // same window, and a split reading contiguous in one list and torn
+            // apart in the other is the kind of thing a user notices at once.
+            tabsOf={(id) => groupedTabs(tabsOfProject(state, id), state.tabs).map((entry) => entry.pane)}
+            activeTabId={currentTabId}
+            status={state.status}
+            since={state.since}
+            now={now}
+            projectStateOf={(id) => stateOfProject(state, id)}
+            needsYou={needsYou(state)}
+            onSelectNeedy={(tab) => {
+              dispatch({ type: 'activatedProject', id: projectIdForTab(state.projects, tab) })
+              dispatch({ type: 'activatedTab', id: tab.id })
+            }}
+            onAcknowledgeNeedy={(tab) => window.pterm.acknowledgeTab(tab.id)}
+            muted={muted}
+            onToggleMute={toggleMute}
+            onSelectProject={(id) => dispatch({ type: 'activatedProject', id })}
+            onSelectTab={(id) => dispatch({ type: 'activatedTab', id })}
+            onAdd={() => setAdding(true)}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onMoveTab={(tabId, projectId) => {
+              // Renames each pane's tmux session. A pane id is the other half of
+              // the name it keeps, so every pane keeps its scrollback and
+              // everything running in it. The reply lists every pane that moved —
+              // one, until 2b lets a tab hold more.
+              window.pterm
+                .moveTabToProject(tabId, projectId)
+                .then(({ projects, panes }) => dispatch({ type: 'movedTab', panes, projects }))
+                .catch(fail)
+            }}
+            onRename={(id, name) => {
+              window.pterm
+                .updateProject(id, { name })
+                .then((projects) => dispatch({ type: 'projects', projects }))
+                .catch(fail)
+            }}
+            onMove={(id, direction) => {
+              const order = state.projects.filter((p) => p.id !== UNSORTED_ID).map((p) => p.id)
+              const from = order.indexOf(id)
+              const to = from + direction
+              if (from === -1 || to < 0 || to >= order.length) return
+              order.splice(to, 0, ...order.splice(from, 1))
+              window.pterm
+                .reorderProjects(order)
+                .then((projects) => dispatch({ type: 'projects', projects }))
+                .catch(fail)
+            }}
+            onRemove={(id) => {
+              // The sessions keep running; they reappear under Unsorted, so a
+              // relaunch is not needed to reach them again.
+              window.pterm
+                .removeProject(id)
+                .then((projects) => dispatch({ type: 'projects', projects }))
+                .catch(fail)
+            }}
+          />
+        )
+      case 'files':
+        // Left of the sidebar, so the tree reads as the outermost thing and
+        // gets the full window height.
+        return hiddenColumns.files ? null : (
+          <FilesPanel
+            projectId={state.activeProjectId ?? undefined}
+            onOpenFile={openFile}
+            collapsed={filesCollapsed}
+            onToggle={() => toggleColumnCollapsed('files')}
+            side={resizerSideFor(columnOrder, 'files')}
+          />
+        )
+      case 'tabs':
+        return hiddenColumns.tabs ? null : (
+          <TabsPanel
+            nodes={tabTree(tabEntries.map((entry) => entry.pane), state.tabs)}
+            activeId={activePaneId}
+            status={state.status}
+            since={state.since}
+            now={now}
+            dead={state.dead}
+            collapsed={tabsCollapsed}
+            onToggle={() => toggleColumnCollapsed('tabs')}
+            onSelect={selectPane}
+            onClose={requestClosePane}
+            side={resizerSideFor(columnOrder, 'tabs')}
+          />
+        )
+      // Five independently collapsible columns (Files, above, is the
+      // sixth). Each renders its own vertical strip when collapsed, so
+      // none of them can vanish without leaving a way back.
+      case 'skills':
+        return hiddenColumns.skills ? null : (
+          <SkillsPanel
+            project={project}
+            collapsed={skillsCollapsed}
+            onToggle={() => toggleColumnCollapsed('skills')}
+            // No trailing `\r`: this types the invocation and leaves the user
+            // to decide, per the spec. A submitted `/name` would run a skill
+            // nobody had finished choosing.
+            onInsert={(name) => {
+              if (activePaneId) window.pterm.input(activePaneId, `/${name}`)
+            }}
+            side={resizerSideFor(columnOrder, 'skills')}
+          />
+        )
+      case 'presets':
+        return hiddenColumns.presets ? null : (
+          <PresetsPanel
+            project={project}
+            collapsed={presetsCollapsed}
+            onToggle={() => toggleColumnCollapsed('presets')}
+            onRun={(command, type) => launch(command, type)}
+            side={resizerSideFor(columnOrder, 'presets')}
+          />
+        )
+      case 'prompts':
+        // Global, unlike every other column here: the prompts a user keeps
+        // are ways of working rather than facts about a repository, so this
+        // takes no project.
+        return hiddenColumns.prompts ? null : (
+          <PromptsPanel
+            collapsed={promptsCollapsed}
+            onToggle={() => toggleColumnCollapsed('prompts')}
+            canInsert={activePaneId !== null}
+            // Typed, never submitted, exactly like a skill. `input` is the same
+            // channel the skills list uses.
+            onInsert={(body) => {
+              if (activePaneId) window.pterm.input(activePaneId, body)
+            }}
+            side={resizerSideFor(columnOrder, 'prompts')}
+          />
+        )
+      case 'git':
+        return hiddenColumns.git ? null : (
+          <GitPanel
+            project={project}
+            collapsed={gitCollapsed}
+            onToggle={() => toggleColumnCollapsed('git')}
+            onOpenDiff={openDiff}
+            side={resizerSideFor(columnOrder, 'git')}
+          />
+        )
+      case 'notes':
+        return hiddenColumns.notes ? null : (
+          <NotesPanel
+            project={project}
+            collapsed={notesCollapsed}
+            onToggle={() => toggleColumnCollapsed('notes')}
+            side={resizerSideFor(columnOrder, 'notes')}
+          />
+        )
+    }
+  }
+
   return (
     <div className="flex h-screen w-screen flex-col bg-bg">
       {/* Above the sidebar rather than beside it, so the strip spans the
@@ -1346,342 +1776,9 @@ export function App() {
       ) : null}
 
       <div className="flex min-h-0 flex-1">
-        {/* Left of the sidebar, so the tree reads as the outermost thing and
-            gets the full window height. */}
-        {hiddenColumns.files ? null : (
-          <FilesPanel
-            projectId={state.activeProjectId ?? undefined}
-            onOpenFile={openFile}
-            collapsed={filesCollapsed}
-            onToggle={() => toggleColumnCollapsed('files')}
-          />
-        )}
-
-        <Sidebar
-          projects={state.projects}
-          activeProjectId={state.activeProjectId}
-          // Grouped, same as the bar: the sidebar draws the same panes in the
-          // same window, and a split reading contiguous in one list and torn
-          // apart in the other is the kind of thing a user notices at once.
-          tabsOf={(id) => groupedTabs(tabsOfProject(state, id), state.tabs).map((entry) => entry.pane)}
-          activeTabId={currentTabId}
-          status={state.status}
-          since={state.since}
-          now={now}
-          projectStateOf={(id) => stateOfProject(state, id)}
-          needsYou={needsYou(state)}
-          onSelectNeedy={(tab) => {
-            dispatch({ type: 'activatedProject', id: projectIdForTab(state.projects, tab) })
-            dispatch({ type: 'activatedTab', id: tab.id })
-          }}
-          onAcknowledgeNeedy={(tab) => window.pterm.acknowledgeTab(tab.id)}
-          muted={muted}
-          onToggleMute={toggleMute}
-          onSelectProject={(id) => dispatch({ type: 'activatedProject', id })}
-          onSelectTab={(id) => dispatch({ type: 'activatedTab', id })}
-          onAdd={() => setAdding(true)}
-          onOpenSettings={() => setSettingsOpen(true)}
-          onMoveTab={(tabId, projectId) => {
-            // Renames each pane's tmux session. A pane id is the other half of
-            // the name it keeps, so every pane keeps its scrollback and
-            // everything running in it. The reply lists every pane that moved —
-            // one, until 2b lets a tab hold more.
-            window.pterm
-              .moveTabToProject(tabId, projectId)
-              .then(({ projects, panes }) => dispatch({ type: 'movedTab', panes, projects }))
-              .catch(fail)
-          }}
-          onRename={(id, name) => {
-            window.pterm
-              .updateProject(id, { name })
-              .then((projects) => dispatch({ type: 'projects', projects }))
-              .catch(fail)
-          }}
-          onMove={(id, direction) => {
-            const order = state.projects.filter((p) => p.id !== UNSORTED_ID).map((p) => p.id)
-            const from = order.indexOf(id)
-            const to = from + direction
-            if (from === -1 || to < 0 || to >= order.length) return
-            order.splice(to, 0, ...order.splice(from, 1))
-            window.pterm
-              .reorderProjects(order)
-              .then((projects) => dispatch({ type: 'projects', projects }))
-              .catch(fail)
-          }}
-          onRemove={(id) => {
-            // The sessions keep running; they reappear under Unsorted, so a
-            // relaunch is not needed to reach them again.
-            window.pterm
-              .removeProject(id)
-              .then((projects) => dispatch({ type: 'projects', projects }))
-              .catch(fail)
-          }}
-        />
-
-        {hiddenColumns.tabs ? null : (
-          <TabsPanel
-            nodes={tabTree(tabEntries.map((entry) => entry.pane), state.tabs)}
-            activeId={activePaneId}
-            status={state.status}
-            since={state.since}
-            now={now}
-            dead={state.dead}
-            collapsed={tabsCollapsed}
-            onToggle={() => toggleColumnCollapsed('tabs')}
-            onSelect={selectPane}
-            onClose={requestClosePane}
-          />
-        )}
-
-        <div className="flex min-w-0 flex-1 flex-col">
-          {showsTabBar(collapsedColumns, hiddenColumns) ? (
-            <TabBar
-              tabs={tabEntries}
-              activeId={currentTabId}
-              status={state.status}
-              since={state.since}
-              now={now}
-              dead={state.dead}
-              dirty={dirty}
-              onActivate={(id) => dispatch({ type: 'activatedTab', id })}
-              onClose={requestClosePane}
-              onRestart={restartTab}
-              onDismiss={dismissTab}
-              onNew={openTab}
-              onRename={renameTab}
-              onRecolor={recolorPane}
-              canOpen={canOpen}
-            />
-          ) : null}
-          {error ? (
-            <pre
-              data-testid="startup-error"
-              className="m-0 whitespace-pre-wrap p-2 font-mono text-[13px] text-danger"
-            >
-              {error}
-            </pre>
-          ) : null}
-          <div className="relative min-h-0 flex-1">
-            {showWelcome ? <Welcome hint={welcomeHint(state)} /> : null}
-            {/* Every terminal stays mounted, across every project and every tab:
-                both maps below are unconditional, and neither list is filtered
-                down to what is on screen. Unmounting would dispose an xterm and
-                lose its scrollback on each switch. `paneGroups` decides the
-                arrangement; see its tests for the arithmetic. */}
-            {groups.map((group) => (
-              <div
-                key={group.id}
-                data-testid={group.visible ? 'terminal-active' : `terminal-${group.id}`}
-                className={cn(
-                  // `visibility`, not `display`: a hidden tab must stay laid
-                  // out so it can measure itself, or it attaches at 80×24 and
-                  // tmux shrinks the real session to match.
-                  // The hairline `gap` between panes is the only thing the axis
-                  // spends on itself. It overflows the bases, which sum to the
-                  // whole container, by one pixel; flex shrinking is weighted by
-                  // base size, so that pixel comes off the panes in the same
-                  // proportion as the ratios and leaves them intact.
-                  //
-                  // That gap is also what draws the seam. This background is
-                  // painted, each pane paints `bg-bg` over its own box, and the
-                  // only place the colour survives is the one pixel between two
-                  // panes. Done here rather than on `PaneDivider` because the
-                  // strip is centred on a computed offset that misses the real
-                  // seam by up to `n − 1.5` pixels (its own comment measures
-                  // it), so a line drawn on the handle would sit beside the gap
-                  // on a lopsided three- or four-pane tab. The gap IS the seam.
-                  //
-                  // `bg-clip-content` so the colour stops at the content box.
-                  // A background paints the padding box by default, which would
-                  // turn the `p-2` frame into an 8px border around every tab
-                  // instead of a hairline between panes.
-                  'absolute inset-0 flex gap-px bg-border bg-clip-content p-2',
-                  group.visible ? 'visible z-10' : 'invisible z-0 pointer-events-none',
-                )}
-                style={group.style}
-              >
-                {group.panes.map((box) => (
-                  <div
-                    key={box.pane.id}
-                    data-testid={`pane-${box.pane.id}`}
-                    data-active={box.pane.id === activePaneId ? 'true' : 'false'}
-                    // Clicking a pane makes it the one the keyboard talks to.
-                    // `onMouseDown` rather than `onClick` so the app has recorded
-                    // it before the click moves DOM focus into that pane's
-                    // textarea — and so a drag that starts a selection inside a
-                    // pane counts as choosing it too.
-                    onMouseDown={() => selectPane(box.pane.id)}
-                    // Right-click opens the colour menu. Nothing else in the
-                    // app listened for `contextmenu` on a pane, and xterm does
-                    // not take it either, so this claims a gesture that did
-                    // nothing rather than displacing one.
-                    onContextMenu={(event) => {
-                      event.preventDefault()
-                      selectPane(box.pane.id)
-                      setPaneMenu({ id: box.pane.id, left: event.clientX, top: event.clientY })
-                    }}
-                    className={cn(
-                      // `relative`: the dead-pane chrome below positions itself
-                      // against this box, and an overlay that escaped to the
-                      // group container would land on whichever pane happened to
-                      // be at that corner.
-                      //
-                      // The background confines the container's seam colour to
-                      // the gaps, and it is the PANE'S colour rather than a
-                      // fixed `bg-bg` (see `style` below, which sets it). Both
-                      // halves matter: xterm's fit leaves a sub-cell remainder
-                      // at each edge, so a pane whose canvas is tinted and
-                      // whose box is not wears a strip of the old background
-                      // down one side and along the bottom.
-                      'relative',
-                      // `min-w-0 min-h-0`: a flex item's automatic minimum size
-                      // is its content's, not zero, so an xterm canvas still
-                      // sized for the whole tab could hold this box open past its
-                      // share — and the fit that would resize that canvas
-                      // measures this box, so it would have nothing to correct
-                      // itself to.
-                      'min-h-0 min-w-0',
-                      // Which pane is listening, said out loud — but only where
-                      // there is a choice to make. An inset ring rather than a
-                      // border: it takes no space, so marking a pane cannot
-                      // resize it and set off a fit of the real tmux session.
-                      group.panes.length > 1 &&
-                        box.pane.id === activePaneId &&
-                        'shadow-[inset_0_0_0_1px_var(--color-accent)]',
-                    )}
-                    style={{ ...box.style, background: box.pane.color ?? PANE_COLOR_DEFAULT }}
-                  >
-                    {/* The pane's contents, by kind. Every pane was a terminal
-                        until this slice; an editor or diff pane has no session
-                        to attach and mounting one for it would create the very
-                        tmux session the kind exists to do without. */}
-                    {box.pane.type === 'diff' ? (
-                      <DiffView
-                        projectId={projectIdForTab(state.projects, box.pane)}
-                        // `diffRelPath` is repo-root-relative, set once by
-                        // `openDiff` in main; `editorRelPath` is relative to
-                        // the PROJECT cwd. The two agree only when the project
-                        // IS the repository root, so a saved row that already
-                        // carries `diffRelPath` is preferred and the derived
-                        // path is only a fallback for one that predates it.
-                        relPath={box.pane.diffRelPath ?? editorRelPath(box.pane)}
-                        side={box.pane.diffSide ?? 'worktree'}
-                        color={box.pane.color ?? PANE_COLOR_DEFAULT}
-                      />
-                    ) : box.pane.type === 'editor' ? (
-                      <FileView
-                        projectId={projectIdForTab(state.projects, box.pane)}
-                        relPath={editorRelPath(box.pane)}
-                        color={box.pane.color ?? PANE_COLOR_DEFAULT}
-                        paneId={box.pane.id}
-                        onDirtyChange={onDirtyChange}
-                      />
-                    ) : (
-                      <Terminal
-                        tabId={box.pane.id}
-                        color={box.pane.color ?? PANE_COLOR_DEFAULT}
-                        visible={group.visible}
-                        // Never for a tab that is off screen: taking focus into one
-                        // would move typing to a terminal the user cannot see.
-                        focused={group.visible && box.pane.id === activePaneId}
-                        onHistoryRequested={requestHistory}
-                      />
-                    )}
-                    {/* Inside the pane box, which is the whole point: it rises
-                        from the bottom edge of the pane the Up was typed at,
-                        not from the window. Only ever one at a time, and only
-                        ever on the active pane: `requestHistory` sets this to
-                        the pane that asked, and the effect beside it clears it
-                        as soon as the selection moves elsewhere. */}
-                    {historyPane === box.pane.id ? (
-                      <HistoryOverlay
-                        entries={historyEntries}
-                        scope={historyScope}
-                        onScopeChange={setHistoryScope}
-                        onDismiss={() => closeHistory(box.pane.id)}
-                        // Typed, never submitted, on the same channel the
-                        // skills and prompts columns insert with.
-                        onPick={(cmd) => {
-                          window.pterm.input(box.pane.id, cmd)
-                          closeHistory(box.pane.id)
-                        }}
-                      />
-                    ) : null}
-                    {/* Only the pane's session has died — the box, the xterm and
-                        the scrollback in it are all still here, which is why this
-                        draws over the pane instead of collapsing it. See
-                        `paneGroups`, which says why that is the opposite of what
-                        restore does with a pane whose session is gone.
-
-                        Gated on `box.dead` rather than on `state.dead[...]` read
-                        again here: `paneGroups` decides it, once, down both of
-                        its branches, and that is where it is tested. */}
-                    {box.dead ? (
-                      <DeadPane
-                        pane={box.pane}
-                        state={state.status[box.pane.id] ?? null}
-                        onRestart={restartTab}
-                        onDismiss={dismissTab}
-                      />
-                    ) : null}
-                  </div>
-                ))}
-                {/* The dividers, in an overlay of their own rather than among the
-                    panes, and `inset-2` is the container's `p-2` written a second
-                    time on purpose. An absolutely positioned element resolves its
-                    percentages — and reports its parent's `offsetWidth` — against
-                    its containing block's PADDING box, while the panes lay out in
-                    the CONTENT box. As direct children of the padded container the
-                    strips missed the real seam by up to the padding and measured a
-                    drag axis two paddings too long, so every drag ran slow and
-                    crept away from the cursor. This overlay IS the content box, so
-                    both resolve against the right one. The duplication is real and
-                    is the price; `dividers.test.ts` pins the two numbers together
-                    so they cannot drift apart quietly.
-
-                    `pointer-events-none` so the overlay is invisible to the mouse
-                    everywhere the strips are not — each strip opts back in — and
-                    no `key` juggling: a divider is keyed by the pane it precedes,
-                    in a list of its own, so nothing here can disturb a pane box's
-                    key or unmount a terminal.
-
-                    That opting back in reaches further than this overlay, and it
-                    is worth knowing which guard it leans on. A hidden tab carries
-                    `pointer-events-none` on the container above, and a descendant
-                    that sets `pointer-events: auto` is not covered by it — so what
-                    actually keeps an off-screen divider from being grabbed is the
-                    `invisible` beside it: `visibility: hidden` is not hit-tested,
-                    and nothing in here sets `visibility: visible` to undo it. That
-                    class is therefore load-bearing for input as well as for what is
-                    drawn, and is not to be traded for something weaker. None of it
-                    is new with the dividers — `DeadPane`'s ↻ and × are
-                    `pointer-events-auto` inside the same hidden container and have
-                    always rested on the same thing — which is why this is written
-                    down here rather than fixed by drawing the overlay only for the
-                    visible group. */}
-                <div
-                  data-testid={`dividers-${group.id}`}
-                  className="pointer-events-none absolute inset-2 z-20"
-                >
-                  {group.panes.map((box, index) =>
-                    index > 0 ? (
-                      <PaneDivider
-                        key={box.pane.id}
-                        dir={group.style.flexDirection === 'column' ? 'col' : 'row'}
-                        offset={group.panes
-                          .slice(0, index)
-                          .reduce((sum, earlier) => sum + earlier.share, 0)}
-                        onGrab={() => grabPane(group.id, index, group.panes)}
-                        onDrag={dragPane}
-                        onCommit={() => commitLayout(group.id)}
-                      />
-                    ) : null,
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+        {columnOrder.map((slot) => (
+          <Fragment key={slot}>{renderSlot(slot)}</Fragment>
+        ))}
 
         {/* The pane's colour menu, rendered here rather than inside the pane
             box it belongs to. A hidden tab's container is `invisible`, and
@@ -1689,7 +1786,13 @@ export function App() {
             be undrawable the moment its tab went to the background. It only
             ever opens on a visible pane today, which makes that theoretical,
             but the cost of being wrong is a menu nobody can see or click and
-            the cost of avoiding it is where the element sits. */}
+            the cost of avoiding it is where the element sits.
+
+            `fixed`, so its place among these siblings (now after every
+            column rather than between the terminal and Skills) affects
+            neither layout nor stacking: `position: fixed` takes it out of
+            the row's flex flow, and its own `z-30` already outranks
+            everything else here regardless of DOM order. */}
         {paneMenu !== null ? (
           <div
             data-testid={`pmenu-${paneMenu.id}`}
@@ -1794,65 +1897,6 @@ export function App() {
             />
           </div>
         ) : null}
-
-        {/* Five independently collapsible columns (Files, above, is the
-            sixth). Each renders its own vertical strip when collapsed, so
-            none of them can vanish without leaving a way back. */}
-        {hiddenColumns.skills ? null : (
-          <SkillsPanel
-            project={project}
-            collapsed={skillsCollapsed}
-            onToggle={() => toggleColumnCollapsed('skills')}
-            // No trailing `\r`: this types the invocation and leaves the user
-            // to decide, per the spec. A submitted `/name` would run a skill
-            // nobody had finished choosing.
-            onInsert={(name) => {
-              if (activePaneId) window.pterm.input(activePaneId, `/${name}`)
-            }}
-          />
-        )}
-
-        {hiddenColumns.presets ? null : (
-          <PresetsPanel
-            project={project}
-            collapsed={presetsCollapsed}
-            onToggle={() => toggleColumnCollapsed('presets')}
-            onRun={(command, type) => launch(command, type)}
-          />
-        )}
-
-        {/* Global, unlike every other column here: the prompts a user keeps
-            are ways of working rather than facts about a repository, so this
-            takes no project. */}
-        {hiddenColumns.prompts ? null : (
-          <PromptsPanel
-            collapsed={promptsCollapsed}
-            onToggle={() => toggleColumnCollapsed('prompts')}
-            canInsert={activePaneId !== null}
-            // Typed, never submitted, exactly like a skill. `input` is the same
-            // channel the skills list uses.
-            onInsert={(body) => {
-              if (activePaneId) window.pterm.input(activePaneId, body)
-            }}
-          />
-        )}
-
-        {hiddenColumns.git ? null : (
-          <GitPanel
-            project={project}
-            collapsed={gitCollapsed}
-            onToggle={() => toggleColumnCollapsed('git')}
-            onOpenDiff={openDiff}
-          />
-        )}
-
-        {hiddenColumns.notes ? null : (
-          <NotesPanel
-            project={project}
-            collapsed={notesCollapsed}
-            onToggle={() => toggleColumnCollapsed('notes')}
-          />
-        )}
 
         <CommandPalette
           open={paletteOpen}

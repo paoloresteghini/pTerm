@@ -2,16 +2,18 @@ import { useEffect, useRef, useState } from 'react'
 import type { ProjectDescriptor } from '../shared/ipc'
 import { createNoteSaver } from './lib/noteSaver'
 import { useColumnWidth } from './lib/columnWidth'
-import { ColumnResizer, PanelHeading, PanelStrip } from './ui/Panel'
+import { ColumnResizer, PanelHeading, PanelStrip, type PanelSide } from './ui/Panel'
 
 export function NotesPanel({
   project,
   collapsed,
   onToggle,
+  side,
 }: {
   project: ProjectDescriptor | undefined
   collapsed: boolean
   onToggle: () => void
+  side: PanelSide
 }) {
   // null is "loading": the textarea is disabled so keystrokes cannot land in a
   // note that is about to be replaced by the fetch result.
@@ -54,7 +56,7 @@ export function NotesPanel({
   }, [projectId, saver])
 
   if (collapsed) {
-    return <PanelStrip testid="notes-toggle" label="Notes" onClick={onToggle} />
+    return <PanelStrip testid="notes-toggle" label="Notes" side={side} onClick={onToggle} />
   }
 
   return (
@@ -89,7 +91,7 @@ export function NotesPanel({
       )}
       <ColumnResizer
         testid="resize-notes"
-        side="right"
+        side={side}
         width={width}
         onResize={set}
         onCommit={commit}
