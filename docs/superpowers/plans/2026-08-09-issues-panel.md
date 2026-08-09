@@ -592,12 +592,7 @@ export type IssuesFailure =
 
 Then change `src/main/gh/run.ts` to import `IssuesFailure` from `../../shared/ipc` and re-export it, so there is exactly one definition.
 
-Add to the `PTermApi` interface, beside the `git*` methods:
-
-```ts
-  issuesList(projectId: string, state: IssueStateFilter): Promise<IssuesResult<IssueSummary[]>>
-  issuesGet(projectId: string, number: number): Promise<IssuesResult<IssueDetail>>
-```
+**Do not touch `PTermApi` in this task.** Its only implementation is `src/preload/index.ts`, so adding a method to the interface and implementing it are one atomic change: split across two tasks, the tree cannot typecheck at the boundary, which contradicts the Global Constraint that every commit typechecks. Task 4 adds the two signatures, the preload implementations and the main handlers together. Adding `CHANNELS` entries and shared types with no consumer yet is harmless and belongs here.
 
 - [ ] **Step 4: Write the read commands**
 
@@ -810,8 +805,15 @@ git commit -m "Read GitHub issues through gh, with a typed failure for each way 
 - Modify: `src/preload/index.ts` (add to the `api` object beside `gitChanges`, around line 129)
 
 **Interfaces:**
-- Consumes: `listIssues`, `getIssue` from Task 3. `CHANNELS.issuesList`, `CHANNELS.issuesGet`, `PTermApi.issuesList`, `PTermApi.issuesGet` from Task 3.
-- Produces: `window.pterm.issuesList(projectId, state)` and `window.pterm.issuesGet(projectId, number)` callable from the renderer.
+- Consumes: `listIssues`, `getIssue` from Task 3. `CHANNELS.issuesList`, `CHANNELS.issuesGet`, and the issue types from Task 3.
+- Produces: the two `PTermApi` signatures, their preload implementations, and the main handlers, so that `window.pterm.issuesList(projectId, state)` and `window.pterm.issuesGet(projectId, number)` are callable from the renderer.
+
+**This task owns the `PTermApi` addition**, which Task 3 deliberately does not make. `src/preload/index.ts` is the interface's only implementation, so the signature and the implementation have to land in one commit or the tree does not typecheck in between. Add both here:
+
+```ts
+  issuesList(projectId: string, state: IssueStateFilter): Promise<IssuesResult<IssueSummary[]>>
+  issuesGet(projectId: string, number: number): Promise<IssuesResult<IssueDetail>>
+```
 
 Both handlers sit outside `serialise`, for the reason the existing `gitChanges` handler gives: they read a repository and never touch pTerm's config.
 
