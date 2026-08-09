@@ -306,8 +306,8 @@ git commit -m "Make room for a seventh column"
 
 **Making typecheck clean again.** Task 2 deliberately left the tree red. After Task 2 there are exactly five errors, and this task clears all of them:
 
-- `src/main/index.ts:203` — `showColumns`'s `ids` is a `Record<ColumnId, string>`. Add `tabs: 'toggle-tabs'` to it. The menu item with that id does not exist until Task 5, and that is safe: the loop does `const item = menu.getMenuItemById(itemId)` followed by `if (item)`, so an id with no item is skipped. Verified 2026-08-08 at `src/main/index.ts:215-216`.
-- `src/renderer/App.tsx` at four sites — `HIDDEN_KEYS` (127), the collapsed-state initialiser (156), the setter record (278), and the storage-key record (287). Each needs its `tabs` member, following exactly what the six existing columns do at that site.
+- `src/main/index.ts:203`: `showColumns`'s `ids` is a `Record<ColumnId, string>`. Add `tabs: 'toggle-tabs'` to it. The menu item with that id does not exist until Task 5, and that is safe: the loop does `const item = menu.getMenuItemById(itemId)` followed by `if (item)`, so an id with no item is skipped. Verified 2026-08-08 at `src/main/index.ts:215-216`.
+- `src/renderer/App.tsx` at four sites: `HIDDEN_KEYS` (127), the collapsed-state initialiser (156), the setter record (278), and the storage-key record (287). Each needs its `tabs` member, following exactly what the six existing columns do at that site.
 
 **Interfaces:**
 - Consumes: `ColumnId`, `ColumnVisibility` from Task 2.
