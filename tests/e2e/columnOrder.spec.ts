@@ -84,9 +84,8 @@ function columnOrderOf(target: Page): Promise<string[]> {
  * The handles (`PanelHeading` / `PanelStrip` in `src/renderer/ui/Panel.tsx`)
  * are plain HTML5 `draggable` elements: their `onDragStart` / `onDragOver` /
  * `onDrop` only answer to real `DragEvent`s. Playwright's own `dragTo`
- * simulates a pointer gesture (move, down, move, up), not those events, and
- * measured against this gesture it never reordered anything. So this
- * dispatches `dragstart`, `dragover` and `drop` explicitly, sharing one
+ * simulates a pointer gesture (move, down, move, up), not those events, so
+ * this dispatches `dragstart`, `dragover` and `drop` explicitly, sharing one
  * `DataTransfer` across all three the way a browser's own drag session
  * would, following Playwright's own documented recipe for driving HTML5
  * drag and drop through `dispatchEvent`.
@@ -203,4 +202,76 @@ test('dragging notes across the terminal moves it, flips its handle, and both su
   const resizerRestored = await boxOf(page, 'resize-notes')
   expect(panelRestored.x).toBe(0)
   expect(Math.abs(resizerRestored.x - (panelRestored.x + panelRestored.width))).toBeLessThan(10)
+})
+
+test('dragging a column rightward across the terminal lands where the gap indicates, and the handle flips', async () => {
+  // Continues in the same window the previous test relaunched, so the order
+  // going in is that test's `expectedOrder`, not `DEFAULT_ORDER`: notes
+  // first, everything else in its shipped order behind it.
+  //
+  // This is the direction `gap(0)` (the previous test's drop index) cannot
+  // exercise: `moveColumn`'s pre-removal and post-removal index spaces only
+  // agree at index 0, which is the one case that stayed green while every
+  // rightward drop landed a column one slot too far right (the whole-branch
+  // review's Critical finding).
+
+  // Files starts hidden on a fresh profile; open it so its panel and
+  // resizer both render, the same reason the previous test opens notes.
+  await expandColumn(page, 'files')
+
+  const orderBefore = await columnOrderOf(page)
+  expect(orderBefore).toEqual([
+    'notes', 'files', 'projects', 'tabs', 'terminal', 'skills', 'presets', 'prompts', 'git',
+  ])
+
+  const panelBefore = await boxOf(page, 'files-panel')
+  const resizerBefore = await boxOf(page, 'resize-files')
+  // Files sits left of `terminal`, so `resizerSideFor` gives it `side:
+  // 'left'`, which puts the handle on the panel's RIGHT edge.
+  expect(Math.abs(resizerBefore.x - (panelBefore.x + panelBefore.width))).toBeLessThan(10)
+
+  // Drop on gap(6): the sliver between `skills` and `presets`, right of the
+  // terminal. Pre-removal that is index 6; post-removal (files taken out of
+  // index 1) it is index 5, one place left of what the highlight showed.
+  await dragColumnTo(page, 'files-toggle', 6)
+
+  const expectedOrder = [
+    'notes', 'projects', 'tabs', 'terminal', 'skills', 'files', 'presets', 'prompts', 'git',
+  ]
+  await expect.poll(() => columnOrderOf(page)).toEqual(expectedOrder)
+
+  // The handle follows it to the opposite edge: files is now right of
+  // `terminal`, so `resizerSideFor` flips to `side: 'right'`, putting the
+  // handle on the panel's LEFT edge instead.
+  const panelAfter = await boxOf(page, 'files-panel')
+  const resizerAfter = await boxOf(page, 'resize-files')
+  expect(Math.abs(resizerAfter.x - panelAfter.x)).toBeLessThan(10)
+  expect(Math.abs(resizerAfter.x - resizerBefore.x)).toBeGreaterThan(50)
+})
+
+test('a column drag does not change the terminal container width', async () => {
+  // `terminal-column` (`App.tsx`'s wrapper, not `Terminal.tsx`'s own
+  // `terminal` testid) so this does not need a real pty: it is the row's
+  // one `flex-1 min-w-0` item regardless of whether a tab has spawned a
+  // session, which is what makes it the one that absorbs whatever the
+  // `gap` helper's drop targets cost the row.
+  const before = await boxOf(page, 'terminal-column')
+
+  // The regression this pins: ten `column-gap-*` elements used to take real
+  // width in the flex row the instant a drag started (`w-1 shrink-0`, no
+  // `--spacing` override), and the terminal was the row's only `flex-1`
+  // item, so it absorbed all of it. `Terminal.tsx`'s unconditional
+  // `ResizeObserver` then fit the real tmux session to the narrowed box.
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer())
+  await page.getByTestId('files-toggle').dispatchEvent('dragstart', { dataTransfer })
+  // Waits for the gaps to actually paint, the same reason `dragColumnTo`
+  // polls `column-gap-<n>` before touching it: this is the moment the
+  // pre-fix layout stole the width.
+  await expect(page.getByTestId('column-gap-0')).toHaveCount(1)
+
+  const during = await boxOf(page, 'terminal-column')
+  expect(during.width).toBe(before.width)
+
+  await page.getByTestId('files-toggle').dispatchEvent('dragend', { dataTransfer })
+  await expect(page.getByTestId('column-gap-0')).toHaveCount(0)
 })

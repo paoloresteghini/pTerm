@@ -1372,7 +1372,13 @@ export function App() {
   // one slot `renderSlot` cannot build inline, since a fragment case that
   // returned it verbatim would be indistinguishable from the JSX it replaced.
   const terminalColumn = (
-    <div className="flex min-w-0 flex-1 flex-col">
+    // `data-testid` here rather than relying on `Terminal.tsx`'s own
+    // `terminal` testid: that one only exists once a pane has spawned a real
+    // pty, and a test that only needs this column's WIDTH (the row's one
+    // `flex-1 min-w-0` item, and so the one that absorbs whatever the `gap`
+    // helper's drop targets cost the row) should not have to spawn a tmux
+    // session to ask for it.
+    <div data-testid="terminal-column" className="flex min-w-0 flex-1 flex-col">
       {showsTabBar(collapsedColumns, hiddenColumns) ? (
         <TabBar
           tabs={tabEntries}
@@ -1816,32 +1822,51 @@ export function App() {
    * Renders nothing outside a drag: with `dragging` null there is nothing to
    * drop, and a gap that existed all the time would sit in the flex row at
    * every moment the user is not dragging, taking width from the columns on
-   * either side of it and eating the clicks that land on that sliver. `w-1
-   * shrink-0` is that width while a drag IS in progress, wide enough to find
-   * with the cursor and narrow enough not to read as a column of its own.
+   * either side of it and eating the clicks that land on that sliver.
+   *
+   * While a drag IS in progress, the outer element still takes no space:
+   * `w-0 shrink-0` is a zero-width flex item, so the ten of these that appear
+   * at once cost the row nothing. `Terminal.tsx`'s `ResizeObserver` fires
+   * `fit.fit()` and a real `window.pterm.resize` on any width change, and
+   * before this the ten gaps' combined 4px each (`w-1`, no `--spacing`
+   * override in `index.css`) came straight out of the terminal, the row's
+   * only `flex-1` item: narrowing the live tmux session by several columns
+   * on every drag, including one cancelled with Escape, and rewrapping
+   * scrollback that the width coming back does not undo. The actual 4px hit
+   * target lives on the CHILD instead, absolutely positioned against the
+   * zero-width parent's edge (`-left-0.5` pulls it 2px left, `w-1` gives it
+   * 4px, so it sits centred on the seam): the same trick `ColumnResizer`
+   * already uses to hang a handle off a column's border without taking flex
+   * space of its own. `z-20` keeps it above the neighbouring columns' own
+   * content, which it now overlaps by 2px on each side rather than sitting
+   * in space of its own.
    */
   const gap = (index: number): ReactNode =>
     dragging === null ? null : (
-      <div
-        key={`gap-${index}`}
-        data-testid={`column-gap-${index}`}
-        data-drop-index={index}
-        onDragOver={(event) => {
-          // Without this a drop never fires at all: an element that never
-          // says it accepts the drag is not a valid drop target, by the
-          // HTML5 drag-and-drop spec's own rule.
-          event.preventDefault()
-          setOver(index)
-        }}
-        onDragLeave={() => setOver((was) => (was === index ? null : was))}
-        onDrop={(event) => {
-          event.preventDefault()
-          if (dragging !== null) moveColumnTo(dragging, index)
-          setDragging(null)
-          setOver(null)
-        }}
-        className={cn('w-1 shrink-0', over === index && 'bg-accent')}
-      />
+      <div key={`gap-${index}`} className="relative w-0 shrink-0">
+        <div
+          data-testid={`column-gap-${index}`}
+          data-drop-index={index}
+          onDragOver={(event) => {
+            // Without this a drop never fires at all: an element that never
+            // says it accepts the drag is not a valid drop target, by the
+            // HTML5 drag-and-drop spec's own rule.
+            event.preventDefault()
+            setOver(index)
+          }}
+          onDragLeave={() => setOver((was) => (was === index ? null : was))}
+          onDrop={(event) => {
+            event.preventDefault()
+            if (dragging !== null) moveColumnTo(dragging, index)
+            setDragging(null)
+            setOver(null)
+          }}
+          className={cn(
+            'absolute inset-y-0 -left-0.5 z-20 w-1',
+            over === index && 'bg-accent',
+          )}
+        />
+      </div>
     )
 
   return (
