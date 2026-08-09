@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import type { TabDescriptor, TabState } from '../shared/ipc'
+import { useState, type ReactNode } from 'react'
+import { canHaveSession, type TabDescriptor, type TabState } from '../shared/ipc'
 import type { TabTreeNode } from './lib/tabGroups'
 import { StatusDot } from './StatusDot'
 import { elapsedLabel } from './lib/elapsed'
@@ -28,6 +28,7 @@ export function TabsPanel({
   status,
   since,
   now,
+  dead,
   collapsed,
   onToggle,
   onSelect,
@@ -38,6 +39,8 @@ export function TabsPanel({
   status: Record<string, TabState>
   since: Record<string, number>
   now: number
+  /** Epoch ms a pane's session exited, keyed by pane id. Matches `TabBar`'s prop of the same name. */
+  dead: Record<string, number>
   collapsed: boolean
   onToggle: () => void
   onSelect: (paneId: string) => void
@@ -51,8 +54,14 @@ export function TabsPanel({
 
   if (collapsed) return <PanelStrip testid="tabs-toggle" label="Tabs" side="left" onClick={onToggle} />
 
-  const row = (pane: TabDescriptor, depth: number, last: boolean) => {
+  const row = (pane: TabDescriptor, depth: number, last: boolean, twist: ReactNode) => {
     const label = elapsedLabel(since[pane.id] ?? null, now)
+    // Matches `TabBar`'s own `tombstoned`: a terminal pane whose session has
+    // exited has nothing left for `onClose` to kill. `TabBar` swaps in
+    // Restart/Dismiss for this case instead of a close control; this column
+    // does not offer either yet, so the honest thing is to offer neither
+    // control rather than a × that reaches `manager.kill()` and throws.
+    const tombstoned = canHaveSession(pane) && dead[pane.id] !== undefined
     return (
       <div
         key={pane.id}
@@ -64,6 +73,7 @@ export function TabsPanel({
         )}
         style={{ paddingLeft: depth === 0 ? 8 : 20 }}
       >
+        {twist}
         {depth > 0 ? (
           <span aria-hidden className="shrink-0 font-mono text-faint">{last ? '└' : '├'}</span>
         ) : null}
@@ -75,18 +85,20 @@ export function TabsPanel({
         <span className="flex-1 truncate">{tabLabel(pane)}</span>
         {label === null ? null : <span className="shrink-0 text-faint">{label}</span>}
         <StatusDot state={status[pane.id] ?? null} testid={`vdot-${pane.id}`} />
-        <button
-          data-testid={`vclose-${pane.id}`}
-          aria-label={`Close ${tabLabel(pane)}`}
-          className="shrink-0 cursor-default border-none bg-transparent px-1 text-faint opacity-0 group-hover:opacity-100 hover:text-fg"
-          onClick={(event) => {
-            // Or the row's own click would select the pane on its way out.
-            event.stopPropagation()
-            onClose(pane.id)
-          }}
-        >
-          ×
-        </button>
+        {tombstoned ? null : (
+          <button
+            data-testid={`vclose-${pane.id}`}
+            aria-label={`Close ${tabLabel(pane)}`}
+            className="shrink-0 cursor-default border-none bg-transparent px-1 text-faint opacity-0 group-hover:opacity-100 hover:text-fg"
+            onClick={(event) => {
+              // Or the row's own click would select the pane on its way out.
+              event.stopPropagation()
+              onClose(pane.id)
+            }}
+          >
+            ×
+          </button>
+        )}
       </div>
     )
   }
@@ -99,30 +111,47 @@ export function TabsPanel({
     >
       <PanelHeading testid="tabs-heading" label="Tabs" onClick={onToggle} />
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {nodes.map((node) => (
-          <div key={node.pane.id}>
-            {node.children.length === 0 ? null : (
+        {nodes.map((node) => {
+          // In the row's own flex flow, the same way `FileTree`'s twist is a
+          // fixed-width flex child rather than something floated over the
+          // row: that is a slot the row's own layout reserves, not a
+          // position guessed at with no offsets and no positioned ancestor.
+          // A childless tab still reserves the slot with a blank span, the
+          // same trade `FileTree` makes for a file next to a directory, so
+          // every tab's swatch lines up on the same x regardless of which
+          // rows have one.
+          const twist =
+            node.children.length === 0 ? (
+              <span aria-hidden className="h-3 w-3 shrink-0" />
+            ) : (
               <button
                 data-testid={`vtwist-${node.pane.id}`}
                 aria-label={shut.has(node.pane.id) ? 'Expand' : 'Collapse'}
-                className="absolute cursor-default border-none bg-transparent text-faint"
-                onClick={() =>
+                className="flex h-3 w-3 shrink-0 cursor-default items-center justify-center border-none bg-transparent text-center text-[9px] leading-none text-faint hover:text-fg"
+                onClick={(event) => {
+                  // Or the row's own click would also select the pane.
+                  event.stopPropagation()
                   setShut((previous) => {
                     const next = new Set(previous)
                     if (!next.delete(node.pane.id)) next.add(node.pane.id)
                     return next
                   })
-                }
+                }}
               >
                 {shut.has(node.pane.id) ? '▸' : '▾'}
               </button>
-            )}
-            {row(node.pane, 0, false)}
-            {shut.has(node.pane.id)
-              ? null
-              : node.children.map((kid, index) => row(kid, 1, index === node.children.length - 1))}
-          </div>
-        ))}
+            )
+          return (
+            <div key={node.pane.id}>
+              {row(node.pane, 0, false, twist)}
+              {shut.has(node.pane.id)
+                ? null
+                : node.children.map((kid, index) =>
+                    row(kid, 1, index === node.children.length - 1, null),
+                  )}
+            </div>
+          )
+        })}
       </div>
       <ColumnResizer testid="tabs-resizer" side="left" width={width} onResize={set} onCommit={commit} />
     </div>

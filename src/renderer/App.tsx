@@ -1425,6 +1425,7 @@ export function App() {
             status={state.status}
             since={state.since}
             now={now}
+            dead={state.dead}
             collapsed={tabsCollapsed}
             onToggle={() => toggleColumnCollapsed('tabs')}
             onSelect={selectPane}
