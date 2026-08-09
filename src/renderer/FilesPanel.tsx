@@ -18,6 +18,7 @@ export function FilesPanel({
   onOpenFile,
   collapsed,
   onToggle,
+  onDragStart,
   side,
 }: {
   projectId: string | undefined
@@ -25,6 +26,8 @@ export function FilesPanel({
   onOpenFile: (relPath: string) => void
   collapsed: boolean
   onToggle: () => void
+  /** Grabs this column to move it. See `PanelHeading`'s doc comment. */
+  onDragStart: () => void
   side: PanelSide
 }) {
   // Above the collapsed return, because a hook cannot be conditional. The read
@@ -32,7 +35,15 @@ export function FilesPanel({
   const { width, set, commit } = useColumnWidth('pterm:filesWidth')
 
   if (collapsed) {
-    return <PanelStrip testid="files-toggle" label="Files" side={side} onClick={onToggle} />
+    return (
+      <PanelStrip
+        testid="files-toggle"
+        label="Files"
+        side={side}
+        onClick={onToggle}
+        onDragStart={onDragStart}
+      />
+    )
   }
 
   return (
@@ -43,7 +54,12 @@ export function FilesPanel({
       className="relative flex shrink-0 flex-col border-r border-border bg-surface font-mono text-[11px] select-none"
       style={{ width }}
     >
-      <FileTree projectId={projectId} onOpenFile={onOpenFile} onToggle={onToggle} />
+      <FileTree
+        projectId={projectId}
+        onOpenFile={onOpenFile}
+        onToggle={onToggle}
+        onDragStart={onDragStart}
+      />
       <ColumnResizer
         testid="resize-files"
         side={side}

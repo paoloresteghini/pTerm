@@ -31,6 +31,7 @@ export function TabsPanel({
   dead,
   collapsed,
   onToggle,
+  onDragStart,
   onSelect,
   onClose,
   side,
@@ -44,6 +45,8 @@ export function TabsPanel({
   dead: Record<string, number>
   collapsed: boolean
   onToggle: () => void
+  /** Grabs this column to move it. See `PanelHeading`'s doc comment. */
+  onDragStart: () => void
   onSelect: (paneId: string) => void
   onClose: (paneId: string) => void
   side: PanelSide
@@ -54,7 +57,17 @@ export function TabsPanel({
   // user has forgotten they closed the twist on.
   const [shut, setShut] = useState<Set<string>>(() => new Set())
 
-  if (collapsed) return <PanelStrip testid="tabs-toggle" label="Tabs" side={side} onClick={onToggle} />
+  if (collapsed) {
+    return (
+      <PanelStrip
+        testid="tabs-toggle"
+        label="Tabs"
+        side={side}
+        onClick={onToggle}
+        onDragStart={onDragStart}
+      />
+    )
+  }
 
   const row = (pane: TabDescriptor, depth: number, last: boolean, twist: ReactNode) => {
     const label = elapsedLabel(since[pane.id] ?? null, now)
@@ -111,7 +124,12 @@ export function TabsPanel({
       className="relative flex shrink-0 flex-col border-r border-border bg-bg"
       style={{ width }}
     >
-      <PanelHeading testid="tabs-heading" label="Tabs" onClick={onToggle} />
+      <PanelHeading
+        testid="tabs-heading"
+        label="Tabs"
+        onClick={onToggle}
+        onDragStart={onDragStart}
+      />
       <div className="min-h-0 flex-1 overflow-y-auto">
         {nodes.map((node) => {
           // In the row's own flex flow, the same way `FileTree`'s twist is a

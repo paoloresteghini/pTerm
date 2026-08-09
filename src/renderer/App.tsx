@@ -46,7 +46,7 @@ import {
   type ColumnId,
   type ColumnVisibility,
 } from './lib/columnVisibility'
-import { COLUMN_ORDER_DEFAULT, resizerSideFor, type ColumnSlot } from './lib/columnOrder'
+import { moveColumn, orderFromStored, resizerSideFor, type ColumnSlot } from './lib/columnOrder'
 import {
   INITIAL_WORKSPACE_STATE,
   activeProject,
@@ -118,6 +118,9 @@ const GIT_KEY = 'pterm:gitCollapsed'
 const NOTES_KEY = 'pterm:notesCollapsed'
 const TABS_KEY = 'pterm:tabsCollapsed'
 
+/** Where the row's left-to-right order is kept, once a drag has changed it. */
+const ORDER_KEY = 'pterm:columnOrder'
+
 /*
  * A column has THREE states, and these keys hold the second of the two flags.
  *
@@ -170,6 +173,44 @@ export function App() {
     git: storedCollapsed(HIDDEN_KEYS.git, true),
     notes: storedCollapsed(HIDDEN_KEYS.notes, true),
   }))
+  // The row's left-to-right order. Restored from whatever the last drag
+  // wrote, or the shipped order on a fresh profile: see `orderFromStored`
+  // for what a half-written or outdated value degrades to.
+  const [columnOrder, setColumnOrder] = useState<ColumnSlot[]>(() =>
+    orderFromStored(localStorage.getItem(ORDER_KEY)),
+  )
+
+  /** Move `id` to `toIndex` and persist the result. See `moveColumn`. */
+  const moveColumnTo = useCallback((id: ColumnSlot, toIndex: number) => {
+    setColumnOrder((was) => {
+      const next = moveColumn(was, id, toIndex)
+      localStorage.setItem(ORDER_KEY, JSON.stringify(next))
+      return next
+    })
+  }, [])
+
+  // The one drag in progress: which column is being carried, and which gap it
+  // is over. Both null outside a drag, which is also what keeps the gaps
+  // themselves from rendering, see `gap` below.
+  const [dragging, setDragging] = useState<ColumnSlot | null>(null)
+  const [over, setOver] = useState<number | null>(null)
+
+  // A drag released outside any gap (dropped on a pane, or cancelled with
+  // Escape) never reaches a gap's own `onDrop`, so nothing there would clear
+  // `dragging` and the gaps would stay on screen for the rest of the session.
+  // `dragend` fires on the source element for every drag, wherever it ends,
+  // and bubbles, so a single window listener catches the ones `onDrop` misses
+  // without duplicating the state change on the ones it doesn't.
+  useEffect(() => {
+    if (dragging === null) return
+    const end = (): void => {
+      setDragging(null)
+      setOver(null)
+    }
+    window.addEventListener('dragend', end)
+    return () => window.removeEventListener('dragend', end)
+  }, [dragging])
+
   const [paletteOpen, setPaletteOpen] = useState(false)
   // Set once the workspace exists. Until then this window knows nothing about
   // what is selected and must not say anything about it — see the effects.
@@ -1582,8 +1623,7 @@ export function App() {
     </div>
   )
 
-  // The row's order, and the case that draws each slot from it.
-  const columnOrder: readonly ColumnSlot[] = COLUMN_ORDER_DEFAULT
+  // The case that draws each slot from `columnOrder`, held in state above.
 
   // `renderSlot` returns `ReactNode`, and `ReactNode` includes `undefined`:
   // with no `default` case, a slot this `switch` does not name simply falls
@@ -1673,6 +1713,7 @@ export function App() {
             onOpenFile={openFile}
             collapsed={filesCollapsed}
             onToggle={() => toggleColumnCollapsed('files')}
+            onDragStart={() => setDragging('files')}
             side={resizerSideFor(columnOrder, 'files')}
           />
         )
@@ -1687,6 +1728,7 @@ export function App() {
             dead={state.dead}
             collapsed={tabsCollapsed}
             onToggle={() => toggleColumnCollapsed('tabs')}
+            onDragStart={() => setDragging('tabs')}
             onSelect={selectPane}
             onClose={requestClosePane}
             side={resizerSideFor(columnOrder, 'tabs')}
@@ -1701,6 +1743,7 @@ export function App() {
             project={project}
             collapsed={skillsCollapsed}
             onToggle={() => toggleColumnCollapsed('skills')}
+            onDragStart={() => setDragging('skills')}
             // No trailing `\r`: this types the invocation and leaves the user
             // to decide, per the spec. A submitted `/name` would run a skill
             // nobody had finished choosing.
@@ -1716,6 +1759,7 @@ export function App() {
             project={project}
             collapsed={presetsCollapsed}
             onToggle={() => toggleColumnCollapsed('presets')}
+            onDragStart={() => setDragging('presets')}
             onRun={(command, type) => launch(command, type)}
             side={resizerSideFor(columnOrder, 'presets')}
           />
@@ -1728,6 +1772,7 @@ export function App() {
           <PromptsPanel
             collapsed={promptsCollapsed}
             onToggle={() => toggleColumnCollapsed('prompts')}
+            onDragStart={() => setDragging('prompts')}
             canInsert={activePaneId !== null}
             // Typed, never submitted, exactly like a skill. `input` is the same
             // channel the skills list uses.
@@ -1743,6 +1788,7 @@ export function App() {
             project={project}
             collapsed={gitCollapsed}
             onToggle={() => toggleColumnCollapsed('git')}
+            onDragStart={() => setDragging('git')}
             onOpenDiff={openDiff}
             side={resizerSideFor(columnOrder, 'git')}
           />
@@ -1753,6 +1799,7 @@ export function App() {
             project={project}
             collapsed={notesCollapsed}
             onToggle={() => toggleColumnCollapsed('notes')}
+            onDragStart={() => setDragging('notes')}
             side={resizerSideFor(columnOrder, 'notes')}
           />
         )
@@ -1762,6 +1809,40 @@ export function App() {
       }
     }
   }
+
+  /**
+   * A drop target between two columns, or at either end of the row.
+   *
+   * Renders nothing outside a drag: with `dragging` null there is nothing to
+   * drop, and a gap that existed all the time would sit in the flex row at
+   * every moment the user is not dragging, taking width from the columns on
+   * either side of it and eating the clicks that land on that sliver. `w-1
+   * shrink-0` is that width while a drag IS in progress, wide enough to find
+   * with the cursor and narrow enough not to read as a column of its own.
+   */
+  const gap = (index: number): ReactNode =>
+    dragging === null ? null : (
+      <div
+        key={`gap-${index}`}
+        data-testid={`column-gap-${index}`}
+        data-drop-index={index}
+        onDragOver={(event) => {
+          // Without this a drop never fires at all: an element that never
+          // says it accepts the drag is not a valid drop target, by the
+          // HTML5 drag-and-drop spec's own rule.
+          event.preventDefault()
+          setOver(index)
+        }}
+        onDragLeave={() => setOver((was) => (was === index ? null : was))}
+        onDrop={(event) => {
+          event.preventDefault()
+          if (dragging !== null) moveColumnTo(dragging, index)
+          setDragging(null)
+          setOver(null)
+        }}
+        className={cn('w-1 shrink-0', over === index && 'bg-accent')}
+      />
+    )
 
   return (
     <div className="flex h-screen w-screen flex-col bg-bg">
@@ -1785,8 +1866,22 @@ export function App() {
       ) : null}
 
       <div className="flex min-h-0 flex-1">
-        {columnOrder.map((slot) => (
-          <Fragment key={slot}>{renderSlot(slot)}</Fragment>
+        {gap(0)}
+        {columnOrder.map((slot, index) => (
+          <Fragment key={slot}>
+            {/* `display: contents`: this div carries `data-column-slot` for a
+                test to find without adding a testid per panel, but it must
+                not itself become a flex item, or the row would gain an extra
+                box with no width or shrink rules of its own, sitting between
+                two columns that do have them. `display: contents` takes the
+                div out of layout entirely and lets its child (the panel's own
+                flex item) take its place, so the row is exactly what it was
+                before this wrapper existed. */}
+            <div data-column-slot={slot} style={{ display: 'contents' }}>
+              {renderSlot(slot)}
+            </div>
+            {gap(index + 1)}
+          </Fragment>
         ))}
 
         {/* The pane's colour menu, rendered here rather than inside the pane

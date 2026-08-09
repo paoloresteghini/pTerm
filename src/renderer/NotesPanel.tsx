@@ -8,11 +8,14 @@ export function NotesPanel({
   project,
   collapsed,
   onToggle,
+  onDragStart,
   side,
 }: {
   project: ProjectDescriptor | undefined
   collapsed: boolean
   onToggle: () => void
+  /** Grabs this column to move it. See `PanelHeading`'s doc comment. */
+  onDragStart: () => void
   side: PanelSide
 }) {
   // null is "loading": the textarea is disabled so keystrokes cannot land in a
@@ -56,7 +59,15 @@ export function NotesPanel({
   }, [projectId, saver])
 
   if (collapsed) {
-    return <PanelStrip testid="notes-toggle" label="Notes" side={side} onClick={onToggle} />
+    return (
+      <PanelStrip
+        testid="notes-toggle"
+        label="Notes"
+        side={side}
+        onClick={onToggle}
+        onDragStart={onDragStart}
+      />
+    )
   }
 
   return (
@@ -65,7 +76,12 @@ export function NotesPanel({
       className="relative flex shrink-0 flex-col border-l border-border bg-surface font-mono text-[11px] select-none"
       style={{ width }}
     >
-      <PanelHeading testid="notes-toggle" label="Notes" onClick={onToggle} />
+      <PanelHeading
+        testid="notes-toggle"
+        label="Notes"
+        onClick={onToggle}
+        onDragStart={onDragStart}
+      />
       {!project ? (
         <p data-testid="notes-empty" className="px-2.5 py-1 text-faint">
           No project selected.

@@ -22,6 +22,7 @@ export function PromptsPanel({
   canInsert,
   collapsed,
   onToggle,
+  onDragStart,
   side,
 }: {
   /** Types a prompt's body into the active pane. Never submits it. */
@@ -30,6 +31,8 @@ export function PromptsPanel({
   canInsert: boolean
   collapsed: boolean
   onToggle: () => void
+  /** Grabs this column to move it. See `PanelHeading`'s doc comment. */
+  onDragStart: () => void
   side: PanelSide
 }) {
   // null is "still reading", which renders as an ellipsis rather than as the
@@ -63,7 +66,15 @@ export function PromptsPanel({
   }, [])
 
   if (collapsed) {
-    return <PanelStrip testid="prompts-toggle" label="Prompts" side={side} onClick={onToggle} />
+    return (
+      <PanelStrip
+        testid="prompts-toggle"
+        label="Prompts"
+        side={side}
+        onClick={onToggle}
+        onDragStart={onDragStart}
+      />
+    )
   }
 
   return (
@@ -75,7 +86,12 @@ export function PromptsPanel({
       {/* Heading and `+` as siblings: a button inside a button is invalid HTML
           and the inner click would bubble out and collapse the column. */}
       <div className="flex items-center justify-between pr-2.5">
-        <PanelHeading testid="prompts-toggle" label="Prompts" onClick={onToggle} />
+        <PanelHeading
+          testid="prompts-toggle"
+          label="Prompts"
+          onClick={onToggle}
+          onDragStart={onDragStart}
+        />
         <button
           data-testid="prompts-new"
           aria-label="New prompt"

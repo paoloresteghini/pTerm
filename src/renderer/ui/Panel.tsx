@@ -29,16 +29,23 @@ export function PanelStrip({
   label,
   side = 'right',
   onClick,
+  onDragStart,
 }: {
   testid: string
   label: string
   side?: PanelSide
   onClick: () => void
+  /** Grabbed as a drag handle when given. `draggable` follows its presence,
+   *  so a caller with nothing to reorder need not pass `draggable={false}`
+   *  on top of it. */
+  onDragStart?: () => void
 }) {
   return (
     <button
       data-testid={testid}
       onClick={onClick}
+      draggable={onDragStart !== undefined}
+      onDragStart={onDragStart}
       title={`Show ${label.toLowerCase()}`}
       // `flex items-center justify-center` centres the word in the strip's
       // full height: in a vertical writing mode the flex axes rotate with the
@@ -63,15 +70,20 @@ export function PanelHeading({
   testid,
   label,
   onClick,
+  onDragStart,
 }: {
   testid: string
   label: string
   onClick: () => void
+  /** Same drag handle `PanelStrip` takes; see its doc comment. */
+  onDragStart?: () => void
 }) {
   return (
     <button
       data-testid={testid}
       onClick={onClick}
+      draggable={onDragStart !== undefined}
+      onDragStart={onDragStart}
       title={`Hide ${label.toLowerCase()}`}
       className="cursor-default border-none bg-transparent px-2.5 pb-1 pt-3 text-left text-[10px] uppercase tracking-wider text-label hover:text-fg"
     >

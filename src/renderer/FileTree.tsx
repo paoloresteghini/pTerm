@@ -25,6 +25,7 @@ export function FileTree({
   projectId,
   onOpenFile,
   onToggle,
+  onDragStart,
 }: {
   projectId: string | undefined
   /** Collapses the column this tree fills. Owned by `FilesPanel`'s caller. */
@@ -35,6 +36,8 @@ export function FileTree({
    * does, and `toggle` below returns before calling it.
    */
   onOpenFile: (relPath: string) => void
+  /** Grabs the Files column to move it. Handed straight to the heading. */
+  onDragStart: () => void
 }) {
   // Relative path to that directory's entries. '' is the project root.
   const [loaded, setLoaded] = useState<Record<string, FileEntry[]>>({})
@@ -333,7 +336,12 @@ export function FileTree({
           `<button>` inside a `<button>` is invalid HTML and the inner one's
           click would still bubble out to collapse the column. */}
       <div className="flex items-center justify-between pr-2.5">
-        <PanelHeading testid="files-toggle" label="Files" onClick={onToggle} />
+        <PanelHeading
+          testid="files-toggle"
+          label="Files"
+          onClick={onToggle}
+          onDragStart={onDragStart}
+        />
         <button
           data-testid="tree-refresh"
           aria-label="Refresh files"

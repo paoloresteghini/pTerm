@@ -16,18 +16,29 @@ export function PresetsPanel({
   onRun,
   collapsed,
   onToggle,
+  onDragStart,
   side,
 }: {
   project: ProjectDescriptor | undefined
   onRun: (command: string, type: TabType) => void
   collapsed: boolean
   onToggle: () => void
+  /** Grabs this column to move it. See `PanelHeading`'s doc comment. */
+  onDragStart: () => void
   side: PanelSide
 }) {
   const { width, set, commit } = useColumnWidth('pterm:presetsWidth')
 
   if (collapsed) {
-    return <PanelStrip testid="presets-toggle" label="Presets" side={side} onClick={onToggle} />
+    return (
+      <PanelStrip
+        testid="presets-toggle"
+        label="Presets"
+        side={side}
+        onClick={onToggle}
+        onDragStart={onDragStart}
+      />
+    )
   }
 
   return (
@@ -36,7 +47,12 @@ export function PresetsPanel({
       className="relative flex shrink-0 flex-col border-l border-border bg-surface font-mono text-[11px] select-none"
       style={{ width }}
     >
-      <PanelHeading testid="presets-toggle" label="Presets" onClick={onToggle} />
+      <PanelHeading
+        testid="presets-toggle"
+        label="Presets"
+        onClick={onToggle}
+        onDragStart={onDragStart}
+      />
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         {/* Not `preset-claude`: a repository declaring a preset labelled
             `claude` would otherwise produce two elements with that testid. */}

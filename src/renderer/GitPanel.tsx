@@ -114,12 +114,15 @@ export function GitPanel({
   project,
   collapsed,
   onToggle,
+  onDragStart,
   onOpenDiff,
   side,
 }: {
   project: ProjectDescriptor | undefined
   collapsed: boolean
   onToggle: () => void
+  /** Grabs this column to move it. See `PanelHeading`'s doc comment. */
+  onDragStart: () => void
   onOpenDiff: (relPath: string, side: DiffSide) => void
   side: PanelSide
 }) {
@@ -294,7 +297,15 @@ export function GitPanel({
   }, [busy, changes, message, mutate])
 
   if (collapsed) {
-    return <PanelStrip testid="git-toggle" label="Git" side={side} onClick={onToggle} />
+    return (
+      <PanelStrip
+        testid="git-toggle"
+        label="Git"
+        side={side}
+        onClick={onToggle}
+        onDragStart={onDragStart}
+      />
+    )
   }
 
   const clean =
@@ -309,7 +320,12 @@ export function GitPanel({
       className="relative flex shrink-0 flex-col border-l border-border bg-surface font-mono text-[11px] select-none"
       style={{ width }}
     >
-      <PanelHeading testid="git-toggle" label="Git" onClick={onToggle} />
+      <PanelHeading
+        testid="git-toggle"
+        label="Git"
+        onClick={onToggle}
+        onDragStart={onDragStart}
+      />
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         {/* The repository, not the project: they are the same name often
             enough that only naming one of them would read as either. A

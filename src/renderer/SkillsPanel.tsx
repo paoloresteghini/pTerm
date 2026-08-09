@@ -19,12 +19,15 @@ export function SkillsPanel({
   onInsert,
   collapsed,
   onToggle,
+  onDragStart,
   side,
 }: {
   project: ProjectDescriptor | undefined
   onInsert: (name: string) => void
   collapsed: boolean
   onToggle: () => void
+  /** Grabs this column to move it. See `PanelHeading`'s doc comment. */
+  onDragStart: () => void
   side: PanelSide
 }) {
   const [skills, setSkills] = useState<SkillEntry[] | null>(null)
@@ -62,7 +65,15 @@ export function SkillsPanel({
   const matched = filterEntries(query, skills ?? [])
 
   if (collapsed) {
-    return <PanelStrip testid="skills-toggle" label="Skills" side={side} onClick={onToggle} />
+    return (
+      <PanelStrip
+        testid="skills-toggle"
+        label="Skills"
+        side={side}
+        onClick={onToggle}
+        onDragStart={onDragStart}
+      />
+    )
   }
 
   return (
@@ -72,7 +83,12 @@ export function SkillsPanel({
       className="relative flex shrink-0 flex-col border-l border-border bg-surface font-mono text-[11px] select-none"
       style={{ width }}
     >
-      <PanelHeading testid="skills-toggle" label="Skills" onClick={onToggle} />
+      <PanelHeading
+        testid="skills-toggle"
+        label="Skills"
+        onClick={onToggle}
+        onDragStart={onDragStart}
+      />
       <input
         data-testid="skills-filter"
         // Load-bearing, not decoration. Without it ⌘W typed while filtering
