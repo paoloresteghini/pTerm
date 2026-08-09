@@ -1,4 +1,7 @@
 import { execFile } from 'node:child_process'
+import type { IssuesFailure } from '../../shared/ipc'
+
+export type { IssuesFailure }
 
 const TIMEOUT_MS = 20_000
 
@@ -8,15 +11,6 @@ export interface GhRun {
   stderr: string
   spawnFailed: boolean
 }
-
-export type IssuesFailure =
-  | 'no-repo'
-  | 'no-remote'
-  | 'not-github'
-  | 'no-gh'
-  | 'no-auth'
-  | 'no-issues'
-  | 'failed'
 
 export function ghBin(): string {
   return process.env.PTERM_GH_BIN ?? 'gh'

@@ -78,6 +78,12 @@ export const CHANNELS = {
   gitDiff: 'pterm:gitDiff',
   openDiff: 'pterm:openDiff',
   columnsVisible: 'pterm:columnsVisible',
+  issuesList: 'pterm:issuesList',
+  issuesGet: 'pterm:issuesGet',
+  issuesCreate: 'pterm:issuesCreate',
+  issuesEdit: 'pterm:issuesEdit',
+  issuesSetState: 'pterm:issuesSetState',
+  issuesComment: 'pterm:issuesComment',
 } as const
 
 /**
@@ -709,6 +715,109 @@ export interface GitChanges {
 export type GitMutation =
   | { ok: true; changes: GitChanges }
   | { ok: false; error: string; changes: GitChanges | null }
+
+/** A label's name and colour, the only two fields the column draws. */
+export interface IssueLabel {
+  name: string
+  color: string
+}
+
+/** A GitHub account, narrowed to the one field the column shows. */
+export interface IssueUser {
+  login: string
+}
+
+/** One comment on an issue, in the order `gh` returns them. */
+export interface IssueComment {
+  author: IssueUser
+  body: string
+  createdAt: string
+}
+
+export type IssueState = 'OPEN' | 'CLOSED'
+
+/**
+ * Why an issue closed, or null when it is open or closed for a reason not
+ * in this list.
+ *
+ * `gh` reports an open issue's reason as the empty string, never `null`;
+ * the parser maps both to `null` here, so nothing downstream can read
+ * `stateReason !== null` as a stand-in for `state === 'CLOSED'`.
+ */
+export type IssueStateReason = 'COMPLETED' | 'NOT_PLANNED' | 'REOPENED' | null
+
+/**
+ * One row of the issues list, narrowed to what the list row and the column
+ * heading draw.
+ *
+ * `gh` sends more per label, assignee and author than this keeps (`id`,
+ * `description`, `is_bot`, `name` among them); the extra fields are dropped
+ * on the way in rather than carried through and ignored later.
+ */
+export interface IssueSummary {
+  number: number
+  title: string
+  state: IssueState
+  stateReason: IssueStateReason
+  labels: IssueLabel[]
+  assignees: IssueUser[]
+  commentCount: number
+  updatedAt: string
+  author: IssueUser
+}
+
+/**
+ * The full issue, for the detail modal.
+ *
+ * Extends `IssueSummary` rather than repeating its fields: a detail view is
+ * a summary with the body and the full comment thread attached.
+ */
+export interface IssueDetail extends IssueSummary {
+  body: string
+  url: string
+  createdAt: string
+  comments: IssueComment[]
+}
+
+/**
+ * The repository an issues result came from, for the column heading.
+ *
+ * `slug` is `owner/name`, for display. `arg` is what `repoArg` produced and
+ * what every `gh` call passes to `--repo`. Kept apart because the two differ
+ * on Enterprise hosts, and the heading has no reason to show the host.
+ */
+export interface IssueRepo {
+  slug: string
+  arg: string
+}
+
+/**
+ * The answer to any issues read, in the same shape as `GitMutation`:
+ * success carries the repository the answer came from alongside the value,
+ * failure carries a reason the renderer can branch on plus a message it can
+ * just show.
+ */
+export type IssuesResult<T> =
+  | { ok: true; repo: IssueRepo; value: T; truncated: boolean }
+  | { ok: false; reason: IssuesFailure; message: string }
+
+export type IssueStateFilter = 'open' | 'closed' | 'all'
+
+/**
+ * Every way listing or reading issues can fail, named rather than left as a
+ * string so the renderer can show a specific empty state for each one.
+ *
+ * Declared here rather than in `src/main/gh/run.ts`, which imports and
+ * re-exports it, because the renderer cannot import from `src/main`.
+ */
+export type IssuesFailure =
+  | 'no-repo'
+  | 'no-remote'
+  | 'not-github'
+  | 'no-gh'
+  | 'no-auth'
+  | 'no-issues'
+  | 'failed'
 
 /**
  * What a mutating file tree call answers.
