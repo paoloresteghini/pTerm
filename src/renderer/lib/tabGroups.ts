@@ -117,6 +117,15 @@ export function groupedTabs(panes: TabDescriptor[], rows: TabRow[]): TabGroupEnt
  * `TabRow.id` is never rewritten, so it can name a pane that has since been
  * closed while its siblings live on. The first present kid is promoted in that
  * case, because a tab whose panes are all still open must not lose its node.
+ *
+ * A kid already claimed by an earlier row in the walk is dropped from a later
+ * row's members, so no pane is ever emitted as two separate top-level nodes.
+ * `tabRows` (`src/main/state/store.ts:256`) already dedupes kids across rows
+ * when loading from disk, by deleting a claimed kid from the set a later row
+ * is allowed to draw from, so two rows sharing a kid is unreachable through
+ * today's only write path. This guard is cheap insurance against that
+ * changing, matching the same invariant `groupedTabs` above already carries a
+ * comment for, not a patch for a bug seen in practice.
  */
 export interface TabTreeNode {
   pane: TabDescriptor
@@ -146,11 +155,13 @@ export function tabTree(panes: TabDescriptor[], rows: TabRow[]): TabTreeNode[] {
       continue
     }
 
-    // In `kids` order and present only, so a kid belonging to another project
-    // or since dropped by main never reaches the screen.
+    // In `kids` order, present only, and not already emitted by an earlier
+    // row: a kid belonging to another project or since dropped by main never
+    // reaches the screen, and a kid an earlier row already claimed (see the
+    // doc comment above) never reappears as a second node.
     const present = row.layout.kids
       .map((kid) => byId.get(kid))
-      .filter((kid): kid is TabDescriptor => kid !== undefined)
+      .filter((kid): kid is TabDescriptor => kid !== undefined && !emitted.has(kid.id))
     for (const kid of present) emitted.add(kid.id)
 
     const founder = present.find((kid) => kid.id === row.id) ?? present[0]

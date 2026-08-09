@@ -194,18 +194,23 @@ describe('tabTree', () => {
     expect(tree).toEqual([{ pane: pane('a'), children: [] }])
   })
 
-  it('resolves a pane claimed by two rows to the first, matching groupedTabs', () => {
+  it('resolves a pane claimed by two rows to the first, matching groupedTabs, and never emits it twice', () => {
     // The rows overlap on `a` and differ in their other kid. Under first-wins,
     // `a` belongs to r1 and brings `b` with it; under last-wins it would belong
-    // to r2 and bring `c`. Asserting the children is what makes the two
-    // orderings distinguishable: asserting only that a node for `a` exists
-    // passes either way, which is how the previous version of this test came to
-    // be one that could not fail.
+    // to r2 and bring `c`. Asserting the FULL tree, not just the first node, is
+    // what pins that `a` is emitted exactly once: `r2` still gets a node for
+    // `c`, but `c` stands alone rather than dragging `a` back in as a second
+    // top-level node headed by a pane that already has one. Asserting only
+    // that a node for `a` exists at index 0 passes either way and would not
+    // notice `a` reappearing at index 1, which is how the previous version of
+    // this test came to be one that could not fail.
     const tree = tabTree(
       [pane('a'), pane('b'), pane('c')],
       [row('r1', ['a', 'b']), row('r2', ['a', 'c'])],
     )
-    expect(tree[0].pane.id).toBe('a')
-    expect(tree[0].children.map((kid) => kid.id)).toEqual(['b'])
+    expect(tree).toEqual([
+      { pane: pane('a'), children: [pane('b')] },
+      { pane: pane('c'), children: [] },
+    ])
   })
 })
