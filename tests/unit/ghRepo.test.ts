@@ -34,11 +34,31 @@ describe('parseRemote', () => {
     })
   })
 
-  it('keeps an Enterprise host', () => {
-    expect(parseRemote('git@github.corp.example:team/thing.git')).toEqual({
-      host: 'github.corp.example',
+  it('keeps a GitHub Enterprise Cloud host', () => {
+    expect(parseRemote('git@enterprise.github.com:team/thing.git')).toEqual({
+      host: 'enterprise.github.com',
       owner: 'team',
       name: 'thing',
+    })
+  })
+
+  it('rejects a spoofed-prefix host', () => {
+    expect(parseRemote('git@github.com.attacker.net:owner/name.git')).toBeNull()
+  })
+
+  it('rejects a similar-prefix host', () => {
+    expect(parseRemote('https://github.evil.net/owner/name.git')).toBeNull()
+  })
+
+  it('rejects a URL with extra path segments', () => {
+    expect(parseRemote('https://github.com/owner/repo/blob/main/file.ts')).toBeNull()
+  })
+
+  it('accepts case-insensitive hosts', () => {
+    expect(parseRemote('git@GITHUB.COM:owner/name.git')).toEqual({
+      host: 'GITHUB.COM',
+      owner: 'owner',
+      name: 'name',
     })
   })
 

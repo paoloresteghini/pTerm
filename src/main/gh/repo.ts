@@ -5,16 +5,18 @@ export interface RepoRef {
 }
 
 function isGitHubHost(host: string): boolean {
-  return host === 'github.com' || host.startsWith('github.')
+  const lower = host.toLowerCase()
+  return lower === 'github.com' || lower.endsWith('.github.com') || lower.endsWith('.ghe.com')
 }
 
 /**
  * Parses a git remote URL into a repository reference for use with `gh --repo`.
- * Accepts SSH (scp-like and ssh://), HTTPS, and local paths. Only accepts
- * GitHub.com and Enterprise GitHub hosts (github.* domains). Returns null for
- * invalid or unsupported formats.
+ * Accepts SSH (scp-like and ssh://) and HTTPS forms. Only accepts GitHub.com,
+ * GitHub Enterprise Cloud (*.github.com), and GitHub Enterprise Server (*.ghe.com)
+ * hosts. Returns null for invalid, unsupported, or non-GitHub hosts.
  *
  * Tolerates missing .git suffix, trailing slashes, and leading/trailing whitespace.
+ * Requires exactly two path segments (owner and repo name) after normalization.
  */
 export function parseRemote(url: string): RepoRef | null {
   const trimmed = url.trim()
@@ -48,21 +50,19 @@ export function parseRemote(url: string): RepoRef | null {
     .replace(/\.git$/, '')
     .split('/')
     .filter((segment) => segment !== '')
-  if (segments.length < 2) return null
+  if (segments.length !== 2) return null
 
-  const owner = segments[segments.length - 2]
-  const name = segments[segments.length - 1]
-  if (owner === '' || name === '') return null
+  const [owner, name] = segments
 
   return { host, owner, name }
 }
 
 /**
  * Formats a repository reference for use with `gh --repo`. Returns OWNER/NAME
- * for github.com and HOST/OWNER/NAME for Enterprise hosts.
+ * for github.com (case-insensitive) and HOST/OWNER/NAME for other hosts.
  */
 export function repoArg(ref: RepoRef): string {
-  return ref.host === 'github.com'
+  return ref.host.toLowerCase() === 'github.com'
     ? `${ref.owner}/${ref.name}`
     : `${ref.host}/${ref.owner}/${ref.name}`
 }
