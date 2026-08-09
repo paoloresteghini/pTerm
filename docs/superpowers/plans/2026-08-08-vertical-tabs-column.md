@@ -301,7 +301,13 @@ git commit -m "Make room for a seventh column"
 **Files:**
 - Modify: `src/renderer/lib/columnVisibility.ts` (add `showsTabBar`)
 - Modify: `src/renderer/App.tsx` (`HIDDEN_KEYS`, a `TABS_KEY`, collapse state, the `<TabBar>` gate)
+- Modify: `src/main/index.ts` (one line in `showColumns`, see below)
 - Test: `tests/unit/columnVisibility.test.ts`
+
+**Making typecheck clean again.** Task 2 deliberately left the tree red. After Task 2 there are exactly five errors, and this task clears all of them:
+
+- `src/main/index.ts:203` — `showColumns`'s `ids` is a `Record<ColumnId, string>`. Add `tabs: 'toggle-tabs'` to it. The menu item with that id does not exist until Task 5, and that is safe: the loop does `const item = menu.getMenuItemById(itemId)` followed by `if (item)`, so an id with no item is skipped. Verified 2026-08-08 at `src/main/index.ts:215-216`.
+- `src/renderer/App.tsx` at four sites — `HIDDEN_KEYS` (127), the collapsed-state initialiser (156), the setter record (278), and the storage-key record (287). Each needs its `tabs` member, following exactly what the six existing columns do at that site.
 
 **Interfaces:**
 - Consumes: `ColumnId`, `ColumnVisibility` from Task 2.
@@ -681,7 +687,7 @@ In `src/main/index.ts`, in the View menu's column block, add an item ahead of `t
 },
 ```
 
-Then find `showColumns` in the same file and give it the `tabs` case alongside the existing six, following exactly what it does for `notes`.
+`showColumns`'s `ids` record already gained its `tabs: 'toggle-tabs'` entry in Task 3, so that this file typechecked before now. Nothing to add there: confirm the entry is present and that its id matches the item you just created, because until this task the id pointed at nothing.
 
 - [ ] **Step 3: Handle it in the renderer**
 
