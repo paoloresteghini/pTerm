@@ -178,8 +178,27 @@ way `parseStatus` in `src/main/git/status.ts` is.
 
 Takes the output of `git remote get-url origin` and returns `{ host, owner, name }` or null.
 Handles `git@github.com:o/n.git`, `https://github.com/o/n.git`, `ssh://git@github.com/o/n`,
-with or without a trailing `.git`, and Enterprise hosts such as `github.corp.com`, which
+with or without a trailing `.git`. Enterprise hosts under `*.github.com` and `*.ghe.com`
 become the `HOST/OWNER/REPO` form `gh --repo` accepts.
+
+**A host is GitHub only on a dot boundary**: exactly `github.com`, or a suffix of
+`.github.com` or `.ghe.com`, compared lowercased. A prefix test such as
+`host.startsWith('github.')` looks equivalent and is not. `github.com.attacker.net` and
+`github.evil.net` are wholly separate registrable domains that merely share those leading
+characters, and accepting them feeds an attacker-chosen host straight into
+`gh --repo HOST/OWNER/REPO`. This document originally described the prefix test, an
+implementation shipped it, and review caught it. The dot-boundary rule is the correction.
+
+That rule narrows what this document first promised. A self-hosted Enterprise host on an
+arbitrary domain, such as `github.corp.com`, is now rejected as not-GitHub. Nothing in a pure
+function can tell such a host from an attacker's domain by name alone, so the choice is
+between rejecting some genuine Enterprise setups with a clear message and accepting
+lookalikes silently. Rejecting is the safe direction, and the empty state names the remote,
+so the reason is visible rather than mysterious.
+
+The path must be **exactly two segments** after stripping `.git` and empty segments. Taking
+the last two segments of a longer path silently resolves
+`https://github.com/owner/repo/blob/main/file.ts` to a repository called `main/file.ts`.
 
 **`origin` only.** A fork whose `origin` is the user's own copy will show that copy's issue
 list, which is usually empty, and the heading naming `owner/name` is how that becomes

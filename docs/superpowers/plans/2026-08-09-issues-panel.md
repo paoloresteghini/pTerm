@@ -39,6 +39,10 @@ Every task's requirements implicitly include this section.
 
 `repoArg` returns the string handed to `gh --repo`: `OWNER/NAME` when the host is `github.com`, and `HOST/OWNER/NAME` otherwise, which is the `[HOST/]OWNER/REPO` form `gh` documents.
 
+**A host counts as GitHub only on a dot boundary**, compared lowercased: exactly `github.com`, or a suffix of `.github.com` or `.ghe.com`. A prefix test such as `host.startsWith('github.')` looks equivalent and is not. `github.com.attacker.net` is a wholly separate registrable domain, and accepting it feeds an attacker-chosen host into `gh --repo HOST/OWNER/REPO`. An earlier draft of this plan specified the prefix test, an implementer transcribed it faithfully, and review caught it. Likewise the path must be **exactly two** segments: taking the last two of a longer path resolves `https://github.com/owner/repo/blob/main/file.ts` to a repository called `main/file.ts`.
+
+This rejects self-hosted Enterprise hosts on arbitrary domains, which the design document originally promised. That narrowing is deliberate and is recorded in the spec.
+
 - [ ] **Step 1: Write the failing test**
 
 Create `tests/unit/ghRepo.test.ts`:
@@ -80,12 +84,28 @@ describe('parseRemote', () => {
     })
   })
 
-  it('keeps an Enterprise host', () => {
-    expect(parseRemote('git@github.corp.example:team/thing.git')).toEqual({
-      host: 'github.corp.example',
+  it('keeps a GitHub Enterprise Cloud host', () => {
+    expect(parseRemote('git@enterprise.github.com:team/thing.git')).toEqual({
+      host: 'enterprise.github.com',
       owner: 'team',
       name: 'thing',
     })
+  })
+
+  it('rejects a spoofed-prefix host', () => {
+    expect(parseRemote('git@github.com.attacker.net:owner/name.git')).toBeNull()
+  })
+
+  it('rejects a similar-prefix host', () => {
+    expect(parseRemote('https://github.evil.net/owner/name.git')).toBeNull()
+  })
+
+  it('rejects a URL with extra path segments', () => {
+    expect(parseRemote('https://github.com/owner/repo/blob/main/file.ts')).toBeNull()
+  })
+
+  it('accepts a host in any case', () => {
+    expect(parseRemote('git@GITHUB.COM:owner/name.git')?.owner).toBe('owner')
   })
 
   it('rejects a non-GitHub host', () => {
@@ -133,7 +153,8 @@ export interface RepoRef {
 }
 
 function isGitHubHost(host: string): boolean {
-  return host === 'github.com' || host.startsWith('github.')
+  const lower = host.toLowerCase()
+  return lower === 'github.com' || lower.endsWith('.github.com') || lower.endsWith('.ghe.com')
 }
 
 export function parseRemote(url: string): RepoRef | null {
@@ -168,17 +189,15 @@ export function parseRemote(url: string): RepoRef | null {
     .replace(/\.git$/, '')
     .split('/')
     .filter((segment) => segment !== '')
-  if (segments.length < 2) return null
+  if (segments.length !== 2) return null
 
-  const owner = segments[segments.length - 2]
-  const name = segments[segments.length - 1]
-  if (owner === '' || name === '') return null
+  const [owner, name] = segments
 
   return { host, owner, name }
 }
 
 export function repoArg(ref: RepoRef): string {
-  return ref.host === 'github.com'
+  return ref.host.toLowerCase() === 'github.com'
     ? `${ref.owner}/${ref.name}`
     : `${ref.host}/${ref.owner}/${ref.name}`
 }
