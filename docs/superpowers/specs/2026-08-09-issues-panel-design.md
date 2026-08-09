@@ -1,7 +1,7 @@
 # Issues panel
 
 Date: 2026-08-09
-Status: approved, not yet planned
+Status: approved, planned, in implementation
 
 An eighth side column listing the active project's GitHub issues, with search, filtering,
 sorting, and a modal for reading, creating, editing, commenting and closing. It reaches
@@ -34,7 +34,7 @@ work, stores no token in this app's config, and needs no rate-limit bookkeeping 
 The alternative, REST plus a stored token, means owning token capture, secure storage,
 401 handling, pagination and rate-limit headers before reaching parity.
 
-The cost is a hard dependency on `gh` being installed, which is one of the five empty states
+The cost is a hard dependency on `gh` being installed, which is one of the empty states
 below, and roughly 200ms of process spawn per action, which is acceptable at this frequency.
 
 Verified against `gh version 2.96.0 (2026-07-02)` on 2026-08-09.
@@ -238,7 +238,8 @@ type IssuesResult<T> =
   | { ok: true; repo: RepoRef; value: T; truncated: boolean }
   | {
       ok: false
-      reason: 'no-repo' | 'no-remote' | 'not-github' | 'no-gh' | 'no-auth' | 'no-issues' | 'failed'
+      reason: 'no-project' | 'no-repo' | 'no-remote' | 'not-github'
+            | 'no-gh' | 'no-auth' | 'no-issues' | 'failed'
       message: string
     }
 ```
@@ -247,6 +248,7 @@ Detected in this order:
 
 | Condition | `reason` |
 |---|---|
+| The project id names nothing in the workspace | `no-project` |
 | `repoRoot()` returns null | `no-repo` |
 | `git remote get-url origin` exits non-zero | `no-remote` |
 | `repo.ts` cannot parse it as GitHub | `not-github` |
@@ -261,7 +263,7 @@ a generic empty state.
 ### Empty states
 
 The column always opens and always explains itself. A greyed-out column that will not open
-teaches nobody anything. Each of the seven reasons above gets a message naming the actual
+teaches nobody anything. Each of the eight reasons above gets a message naming the actual
 fix, and `no-gh` and `no-auth` show the command to run (`brew install gh`, `gh auth login`)
 as copyable text.
 

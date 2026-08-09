@@ -230,7 +230,7 @@ git commit -m "Parse a git remote URL into the repository gh --repo wants"
 - Produces:
   - `export interface GhRun { code: number; stdout: string; stderr: string; spawnFailed: boolean }`
   - `export function gh(cwd: string, args: string[], stdin?: string): Promise<GhRun>`
-  - `export type IssuesFailure = 'no-repo' | 'no-remote' | 'not-github' | 'no-gh' | 'no-auth' | 'no-issues' | 'failed'`
+  - `export type IssuesFailure = 'no-project' | 'no-repo' | 'no-remote' | 'not-github' | 'no-gh' | 'no-auth' | 'no-issues' | 'failed'`
   - `export function classify(run: GhRun): IssuesFailure`
 
 `classify` only ever returns the four reasons a `gh` run itself can produce (`no-gh`, `no-auth`, `no-issues`, `failed`). The other three are decided before `gh` is spawned, in Task 3.
@@ -304,6 +304,7 @@ export interface GhRun {
 }
 
 export type IssuesFailure =
+  | 'no-project'
   | 'no-repo'
   | 'no-remote'
   | 'not-github'
@@ -566,7 +567,7 @@ Expected: FAIL, cannot resolve `../../src/main/gh/issues`.
 
 - [ ] **Step 3: Add the shared types**
 
-In `src/shared/ipc.ts`, add the seven channel names to the `CHANNELS` object immediately after `columnsVisible`:
+In `src/shared/ipc.ts`, add the six channel names to the `CHANNELS` object immediately after `columnsVisible`:
 
 ```ts
   issuesList: 'pterm:issuesList',
@@ -581,6 +582,7 @@ Add the type block from the Interfaces section above, placed after the `GitMutat
 
 ```ts
 export type IssuesFailure =
+  | 'no-project'
   | 'no-repo'
   | 'no-remote'
   | 'not-github'
@@ -710,6 +712,7 @@ export async function resolveRepo(
 }
 
 const MESSAGES: Record<IssuesFailure, string> = {
+  'no-project': 'That project is not in this workspace.',
   'no-repo': 'This project is not inside a git repository.',
   'no-remote': 'This repository has no origin remote.',
   'not-github': 'The origin remote does not point at GitHub.',
@@ -828,7 +831,7 @@ In `src/main/ipc/register.ts`, after the `gitChanges` handler:
       const config = await store.read()
       const project = config.projects.find((row) => row.id === projectId)
       if (!project) {
-        return { ok: false as const, reason: 'no-repo' as const, message: 'No project' }
+        return { ok: false as const, reason: 'no-project' as const, message: 'No project' }
       }
       return listIssues(project.cwd, state)
     },
@@ -838,7 +841,7 @@ In `src/main/ipc/register.ts`, after the `gitChanges` handler:
     const config = await store.read()
     const project = config.projects.find((row) => row.id === projectId)
     if (!project) {
-      return { ok: false as const, reason: 'no-repo' as const, message: 'No project' }
+      return { ok: false as const, reason: 'no-project' as const, message: 'No project' }
     }
     return getIssue(project.cwd, number)
   })
