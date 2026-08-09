@@ -17,6 +17,13 @@
  * untouched; and a drag on a tab holding a tombstone is kept, routed by name
  * through main's row, and survives the tombstone's restart.
  *
+ * One more is about the tab BAR rather than the pane area: opening two tabs
+ * and then going back to split the first reads the bar's own on-screen order
+ * (which is not `state.panes`' order, per `applyTabShape`), each entry's
+ * `data-group-id`/`data-group-pos`, its `border-right` and its computed
+ * `box-shadow`, so a `groupedTabs` that tagged the panes but never reordered
+ * them, or a `TabBar` that drew the tags but not the strip, both fail here.
+ *
  * `tests/unit/dividers.test.ts` covers this gesture by reading `App.tsx` and
  * `PaneDivider.tsx` as TEXT — vitest runs `environment: 'node'`, so it has no
  * DOM and no layout — and its own header lists what that cannot see. Three of
@@ -55,6 +62,32 @@
  *
  * **What this file does NOT see** — read off this file's own text unless a
  * line says measured or names another file:
+ *
+ * - **that the strip is CONTINUOUS across the two entries.** The test reads
+ *   each tab's own computed shadow. Nothing measures that the two 2px runs
+ *   meet with no gap, and a change to the bar's spacing or the tabs' padding
+ *   would break the join without failing anything here. Checked by eye during
+ *   Task 2 instead.
+ * - **that `⌥1..9` indexes the same order the bar draws.** Grouping happens in
+ *   `App.tsx` rather than in `TabBar` precisely so those two cannot disagree,
+ *   and **measured 2026-08-08, sabotage-checking the split-signal test**:
+ *   handing `⌥1..9` the ungrouped list — `const currentTabs =
+ *   tabsOfProject(state, state.activeProjectId ?? '')`, leaving `TabBar` its
+ *   own `tabEntries` — leaves the split-signal test green. Nothing in this
+ *   repo presses ⌥3.
+ * - **that `groupedTabs` itself reorders, as distinct from `TabBar` drawing
+ *   what it is handed.** Also measured the same day: passing `TabBar`
+ *   `currentTabs.map((pane) => ({ pane, groupId: null, pos: null }))` in
+ *   place of `tabEntries` still failed the split-signal test — but on the
+ *   group/position assertions, not on the order assertion the comment above
+ *   that test names as the one a non-reordering `groupedTabs` would trip.
+ *   `currentTabs` is `tabEntries.map((entry) => entry.pane)`
+ *   (`App.tsx:333`), so it already carries Task 1's reorder; stripping the
+ *   tags on the way into `TabBar` cannot undo an order baked in one line
+ *   above it. The order assertion is real — it would catch `groupedTabs`
+ *   itself failing to reorder, which `tests/unit/tabGroups.test.ts` is where
+ *   that is actually pinned — but no mutation reachable through `App.tsx`'s
+ *   wiring alone exercises it; only a change to `groupedTabs` would.
  *
  * - **that the seam is on the screen.** The test above reads computed style,
  *   not pixels, and says so in its own comment. Checked by hand instead, the
@@ -1211,4 +1244,103 @@ test('right-clicking a pane recolours it, in the canvas and the box, and it surv
     .toBe('rgb(9, 9, 11)')
 
   await second.close()
+})
+
+// The bar lists PANES, one entry each, so a split adds an entry that looks
+// unrelated to the one it came from — and need not even sit beside it, since
+// `applyTabShape` appends the new pane to the END of `state.panes`
+// (`workspace.ts:875`).
+//
+// Which is why this opens TWO tabs and then goes BACK to the first to split
+// it. That is the arrangement where `state.panes` is [A, B, A2] and the bar
+// must draw A, A2, B: a `groupedTabs` that tagged the panes but never reordered
+// them passes every other shape of this test and fails this one.
+test('a split names itself in the tab bar, next to the tab it came from', async () => {
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  await window.getByTestId('new-tab').click()
+  await expect(window.getByTestId('terminal-active')).toBeVisible()
+  await expect.poll(async () => (await sessionNames(SOCKET)).length, { timeout: 20_000 }).toBe(1)
+  const [first] = await paneIds(window)
+  expect(first).toBeDefined()
+
+  await window.getByTestId('new-tab').click()
+  await expect.poll(async () => (await sessionNames(SOCKET)).length, { timeout: 20_000 }).toBe(2)
+  const [second] = await paneIds(window)
+  expect(second).toBeDefined()
+  expect(second).not.toBe(first)
+
+  // Back to the first tab, and split THAT one. `paneIds` reads the visible
+  // group, so waiting for it to report `first` waits for the activation to
+  // reach the DOM rather than assuming the click did it.
+  await window.getByTestId(`tab-${first}`).click()
+  await expect.poll(async () => paneIds(window)).toEqual([first])
+
+  await window.keyboard.press('Meta+d')
+  await expect(
+    window.getByTestId('terminal-active').locator(':scope > [data-testid^="pane-"]'),
+  ).toHaveCount(2)
+  await expect.poll(async () => (await sessionNames(SOCKET)).length, { timeout: 20_000 }).toBe(3)
+  const panes = await paneIds(window)
+  const sibling = panes.find((id) => id !== first)
+  expect(sibling).toBeDefined()
+
+  /**
+   * Every tab-bar entry, left to right, with the four things this test reads.
+   *
+   * `[data-testid^="tab-"]` is the same prefix 27+ locators across the suite
+   * count tabs with, and it matches the tab divs only: the bar itself is
+   * `tabbar`, and the per-tab `tablabel-`, `tabinput-` and `tabmenu-` testids
+   * all lack the hyphen. If this returns more entries than there are tabs,
+   * something new has been added under that prefix and the rest of the suite
+   * is already miscounting.
+   */
+  const bar = await window
+    .getByTestId('tabbar')
+    .locator('[data-testid^="tab-"]')
+    .evaluateAll((els) =>
+      els.map((el) => ({
+        id: (el as HTMLElement).dataset.testid?.replace('tab-', '') ?? '',
+        group: (el as HTMLElement).dataset.groupId ?? null,
+        pos: (el as HTMLElement).dataset.groupPos ?? null,
+        borderRight: getComputedStyle(el).borderRightWidth,
+        shadow: getComputedStyle(el).boxShadow,
+      })),
+    )
+
+  // The reordering. `state.panes` is [first, second, sibling]; the bar is not.
+  expect(bar.map((entry) => entry.id)).toEqual([first, sibling, second])
+
+  const [founderRow, siblingRow, loneRow] = bar
+  expect(founderRow).toBeDefined()
+  expect(siblingRow).toBeDefined()
+  expect(loneRow).toBeDefined()
+
+  // One split: same group, and the two ends of it.
+  expect(founderRow?.group).not.toBeNull()
+  expect(siblingRow?.group).toBe(founderRow?.group)
+  expect(founderRow?.pos).toBe('first')
+  expect(siblingRow?.pos).toBe('last')
+
+  // The tab that was never split is in no group at all.
+  expect(loneRow?.group).toBeNull()
+  expect(loneRow?.pos).toBeNull()
+
+  // No rule inside the group, one on the way out of it, one after the tab that
+  // is not in it. The strip alone would not be enough: a divider through the
+  // middle of a group says the opposite of what the strip says.
+  expect(founderRow?.borderRight).toBe('0px')
+  expect(siblingRow?.borderRight).not.toBe('0px')
+  expect(loneRow?.borderRight).not.toBe('0px')
+
+  // The strip. `--color-group` is #5e8322 = rgb(94, 131, 34). The colour and
+  // the `inset` keyword are asserted separately so a change to either names
+  // itself rather than failing one opaque string comparison.
+  expect(founderRow?.shadow).toContain('rgb(94, 131, 34)')
+  expect(founderRow?.shadow).toContain('inset')
+  expect(siblingRow?.shadow).toContain('rgb(94, 131, 34)')
+  expect(loneRow?.shadow).not.toContain('rgb(94, 131, 34)')
+
+  await app.close()
 })
