@@ -1239,6 +1239,10 @@ export interface PTermApi {
    * path cannot be resolved.
    */
   openDiff(projectId: string, relPath: string, side: DiffSide): Promise<TabDescriptor | null>
+  /** Lists issues in the active project's repository, filtered by `state`. */
+  issuesList(projectId: string, state: IssueStateFilter): Promise<IssuesResult<IssueSummary[]>>
+  /** Fetches one issue's full detail from the active project's repository. */
+  issuesGet(projectId: string, number: number): Promise<IssuesResult<IssueDetail>>
   /**
    * Tell main which side columns are collapsed, so the View menu's checkboxes
    * and its hide-all label can show the truth.

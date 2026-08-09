@@ -9,6 +9,7 @@ import {
   type FsResult,
   type HistoryEntry,
   type HistoryScope,
+  type IssueStateFilter,
   type NotificationConfig,
   type OpenRequest,
   type Preset,
@@ -40,6 +41,7 @@ import {
   rescaledClaims,
   type Claim,
 } from './shares'
+import { getIssue, listIssues } from '../gh/issues'
 import { attachSavedFields } from './savedFields'
 import { isDirectory } from '../fsutil'
 import { scanCandidates } from '../projects/discovery'
@@ -1459,6 +1461,30 @@ export function registerIpc(
     const project = config.projects.find((row) => row.id === projectId)
     if (!project) return null
     return readChanges(project.cwd)
+  })
+
+  // Outside `serialise`, like the git read above and for the same reason:
+  // these read a repository (via `gh`, not git itself) and never touch
+  // pTerm's config.
+  ipcMain.handle(
+    CHANNELS.issuesList,
+    async (_event, projectId: string, state: IssueStateFilter) => {
+      const config = await store.read()
+      const project = config.projects.find((row) => row.id === projectId)
+      if (!project) {
+        return { ok: false as const, reason: 'no-repo' as const, message: 'No project' }
+      }
+      return listIssues(project.cwd, state)
+    },
+  )
+
+  ipcMain.handle(CHANNELS.issuesGet, async (_event, projectId: string, number: number) => {
+    const config = await store.read()
+    const project = config.projects.find((row) => row.id === projectId)
+    if (!project) {
+      return { ok: false as const, reason: 'no-repo' as const, message: 'No project' }
+    }
+    return getIssue(project.cwd, number)
   })
 
   /**

@@ -8,6 +8,10 @@ import {
   type GitMutation,
   type GitStatus,
   type GitSyncResult,
+  type IssueDetail,
+  type IssueStateFilter,
+  type IssueSummary,
+  type IssuesResult,
   type MenuCommand,
   type OpenRequest,
   type PTermApi,
@@ -128,6 +132,13 @@ const api: PTermApi = {
     ipcRenderer.invoke(CHANNELS.gitSync, projectId),
   gitChanges: (projectId: string): Promise<GitChanges | null> =>
     ipcRenderer.invoke(CHANNELS.gitChanges, projectId),
+  issuesList: (
+    projectId: string,
+    state: IssueStateFilter,
+  ): Promise<IssuesResult<IssueSummary[]>> =>
+    ipcRenderer.invoke(CHANNELS.issuesList, projectId, state),
+  issuesGet: (projectId: string, number: number): Promise<IssuesResult<IssueDetail>> =>
+    ipcRenderer.invoke(CHANNELS.issuesGet, projectId, number),
   gitStage: (projectId: string, paths: string[]): Promise<GitMutation> =>
     ipcRenderer.invoke(CHANNELS.gitStage, projectId, paths),
   gitUnstage: (projectId: string, paths: string[]): Promise<GitMutation> =>
