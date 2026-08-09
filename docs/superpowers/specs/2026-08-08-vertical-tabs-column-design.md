@@ -159,16 +159,23 @@ counted by 27+ locators across the suite, `pane-` by `splits.spec.ts`, and
 
 ### What this is expected to break
 
-Named up front so a red run is recognised rather than investigated:
+Named up front so a red run is recognised rather than investigated. Each line
+below was checked against the spec file rather than assumed:
 
-- **`menuColumns.spec.ts`** — a seventh column adds a View-menu item, and that
-  spec asserts the menu's contents.
-- **`columnVisibility.test.ts`** — enumerates the six ids.
-- **`splits.spec.ts`** — only if the column defaults to anything but hidden. It
-  encodes pixel arithmetic across the whole flex row, and an always-on column
-  breaks five tests at once. The column defaults hidden like every other column,
-  which is what keeps the rest of the suite untouched, and that spec gets run to
-  confirm rather than assumed.
+- **`columnVisibility.test.ts` WILL break.** Line 28 asserts
+  `COLUMN_IDS` equals the exact six-item array, so it fails the moment a seventh
+  is added. It is updated as part of the task that adds the id.
+- **`menuColumns.spec.ts` should NOT break.** Checked: it clicks menu items by
+  id (`toggle-git`, `hide-all-columns`) and asserts specific panels — it never
+  enumerates the menu's contents or counts its items, so a seventh entry is
+  invisible to it. Its hide-all test still holds, because hiding every column
+  hides this one too and simply brings the bar back. Run it to confirm; do not
+  "fix" it pre-emptively.
+- **`splits.spec.ts`** — at risk only if the column defaults to anything but
+  hidden. It encodes pixel arithmetic across the whole flex row, and an
+  always-on column breaks five tests at once. The column defaults hidden like
+  every other column, which is what keeps the rest of the suite untouched, and
+  that spec gets run to confirm rather than assumed.
 
 ## Known limitation
 
