@@ -149,6 +149,7 @@ export async function resolveRepo(
 }
 
 const MESSAGES: Record<IssuesFailure, string> = {
+  'no-project': 'This project is no longer in the workspace.',
   'no-repo': 'This project is not inside a git repository.',
   'no-remote': 'This repository has no origin remote.',
   'not-github': 'The origin remote does not point at GitHub.',

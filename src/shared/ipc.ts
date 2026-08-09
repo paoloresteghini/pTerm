@@ -811,6 +811,7 @@ export type IssueStateFilter = 'open' | 'closed' | 'all'
  * re-exports it, because the renderer cannot import from `src/main`.
  */
 export type IssuesFailure =
+  | 'no-project'
   | 'no-repo'
   | 'no-remote'
   | 'not-github'

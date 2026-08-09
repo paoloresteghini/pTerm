@@ -1472,7 +1472,7 @@ export function registerIpc(
       const config = await store.read()
       const project = config.projects.find((row) => row.id === projectId)
       if (!project) {
-        return { ok: false as const, reason: 'no-repo' as const, message: 'No project' }
+        return { ok: false as const, reason: 'no-project' as const, message: 'No project' }
       }
       return listIssues(project.cwd, state)
     },
@@ -1482,7 +1482,7 @@ export function registerIpc(
     const config = await store.read()
     const project = config.projects.find((row) => row.id === projectId)
     if (!project) {
-      return { ok: false as const, reason: 'no-repo' as const, message: 'No project' }
+      return { ok: false as const, reason: 'no-project' as const, message: 'No project' }
     }
     return getIssue(project.cwd, number)
   })
