@@ -31,7 +31,7 @@ issue templates.
 
 `gh` inherits the login the user already has, works against GitHub Enterprise without extra
 work, stores no token in this app's config, and needs no rate-limit bookkeeping of our own.
-The alternative — REST plus a stored token — means owning token capture, secure storage,
+The alternative, REST plus a stored token, means owning token capture, secure storage,
 401 handling, pagination and rate-limit headers before reaching parity.
 
 The cost is a hard dependency on `gh` being installed, which is one of the five empty states
@@ -41,7 +41,7 @@ Verified against `gh version 2.96.0 (2026-07-02)` on 2026-08-09.
 
 ## Why a column and not a pane
 
-Every other finder in this app — `FileTree`, `GitPanel` — lives in a column. The issues list
+Every other finder in this app (`FileTree`, `GitPanel`) lives in a column. The issues list
 is a finder. Putting it in a column means it costs no new `TabType`, no new `PaneRecord`
 type, no entry in `SESSIONLESS`, no `tabLabel.ts` case, and no `attachSavedFields` field, and
 it cannot collide with the 27+ e2e locators that count open tabs by `[data-testid^="tab-"]`.
@@ -72,8 +72,8 @@ which is what "click the one you want to work on" means.
 └──────┴─────────────────────┴────────┘
 ```
 
-The column uses the shared chrome in `src/renderer/ui/Panel.tsx` — `PanelStrip`,
-`PanelHeading`, `ColumnResizer` — and persists its width at `pterm:issuesWidth` through
+The column uses the shared chrome in `src/renderer/ui/Panel.tsx` (`PanelStrip`,
+`PanelHeading`, `ColumnResizer`) and persists its width at `pterm:issuesWidth` through
 `useColumnWidth`, default 256, exactly as `NotesPanel` does. It takes a place in
 `COLUMN_ORDER_DEFAULT` next to `git`, and is draggable in the row like every other column.
 
@@ -113,8 +113,8 @@ not a wall of controls:
 
 ## The modal
 
-A Radix `Dialog` following `SettingsPane.tsx` — `DialogContent`, centred, `max-h-[85vh]
-overflow-y-auto` — but wider. Settings is narrow; issue bodies want roughly 720px.
+A Radix `Dialog` following `SettingsPane.tsx` (`DialogContent`, centred, `max-h-[85vh]
+overflow-y-auto`), but wider. Settings is narrow; issue bodies want roughly 720px.
 
 Top to bottom:
 
@@ -144,7 +144,7 @@ is one click away when the rendered view is what is wanted.
 Comment bodies get the same treatment. Editing uses the same component, writable.
 
 If in-app rendering is ever wanted, it is its own scoped decision with its own sanitizer
-review — not a detail of this panel.
+review, not a detail of this panel.
 
 ## Data layer
 
@@ -186,7 +186,7 @@ list, which is usually empty, and the heading naming `owner/name` is how that be
 visible rather than mysterious.
 
 **Every `gh` call passes `--repo` explicitly.** Left to resolve the base repository itself,
-`gh` applies its own rules and, in a fork with several remotes, prompts — which, spawned
+`gh` applies its own rules and, in a fork with several remotes, prompts, which, spawned
 non-interactively, is an error or a hang rather than a prompt. Deriving the reference
 ourselves and passing it makes every invocation deterministic.
 
@@ -266,7 +266,7 @@ The ceiling is honest rather than hidden. `--limit 200`, and `truncated` is true
 reply came back holding exactly the limit, which is the only signal available: `gh issue
 list` reports the page it fetched and never a repository total, so a `200 of 431` reading
 cannot be produced without a second, different call. The heading therefore reads `200+`,
-which claims only what is known — that the filter is not looking at everything.
+which claims only what is known: that the filter is not looking at everything.
 
 Server-side `--search` is the obvious follow-up if that ceiling is ever reached in practice,
 and it is also where a true total would come from.
@@ -305,7 +305,7 @@ a toast that disappears before it can be read.
 
 **Deleting an issue.** `gh issue delete` requires admin on the repository, is irreversible,
 and GitHub itself buries it because closing is what people actually mean. Every other verb
-originally asked for — list, sort, open detail, change status, search, create, edit — is in.
+originally asked for (list, sort, open detail, change status, search, create, edit) is in.
 
 ## Also in scope: the Git column becomes "Git Changes"
 
