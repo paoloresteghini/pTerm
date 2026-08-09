@@ -1582,13 +1582,18 @@ export function App() {
     </div>
   )
 
-  // The row's order, and the case that draws each slot from it. `switch`, not
-  // a lookup object, and no `default`: a slot with no matching case fails to
-  // compile instead of rendering nothing, which is what makes `ColumnSlot`
-  // gaining a member later a build error here rather than a silent blank
-  // column.
+  // The row's order, and the case that draws each slot from it.
   const columnOrder: readonly ColumnSlot[] = COLUMN_ORDER_DEFAULT
 
+  // `renderSlot` returns `ReactNode`, and `ReactNode` includes `undefined`:
+  // with no `default` case, a slot this `switch` does not name simply falls
+  // out of it and returns `undefined`, which is a value this function's own
+  // return type accepts. `tsconfig.json` does not set `noImplicitReturns`
+  // either, so nothing else catches that for a function shaped like this
+  // one. The `default` below is what turns a missing case into a build
+  // error: assigning `slot` to a `never` only typechecks once every member
+  // of `ColumnSlot` has a case above it, so a slot the switch has not
+  // handled fails `tsc` on this line instead of rendering a blank column.
   const renderSlot = (slot: ColumnSlot): ReactNode => {
     switch (slot) {
       case 'terminal':
@@ -1751,6 +1756,10 @@ export function App() {
             side={resizerSideFor(columnOrder, 'notes')}
           />
         )
+      default: {
+        const unreachable: never = slot
+        return unreachable
+      }
     }
   }
 
