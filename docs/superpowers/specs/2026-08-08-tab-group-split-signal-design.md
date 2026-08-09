@@ -15,7 +15,7 @@ screen reads. On a window showing two panes side by side, the bar shows two
 unrelated-looking tabs.
 
 Worse, they need not even be next to each other. `applyTabShape` appends the new
-pane to the END of `state.panes` (`workspace.ts:876`), so splitting the first of
+pane to the END of `state.panes` (`workspace.ts:875`), so splitting the first of
 three tabs puts its sibling last in the bar. Adjacency today is luck.
 
 ## The design

@@ -88,7 +88,7 @@ describe('groupedTabs', () => {
 
   it('pulls a split sibling forward to its founder, leaving the rest in place', () => {
     // What `applyTabShape` actually produces: the new pane is appended to the
-    // END of `state.panes` (workspace.ts:876), so splitting the FIRST of three
+    // END of `state.panes` (workspace.ts:875), so splitting the FIRST of three
     // tabs puts its sibling last. This is the case the whole module exists for.
     const entries = groupedTabs(
       [pane('a'), pane('b'), pane('c'), pane('a2')],
@@ -182,7 +182,7 @@ import type { TabDescriptor, TabRow } from '../../shared/ipc'
  * as a single window.
  *
  * They need not even be adjacent: `applyTabShape` appends the new pane to the
- * END of `state.panes` (`workspace.ts:876`), so splitting the first of three
+ * END of `state.panes` (`workspace.ts:875`), so splitting the first of three
  * tabs puts its sibling last. Adjacency in a running app is luck, which is why
  * this reorders rather than only tagging.
  */
@@ -474,7 +474,7 @@ Add at the end of `tests/e2e/splits.spec.ts`:
 // The bar lists PANES, one entry each, so a split adds an entry that looks
 // unrelated to the one it came from — and need not even sit beside it, since
 // `applyTabShape` appends the new pane to the END of `state.panes`
-// (`workspace.ts:876`).
+// (`workspace.ts:875`).
 //
 // Which is why this opens TWO tabs and then goes BACK to the first to split
 // it. That is the arrangement where `state.panes` is [A, B, A2] and the bar
