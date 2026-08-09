@@ -28,6 +28,7 @@ const DEFAULT_ORDER = [
   'presets',
   'prompts',
   'git',
+  'issues',
   'notes',
 ]
 
@@ -236,7 +237,7 @@ test('dragging a column rightward across the terminal lands where the gap indica
 
   const orderBefore = await columnOrderOf(page)
   expect(orderBefore).toEqual([
-    'notes', 'files', 'projects', 'tabs', 'terminal', 'skills', 'presets', 'prompts', 'git',
+    'notes', 'files', 'projects', 'tabs', 'terminal', 'skills', 'presets', 'prompts', 'git', 'issues',
   ])
 
   const panelBefore = await boxOf(page, 'files-panel')
@@ -256,7 +257,7 @@ test('dragging a column rightward across the terminal lands where the gap indica
   await dragColumnTo(page, 'files-toggle', 6)
 
   const expectedOrder = [
-    'notes', 'projects', 'tabs', 'terminal', 'skills', 'files', 'presets', 'prompts', 'git',
+    'notes', 'projects', 'tabs', 'terminal', 'skills', 'files', 'presets', 'prompts', 'git', 'issues',
   ]
   await expect.poll(() => columnOrderOf(page)).toEqual(expectedOrder)
 

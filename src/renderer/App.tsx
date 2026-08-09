@@ -21,6 +21,7 @@ import { SkillsPanel } from './SkillsPanel'
 import { PresetsPanel } from './PresetsPanel'
 import { PromptsPanel } from './PromptsPanel'
 import { GitPanel } from './GitPanel'
+import { IssuesPanel } from './IssuesPanel'
 import { NotesPanel } from './NotesPanel'
 import { AddProjectDialog } from './AddProjectDialog'
 import { ConfirmClosePane } from './ConfirmClosePane'
@@ -99,13 +100,13 @@ const MIN_PANE_COLS = 20
 const MIN_PANE_ROWS = 5
 
 /**
- * Collapse state for the six collapsible columns: '0' means expanded,
+ * Collapse state for the seven collapsible columns: '0' means expanded,
  * anything else (including absent) means collapsed.
  *
  * **Every one of them defaults collapsed**, so a fresh profile shows the
  * projects sidebar and the terminal and nothing else. Each expanded column
- * costs 208px: six of them plus the 208px sidebar is 1456px, which already
- * exceeds the 1280px window `src/main/index.ts` opens, so opening all six on
+ * costs 208px: seven of them plus the 208px sidebar is 1664px, which already
+ * exceeds the 1280px window `src/main/index.ts` opens, so opening all seven on
  * that window leaves no room for a terminal. Nothing stops a user from doing
  * it anyway on a wider or maximised window. The state persists per column, so
  * this default is the first run only.
@@ -115,6 +116,7 @@ const PRESETS_KEY = 'pterm:presetsCollapsed'
 const FILES_KEY = 'pterm:filesCollapsed'
 const PROMPTS_KEY = 'pterm:promptsCollapsed'
 const GIT_KEY = 'pterm:gitCollapsed'
+const ISSUES_KEY = 'pterm:issuesCollapsed'
 const NOTES_KEY = 'pterm:notesCollapsed'
 const TABS_KEY = 'pterm:tabsCollapsed'
 
@@ -140,6 +142,7 @@ const HIDDEN_KEYS: Record<ColumnId, string> = {
   presets: 'pterm:presetsHidden',
   prompts: 'pterm:promptsHidden',
   git: 'pterm:gitHidden',
+  issues: 'pterm:issuesHidden',
   notes: 'pterm:notesHidden',
 }
 
@@ -160,10 +163,11 @@ export function App() {
   const [filesCollapsed, setFilesCollapsed] = useState(() => storedCollapsed(FILES_KEY, true))
   const [promptsCollapsed, setPromptsCollapsed] = useState(() => storedCollapsed(PROMPTS_KEY, true))
   const [gitCollapsed, setGitCollapsed] = useState(() => storedCollapsed(GIT_KEY, true))
+  const [issuesCollapsed, setIssuesCollapsed] = useState(() => storedCollapsed(ISSUES_KEY, true))
   const [notesCollapsed, setNotesCollapsed] = useState(() => storedCollapsed(NOTES_KEY, true))
   const [tabsCollapsed, setTabsCollapsed] = useState(() => storedCollapsed(TABS_KEY, true))
   // Every column starts hidden on a fresh profile, which is what shipped: the
-  // window opens on terminal, not on seven columns of chrome.
+  // window opens on terminal, not on eight columns of chrome.
   const [hiddenColumns, setHiddenColumns] = useState<ColumnVisibility>(() => ({
     tabs: storedCollapsed(HIDDEN_KEYS.tabs, true),
     files: storedCollapsed(HIDDEN_KEYS.files, true),
@@ -171,6 +175,7 @@ export function App() {
     presets: storedCollapsed(HIDDEN_KEYS.presets, true),
     prompts: storedCollapsed(HIDDEN_KEYS.prompts, true),
     git: storedCollapsed(HIDDEN_KEYS.git, true),
+    issues: storedCollapsed(HIDDEN_KEYS.issues, true),
     notes: storedCollapsed(HIDDEN_KEYS.notes, true),
   }))
   // The row's left-to-right order. Restored from whatever the last drag
@@ -297,6 +302,12 @@ export function App() {
     // Collapsing to the strip is the heading's job, not this one's.
     setColumnHidden('git', !hiddenColumns.git)
   }, [hiddenColumns.git, setColumnHidden])
+  const toggleIssues = useCallback(() => {
+    // The View menu's item and its shortcut both land here, and both
+    // mean presence: show the column, or take it off screen entirely.
+    // Collapsing to the strip is the heading's job, not this one's.
+    setColumnHidden('issues', !hiddenColumns.issues)
+  }, [hiddenColumns.issues, setColumnHidden])
   const toggleFiles = useCallback(() => {
     // The View menu's item and its shortcut both land here, and both
     // mean presence: show the column, or take it off screen entirely.
@@ -339,6 +350,7 @@ export function App() {
     prompts: setPromptsCollapsed,
     notes: setNotesCollapsed,
     git: setGitCollapsed,
+    issues: setIssuesCollapsed,
   }
 
   const COLUMN_KEY: Record<ColumnId, string> = {
@@ -349,6 +361,7 @@ export function App() {
     prompts: PROMPTS_KEY,
     notes: NOTES_KEY,
     git: GIT_KEY,
+    issues: ISSUES_KEY,
   }
 
   /**
@@ -379,7 +392,7 @@ export function App() {
     window.pterm.columnsVisible(hiddenColumns)
   }, [hiddenColumns])
 
-  // The seven *Collapsed booleans as one ColumnVisibility, for showsTabBar.
+  // The eight *Collapsed booleans as one ColumnVisibility, for showsTabBar.
   const collapsedColumns: ColumnVisibility = {
     tabs: tabsCollapsed,
     files: filesCollapsed,
@@ -387,6 +400,7 @@ export function App() {
     presets: presetsCollapsed,
     prompts: promptsCollapsed,
     git: gitCollapsed,
+    issues: issuesCollapsed,
     notes: notesCollapsed,
   }
 
@@ -1168,6 +1182,9 @@ export function App() {
           case 'toggleGit':
             toggleGit()
             return
+          case 'toggleIssues':
+            toggleIssues()
+            return
           case 'hideAllColumns':
             hideAllColumns()
             return
@@ -1188,6 +1205,7 @@ export function App() {
       togglePrompts,
       toggleNotes,
       toggleGit,
+      toggleIssues,
       hideAllColumns,
     ],
   )
@@ -1275,6 +1293,7 @@ export function App() {
           KeyR: togglePrompts,
           KeyN: toggleNotes,
           KeyG: toggleGit,
+          KeyI: toggleIssues,
         }
         const toggle = column[event.code]
         if (toggle) {
@@ -1328,6 +1347,7 @@ export function App() {
     togglePrompts,
     toggleNotes,
     toggleGit,
+    toggleIssues,
     hideAllColumns,
   ])
 
@@ -1740,8 +1760,8 @@ export function App() {
             side={resizerSideFor(columnOrder, 'tabs')}
           />
         )
-      // Five independently collapsible columns (Files, above, is the
-      // sixth). Each renders its own vertical strip when collapsed, so
+      // Six independently collapsible columns (Files, above, is the
+      // seventh). Each renders its own vertical strip when collapsed, so
       // none of them can vanish without leaving a way back.
       case 'skills':
         return hiddenColumns.skills ? null : (
@@ -1797,6 +1817,16 @@ export function App() {
             onDragStart={() => setDragging('git')}
             onOpenDiff={openDiff}
             side={resizerSideFor(columnOrder, 'git')}
+          />
+        )
+      case 'issues':
+        return hiddenColumns.issues ? null : (
+          <IssuesPanel
+            project={project}
+            collapsed={issuesCollapsed}
+            onToggle={() => toggleColumnCollapsed('issues')}
+            onDragStart={() => setDragging('issues')}
+            side={resizerSideFor(columnOrder, 'issues')}
           />
         )
       case 'notes':

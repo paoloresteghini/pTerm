@@ -32,6 +32,7 @@ export const COLUMN_ORDER_DEFAULT: readonly ColumnSlot[] = [
   'presets',
   'prompts',
   'git',
+  'issues',
   'notes',
 ]
 

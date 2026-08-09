@@ -117,6 +117,7 @@ export type MenuCommand =
   | 'togglePrompts'
   | 'toggleNotes'
   | 'toggleGit'
+  | 'toggleIssues'
   | 'hideAllColumns'
   | 'settings'
 
@@ -1278,7 +1279,7 @@ export interface PTermApi {
  * this shape across the IPC boundary and main needs the same type the
  * renderer does.
  */
-export type ColumnId = 'tabs' | 'files' | 'skills' | 'presets' | 'prompts' | 'notes' | 'git'
+export type ColumnId = 'tabs' | 'files' | 'skills' | 'presets' | 'prompts' | 'notes' | 'git' | 'issues'
 
 export type ColumnVisibility = Record<ColumnId, boolean>
 

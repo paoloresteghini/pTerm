@@ -29,6 +29,7 @@ export const COLUMN_IDS: readonly ColumnId[] = [
   'presets',
   'prompts',
   'git',
+  'issues',
   'notes',
 ]
 

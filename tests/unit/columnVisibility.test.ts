@@ -18,6 +18,7 @@ const ALL_SHUT: ColumnVisibility = {
   prompts: true,
   notes: true,
   git: true,
+  issues: true,
 }
 
 const withOpen = (...open: Array<keyof ColumnVisibility>): ColumnVisibility => {
@@ -27,10 +28,12 @@ const withOpen = (...open: Array<keyof ColumnVisibility>): ColumnVisibility => {
 }
 
 describe('COLUMN_IDS', () => {
-  it('lists the seven columns in on-screen order', () => {
+  it('lists the eight columns in on-screen order', () => {
     // `tabs` leads because the column sits leftmost, immediately right of the
     // projects sidebar, and this array is documented as on-screen order.
-    expect(COLUMN_IDS).toEqual(['tabs', 'files', 'skills', 'presets', 'prompts', 'git', 'notes'])
+    expect(COLUMN_IDS).toEqual([
+      'tabs', 'files', 'skills', 'presets', 'prompts', 'git', 'issues', 'notes',
+    ])
   })
 })
 
@@ -64,6 +67,7 @@ describe('hideAll', () => {
       skills: true,
       files: false,
       tabs: true,
+      issues: true,
     }
     expect(hideAll(opened).remembered).toEqual(['files', 'git'])
   })
@@ -105,10 +109,10 @@ describe('the round trip', () => {
 
 describe('showsTabBar', () => {
   const allCollapsed: ColumnVisibility = {
-    tabs: true, files: true, skills: true, presets: true, prompts: true, git: true, notes: true,
+    tabs: true, files: true, skills: true, presets: true, prompts: true, git: true, issues: true, notes: true,
   }
   const noneHidden: Record<ColumnId, boolean> = {
-    tabs: false, files: false, skills: false, presets: false, prompts: false, git: false, notes: false,
+    tabs: false, files: false, skills: false, presets: false, prompts: false, git: false, issues: false, notes: false,
   }
 
   it('shows the bar when the tabs column is collapsed to its strip', () => {
@@ -133,7 +137,7 @@ describe('showsTabBar', () => {
     // them apart.
     const alsoOpen: ColumnVisibility = {
       tabs: false, files: false, skills: false, presets: false,
-      prompts: false, git: false, notes: false,
+      prompts: false, git: false, issues: false, notes: false,
     }
     expect(showsTabBar(alsoOpen, noneHidden)).toBe(false)
   })

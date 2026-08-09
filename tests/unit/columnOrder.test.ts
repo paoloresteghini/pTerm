@@ -34,8 +34,15 @@ import {
 describe('COLUMN_ORDER_DEFAULT', () => {
   it('is the row as it stands before anyone drags anything', () => {
     expect(COLUMN_ORDER_DEFAULT).toEqual([
-      'files', 'projects', 'tabs', 'terminal', 'skills', 'presets', 'prompts', 'git', 'notes',
+      'files', 'projects', 'tabs', 'terminal', 'skills', 'presets', 'prompts', 'git', 'issues', 'notes',
     ])
+  })
+
+  it('places issues next to git in the default order', () => {
+    const git = COLUMN_ORDER_DEFAULT.indexOf('git')
+    const issues = COLUMN_ORDER_DEFAULT.indexOf('issues')
+    expect(issues).toBeGreaterThan(-1)
+    expect(Math.abs(issues - git)).toBe(1)
   })
 })
 
@@ -55,7 +62,7 @@ describe('orderFromStored', () => {
 
   it('keeps a stored order the app fully recognises', () => {
     const stored: ColumnSlot[] = [
-      'notes', 'files', 'projects', 'tabs', 'terminal', 'skills', 'presets', 'prompts', 'git',
+      'notes', 'files', 'projects', 'tabs', 'terminal', 'skills', 'presets', 'prompts', 'git', 'issues',
     ]
     expect(orderFromStored(JSON.stringify(stored))).toEqual(stored)
   })
@@ -71,7 +78,7 @@ describe('orderFromStored', () => {
     // COLUMN_ORDER_DEFAULT's order and not in some incidental one.
     const stored: ColumnSlot[] = ['notes', 'projects', 'terminal']
     expect(orderFromStored(JSON.stringify(stored))).toEqual([
-      'notes', 'projects', 'terminal', 'files', 'tabs', 'skills', 'presets', 'prompts', 'git',
+      'notes', 'projects', 'terminal', 'files', 'tabs', 'skills', 'presets', 'prompts', 'git', 'issues',
     ])
   })
 
