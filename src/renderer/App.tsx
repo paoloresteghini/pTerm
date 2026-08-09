@@ -39,6 +39,7 @@ import {
   anyOpen,
   hideAll,
   restore,
+  showsTabBar,
   type ColumnId,
   type ColumnVisibility,
 } from './lib/columnVisibility'
@@ -111,6 +112,7 @@ const FILES_KEY = 'pterm:filesCollapsed'
 const PROMPTS_KEY = 'pterm:promptsCollapsed'
 const GIT_KEY = 'pterm:gitCollapsed'
 const NOTES_KEY = 'pterm:notesCollapsed'
+const TABS_KEY = 'pterm:tabsCollapsed'
 
 /*
  * A column has THREE states, and these keys hold the second of the two flags.
@@ -125,6 +127,7 @@ const NOTES_KEY = 'pterm:notesCollapsed'
  * simply default, and nothing has to migrate.
  */
 const HIDDEN_KEYS: Record<ColumnId, string> = {
+  tabs: 'pterm:tabsHidden',
   files: 'pterm:filesHidden',
   skills: 'pterm:skillsHidden',
   presets: 'pterm:presetsHidden',
@@ -151,9 +154,11 @@ export function App() {
   const [promptsCollapsed, setPromptsCollapsed] = useState(() => storedCollapsed(PROMPTS_KEY, true))
   const [gitCollapsed, setGitCollapsed] = useState(() => storedCollapsed(GIT_KEY, true))
   const [notesCollapsed, setNotesCollapsed] = useState(() => storedCollapsed(NOTES_KEY, true))
+  const [tabsCollapsed, setTabsCollapsed] = useState(() => storedCollapsed(TABS_KEY, true))
   // Every column starts hidden on a fresh profile, which is what shipped: the
-  // window opens on terminal, not on six columns of chrome.
+  // window opens on terminal, not on seven columns of chrome.
   const [hiddenColumns, setHiddenColumns] = useState<ColumnVisibility>(() => ({
+    tabs: storedCollapsed(HIDDEN_KEYS.tabs, true),
     files: storedCollapsed(HIDDEN_KEYS.files, true),
     skills: storedCollapsed(HIDDEN_KEYS.skills, true),
     presets: storedCollapsed(HIDDEN_KEYS.presets, true),
@@ -276,6 +281,7 @@ export function App() {
   // void`: these are React setters and `toggleColumnCollapsed` hands them an
   // updater, which the narrower type rejected.
   const setColumn: Record<ColumnId, Dispatch<SetStateAction<boolean>>> = {
+    tabs: setTabsCollapsed,
     files: setFilesCollapsed,
     skills: setSkillsCollapsed,
     presets: setPresetsCollapsed,
@@ -285,6 +291,7 @@ export function App() {
   }
 
   const COLUMN_KEY: Record<ColumnId, string> = {
+    tabs: TABS_KEY,
     files: FILES_KEY,
     skills: SKILLS_KEY,
     presets: PRESETS_KEY,
@@ -320,6 +327,17 @@ export function App() {
     // column collapsed to its strip is still on screen.
     window.pterm.columnsVisible(hiddenColumns)
   }, [hiddenColumns])
+
+  // The seven *Collapsed booleans as one ColumnVisibility, for showsTabBar.
+  const collapsedColumns: ColumnVisibility = {
+    tabs: tabsCollapsed,
+    files: filesCollapsed,
+    skills: skillsCollapsed,
+    presets: presetsCollapsed,
+    prompts: promptsCollapsed,
+    git: gitCollapsed,
+    notes: notesCollapsed,
+  }
 
   const project = activeProject(state)
   const currentTabId = activeTabId(state)
@@ -1390,23 +1408,25 @@ export function App() {
         />
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <TabBar
-            tabs={tabEntries}
-            activeId={currentTabId}
-            status={state.status}
-            since={state.since}
-            now={now}
-            dead={state.dead}
-            dirty={dirty}
-            onActivate={(id) => dispatch({ type: 'activatedTab', id })}
-            onClose={requestClosePane}
-            onRestart={restartTab}
-            onDismiss={dismissTab}
-            onNew={openTab}
-            onRename={renameTab}
-            onRecolor={recolorPane}
-            canOpen={canOpen}
-          />
+          {showsTabBar(collapsedColumns, hiddenColumns) ? (
+            <TabBar
+              tabs={tabEntries}
+              activeId={currentTabId}
+              status={state.status}
+              since={state.since}
+              now={now}
+              dead={state.dead}
+              dirty={dirty}
+              onActivate={(id) => dispatch({ type: 'activatedTab', id })}
+              onClose={requestClosePane}
+              onRestart={restartTab}
+              onDismiss={dismissTab}
+              onNew={openTab}
+              onRename={renameTab}
+              onRecolor={recolorPane}
+              canOpen={canOpen}
+            />
+          ) : null}
           {error ? (
             <pre
               data-testid="startup-error"

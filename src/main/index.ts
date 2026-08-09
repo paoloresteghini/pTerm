@@ -201,6 +201,7 @@ function showColumns(collapsed: ColumnVisibility): void {
   const menu = Menu.getApplicationMenu()
   if (!menu) return
   const ids: Record<ColumnId, string> = {
+    tabs: 'toggle-tabs',
     files: 'toggle-files',
     skills: 'toggle-skills',
     presets: 'toggle-presets',
