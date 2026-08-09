@@ -22,7 +22,7 @@ Design: `docs/superpowers/specs/2026-08-08-vertical-tabs-column-design.md`
 
 ---
 
-### Task 1: `tabTree` — the nested row model
+### Task 1: `tabTree`, the nested row model
 
 **Files:**
 - Modify: `src/renderer/lib/tabGroups.ts` (append; do not touch `groupedTabs`)
@@ -111,13 +111,12 @@ describe('tabTree', () => {
   })
 
   it('resolves a pane claimed by two rows to the first, matching groupedTabs', () => {
-    // The rows overlap on `a` and differ in their other kid, which is what
-    // makes the two resolution orders distinguishable: under first-wins `a`
-    // belongs to r1 and brings `b`, under last-wins it would belong to r2 and
-    // bring `c`. An earlier draft asserted only that a node for `a` existed
-    // with no children, which passed under BOTH orders — neither row id
-    // matched the pane id, so `founder` fell through to `present[0]` either
-    // way. Measured: dropping the first-wins guard left that version green.
+    // The rows overlap on `a` and differ in their other kid. Under first-wins,
+    // `a` belongs to r1 and brings `b` with it; under last-wins it would belong
+    // to r2 and bring `c`. Asserting the children is what makes the two
+    // orderings distinguishable: asserting only that a node for `a` exists
+    // passes either way, which is how the previous version of this test came to
+    // be one that could not fail.
     const tree = tabTree(
       [pane('a'), pane('b'), pane('c')],
       [row('r1', ['a', 'b']), row('r2', ['a', 'c'])],
