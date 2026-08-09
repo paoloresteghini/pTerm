@@ -433,5 +433,54 @@ export class TmuxAdapter {
       args.push('-e', `${key}=${value}`)
     }
     await this.exec(args)
+
+    /*
+     * Whether it actually JOINED, checked rather than assumed, and checked on
+     * the group's SIZE rather than its name.
+     *
+     * **Measured 2026-08-08.** Given a `-t` naming a group that does not
+     * exist, tmux exits 0. It does not error and it does not refuse — it
+     * founds a brand new group of ONE, named after the target that was
+     * missing, holding a brand new session with a brand new window whose pane
+     * runs the login shell.
+     *
+     * That makes the obvious checks all agree with the disaster: the session
+     * exists, `#{session_group}` is exactly the name that was asked for, and
+     * `#{session_grouped}` is 1. Only `#{session_group_size}` tells them
+     * apart — 1 when this call founded the group alone, 2 or more when it
+     * joined sessions that were already there. A real join always has the
+     * member it joined THROUGH still in the group, so 2 is the floor.
+     *
+     * Why it matters: this call passes no `-c`, because a session joining a
+     * group has no start directory of its own to set. So the shell in that
+     * phantom window lands in whatever directory this PROCESS is in — the repo
+     * root under vitest, the app's own cwd in a dev run. Nothing ever attaches
+     * to it. It holds a pty and a shell until something kills the server, and
+     * when the server goes the shell can outlive it, re-parented to init. On
+     * this machine that had reached 287 such shells against a 511-pty budget,
+     * at which point unrelated tests began failing with `posix_spawnp failed`
+     * — a leak whose only symptom was other things breaking.
+     *
+     * Checked after the fact rather than by asking whether the group exists
+     * first: the group can go between the question and the answer, and that is
+     * exactly how this arises (in the suite, a teardown `kill-server` landing
+     * 15ms ahead of the next `new-session`). Only what tmux actually built can
+     * settle it.
+     *
+     * The phantom is destroyed before the throw. `splitTab` rolls back on an
+     * error from here, and it cannot be asked to clean up a session it was
+     * never told was made.
+     */
+    const size = Number(
+      (await this.exec(['display-message', '-p', '-t', `=${name}:`, '#{session_group_size}'])).trim(),
+    )
+    if (!Number.isFinite(size) || size < 2) {
+      await this.killSession(name)
+      throw new Error(
+        `tmux did not join ${name} to group ${group}: the group was gone, so tmux ` +
+          'founded a new one holding only this session. It has been destroyed rather ' +
+          'than left running a shell nothing is attached to.',
+      )
+    }
   }
 }

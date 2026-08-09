@@ -413,3 +413,50 @@ describe('TmuxAdapter groups and windows', () => {
     expect(await hooksOf(first)).not.toContain('pane-died')
   })
 })
+
+/**
+ * The one tmux answer that is worse than an error: silent success at the wrong
+ * thing.
+ *
+ * **Measured 2026-08-08.** `tmux new-session -d -t <a group that does not
+ * exist> -s <name>` exits **0**. It does not join a group, because there is
+ * none to join — it founds a brand new group of ONE, named after the target
+ * that was missing, holding a new session and a new window whose pane runs the
+ * user's login shell. Every obvious check therefore agrees with the disaster:
+ * the session exists, `#{session_group}` is the name that was asked for, and
+ * `#{session_grouped}` is 1. `#{session_group_size}` is the only field that
+ * tells a founding from a joining. And because this call passes no `-c` (a
+ * session joining a group has no start directory of its own to set), that
+ * shell's working directory is whatever the CALLING process happened to be in.
+ *
+ * Nothing attaches to that session. It holds a pty and a shell until something
+ * kills the server, and when the server goes it can leave the shell behind
+ * re-parented to init. That is where 287 orphaned `-zsh` processes on this
+ * machine came from, 376 of a 511-pty budget, and eventually
+ * `posix_spawnp failed` in unrelated tests.
+ *
+ * The group can vanish underneath this call for ordinary reasons — every
+ * session in the tab died, or a teardown raced it by 15ms — so "check first"
+ * is not enough on its own. The check that counts is the one AFTER, on the
+ * thing tmux actually built.
+ */
+describe('TmuxAdapter.newGroupMember when the group is gone', () => {
+  it('refuses, and leaves no stray session holding a shell', async () => {
+    await expect(
+      adapter.newGroupMember('pterm-no-such-group-ffffffffffffffff', 'pterm-victim-0123456789abcdef'),
+    ).rejects.toThrow(/group/i)
+
+    // The half that matters. A throw with the session still standing would
+    // leak exactly the shell this is here to prevent.
+    await expect(adapter.hasSession('pterm-victim-0123456789abcdef')).resolves.toBe(false)
+  })
+
+  it('still joins a group that is really there', async () => {
+    await createSession('pterm-host-0123456789abcdef')
+    await adapter.newGroupMember('pterm-host-0123456789abcdef', 'pterm-member-0123456789abcdef')
+
+    const groups = await adapter.listSessionsWithGroups()
+    const member = groups.find((row) => row.name === 'pterm-member-0123456789abcdef')
+    expect(member?.group).toBe('pterm-host-0123456789abcdef')
+  })
+})
