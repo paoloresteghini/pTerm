@@ -195,7 +195,17 @@ describe('tabTree', () => {
   })
 
   it('resolves a pane claimed by two rows to the first, matching groupedTabs', () => {
-    const tree = tabTree([pane('a')], [row('r1', ['a']), row('r2', ['a'])])
-    expect(tree).toEqual([{ pane: pane('a'), children: [] }])
+    // The rows overlap on `a` and differ in their other kid. Under first-wins,
+    // `a` belongs to r1 and brings `b` with it; under last-wins it would belong
+    // to r2 and bring `c`. Asserting the children is what makes the two
+    // orderings distinguishable: asserting only that a node for `a` exists
+    // passes either way, which is how the previous version of this test came to
+    // be one that could not fail.
+    const tree = tabTree(
+      [pane('a'), pane('b'), pane('c')],
+      [row('r1', ['a', 'b']), row('r2', ['a', 'c'])],
+    )
+    expect(tree[0].pane.id).toBe('a')
+    expect(tree[0].children.map((kid) => kid.id)).toEqual(['b'])
   })
 })
