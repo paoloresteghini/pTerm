@@ -118,7 +118,7 @@ export const INITIAL_WORKSPACE_STATE: WorkspaceState = {
  *
  * Purely positional in `tabs`, so "right" means what is on screen only when
  * `tabs` is already in the bar's own order. A split's sibling is not next to
- * its founder in raw `state.panes` order (`applyTabShape`, `workspace.ts:875`
+ * its founder in raw `state.panes` order (`applyTabShape`, below in this file,
  * appends it), so both call sites below pass `groupedTabs`' output rather
  * than a bare `tabsOfProject` filter.
  */

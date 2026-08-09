@@ -59,10 +59,10 @@ export function groupedTabs(panes: TabDescriptor[], rows: TabRow[]): TabGroupEnt
   const rowByPaneId = new Map<string, TabRow>()
   // First-wins, to match `tabOfPane` (workspace.ts) and `restore.ts`'s
   // `savedByGroup`: both resolve a pane to its row by taking the first match.
-  // Unreachable today — `store.ts`'s `tabRows` dedupes kids across rows and
-  // `normaliseLayout` dedupes within one (workspace.ts:663-669) — so no two
-  // rows can currently claim the same kid. This keeps the convention rather
-  // than fixing an observed bug.
+  // Unreachable today — `tabRows` dedupes kids across rows and
+  // `normaliseLayout` dedupes within one, both in `src/main/state/store.ts` —
+  // so no two rows can currently claim the same kid. This keeps the
+  // convention rather than fixing an observed bug.
   for (const row of rows) {
     for (const kid of row.layout.kids) {
       if (!rowByPaneId.has(kid)) rowByPaneId.set(kid, row)
