@@ -340,6 +340,23 @@ export async function activeTerminalText(page: Page): Promise<string> {
 }
 
 /**
+ * One specific pane's buffer, by pane id, kept apart from `activeTerminalText`
+ * (which pane the DOM currently marks active) and `terminalTexts` (every
+ * pane, id discarded). A test that clicks a specific row and needs to know
+ * the keystrokes landed in THAT pane and not some other one needs this: both
+ * of the other helpers throw the id away before the test can check it.
+ *
+ * Empty string for an id that is not mounted, for the same pollability
+ * reason `terminalTexts` returns `[]`.
+ */
+export async function terminalTextOf(page: Page, paneId: string): Promise<string> {
+  return page.evaluate(
+    (id) => (window.__ptermTerminalTexts?.() ?? []).find((pane) => pane.id === id)?.text ?? '',
+    paneId,
+  )
+}
+
+/**
  * Expand one of the collapsible columns, which every profile starts without.
  *
  * `App.tsx` collapses Files, Skills, Presets, Notes and Prompts on a fresh

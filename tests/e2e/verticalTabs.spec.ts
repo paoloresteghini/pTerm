@@ -12,7 +12,7 @@ import { test, expect, type ElectronApplication, type Page } from '@playwright/t
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchApp, killServer, sessionNames, terminalTexts } from './harness'
+import { launchApp, killServer, sessionNames, terminalTextOf } from './harness'
 
 const SOCKET = 'pterm-e2e-vtabs'
 
@@ -139,10 +139,15 @@ test('clicking a child row moves the keyboard to that pane', async () => {
   // this test would pass for the wrong reason without this step.
   await window.getByTestId(`vtab-${first}`).click()
   await window.getByTestId(`vpane-${childId}`).click()
-  // Typed text has to land in the pane that was clicked. Read through the
-  // buffer helper, because the WebGL renderer leaves `.xterm-rows` empty.
+  // Typed text has to land in the pane that was clicked, not merely in some
+  // pane or other: read the child's own buffer by id, because a count over
+  // every pane's text (as `terminalTexts` returns it) cannot tell the child
+  // that was clicked apart from the parent that was clicked immediately
+  // before it, and a `row` that selects the wrong depth would still leave
+  // exactly one pane holding the marker.
   await window.keyboard.type('echo vtabs-target')
-  await expect
-    .poll(async () => (await terminalTexts(window)).filter((text) => text.includes('vtabs-target')).length)
-    .toBe(1)
+  await expect.poll(async () => terminalTextOf(window, childId)).toContain('vtabs-target')
+  // And the parent must NOT have caught it, which is the other half of
+  // "landed in the right pane" rather than just "landed somewhere".
+  await expect.poll(async () => terminalTextOf(window, first)).not.toContain('vtabs-target')
 })
