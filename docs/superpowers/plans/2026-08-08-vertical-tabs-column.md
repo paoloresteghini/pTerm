@@ -56,7 +56,13 @@ describe('tabTree', () => {
   // read by tabTree, and building the full shape here would tie these tests to
   // fields they say nothing about.
   const pane = (id: string): TabDescriptor => ({ id }) as TabDescriptor
-  const row = (id: string, kids: string[]): TabRow => ({ id, kids }) as unknown as TabRow
+  // `layout.kids`, not a flat `kids`: that is where a TabRow actually keeps
+  // them (`src/shared/ipc.ts`), and it is what the implementation reads. An
+  // earlier draft of this plan had `{ id, kids }` here, which crashed six of
+  // these seven tests with "Cannot read properties of undefined (reading
+  // 'kids')".
+  const row = (id: string, kids: string[]): TabRow =>
+    ({ id, layout: { kids } }) as unknown as TabRow
 
   it('gives a pane in no row a node of its own with no children', () => {
     expect(tabTree([pane('a')], [])).toEqual([{ pane: pane('a'), children: [] }])
@@ -105,8 +111,19 @@ describe('tabTree', () => {
   })
 
   it('resolves a pane claimed by two rows to the first, matching groupedTabs', () => {
-    const tree = tabTree([pane('a')], [row('r1', ['a']), row('r2', ['a'])])
-    expect(tree).toEqual([{ pane: pane('a'), children: [] }])
+    // The rows overlap on `a` and differ in their other kid, which is what
+    // makes the two resolution orders distinguishable: under first-wins `a`
+    // belongs to r1 and brings `b`, under last-wins it would belong to r2 and
+    // bring `c`. An earlier draft asserted only that a node for `a` existed
+    // with no children, which passed under BOTH orders — neither row id
+    // matched the pane id, so `founder` fell through to `present[0]` either
+    // way. Measured: dropping the first-wins guard left that version green.
+    const tree = tabTree(
+      [pane('a'), pane('b'), pane('c')],
+      [row('r1', ['a', 'b']), row('r2', ['a', 'c'])],
+    )
+    expect(tree[0].pane.id).toBe('a')
+    expect(tree[0].children.map((kid) => kid.id)).toEqual(['b'])
   })
 })
 ```
