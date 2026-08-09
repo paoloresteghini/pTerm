@@ -1332,7 +1332,10 @@ export function App() {
         <Sidebar
           projects={state.projects}
           activeProjectId={state.activeProjectId}
-          tabsOf={(id) => tabsOfProject(state, id)}
+          // Grouped, same as the bar: the sidebar draws the same panes in the
+          // same window, and a split reading contiguous in one list and torn
+          // apart in the other is the kind of thing a user notices at once.
+          tabsOf={(id) => groupedTabs(tabsOfProject(state, id), state.tabs).map((entry) => entry.pane)}
           activeTabId={currentTabId}
           status={state.status}
           since={state.since}
