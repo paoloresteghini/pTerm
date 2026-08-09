@@ -15,8 +15,8 @@ import type { PanelSide } from '../ui/Panel'
  * Pure and framework-free like `columnVisibility.ts` and `columnWidth.ts`:
  * `vitest.config.mts` runs `environment: 'node'`, so anything that has to
  * touch React or the DOM cannot be unit-tested here at all. The drag that
- * calls `moveColumn` and the render that reads `resizerSideFor` are covered
- * by `tests/e2e/columnOrder.spec.ts` instead.
+ * calls `moveColumn` and the render that reads `resizerSideFor` belong to a
+ * component and an end-to-end spec still to come, not to this file.
  */
 export type ColumnSlot = ColumnId | 'projects' | 'terminal'
 

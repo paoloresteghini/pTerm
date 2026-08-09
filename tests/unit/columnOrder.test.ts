@@ -12,8 +12,8 @@ import {
  *
  * Pure, because `vitest.config.mts` runs `environment: 'node'` and logic that
  * lives inside a component cannot be unit-tested here at all. The drag that
- * calls `moveColumn` and the render that reads `resizerSideFor` are covered by
- * `tests/e2e/columnOrder.spec.ts`.
+ * calls `moveColumn` and the render that reads `resizerSideFor` belong to a
+ * component and an end-to-end spec still to come, not to this file.
  *
  * Sabotage-checked (2026-08-09), each mutation applied and reverted by hand:
  * 1. dropped the `id === 'projects'` guard in `moveColumn`: reddened "refuses
