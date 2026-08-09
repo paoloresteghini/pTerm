@@ -148,27 +148,38 @@ describe('tabTree', () => {
   const row = (id: string, kids: string[]): TabRow =>
     ({ id, layout: { kids } }) as unknown as TabRow
 
-  it('gives a pane in no row a node of its own with no children', () => {
-    expect(tabTree([pane('a')], [])).toEqual([{ pane: pane('a'), children: [] }])
+  it('gives a pane in no row a group of its own', () => {
+    expect(tabTree([pane('a')], [])).toEqual([{ panes: [pane('a')] }])
   })
 
-  it('gives a row holding one pane no children, so a plain tab grows no twist', () => {
-    expect(tabTree([pane('a')], [row('a', ['a'])])).toEqual([
-      { pane: pane('a'), children: [] },
-    ])
+  it('gives a row holding one pane a group of one, which draws no bracket', () => {
+    expect(tabTree([pane('a')], [row('a', ['a'])])).toEqual([{ panes: [pane('a')] }])
   })
 
-  it('nests a row\'s other kids under its founding pane, in kids order', () => {
+  it('keeps a split\'s panes as PEERS in kids order, not one nested under another', () => {
+    // The whole point of the group shape. A split's panes are two halves of one
+    // tab, so neither contains the other: the column brackets them at the same
+    // indent rather than indenting one below the first.
     const tree = tabTree(
       [pane('a'), pane('b'), pane('c')],
       [row('a', ['a', 'b', 'c'])],
     )
-    expect(tree).toEqual([
-      { pane: pane('a'), children: [pane('b'), pane('c')] },
-    ])
+    expect(tree).toEqual([{ panes: [pane('a'), pane('b'), pane('c')] }])
   })
 
-  it('anchors a group at its earliest member, not at the founding pane', () => {
+  it('lists members in kids order even when the founder is not first on screen', () => {
+    // `kids` is the on-screen left-to-right order. The founder can sit anywhere
+    // in it, so a shape that promoted `TabRow.id` to the head listed a split
+    // backwards whenever the user split leftward. Reading `kids` straight
+    // through is what keeps the column in the same order as the window.
+    const tree = tabTree(
+      [pane('a'), pane('b')],
+      [row('b', ['a', 'b'])],
+    )
+    expect(tree).toEqual([{ panes: [pane('a'), pane('b')] }])
+  })
+
+  it('anchors a group at its earliest member', () => {
     // `applyTabShape` appends new panes, so a split of the first of two tabs
     // puts its sibling last in `panes`. The group must still draw where its
     // earliest member sat.
@@ -176,22 +187,22 @@ describe('tabTree', () => {
       [pane('a'), pane('z'), pane('b')],
       [row('a', ['a', 'b'])],
     )
-    expect(tree.map((node) => node.pane.id)).toEqual(['a', 'z'])
-    expect(tree[0].children.map((kid) => kid.id)).toEqual(['b'])
+    expect(tree).toEqual([{ panes: [pane('a'), pane('b')] }, { panes: [pane('z')] }])
   })
 
-  it('promotes the first present kid when the founding pane is gone', () => {
+  it('needs no founder to form a group when the founding pane is gone', () => {
     // Reachable: the founding pane can be closed while its siblings live on.
     // `TabRow.id` is never rewritten, so it can name a pane that is no longer
-    // in the tab.
+    // in the tab. With peers there is nothing to promote, so this is simply
+    // the present kids in order.
     const tree = tabTree([pane('b'), pane('c')], [row('a', ['a', 'b', 'c'])])
-    expect(tree).toEqual([{ pane: pane('b'), children: [pane('c')] }])
+    expect(tree).toEqual([{ panes: [pane('b'), pane('c')] }])
   })
 
   it('drops a kid that is not among the panes given', () => {
     // Another project's pane, or one main has since dropped.
     const tree = tabTree([pane('a')], [row('a', ['a', 'gone'])])
-    expect(tree).toEqual([{ pane: pane('a'), children: [] }])
+    expect(tree).toEqual([{ panes: [pane('a')] }])
   })
 
   it('resolves a pane claimed by two rows to the first, matching groupedTabs, and never emits it twice', () => {
@@ -208,9 +219,6 @@ describe('tabTree', () => {
       [pane('a'), pane('b'), pane('c')],
       [row('r1', ['a', 'b']), row('r2', ['a', 'c'])],
     )
-    expect(tree).toEqual([
-      { pane: pane('a'), children: [pane('b')] },
-      { pane: pane('c'), children: [] },
-    ])
+    expect(tree).toEqual([{ panes: [pane('a'), pane('b')] }, { panes: [pane('c')] }])
   })
 })

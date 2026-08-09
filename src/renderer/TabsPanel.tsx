@@ -1,4 +1,3 @@
-import { useState, type ReactNode } from 'react'
 import { canHaveSession, type TabDescriptor, type TabState } from '../shared/ipc'
 import type { TabTreeNode } from './lib/tabGroups'
 import { StatusDot } from './StatusDot'
@@ -52,11 +51,6 @@ export function TabsPanel({
   side: PanelSide
 }) {
   const { width, set, commit } = useColumnWidth('pterm:tabsWidth', 208)
-  // Which tabs are twisted shut. Local and not persisted: it is a glance-level
-  // gesture, and a collapsed tab that survived a relaunch would hide panes the
-  // user has forgotten they closed the twist on.
-  const [shut, setShut] = useState<Set<string>>(() => new Set())
-
   if (collapsed) {
     return (
       <PanelStrip
@@ -69,7 +63,21 @@ export function TabsPanel({
     )
   }
 
-  const row = (pane: TabDescriptor, depth: number, last: boolean, twist: ReactNode) => {
+  /**
+   * Which corner of its group's bracket a row draws, or null when the group is
+   * one pane and there is nothing to bracket.
+   *
+   * The bracket is the whole point of the group shape: a split's panes are
+   * peers, so they sit at ONE indent joined down the left, rather than one
+   * being indented beneath the other as though it were contained by it.
+   */
+  const bracketAt = (index: number, size: number): 'first' | 'middle' | 'last' | null => {
+    if (size < 2) return null
+    if (index === 0) return 'first'
+    return index === size - 1 ? 'last' : 'middle'
+  }
+
+  const row = (pane: TabDescriptor, bracket: 'first' | 'middle' | 'last' | null) => {
     const label = elapsedLabel(since[pane.id] ?? null, now)
     // Matches `TabBar`'s own `tombstoned`: a terminal pane whose session has
     // exited has nothing left for `onClose` to kill. `TabBar` swaps in
@@ -80,18 +88,25 @@ export function TabsPanel({
     return (
       <div
         key={pane.id}
-        data-testid={depth === 0 ? `vtab-${pane.id}` : `vpane-${pane.id}`}
+        // Every row is a pane, so every row is named the same way. The old
+        // `vtab-`/`vpane-` split encoded a parent and a child, which is the
+        // hierarchy this shape exists to remove; where a row sits in its
+        // group is reported by `data-bracket` instead.
+        data-testid={`vpane-${pane.id}`}
+        data-bracket={bracket ?? undefined}
         onClick={() => onSelect(pane.id)}
         className={cn(
           'group flex cursor-default items-center gap-1 py-0.5 pr-1 text-[11px]',
           pane.id === activeId ? 'bg-surface text-fg' : 'text-muted hover:text-fg',
         )}
-        style={{ paddingLeft: depth === 0 ? 8 : 20 }}
+        style={{ paddingLeft: 8 }}
       >
-        {twist}
-        {depth > 0 ? (
-          <span aria-hidden className="shrink-0 font-mono text-faint">{last ? '└' : '├'}</span>
-        ) : null}
+        {/* One slot, always reserved, so every swatch lines up on the same x
+            whether or not its row is part of a split. The same trade
+            `FileTree` makes for a file sitting next to a directory. */}
+        <span aria-hidden className="w-3 shrink-0 font-mono text-faint">
+          {bracket === 'first' ? '┌' : bracket === 'middle' ? '├' : bracket === 'last' ? '└' : ''}
+        </span>
         <span
           aria-hidden
           className="h-2.5 w-2.5 shrink-0 rounded-sm border border-border"
@@ -134,47 +149,11 @@ export function TabsPanel({
         onDragStart={onDragStart}
       />
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {nodes.map((node) => {
-          // In the row's own flex flow, the same way `FileTree`'s twist is a
-          // fixed-width flex child rather than something floated over the
-          // row: that is a slot the row's own layout reserves, not a
-          // position guessed at with no offsets and no positioned ancestor.
-          // A childless tab still reserves the slot with a blank span, the
-          // same trade `FileTree` makes for a file next to a directory, so
-          // every tab's swatch lines up on the same x regardless of which
-          // rows have one.
-          const twist =
-            node.children.length === 0 ? (
-              <span aria-hidden className="h-3 w-3 shrink-0" />
-            ) : (
-              <button
-                data-testid={`vtwist-${node.pane.id}`}
-                aria-label={shut.has(node.pane.id) ? 'Expand' : 'Collapse'}
-                className="flex h-3 w-3 shrink-0 cursor-default items-center justify-center border-none bg-transparent text-center text-[9px] leading-none text-faint hover:text-fg"
-                onClick={(event) => {
-                  // Or the row's own click would also select the pane.
-                  event.stopPropagation()
-                  setShut((previous) => {
-                    const next = new Set(previous)
-                    if (!next.delete(node.pane.id)) next.add(node.pane.id)
-                    return next
-                  })
-                }}
-              >
-                {shut.has(node.pane.id) ? '▸' : '▾'}
-              </button>
-            )
-          return (
-            <div key={node.pane.id}>
-              {row(node.pane, 0, false, twist)}
-              {shut.has(node.pane.id)
-                ? null
-                : node.children.map((kid, index) =>
-                    row(kid, 1, index === node.children.length - 1, null),
-                  )}
-            </div>
-          )
-        })}
+        {nodes.map((node) => (
+          <div key={node.panes[0]?.id ?? ''}>
+            {node.panes.map((pane, index) => row(pane, bracketAt(index, node.panes.length)))}
+          </div>
+        ))}
       </div>
       <ColumnResizer testid="tabs-resizer" side={side} width={width} onResize={set} onCommit={commit} />
     </div>

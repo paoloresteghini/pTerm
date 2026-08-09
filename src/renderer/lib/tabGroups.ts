@@ -102,34 +102,38 @@ export function groupedTabs(panes: TabDescriptor[], rows: TabRow[]): TabGroupEnt
 }
 
 /**
- * One node per tab, with that tab's other panes nested under it.
+ * One node per tab, holding that tab's panes as PEERS.
  *
- * The nested counterpart to `groupedTabs`, from the same two inputs and using
+ * The grouped counterpart to `groupedTabs`, from the same two inputs and using
  * the same first-wins pane-to-row convention, and living in this file so the
- * flat and nested readings of "what is a group" cannot drift apart.
+ * flat and grouped readings of "what is a group" cannot drift apart.
  *
- * The parent is a PANE, not the row. `TabRow` carries no name of its own: a
- * title lives on `TabDescriptor.title` and `renameTab` renames a pane, so a row
- * has nothing to label itself with. The founding pane (`TabRow.id`) is the
- * parent, which is also what a terminal list looks like elsewhere: a terminal
- * with its splits beneath it, not an abstract heading.
+ * Peers rather than a parent with children, which is what this used to be. A
+ * split's panes are two halves of one tab and neither contains the other, so
+ * indenting one under the first drew a hierarchy that does not exist. The
+ * column brackets the members at one indent instead, the way an editor shows a
+ * split group.
  *
- * `TabRow.id` is never rewritten, so it can name a pane that has since been
- * closed while its siblings live on. The first present kid is promoted in that
- * case, because a tab whose panes are all still open must not lose its node.
+ * There is no head pane to choose, which removes two problems the parent shape
+ * had. `TabRow.id` names the FOUNDING pane, and a founder can sit anywhere in
+ * `layout.kids`, so promoting it listed a split backwards whenever the user
+ * split leftward. It can also name a pane already closed while its siblings
+ * live on, which needed a promotion rule of its own. Reading `kids` straight
+ * through answers both: members come out in the order they are on screen, and
+ * a missing founder is simply a kid that is not present.
  *
  * A kid already claimed by an earlier row in the walk is dropped from a later
- * row's members, so no pane is ever emitted as two separate top-level nodes.
- * `tabRows` (`src/main/state/store.ts:256`) already dedupes kids across rows
- * when loading from disk, by deleting a claimed kid from the set a later row
- * is allowed to draw from, so two rows sharing a kid is unreachable through
- * today's only write path. This guard is cheap insurance against that
- * changing, matching the same invariant `groupedTabs` above already carries a
- * comment for, not a patch for a bug seen in practice.
+ * row's members, so no pane is ever emitted in two groups. `tabRows` in
+ * `src/main/state/store.ts` already dedupes kids across rows when loading from
+ * disk, by deleting a claimed kid from the set a later row may draw from, so
+ * two rows sharing a kid is unreachable through today's only write path. This
+ * guard is cheap insurance against that changing, matching the invariant
+ * `groupedTabs` above already carries a comment for, not a patch for a bug
+ * seen in practice.
  */
 export interface TabTreeNode {
-  pane: TabDescriptor
-  children: TabDescriptor[]
+  /** In `layout.kids` order, which is left to right on screen. Never empty. */
+  panes: TabDescriptor[]
 }
 
 export function tabTree(panes: TabDescriptor[], rows: TabRow[]): TabTreeNode[] {
@@ -151,24 +155,20 @@ export function tabTree(panes: TabDescriptor[], rows: TabRow[]): TabTreeNode[] {
     const row = rowByPaneId.get(pane.id)
     if (!row) {
       emitted.add(pane.id)
-      nodes.push({ pane, children: [] })
+      nodes.push({ panes: [pane] })
       continue
     }
 
     // In `kids` order, present only, and not already emitted by an earlier
     // row: a kid belonging to another project or since dropped by main never
     // reaches the screen, and a kid an earlier row already claimed (see the
-    // doc comment above) never reappears as a second node.
+    // doc comment above) never reappears in a second group.
     const present = row.layout.kids
       .map((kid) => byId.get(kid))
       .filter((kid): kid is TabDescriptor => kid !== undefined && !emitted.has(kid.id))
     for (const kid of present) emitted.add(kid.id)
 
-    const founder = present.find((kid) => kid.id === row.id) ?? present[0]
-    nodes.push({
-      pane: founder,
-      children: present.filter((kid) => kid.id !== founder.id),
-    })
+    nodes.push({ panes: present })
   }
 
   return nodes
