@@ -68,26 +68,35 @@
  *   meet with no gap, and a change to the bar's spacing or the tabs' padding
  *   would break the join without failing anything here. Checked by eye during
  *   Task 2 instead.
- * - **that `⌥1..9` indexes the same order the bar draws.** Grouping happens in
- *   `App.tsx` rather than in `TabBar` precisely so those two cannot disagree,
- *   and **measured 2026-08-08, sabotage-checking the split-signal test**:
- *   handing `⌥1..9` the ungrouped list — `const currentTabs =
- *   tabsOfProject(state, state.activeProjectId ?? '')`, leaving `TabBar` its
- *   own `tabEntries` — leaves the split-signal test green. Nothing in this
- *   repo presses ⌥3.
+ * - **that `⌥1..9` indexes the same order the bar draws.** Nothing in this
+ *   repo presses ⌥3 — `grep -rn "Alt+Digit\|Alt+[0-9]" tests/` returns
+ *   nothing — so this file cannot see it, and neither can any other.
+ *   **Measured 2026-08-08**, against the code as it stood before the fix
+ *   below landed: a `currentTabs` alias fed `⌥1..9` the ungrouped list —
+ *   `const currentTabs = tabsOfProject(state, state.activeProjectId ?? '')`,
+ *   leaving `TabBar` its own `tabEntries` — and the split-signal test below
+ *   stayed green. That alias is gone: the Digit branch now reads
+ *   `tabEntries[index]?.pane` directly (`App.tsx:1228`), the same array
+ *   `TabBar` is handed where it is built (`App.tsx:330`), so there is no
+ *   longer a second variable a stray edit could quietly repoint one of them
+ *   without the other. The claim is still unverified by any test; it is only
+ *   harder to break silently now.
  * - **that `groupedTabs` itself reorders, as distinct from `TabBar` drawing
- *   what it is handed.** Also measured the same day: passing `TabBar`
- *   `currentTabs.map((pane) => ({ pane, groupId: null, pos: null }))` in
- *   place of `tabEntries` still failed the split-signal test — but on the
- *   group/position assertions, not on the order assertion the comment above
- *   that test names as the one a non-reordering `groupedTabs` would trip.
- *   `currentTabs` is `tabEntries.map((entry) => entry.pane)`
- *   (`App.tsx:333`), so it already carries Task 1's reorder; stripping the
- *   tags on the way into `TabBar` cannot undo an order baked in one line
- *   above it. The order assertion is real — it would catch `groupedTabs`
- *   itself failing to reorder, which `tests/unit/tabGroups.test.ts` is where
- *   that is actually pinned — but no mutation reachable through `App.tsx`'s
- *   wiring alone exercises it; only a change to `groupedTabs` would.
+ *   what it is handed.** Also measured 2026-08-08, expressed against that
+ *   day's code: passing `TabBar` `currentTabs.map((pane) => ({ pane,
+ *   groupId: null, pos: null }))` — value-identical to today's
+ *   `tabEntries.map((entry) => ({ pane: entry.pane, groupId: null, pos: null
+ *   }))`, since `currentTabs` was exactly `tabEntries.map((entry) =>
+ *   entry.pane)` — in place of `tabEntries` still failed the split-signal
+ *   test, but on the group/position assertions, not on the order assertion
+ *   the comment above that test names as the one a non-reordering
+ *   `groupedTabs` would trip. `tabEntries` (`App.tsx:330`) already carries
+ *   the reorder, so stripping the tags on the way into `TabBar` cannot undo
+ *   an order baked in one `groupedTabs` call above it. The order assertion is
+ *   real — it would catch `groupedTabs` itself failing to reorder, which
+ *   `tests/unit/tabGroups.test.ts` is where that is actually pinned — but no
+ *   mutation reachable through `App.tsx`'s wiring alone exercises it; only a
+ *   change to `groupedTabs` would.
  *
  * - **that the seam is on the screen.** The test above reads computed style,
  *   not pixels, and says so in its own comment. Checked by hand instead, the

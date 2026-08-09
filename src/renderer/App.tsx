@@ -330,7 +330,6 @@ export function App() {
   const tabEntries = state.activeProjectId
     ? groupedTabs(tabsOfProject(state, state.activeProjectId), state.tabs)
     : []
-  const currentTabs = tabEntries.map((entry) => entry.pane)
   // Hoisted out of the JSX below because the welcome page's condition is read
   // off it. "No visible group" is the literal statement of an empty pane area,
   // and it is not the same as "no tabs": a tab whose kids were all boxed by an
@@ -1226,7 +1225,7 @@ export function App() {
       if (!digit) return
       const index = Number(digit[1]) - 1
       if (event.altKey) {
-        const target = currentTabs[index]
+        const target = tabEntries[index]?.pane
         if (target) {
           event.preventDefault()
           dispatch({ type: 'activatedTab', id: target.id })
@@ -1243,7 +1242,7 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [
     activePaneId,
-    currentTabs,
+    tabEntries,
     state.projects,
     openTab,
     requestClosePane,
