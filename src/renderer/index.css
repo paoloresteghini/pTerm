@@ -16,6 +16,15 @@
      to fix. `tests/unit/labelContrast.test.ts` holds it to 4.5:1. */
   --color-label: #a1a1aa;
   --color-accent: #a3e635;
+  /* The tab bar's split-group strip: `--color-accent` (163,230,53) blended
+     55% over `--color-bg` (9,9,11), computed rather than picked, giving
+     (94,131,34). Related to the accent by eye, and quiet enough that the
+     strip along the top of a group does not compete with the saturated
+     accent under the ACTIVE tab's bottom edge — two signals, two edges.
+     Flat and opaque rather than an alpha, so it reads the same on
+     `--color-bg` behind an active tab and `--color-surface` behind an idle
+     one. */
+  --color-group: #5e8322;
   --color-danger: #f87171;
   /* Added for the diff pane's added-line colour, alongside the removed-line
      `--color-danger` it is paired with. Measured against `--color-bg`:

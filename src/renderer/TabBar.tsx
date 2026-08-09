@@ -6,6 +6,7 @@ import { cn } from './lib/cn'
 import { tabLabel } from './lib/tabLabel'
 import { ColorSwatches } from './ColorSwatches'
 import { PANE_COLOR_DEFAULT, type PaneColor } from '../shared/paneColors'
+import type { TabGroupEntry } from './lib/tabGroups'
 
 export function TabBar({
   tabs,
@@ -24,7 +25,7 @@ export function TabBar({
   onRecolor,
   canOpen,
 }: {
-  tabs: TabDescriptor[]
+  tabs: TabGroupEntry[]
   activeId: string | null
   status: Record<string, TabState>
   /** When each tab entered its state, epoch ms. Absent means no label. */
@@ -113,7 +114,8 @@ export function TabBar({
       data-testid="tabbar"
       className="flex h-8 select-none items-stretch overflow-x-auto border-b border-border bg-surface font-mono text-[11px]"
     >
-      {tabs.map((tab) => {
+      {tabs.map((entry) => {
+        const tab = entry.pane
         const active = tab.id === activeId
         // `paneGroups`'s `isDead`, applied to the other surface that offers a
         // restart. The overlay reads `PaneBox.dead` and this bar reads the raw
@@ -155,6 +157,12 @@ export function TabBar({
             key={tab.id}
             data-testid={`tab-${tab.id}`}
             data-active={active ? 'true' : 'false'}
+            // The whole grouping signal, carried on the div that is already
+            // here rather than a nested element: the e2e suite counts tabs
+            // with `[data-testid^="tab-"]`, so a second element per tab under
+            // that prefix would inflate every one of those counts.
+            data-group-id={entry.groupId ?? undefined}
+            data-group-pos={entry.pos ?? undefined}
             onClick={() => onActivate(tab.id)}
             onContextMenu={(event) => {
               event.preventDefault()
@@ -163,9 +171,29 @@ export function TabBar({
               const box = event.currentTarget.getBoundingClientRect()
               setMenu({ id: tab.id, left: box.left, top: box.bottom })
             }}
+            // Two insets on two edges that compose rather than replace: the
+            // top strip says "these panes are one split" and the bottom line
+            // says "this pane is focused", so a grouped active tab shows
+            // both. Inline rather than a Tailwind arbitrary value because the
+            // list is built from two independent conditions and an arbitrary
+            // value holding a comma is not worth the escaping.
+            style={{
+              boxShadow:
+                [
+                  entry.pos === null ? null : 'inset 0 2px 0 var(--color-group)',
+                  active ? 'inset 0 -1px 0 var(--color-accent)' : null,
+                ]
+                  .filter((inset): inset is string => inset !== null)
+                  .join(', ') || undefined,
+            }}
             className={cn(
-              'flex cursor-default items-center gap-1.5 whitespace-nowrap border-r border-border px-2.5',
-              active ? 'bg-bg text-fg shadow-[inset_0_-1px_0_var(--color-accent)]' : 'text-muted',
+              'flex cursor-default items-center gap-1.5 whitespace-nowrap px-2.5',
+              // Kept on the group's LAST member and on every ungrouped tab, so
+              // a split's run of tabs reads as one box. The strip alone is not
+              // enough: a divider through the middle of it would say the
+              // opposite of what the strip says.
+              entry.pos === 'first' || entry.pos === 'middle' ? null : 'border-r border-border',
+              active ? 'bg-bg text-fg' : 'text-muted',
             )}
           >
             <StatusDot state={status[tab.id] ?? null} testid={`dot-${tab.id}`} />

@@ -61,6 +61,7 @@ import {
   type PaneBox,
   type PaneDirection,
 } from './workspace'
+import { groupedTabs } from './lib/tabGroups'
 import { projectMuted, toggleProjectMute } from './mute'
 import { PANE_COLOR_DEFAULT, type PaneColor } from '../shared/paneColors'
 import { ColorSwatches } from './ColorSwatches'
@@ -322,7 +323,14 @@ export function App() {
 
   const project = activeProject(state)
   const currentTabId = activeTabId(state)
-  const currentTabs = state.activeProjectId ? tabsOfProject(state, state.activeProjectId) : []
+  // Grouped ONCE, here, and read by two consumers: the bar draws it and
+  // `⌥1..9` indexes it (see the Digit branch of the keydown handler below). A
+  // `TabBar` that sorted privately would leave `⌥3` selecting something other
+  // than the third tab on screen, and no unit test could see the disagreement.
+  const tabEntries = state.activeProjectId
+    ? groupedTabs(tabsOfProject(state, state.activeProjectId), state.tabs)
+    : []
+  const currentTabs = tabEntries.map((entry) => entry.pane)
   // Hoisted out of the JSX below because the welcome page's condition is read
   // off it. "No visible group" is the literal statement of an empty pane area,
   // and it is not the same as "no tabs": a tab whose kids were all boxed by an
@@ -1381,7 +1389,7 @@ export function App() {
 
         <div className="flex min-w-0 flex-1 flex-col">
           <TabBar
-            tabs={currentTabs}
+            tabs={tabEntries}
             activeId={currentTabId}
             status={state.status}
             since={state.since}
