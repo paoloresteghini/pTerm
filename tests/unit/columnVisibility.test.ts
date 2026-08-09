@@ -124,12 +124,17 @@ describe('showsTabBar', () => {
   })
 
   it('ignores every other column', () => {
-    // A guard against reading the wrong key: opening all six of the others
-    // must not touch the bar. Without this, `some(id => !state[id])` would
-    // pass the other three tests and still be wrong.
-    const othersOpen: ColumnVisibility = {
-      tabs: true, files: false, skills: false, presets: false, prompts: false, git: false, notes: false,
+    // The tabs column is open, so the bar must stand down, and it must stand
+    // down no matter what the other six are doing. Six of them are open here
+    // too, which is what makes this test able to fail: a predicate that asked
+    // "is any column open" would answer true and show the bar, where the right
+    // answer is false. An earlier version had the tabs column COLLAPSED with the
+    // others open, where both readings answer true and the test could not tell
+    // them apart.
+    const alsoOpen: ColumnVisibility = {
+      tabs: false, files: false, skills: false, presets: false,
+      prompts: false, git: false, notes: false,
     }
-    expect(showsTabBar(othersOpen, noneHidden)).toBe(true)
+    expect(showsTabBar(alsoOpen, noneHidden)).toBe(false)
   })
 })
