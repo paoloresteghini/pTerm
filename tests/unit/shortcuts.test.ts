@@ -175,7 +175,7 @@ describe('menu accelerators', () => {
     // all). Exact, not `>=`: with slack in the count, the first
     // accelerator-bearing item that forgets to opt out lands inside the
     // slack and this goes quiet. Measured 2026-08-09 against this file:
-    // 16 `accelerator: '` and 17 `registerAccelerator: false`.
+    // 17 `accelerator: '` and 18 `registerAccelerator: false`.
     const declared = main.match(/\baccelerator: '/g) ?? []
     const unregistered = main.match(/registerAccelerator: false/g) ?? []
     expect(declared).not.toHaveLength(0)
