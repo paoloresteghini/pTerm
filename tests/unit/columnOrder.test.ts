@@ -104,6 +104,28 @@ describe('moveColumn', () => {
     expect(moveColumn(order, 'notes', 2)).toEqual(['files', 'projects', 'notes', 'tabs', 'terminal'])
   })
 
+  it('moves a column rightward, compensating for the shift removal causes', () => {
+    // `gap(3)` is the sliver between `tabs` and `terminal`, read off the row
+    // BEFORE `files` comes out of it. Post-removal that sliver is index 2,
+    // not 3: this is the case the whole-branch review's Critical finding
+    // named (dropping `files` just left of the terminal must not carry it
+    // across), and it fails without the `toIndex > from` compensation in
+    // `moveColumn`.
+    const order: ColumnSlot[] = ['files', 'projects', 'tabs', 'terminal', 'notes']
+    expect(moveColumn(order, 'files', 3)).toEqual(['projects', 'tabs', 'files', 'terminal', 'notes'])
+  })
+
+  it('is a no-op when dropped on the gap immediately to its own right', () => {
+    // The sliver right of a column's current position is visually where the
+    // column already sits, so this is the natural way to abandon a drag. In
+    // pre-removal index space that sliver is `from + 1`; without the
+    // rightward compensation this reads as a one-place shift instead of a
+    // no-op.
+    const order: ColumnSlot[] = ['files', 'projects', 'tabs', 'terminal', 'notes']
+    expect(moveColumn(order, 'tabs', 3)).toEqual(order)
+    expect(moveColumn(order, 'notes', 5)).toEqual(order)
+  })
+
   it('refuses to move projects, and hands back the order it was given', () => {
     const order: ColumnSlot[] = ['files', 'projects', 'tabs', 'terminal', 'notes']
     expect(moveColumn(order, 'projects', 4)).toEqual(order)

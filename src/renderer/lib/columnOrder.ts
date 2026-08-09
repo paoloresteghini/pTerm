@@ -8,9 +8,11 @@ import type { PanelSide } from '../ui/Panel'
  * was whatever order someone typed them in: nothing else read it, nothing
  * else could change it. This module gives that order a value, so a drag (or
  * a stored profile) can move a column instead of the source file. `projects`
- * and `terminal` are not `ColumnId`s (they carry no visibility or width
- * preference of their own) but they still occupy a place in the row, so
- * `ColumnSlot` widens `ColumnId` to include them.
+ * and `terminal` are not `ColumnId`s (they carry no visibility preference of
+ * their own, and `terminal` has no width preference either, though
+ * `projects` does, under its own key, `pterm:sidebarWidth`) but they still
+ * occupy a place in the row, so `ColumnSlot` widens `ColumnId` to include
+ * them.
  *
  * Pure and framework-free like `columnVisibility.ts` and `columnWidth.ts`:
  * `vitest.config.mts` runs `environment: 'node'`, so anything that has to
@@ -81,6 +83,17 @@ export function orderFromStored(raw: string | null): ColumnSlot[] {
  * array: the caller holds this in state, so mutating `order` in place would
  * leave a render reading the same reference it started with.
  *
+ * `toIndex` lives in PRE-REMOVAL index space: it is the insertion point the
+ * caller read off the row before `id` came out of it (`App.tsx`'s `gap(k)`
+ * is the sliver immediately before whatever occupies index `k` right now).
+ * Once `id` is spliced out, every slot to its right has shifted left by one,
+ * so a `toIndex` that named a position to the right of `from` now names the
+ * position one past where the user actually pointed. `toIndex <= from` is
+ * unaffected, because the removal happened at or after the insertion point
+ * and nothing between them moved. Compensating by one only in the rightward
+ * case is what keeps a drop on a column's own right-hand sliver a no-op
+ * instead of a one-place shift.
+ *
  * `projects` refuses to move (the order is handed back unchanged) because the
  * project switcher is fixed beside the tab strip; that rule needs to live
  * here, where a test can reach it, rather than only in whether the render
@@ -99,7 +112,8 @@ export function moveColumn(
 
   const next = [...order]
   next.splice(from, 1)
-  const bounded = Math.max(0, Math.min(next.length, toIndex))
+  const target = toIndex > from ? toIndex - 1 : toIndex
+  const bounded = Math.max(0, Math.min(next.length, target))
   next.splice(bounded, 0, id)
   return next
 }
@@ -112,8 +126,11 @@ export function moveColumn(
  * on the column's right edge; right of it, on the left edge. Dragging a
  * column across the terminal (via `moveColumn`) has to flip which edge grows,
  * or the user is left dragging a strip that no longer touches the terminal at
- * all. An order missing either slot (a `moveColumn` no-op, or a caller
- * mid-update) reads as `'right'`, the same side an unmoved column starts on.
+ * all. An order missing either slot reads as `'right'`, the same side an
+ * unmoved column starts on. `moveColumn` can never produce that: it neither
+ * drops nor duplicates a slot for any input. The guard exists for a
+ * hand-built array (a test, or a caller mid-update) rather than anything
+ * `moveColumn` itself can hand back.
  */
 export function resizerSideFor(order: readonly ColumnSlot[], id: ColumnId): PanelSide {
   const terminal = order.indexOf('terminal')
