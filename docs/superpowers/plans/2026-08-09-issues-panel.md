@@ -1084,7 +1084,9 @@ test('the heading collapses it to a strip and the strip brings it back', async (
 
 Run: `npx playwright test tests/e2e/splits.spec.ts tests/e2e/columns.spec.ts tests/e2e/menuColumns.spec.ts tests/e2e/columnOrder.spec.ts`
 
-Expect failures. `splits.spec.ts` encodes the whole flex row in pixel constants, and `columns.spec.ts` and `menuColumns.spec.ts` enumerate the column set. Update the constants and the enumerations to the eight-column row.
+Expect failures in the specs that enumerate the row. **Measured when this task ran: only `columnOrder.spec.ts` failed, in three order-array literals, and no pixel constant needed changing.** `splits.spec.ts`, `columns.spec.ts` and `menuColumns.spec.ts` were untouched, because the column is hidden and collapsed by default and none of those specs open it, so it occupies no width they measure. The full unfiltered run stayed at 211 passing.
+
+Treat the prediction as the thing to check, not as the thing to make true: if `splits.spec.ts` does fail, something has made the column take width by default, and that is the bug rather than the constants.
 
 Do not "fix" a failure by loosening an assertion into one that cannot fail. If a pixel constant has to change, change it to the new measured value, not to a range.
 

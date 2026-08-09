@@ -361,9 +361,22 @@ JSON and records its argv. That makes the assertions the ones worth making:
   generic one.
 - A list that comes back at the limit shows `200+`.
 
-### Known blast radius, to be planned for rather than discovered
+### Blast radius, as predicted and as measured
 
-- An eighth column shifts the flex row, and `splits.spec.ts`'s pixel constants encode the
-  whole row.
-- `columns.spec.ts` and `menuColumns.spec.ts` enumerate the column set and both grow an entry.
-- The Git rename changes user-visible strings that existing specs may assert on.
+Predicted: an eighth column shifts the flex row, so `splits.spec.ts`'s pixel constants, which
+encode the whole row, would need re-measuring; and `columns.spec.ts` and `menuColumns.spec.ts`
+enumerate the column set and would each grow an entry.
+
+**Measured on 2026-08-09, when the column landed: none of that happened.** A full unfiltered
+Playwright run stayed at 211 passing. `splits.spec.ts`, `columns.spec.ts` and
+`menuColumns.spec.ts` were not touched at all. The only fallout was three order-array literals
+in `columnOrder.spec.ts` that enumerate the row explicitly.
+
+The reason is the collapsed-and-hidden default above. A column that occupies no width until
+someone opens it cannot move anything the pixel constants measure, and specs that never open
+it never see it. That rule was adopted so a new column would not take terminal width unasked;
+neutralising the e2e blast radius was an unplanned second benefit, and it is the argument for
+keeping the rule if a future column is ever tempted to default to open.
+
+Still outstanding: the Git rename changes user-visible strings that existing specs may assert
+on.
