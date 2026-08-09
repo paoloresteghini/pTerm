@@ -11,6 +11,7 @@ import { Terminal, paneGrid, focusTerminal } from './Terminal'
 import { HistoryOverlay } from './HistoryOverlay'
 import { PaneDivider } from './PaneDivider'
 import { TabBar } from './TabBar'
+import { TabsPanel } from './TabsPanel'
 import { DeadPane } from './DeadPane'
 import { Sidebar } from './Sidebar'
 import { FilesPanel } from './FilesPanel'
@@ -62,7 +63,7 @@ import {
   type PaneBox,
   type PaneDirection,
 } from './workspace'
-import { groupedTabs } from './lib/tabGroups'
+import { groupedTabs, tabTree } from './lib/tabGroups'
 import { projectMuted, toggleProjectMute } from './mute'
 import { PANE_COLOR_DEFAULT, type PaneColor } from '../shared/paneColors'
 import { ColorSwatches } from './ColorSwatches'
@@ -1406,6 +1407,20 @@ export function App() {
               .catch(fail)
           }}
         />
+
+        {hiddenColumns.tabs ? null : (
+          <TabsPanel
+            nodes={tabTree(tabEntries.map((entry) => entry.pane), state.tabs)}
+            activeId={activePaneId}
+            status={state.status}
+            since={state.since}
+            now={now}
+            collapsed={tabsCollapsed}
+            onToggle={() => toggleColumnCollapsed('tabs')}
+            onSelect={selectPane}
+            onClose={requestClosePane}
+          />
+        )}
 
         <div className="flex min-w-0 flex-1 flex-col">
           {showsTabBar(collapsedColumns, hiddenColumns) ? (
