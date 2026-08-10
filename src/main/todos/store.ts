@@ -18,7 +18,7 @@ export function todosPath(): string {
 }
 
 interface TodosFile {
-  /** Read but not yet branched on: it exists so a shape change has somewhere to look. */
+  /** Written but not yet read: it exists so a shape change has somewhere to look. */
   version: number
   todos: TodoRecord[]
 }
@@ -47,7 +47,7 @@ function validate(candidate: unknown): TodoRecord | null {
   const stamp = created ?? updated ?? new Date(0).toISOString()
   return {
     id,
-    title,
+    title: title.trim(),
     body: typeof body === 'string' ? body : '',
     priority: isPriority(priority) ? priority : 'medium',
     done: done === true,
@@ -144,9 +144,7 @@ export function updateTodo(id: string, patch: TodoPatch): Promise<TodoRecord[]> 
   return serialise(async () => {
     const before = await readTodos()
     if (!before.some((todo) => todo.id === id)) return before
-    // A patch that would empty the title keeps the stored one: the modal
-    // disables Save for an empty field, and this is the same rule enforced
-    // where it cannot be bypassed.
+    // A patch that would empty the title keeps the stored one.
     const title = patch.title === undefined ? undefined : patch.title.trim()
     const after = before.map((todo) =>
       todo.id === id

@@ -68,6 +68,18 @@ describe('readTodos', () => {
     expect(todo.priority).toBe('medium')
     expect(todo.body).toBe('')
   })
+
+  it('trims a padded title read from disk', async () => {
+    await writeFile(
+      todosPath(),
+      JSON.stringify({
+        version: 1,
+        todos: [{ id: 'td_1', title: '  padded  ', body: '', priority: 'low', done: false, createdAt: 'a', updatedAt: 'a' }],
+      }),
+    )
+    const [todo] = await readTodos()
+    expect(todo.title).toBe('padded')
+  })
 })
 
 describe('createTodo', () => {
