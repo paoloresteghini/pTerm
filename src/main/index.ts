@@ -218,6 +218,7 @@ function showColumns(collapsed: ColumnVisibility): void {
     notes: 'toggle-notes',
     git: 'toggle-git',
     issues: 'toggle-issues',
+    todos: 'toggle-todos',
   }
   let open = false
   for (const [column, itemId] of Object.entries(ids) as [ColumnId, string][]) {
@@ -275,7 +276,7 @@ function installMenu(): void {
           id: 'toggle-tabs',
           label: 'Tabs',
           type: 'checkbox',
-          // No accelerator. The seven lettered columns have spent the mnemonic keys, and
+          // No accelerator. The lettered columns below have spent the mnemonic keys, and
           // this one replaces the tab bar rather than merely appearing beside it, which
           // is not a change to make by a keystroke a hand can land on by accident.
           registerAccelerator: false,
@@ -311,8 +312,8 @@ function installMenu(): void {
           type: 'checkbox',
           // One modifier away from `reload`'s CmdOrCtrl+R, and distinct from
           // it. Taken so the other letters stay mnemonic: P is spent on Presets,
-          // and one non-mnemonic key among seven is harder to remember than a
-          // near miss.
+          // and one non-mnemonic key among otherwise mnemonic ones is harder to
+          // remember than a near miss.
           accelerator: 'Alt+CmdOrCtrl+R',
           registerAccelerator: false,
           click: () => sendMenuCommand('togglePrompts'),
@@ -332,6 +333,14 @@ function installMenu(): void {
           accelerator: 'Alt+CmdOrCtrl+I',
           registerAccelerator: false,
           click: () => sendMenuCommand('toggleIssues'),
+        },
+        {
+          id: 'toggle-todos',
+          label: 'Todos',
+          type: 'checkbox',
+          accelerator: 'Alt+CmdOrCtrl+T',
+          registerAccelerator: false,
+          click: () => sendMenuCommand('toggleTodos'),
         },
         {
           id: 'toggle-notes',

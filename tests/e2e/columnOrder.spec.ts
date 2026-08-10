@@ -30,6 +30,7 @@ const DEFAULT_ORDER = [
   'git',
   'issues',
   'notes',
+  'todos',
 ]
 
 let app: ElectronApplication
@@ -238,6 +239,7 @@ test('dragging a column rightward across the terminal lands where the gap indica
   const orderBefore = await columnOrderOf(page)
   expect(orderBefore).toEqual([
     'notes', 'files', 'projects', 'tabs', 'terminal', 'skills', 'presets', 'prompts', 'git', 'issues',
+    'todos',
   ])
 
   const panelBefore = await boxOf(page, 'files-panel')
@@ -258,6 +260,7 @@ test('dragging a column rightward across the terminal lands where the gap indica
 
   const expectedOrder = [
     'notes', 'projects', 'tabs', 'terminal', 'skills', 'files', 'presets', 'prompts', 'git', 'issues',
+    'todos',
   ]
   await expect.poll(() => columnOrderOf(page)).toEqual(expectedOrder)
 
@@ -286,8 +289,8 @@ test('a column drag does not change the terminal container width', async () => {
   // `gap` helper's drop targets cost the row.
   const before = await boxOf(page, 'terminal-column')
 
-  // The regression this pins: ten `column-gap-*` elements used to take real
-  // width in the flex row the instant a drag started (`w-1 shrink-0`, no
+  // The regression this pins: the `column-gap-*` elements, one per seam in the
+  // row, used to take real width in the flex row the instant a drag started (`w-1 shrink-0`, no
   // `--spacing` override), and the terminal was the row's only `flex-1`
   // item, so it absorbed all of it. `Terminal.tsx`'s unconditional
   // `ResizeObserver` then fit the real tmux session to the narrowed box.

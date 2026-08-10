@@ -22,6 +22,7 @@ import { PresetsPanel } from './PresetsPanel'
 import { PromptsPanel } from './PromptsPanel'
 import { GitPanel } from './GitPanel'
 import { IssuesPanel } from './IssuesPanel'
+import { TodosPanel } from './TodosPanel'
 import { NotesPanel } from './NotesPanel'
 import { AddProjectDialog } from './AddProjectDialog'
 import { ConfirmClosePane } from './ConfirmClosePane'
@@ -103,15 +104,16 @@ const MIN_PANE_COLS = 20
 const MIN_PANE_ROWS = 5
 
 /**
- * Collapse state for the seven collapsible columns: '0' means expanded,
- * anything else (including absent) means collapsed.
+ * Collapse state for the collapsible columns: '0' means expanded, anything
+ * else (including absent) means collapsed.
  *
  * **Every one of them defaults collapsed**, so a fresh profile shows the
  * projects sidebar and the terminal and nothing else. Each expanded column
- * costs 208px: seven of them plus the 208px sidebar is 1664px, which already
- * exceeds the 1280px window `src/main/index.ts` opens, so opening all seven on
- * that window leaves no room for a terminal. Nothing stops a user from doing
- * it anyway on a wider or maximised window. The state persists per column, so
+ * costs 208px by default, so the keys below plus the 208px sidebar already add
+ * up to more than the 1280px window `src/main/index.ts` opens, and expanding
+ * all of them on that window leaves no room for a terminal. Nothing stops a
+ * user from doing it anyway on a wider or maximised window. The state
+ * persists per column, so
  * this default is the first run only.
  */
 const SKILLS_KEY = 'pterm:skillsCollapsed'
@@ -120,6 +122,7 @@ const FILES_KEY = 'pterm:filesCollapsed'
 const PROMPTS_KEY = 'pterm:promptsCollapsed'
 const GIT_KEY = 'pterm:gitCollapsed'
 const ISSUES_KEY = 'pterm:issuesCollapsed'
+const TODOS_KEY = 'pterm:todosCollapsed'
 const NOTES_KEY = 'pterm:notesCollapsed'
 const TABS_KEY = 'pterm:tabsCollapsed'
 
@@ -146,6 +149,7 @@ const HIDDEN_KEYS: Record<ColumnId, string> = {
   prompts: 'pterm:promptsHidden',
   git: 'pterm:gitHidden',
   issues: 'pterm:issuesHidden',
+  todos: 'pterm:todosHidden',
   notes: 'pterm:notesHidden',
 }
 
@@ -167,10 +171,14 @@ export function App() {
   const [promptsCollapsed, setPromptsCollapsed] = useState(() => storedCollapsed(PROMPTS_KEY, true))
   const [gitCollapsed, setGitCollapsed] = useState(() => storedCollapsed(GIT_KEY, true))
   const [issuesCollapsed, setIssuesCollapsed] = useState(() => storedCollapsed(ISSUES_KEY, true))
+  const [todosCollapsed, setTodosCollapsed] = useState(() => storedCollapsed(TODOS_KEY, true))
   const [notesCollapsed, setNotesCollapsed] = useState(() => storedCollapsed(NOTES_KEY, true))
   const [tabsCollapsed, setTabsCollapsed] = useState(() => storedCollapsed(TABS_KEY, true))
+  // Whether the Todos column's create dialog is open. Held here rather than
+  // inside `TodosPanel` so something outside that column can open it.
+  const [creatingTodo, setCreatingTodo] = useState(false)
   // Every column starts hidden on a fresh profile, which is what shipped: the
-  // window opens on terminal, not on eight columns of chrome.
+  // window opens on terminal, not on a row of chrome.
   const [hiddenColumns, setHiddenColumns] = useState<ColumnVisibility>(() => ({
     tabs: storedCollapsed(HIDDEN_KEYS.tabs, true),
     files: storedCollapsed(HIDDEN_KEYS.files, true),
@@ -179,6 +187,7 @@ export function App() {
     prompts: storedCollapsed(HIDDEN_KEYS.prompts, true),
     git: storedCollapsed(HIDDEN_KEYS.git, true),
     issues: storedCollapsed(HIDDEN_KEYS.issues, true),
+    todos: storedCollapsed(HIDDEN_KEYS.todos, true),
     notes: storedCollapsed(HIDDEN_KEYS.notes, true),
   }))
   // The row's left-to-right order. Restored from whatever the last drag
@@ -344,6 +353,12 @@ export function App() {
     // Collapsing to the strip is the heading's job, not this one's.
     setColumnHidden('issues', !hiddenColumns.issues)
   }, [hiddenColumns.issues, setColumnHidden])
+  const toggleTodos = useCallback(() => {
+    // The View menu's item and its shortcut both land here, and both
+    // mean presence: show the column, or take it off screen entirely.
+    // Collapsing to the strip is the heading's job, not this one's.
+    setColumnHidden('todos', !hiddenColumns.todos)
+  }, [hiddenColumns.todos, setColumnHidden])
   const toggleFiles = useCallback(() => {
     // The View menu's item and its shortcut both land here, and both
     // mean presence: show the column, or take it off screen entirely.
@@ -387,6 +402,7 @@ export function App() {
     notes: setNotesCollapsed,
     git: setGitCollapsed,
     issues: setIssuesCollapsed,
+    todos: setTodosCollapsed,
   }
 
   const COLUMN_KEY: Record<ColumnId, string> = {
@@ -398,6 +414,7 @@ export function App() {
     notes: NOTES_KEY,
     git: GIT_KEY,
     issues: ISSUES_KEY,
+    todos: TODOS_KEY,
   }
 
   /**
@@ -428,7 +445,7 @@ export function App() {
     window.pterm.columnsVisible(hiddenColumns)
   }, [hiddenColumns])
 
-  // The eight *Collapsed booleans as one ColumnVisibility, for showsTabBar.
+  // The *Collapsed booleans as one ColumnVisibility, for showsTabBar.
   const collapsedColumns: ColumnVisibility = {
     tabs: tabsCollapsed,
     files: filesCollapsed,
@@ -437,6 +454,7 @@ export function App() {
     prompts: promptsCollapsed,
     git: gitCollapsed,
     issues: issuesCollapsed,
+    todos: todosCollapsed,
     notes: notesCollapsed,
   }
 
@@ -1233,6 +1251,9 @@ export function App() {
           case 'toggleIssues':
             toggleIssues()
             return
+          case 'toggleTodos':
+            toggleTodos()
+            return
           case 'hideAllColumns':
             hideAllColumns()
             return
@@ -1254,6 +1275,7 @@ export function App() {
       toggleNotes,
       toggleGit,
       toggleIssues,
+      toggleTodos,
       hideAllColumns,
     ],
   )
@@ -1342,6 +1364,10 @@ export function App() {
           KeyN: toggleNotes,
           KeyG: toggleGit,
           KeyI: toggleIssues,
+          // No collision with ⌘T for a new tab: the `KeyT` branch above is
+          // guarded on `!event.altKey`, and this whole map sits behind
+          // `event.altKey`.
+          KeyT: toggleTodos,
         }
         const toggle = column[event.code]
         if (toggle) {
@@ -1396,6 +1422,7 @@ export function App() {
     toggleNotes,
     toggleGit,
     toggleIssues,
+    toggleTodos,
     hideAllColumns,
   ])
 
@@ -1888,6 +1915,19 @@ export function App() {
             side={resizerSideFor(columnOrder, 'issues')}
           />
         )
+      case 'todos':
+        // Global, like `prompts`: a todo is the user's own list rather than a
+        // fact about a repository, so this takes no project.
+        return hiddenColumns.todos ? null : (
+          <TodosPanel
+            collapsed={todosCollapsed}
+            onToggle={() => toggleColumnCollapsed('todos')}
+            onDragStart={() => setDragging('todos')}
+            side={resizerSideFor(columnOrder, 'todos')}
+            creating={creatingTodo}
+            onCreatingChange={setCreatingTodo}
+          />
+        )
       case 'notes':
         return hiddenColumns.notes ? null : (
           <NotesPanel
@@ -1914,10 +1954,10 @@ export function App() {
    * either side of it and eating the clicks that land on that sliver.
    *
    * While a drag IS in progress, the outer element still takes no space:
-   * `w-0 shrink-0` is a zero-width flex item, so the ten of these that appear
-   * at once cost the row nothing. `Terminal.tsx`'s `ResizeObserver` fires
+   * `w-0 shrink-0` is a zero-width flex item, so all of these that appear at
+   * once cost the row nothing. `Terminal.tsx`'s `ResizeObserver` fires
    * `fit.fit()` and a real `window.pterm.resize` on any width change, and
-   * before this the ten gaps' combined 4px each (`w-1`, no `--spacing`
+   * before this the gaps' combined 4px each (`w-1`, no `--spacing`
    * override in `index.css`) came straight out of the terminal, the row's
    * only `flex-1` item: narrowing the live tmux session by several columns
    * on every drag, including one cancelled with Escape, and rewrapping

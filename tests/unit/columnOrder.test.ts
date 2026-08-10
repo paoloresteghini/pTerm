@@ -35,6 +35,7 @@ describe('COLUMN_ORDER_DEFAULT', () => {
   it('is the row as it stands before anyone drags anything', () => {
     expect(COLUMN_ORDER_DEFAULT).toEqual([
       'files', 'projects', 'tabs', 'terminal', 'skills', 'presets', 'prompts', 'git', 'issues', 'notes',
+      'todos',
     ])
   })
 
@@ -63,6 +64,7 @@ describe('orderFromStored', () => {
   it('keeps a stored order the app fully recognises', () => {
     const stored: ColumnSlot[] = [
       'notes', 'files', 'projects', 'tabs', 'terminal', 'skills', 'presets', 'prompts', 'git', 'issues',
+      'todos',
     ]
     expect(orderFromStored(JSON.stringify(stored))).toEqual(stored)
   })
@@ -79,7 +81,13 @@ describe('orderFromStored', () => {
     const stored: ColumnSlot[] = ['notes', 'projects', 'terminal']
     expect(orderFromStored(JSON.stringify(stored))).toEqual([
       'notes', 'projects', 'terminal', 'files', 'tabs', 'skills', 'presets', 'prompts', 'git', 'issues',
+      'todos',
     ])
+  })
+
+  it('appends todos for a profile written before the column existed', () => {
+    const stored = JSON.stringify(['files', 'projects', 'tabs', 'terminal', 'skills', 'presets', 'prompts', 'git', 'issues', 'notes'])
+    expect(orderFromStored(stored)).toEqual([...COLUMN_ORDER_DEFAULT])
   })
 
   it('collapses a duplicated slot to its first appearance', () => {

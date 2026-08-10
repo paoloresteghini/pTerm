@@ -425,11 +425,12 @@ const COLUMN_KEY: Record<string, string> = {
   git: 'g',
   notes: 'n',
   issues: 'i',
+  todos: 't',
 }
 
 export async function expandColumn(
   page: Page,
-  name: 'files' | 'skills' | 'presets' | 'notes' | 'prompts' | 'git' | 'issues',
+  name: 'files' | 'skills' | 'presets' | 'notes' | 'prompts' | 'git' | 'issues' | 'todos',
 ): Promise<void> {
   // Wait for the app to have painted BEFORE reading the panel's absence.
   // Without this the count is 0 on a window that has not rendered yet, and on

@@ -19,6 +19,7 @@ const ALL_SHUT: ColumnVisibility = {
   notes: true,
   git: true,
   issues: true,
+  todos: true,
 }
 
 const withOpen = (...open: Array<keyof ColumnVisibility>): ColumnVisibility => {
@@ -28,11 +29,11 @@ const withOpen = (...open: Array<keyof ColumnVisibility>): ColumnVisibility => {
 }
 
 describe('COLUMN_IDS', () => {
-  it('lists the eight columns in on-screen order', () => {
+  it('lists the nine columns in on-screen order', () => {
     // `tabs` leads because the column sits leftmost, immediately right of the
     // projects sidebar, and this array is documented as on-screen order.
     expect(COLUMN_IDS).toEqual([
-      'tabs', 'files', 'skills', 'presets', 'prompts', 'git', 'issues', 'notes',
+      'tabs', 'files', 'skills', 'presets', 'prompts', 'git', 'issues', 'notes', 'todos',
     ])
   })
 })
@@ -68,6 +69,7 @@ describe('hideAll', () => {
       files: false,
       tabs: true,
       issues: true,
+      todos: true,
     }
     expect(hideAll(opened).remembered).toEqual(['files', 'git'])
   })
@@ -110,9 +112,11 @@ describe('the round trip', () => {
 describe('showsTabBar', () => {
   const allCollapsed: ColumnVisibility = {
     tabs: true, files: true, skills: true, presets: true, prompts: true, git: true, issues: true, notes: true,
+    todos: true,
   }
   const noneHidden: Record<ColumnId, boolean> = {
     tabs: false, files: false, skills: false, presets: false, prompts: false, git: false, issues: false, notes: false,
+    todos: false,
   }
 
   it('shows the bar when the tabs column is collapsed to its strip', () => {
@@ -129,15 +133,15 @@ describe('showsTabBar', () => {
 
   it('ignores every other column', () => {
     // The tabs column is open, so the bar must stand down, and it must stand
-    // down no matter what the other six are doing. Six of them are open here
-    // too, which is what makes this test able to fail: a predicate that asked
-    // "is any column open" would answer true and show the bar, where the right
-    // answer is false. An earlier version had the tabs column COLLAPSED with the
-    // others open, where both readings answer true and the test could not tell
-    // them apart.
+    // down no matter what the other columns are doing. Every one of them is
+    // open here too, which is what makes this test able to fail: a predicate
+    // that asked "is any column open" would answer true and show the bar, where
+    // the right answer is false. An earlier version had the tabs column
+    // COLLAPSED with the others open, where both readings answer true and the
+    // test could not tell them apart.
     const alsoOpen: ColumnVisibility = {
       tabs: false, files: false, skills: false, presets: false,
-      prompts: false, git: false, issues: false, notes: false,
+      prompts: false, git: false, issues: false, notes: false, todos: false,
     }
     expect(showsTabBar(alsoOpen, noneHidden)).toBe(false)
   })

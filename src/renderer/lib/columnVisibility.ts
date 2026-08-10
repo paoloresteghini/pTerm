@@ -31,6 +31,7 @@ export const COLUMN_IDS: readonly ColumnId[] = [
   'git',
   'issues',
   'notes',
+  'todos',
 ]
 
 export function anyOpen(state: ColumnVisibility): boolean {
