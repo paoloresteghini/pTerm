@@ -143,6 +143,18 @@ is read → apply → write → broadcast:
 - Broadcast walks `BrowserWindow.getAllWindows()` and sends `todosChanged` with
   the new list to every window, the originator included. The payload is
   identical to the reply it already applied, so the extra render is idempotent.
+- **That list holds exactly one window today.** Measured during this feature's
+  hand pass on 2026-08-10: `app.on('second-instance')` in `src/main/index.ts`
+  focuses the existing window and creates one only when `mainWindow` is null,
+  and `activate` creates one only when no window exists, so the app is
+  single-window by construction. A second Electron launched against the same
+  user-data-dir exits 0 against the single-instance lock and produces no
+  window. The fan-out therefore costs one loop over one window and buys nothing
+  observable now; it is kept because the alternative is a `getWindow()` call
+  that would silently serve only one window on the day the app gains a second,
+  and because `todosChanged` is the same push shape the status and update
+  channels already use. **Nothing in this design should be read as promising
+  cross-window sync a user could see.**
 
 `onTodosChanged` is exposed as an `ipcRenderer.on` subscription returning its
 own unsubscribe closure, matching the existing push channels.
@@ -343,11 +355,13 @@ untouched and returns the current list; `setDone` flips only `done` and
 **Unit, broadcast:** the window-fan-out is extracted as
 `broadcastTodos(windows, todos)` over a structural `{ isDestroyed, webContents }`
 target, so a node-environment test can assert that two live windows both receive
-the payload and a destroyed one is skipped rather than throwing. That is as far
-as automation reaches: `ipcMain` and a real second `BrowserWindow` cannot be
-constructed in vitest, and the e2e suite drives one window. **Nothing proves two
-real windows sync**; that check belongs to the hand pass, and is named here so it
-is not mistaken for covered.
+the payload and a destroyed one is skipped rather than throwing.
+
+That is as far as automation reaches, and the hand pass established why it is
+also as far as anything can reach: the app is single-window by construction (see
+the IPC section), so there is no second window to sync. The unit test exercises
+the fan-out's rule against fakes; no test, and no manual check, can show two real
+windows agreeing, because two real windows do not occur.
 
 **E2E, `tests/e2e/todos.spec.ts`:** open the column → create a todo → the row
 appears with the high-priority dot colour → search filters it → the priority
