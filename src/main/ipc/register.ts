@@ -1240,10 +1240,17 @@ export function registerIpc(
    * A pane dragged out of its tab and dropped onto another: the target tab
    * gains the pane, the source tab loses it.
    *
-   * `tabIdOf(paneId)` has to run before `manager.joinTab`, which moves the
-   * pane into the target's tmux group: after that the moved pane no longer
-   * answers `tabIdOf` with its old tab, and there would be nothing left to
-   * ask. The source tab's live members are read before the move for a
+   * `tabIdOf(paneId)` has to run before `manager.joinTab`. `joinTab` ends by
+   * re-registering the moved pane's manager entry under the TARGET's tab id
+   * (`this.open({ ..., tabId: targetTabId })`), so a `tabIdOf(paneId)` read
+   * AFTER the move does not fail or come back empty: it answers with the
+   * target's tab id, indistinguishable from a pane that was already there.
+   * Read there, `sourceTabId` would equal `tabId`, the `if (!sourceTabId)`
+   * guard below would not catch it, and the double `withTabRow` further down
+   * would overwrite the target row with the source row, writing a config
+   * where the moved pane names no row at all.
+   *
+   * The source tab's live members are read before the move too, for a
    * related but distinct reason: when the moved pane is its own tab's
    * founder, `joinTab` renames the target's staging session back onto that
    * founder's OWN session name, so the session `panesOfTab(sourceTabId)`
@@ -1275,13 +1282,22 @@ export function registerIpc(
     async (_event, paneId: string, targetPaneId: string): Promise<JoinShape> => {
       const sourceTabId = manager.tabIdOf(paneId)
       if (!sourceTabId) throw new Error(`Cannot join: pane ${paneId} is not open`)
-      // Before the move: see the doc comment above for why after is wrong
-      // whenever the moved pane is its own tab's founder.
+      // Both read before the move: see the doc comment above for why after
+      // is wrong whenever the moved pane is its own tab's founder.
+      // `groupIdOf` has the same hazard as `panesOfTab` for that case, and a
+      // narrower one besides: if the source tab has ALSO re-founded (every
+      // pane of it died and one came back under a fresh group), its group
+      // name no longer decodes to `sourceTabId`, `groupIdOf`'s founder-by-
+      // session-name fallback is the only match left, and after the move
+      // that fallback finds the very session `panesOfTab` is guarded
+      // against above, now sitting in the TARGET's group. Read here, before
+      // any of that has happened, both calls see the source tab exactly as
+      // it stood with the moved pane still in it.
       const sourceMembers = (await manager.panesOfTab(sourceTabId)).map((pane) => pane.id)
+      const sourceGroupId = await manager.groupIdOf(sourceTabId)
 
       const { record, tabId } = await manager.joinTab({ paneId, targetPaneId })
       const targetGroupId = await manager.groupIdOf(tabId)
-      const sourceGroupId = await manager.groupIdOf(sourceTabId)
 
       return serialise(async () => {
         const config = await store.read()
@@ -1357,9 +1373,12 @@ export function registerIpc(
         // source tab survives. See `JoinShape`'s doc comment in
         // `src/shared/ipc.ts`.
         const rows = sourceRow ? [targetRow, sourceRow] : [targetRow]
-        const named = new Set(rows.flatMap((row) => row.layout.kids))
+        // `held`, the same helper `splitPane` and `closePane` use, so `panes`
+        // is in each row's own layout order rather than `config.panes`
+        // order: a tab split more than once can have its kids reordered
+        // relative to when each pane was first written to disk.
         return {
-          panes: panes.filter((pane) => named.has(pane.id)),
+          panes: rows.flatMap((row) => held(panes, row.layout.kids)),
           tabs: rows,
           dropped: sourceRow ? null : sourceTabId,
         }

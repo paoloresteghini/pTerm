@@ -2317,6 +2317,13 @@ describe('joinPane', () => {
     const shape = await invoke<JoinShape>(CHANNELS.joinPane, sibling.id, other.id)
 
     expect(shape.dropped).toBeNull()
+    // The target row first, the source row second: Task 5's reducer reads
+    // `tabs[0].activePaneId` to decide which pane to focus, so a reversed
+    // order would focus the source tab's survivor instead of the pane the
+    // user just dropped, and nothing else here would catch it (both entries
+    // are `TabRow`, so a swap type-checks). See `JoinShape`'s doc comment.
+    expect(shape.tabs[0].id).toBe(other.id)
+    expect(shape.tabs[1]?.id).toBe(founder.id)
     expect(shape.tabs.find((row) => row.id === founder.id)?.layout.kids).toEqual([founder.id])
     expect(shape.tabs.find((row) => row.id === other.id)?.layout.kids).toEqual([
       other.id,
