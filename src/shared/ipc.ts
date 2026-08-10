@@ -30,6 +30,7 @@ export const CHANNELS = {
   dismissTab: 'pterm:dismissTab',
   acknowledgeTab: 'pterm:acknowledgeTab',
   splitPane: 'pterm:splitPane',
+  joinPane: 'pterm:joinPane',
   closePane: 'pterm:closePane',
   focusTab: 'pterm:focusTab',
   notifications: 'pterm:notifications',
@@ -506,6 +507,25 @@ export interface TabShape {
 }
 
 /**
+ * Two tabs after a join: the target gains a pane, the source loses one.
+ *
+ * What `joinPane` answers with, carrying the two rows that changed. Unlike
+ * `TabShape`, this must hold two rows because a join always affects both the
+ * target tab (which gained a pane) and the source tab (which lost one).
+ *
+ * `dropped` names the source tab when it had no panes left after the join and
+ * its row is gone, and is null when the source tab still holds panes.
+ *
+ * `panes` is every pane from both rows, in their layout order within each tab.
+ * `tabs` carries the target row always, and the source row when it survives.
+ */
+export interface JoinShape {
+  panes: TabDescriptor[]
+  tabs: TabRow[]
+  dropped: string | null
+}
+
+/**
  * The synthetic project collecting tabs whose slug matches no real one.
  * Lives here rather than in src/main because the renderer needs it too.
  */
@@ -964,6 +984,14 @@ export interface PTermApi {
    * itself. Rejects when no size was measured; see `SplitRequest`.
    */
   splitPane(request: SplitRequest): Promise<TabShape>
+  /**
+   * Join one pane to another's tab, moving it beside the target pane.
+   *
+   * Resolves to both affected rows and their panes, because a join always
+   * changes two tabs: the target gains a pane and the source loses one.
+   * The source tab's row is absent when it had no panes left.
+   */
+  joinPane(paneId: string, targetPaneId: string): Promise<JoinShape>
   /**
    * Kill one pane and take it out of its tab's layout.
    *

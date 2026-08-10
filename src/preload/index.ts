@@ -68,6 +68,8 @@ const api: PTermApi = {
   dismissTab: (id) => ipcRenderer.send(CHANNELS.dismissTab, id),
   acknowledgeTab: (id) => ipcRenderer.send(CHANNELS.acknowledgeTab, id),
   splitPane: (request) => ipcRenderer.invoke(CHANNELS.splitPane, request),
+  joinPane: (paneId: string, targetPaneId: string) =>
+    ipcRenderer.invoke(CHANNELS.joinPane, paneId, targetPaneId),
   closePane: (paneId) => ipcRenderer.invoke(CHANNELS.closePane, paneId),
   onFocusTab: (listener: (tabId: string) => void) => {
     const handler = (_event: IpcRendererEvent, tabId: string): void => listener(tabId)
