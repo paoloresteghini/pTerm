@@ -722,6 +722,18 @@ has lost a pane, including handing `activePaneId` to a survivor, so this handler
 does not need its own copy of that rule. Import `JoinShape` alongside the other
 shared types at the top of the file.
 
+**The order of `tabs` is load-bearing and must be written down (added after the
+Task 3 review).** The target row goes FIRST and the source row second. Task 5's
+reducer reads `shape.tabs[0].activePaneId` to decide which pane to focus, so
+emitting the source row first would focus the wrong pane, and nothing in the
+type would catch it: both entries are `TabRow`, so the two orderings are
+indistinguishable to the compiler and to every test that does not assert focus.
+
+`JoinShape`'s doc comment in `src/shared/ipc.ts` currently states the ordering
+of panes WITHIN a tab and says nothing about the order of `tabs` itself. As part
+of this task, add that sentence to the comment, so the contract lives next to the
+type both sides read rather than only in this plan.
+
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npx vitest run tests/integration/persistence.test.ts`
