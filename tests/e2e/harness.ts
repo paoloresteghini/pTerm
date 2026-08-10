@@ -147,9 +147,15 @@ export async function launchApp(opts: {
    */
   ghBin?: string
   /**
-   * The three knobs `tests/e2e/fixtures/gh-stub.mjs` reads out of its own
+   * The four knobs `tests/e2e/fixtures/gh-stub.mjs` reads out of its own
    * environment: which canned failure to answer with, the fixture file to
-   * echo back on success, and where to append every argv it was called with.
+   * echo back on success, where to append every argv it was called with, and
+   * how long to stall before answering.
+   *
+   * `ghStubDelayMs` is what makes the column's transition window long enough
+   * to assert on. A real `gh issue list` takes seconds on a busy repository,
+   * and what the column shows for that stretch is where two of its defects
+   * lived; with an instant stub there is no window to look at.
    *
    * Opts here rather than read straight from this process's `process.env`,
    * even though the stub would see the same values either way through the
@@ -162,6 +168,7 @@ export async function launchApp(opts: {
   ghStubMode?: string
   ghStubFixture?: string
   ghStubLog?: string
+  ghStubDelayMs?: number
 }): Promise<ElectronApplication> {
   assertTestSocket(opts.socket)
   assertUnderTmp('configDir', opts.configDir)
@@ -254,6 +261,9 @@ export async function launchApp(opts: {
       ...(opts.ghStubMode !== undefined ? { PTERM_GH_STUB_MODE: opts.ghStubMode } : {}),
       ...(opts.ghStubFixture !== undefined ? { PTERM_GH_STUB_FIXTURE: opts.ghStubFixture } : {}),
       ...(opts.ghStubLog !== undefined ? { PTERM_GH_STUB_LOG: opts.ghStubLog } : {}),
+      ...(opts.ghStubDelayMs !== undefined
+        ? { PTERM_GH_STUB_DELAY_MS: String(opts.ghStubDelayMs) }
+        : {}),
     },
   })
 }

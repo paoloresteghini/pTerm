@@ -108,12 +108,19 @@ test.afterEach(async () => {
   }
 })
 
-/** Writes `rows` as the fixture file and launches with the stub reading it. */
-async function openWithFixture(rows: unknown[]): Promise<void> {
+/**
+ * Writes `rows` as the fixture file and launches with the stub reading it.
+ *
+ * `delayMs` stalls every `gh` call the stub answers, which is the only way to
+ * hold the column's in-flight window open long enough to assert on it. A real
+ * `gh issue list` takes seconds against a busy repository; the two tests that
+ * pass a delay are about what the column shows for exactly that stretch.
+ */
+async function openWithFixture(rows: unknown[], delayMs?: number): Promise<void> {
   await writeFile(fixturePath, JSON.stringify(rows), 'utf8')
   app = await launchApp({
     socket: SOCKET, configDir, projectsRoot, claudeSettings: claudeSettingsPath, claudeHome, userDataDir,
-    ghBin: GH_BIN, ghStubFixture: fixturePath, ghStubLog: stubLog,
+    ghBin: GH_BIN, ghStubFixture: fixturePath, ghStubLog: stubLog, ghStubDelayMs: delayMs,
   })
   page = await app.firstWindow()
   await expandColumn(page, 'issues')
@@ -173,6 +180,113 @@ test('shows the no-auth empty state and no list when gh is not signed in', async
   await openWithMode('no-auth')
   await expect(page.getByTestId('issues-empty-no-auth')).toBeVisible({ timeout: 15_000 })
   await expect(page.getByTestId('issues-list')).toHaveCount(0)
+})
+
+test('the count keeps the filter its rows were fetched under while the next one loads', async () => {
+  await openWithFixture(TWO_ISSUES, 2500)
+  await expect(page.getByTestId('issue-row-42')).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByTestId('issues-count')).toHaveText('2 open')
+
+  await page.getByTestId('issues-state-closed').click()
+
+  // The gate, not the assertion. `issues-refresh` goes disabled when `load`
+  // sets `loading`, one render AFTER the click's own state change has already
+  // painted, so reaching this point proves the heading has been re-rendered
+  // under the new filter. Asserting the count straight after the click would
+  // race that render and pass on the pre-click text.
+  await expect(page.getByTestId('issues-refresh')).toBeDisabled()
+
+  // The two open rows are still on screen, deliberately: this column does not
+  // blank a list it is refreshing. What it must not do is caption them with a
+  // filter the server was never asked about.
+  await expect(page.getByTestId('issue-row-42')).toBeVisible()
+  await expect(page.getByTestId('issues-count')).toHaveText('2 open')
+
+  // And once the closed fetch lands both halves move together. The stub
+  // answers every call from the same fixture regardless of `--state`, so what
+  // arrives is two rows again; the point is that the word changes only when
+  // the rows it counts do.
+  await expect(page.getByTestId('issues-count')).toHaveText('2 closed', { timeout: 20_000 })
+})
+
+test('a project switch takes the previous project rows off screen', async () => {
+  // The reason this matters is `quickClose`: it pairs the row number it is
+  // given with the LIVE project id, so a row left over from the project the
+  // user just left would close that number in the repository they switched to.
+  const other = await mkdtemp(join(tmpdir(), 'pterm-e2e-issues-list-repo2-'))
+  try {
+    await gitIn(other, ['init'])
+    await writeFile(join(other, 'tracked.txt'), 'one\n', 'utf8')
+    await gitIn(other, ['add', 'tracked.txt'])
+    await gitIn(other, ['commit', '-m', 'first'])
+    await gitIn(other, ['remote', 'add', 'origin', 'https://github.com/other/second.git'])
+    await writeFile(
+      join(configDir, 'config.json'),
+      JSON.stringify({
+        version: 3,
+        projects: [
+          { id: 'id-repo', name: 'Repo', slug: 'repo', cwd: repo, presets: [], activeTabId: null },
+          { id: 'id-other', name: 'Other', slug: 'other', cwd: other, presets: [], activeTabId: null },
+        ],
+        activeProjectId: 'id-repo',
+        tabs: [],
+      }),
+      'utf8',
+    )
+
+    await openWithFixture(TWO_ISSUES, 2500)
+    await expect(page.getByTestId('issue-row-42')).toBeVisible({ timeout: 20_000 })
+    await expect(page.getByTestId('issues-repo')).toHaveText('o/n')
+
+    await page.keyboard.press('Meta+Digit2')
+    // Same gate rule as the filter test above: the rail's own `data-active`
+    // flips in the render the switch causes, so waiting on it means the panel
+    // has re-rendered too and the assertions below are not racing it.
+    await expect(page.getByTestId('project-id-other')).toHaveAttribute('data-active', 'true')
+
+    await expect(page.getByTestId('issue-row-42')).toHaveCount(0)
+    await expect(page.getByTestId('issues-repo')).toHaveCount(0)
+    await expect(page.getByTestId('issues-loading')).toBeVisible()
+
+    await expect(page.getByTestId('issues-repo')).toHaveText('other/second', { timeout: 20_000 })
+  } finally {
+    await rm(other, { recursive: true, force: true })
+  }
+})
+
+test('the count stays inside the column when the repo slug is too long for it', async () => {
+  // Geometry, not text. `toContainText('1 open')` passes on the broken layout
+  // too: with the slug and the count inside one `truncate` span, the count is
+  // still a text node, still in the DOM, and Playwright still calls it
+  // visible. It is simply clipped out of sight, which is how this shipped.
+  await gitIn(repo, ['remote', 'set-url', 'origin',
+    'https://github.com/paoloresteghini/prcli-issues-smoke.git'])
+  await openWithFixture([TWO_ISSUES[0]])
+  await expect(page.getByTestId('issue-row-42')).toBeVisible({ timeout: 15_000 })
+
+  const boxes = await page.evaluate(() => {
+    const panel = document.querySelector('[data-testid="issues-panel"]')
+    const slug = document.querySelector('[data-testid="issues-repo"]')
+    const count = document.querySelector('[data-testid="issues-count"]')
+    if (!panel || !slug || !count) return null
+    return {
+      panelRight: panel.getBoundingClientRect().right,
+      count: count.getBoundingClientRect(),
+      slugClient: slug.clientWidth,
+      slugScroll: slug.scrollWidth,
+    }
+  })
+  expect(boxes).not.toBeNull()
+
+  // The premise: this slug really is wider than the column gives it, so the
+  // assertions below are about a genuinely tight row rather than one with
+  // room to spare. Without this a wider default width would quietly turn the
+  // rest of this test into a no-op.
+  expect(boxes!.slugScroll).toBeGreaterThan(boxes!.slugClient)
+
+  // The property: the name is what shortens, and the count is still on screen.
+  expect(boxes!.count.width).toBeGreaterThan(0)
+  expect(boxes!.count.right).toBeLessThanOrEqual(boxes!.panelRight)
 })
 
 test('a fixture of exactly 200 issues shows the truncated count', async () => {

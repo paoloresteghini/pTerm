@@ -2,19 +2,26 @@ import { Dialog, DialogContent, DialogTitle } from './ui/Dialog'
 import { Button } from './ui/Button'
 
 /**
- * Asks before a pane with unsaved edits is closed.
+ * Asks before something with unsaved edits is closed.
  *
- * Only ever shown for a dirty pane: `App.tsx` opens it from `requestClosePane`,
- * which checks the dirty map before this component exists. Cancelling and the
- * dialog's own dismissal (Escape, an outside click) are the same action, both
- * routed through `onCancel`, so there is exactly one way to back out.
+ * Only ever shown for something already known to be dirty; each caller checks
+ * that before this component exists. There are two: `App.tsx` opens it from
+ * `requestClosePane` for a pane, and `IssueModal.tsx` from its own
+ * `pendingAction` gate for an issue edit or a create draft. `subject` is what
+ * the body copy calls the thing, since "pane" is a lie in the second case.
+ * Cancelling and the dialog's own dismissal (Escape, an outside click) are the
+ * same action, both routed through `onCancel`, so there is exactly one way to
+ * back out.
  */
 export function ConfirmClosePane({
   open,
+  subject = 'pane',
   onCancel,
   onDiscard,
 }: {
   open: boolean
+  /** What the body copy calls the thing holding the edits. */
+  subject?: string
   onCancel: () => void
   onDiscard: () => void
 }) {
@@ -25,7 +32,7 @@ export function ConfirmClosePane({
           Unsaved changes
         </DialogTitle>
         <p className="mb-3 text-[11px] text-muted">
-          This pane has edits that were never saved. Closing it now throws them away.
+          This {subject} has edits that were never saved. Closing it now throws them away.
         </p>
         <div className="flex justify-end gap-2">
           <Button data-testid="confirm-close-cancel" variant="ghost" onClick={onCancel}>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { EditorState } from '@codemirror/state'
+import { EditorState, Prec } from '@codemirror/state'
 import { EditorView, keymap, lineNumbers } from '@codemirror/view'
-import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
+import { defaultKeymap, history, historyKeymap, insertNewlineAndIndent } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
 import { syntaxHighlighting } from '@codemirror/language'
 import type { IssueDetail } from '../shared/ipc'
@@ -48,6 +48,20 @@ function BodyEditor({ value, onChange }: { value: string; onChange: (text: strin
         history(),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         markdown(),
+        // A plain newline on Enter, ahead of the `Prec.high` binding
+        // `markdown()` installs for `insertNewlineContinueMarkup`.
+        //
+        // That command continues a markdown list by inserting the next
+        // marker for you, which is right in an editor someone lives in and
+        // wrong here: nothing on screen says it happened, so the ordinary way
+        // to type a two-item list (`- one`, Enter, `- two`) lands the user's
+        // own `- ` on top of the inserted one and writes `- - two`. It filed a
+        // real malformed issue during live testing. Continuing to insert the
+        // marker while somehow declining the user's identical keystrokes is
+        // not a thing a keymap can do, so the continuation goes: this is a
+        // single-purpose issue-body field, not a document editor, and a
+        // markdown list typed in full is what everyone expects to get.
+        Prec.highest(keymap.of([{ key: 'Enter', run: insertNewlineAndIndent }])),
         syntaxHighlighting(syntaxColorStyle, { fallback: true }),
         EditorView.lineWrapping,
         EditorView.theme(
@@ -111,12 +125,20 @@ function BodyEditor({ value, onChange }: { value: string; onChange: (text: strin
  */
 export function IssueModal({
   projectId,
+  projectRepo,
   number,
   create,
   onClose,
   onMutated,
 }: {
   projectId: string
+  /**
+   * The repository the panel is showing for `projectId`, or null while it
+   * does not know one. Read only in create mode, and only through the ref
+   * below so it cannot pull the reset effect around: read and edit take
+   * their slug from the reply that fetched the issue instead.
+   */
+  projectRepo: string | null
   number: number | null
   /** Opens the dialog in create mode, with no issue to fetch. */
   create: boolean
@@ -125,6 +147,12 @@ export function IssueModal({
   onMutated: () => void
 }) {
   const [detail, setDetail] = useState<IssueDetail | null>(null)
+  // The repository this dialog is about, shown under the title. Without it
+  // nothing on screen distinguished two repositories' issue #42, and a ⌘+digit
+  // project switch with the dialog open refetches the same NUMBER against the
+  // new repository and repaints in place. Frozen with the rest of the target
+  // by `resetForTarget`, so it names what the buttons would actually act on.
+  const [repoSlug, setRepoSlug] = useState<string | null>(null)
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState('')
@@ -148,9 +176,19 @@ export function IssueModal({
   // overtaken by a newer one) and is dropped rather than landing.
   const fetchToken = useRef(0)
 
+  // A ref rather than a dependency, the same reason `BodyEditor`'s
+  // `onChangeRef` is one: `projectRepo` changes every time the panel's own
+  // list reloads, and as a dependency of `resetForTarget` that would refetch
+  // this dialog's issue each time the column behind it refreshed.
+  const projectRepoRef = useRef(projectRepo)
+  useEffect(() => {
+    projectRepoRef.current = projectRepo
+  })
+
   // The project and issue an in-progress edit or create actually targets,
-  // frozen at the moment that session started (`resetForTarget` below is the
-  // only writer). `submitEdit`/`submitCreate` read this instead of the live
+  // frozen at the moment that session started (`resetForTarget` and
+  // `startEdit` both write it, always the pair this render names).
+  // `submitEdit`/`submitCreate` read this instead of the live
   // `projectId`/`number` props: if a target change lands while dirty (see
   // the effect below) the confirm blocks further submits until it is
   // answered, but a project switch by ⌘+digit can still land the instant
@@ -176,6 +214,7 @@ export function IssueModal({
           if (fetchToken.current !== token) return
           if (result.ok) {
             setDetail(result.value)
+            setRepoSlug(result.repo.slug)
             setFetchError(null)
           } else {
             setFetchError(result.message)
@@ -211,6 +250,11 @@ export function IssueModal({
     setEditing(false)
     setMutationError(null)
     setComment('')
+    // Create has no fetch to learn the repository from, so it takes the
+    // panel's; every other mode clears it here and `fetchDetail` fills it in
+    // from the reply, which is what makes a repaint after a project switch
+    // visible rather than silent.
+    setRepoSlug(create ? projectRepoRef.current : null)
     if (create) {
       setTitle('')
       setBody('')
@@ -402,6 +446,11 @@ export function IssueModal({
                 {detail ? ` ${detail.title}` : ''}
               </>
             )}
+            {repoSlug !== null ? (
+              <span data-testid="issue-repo" className="mt-0.5 block text-[11px] font-normal text-faint">
+                {repoSlug}
+              </span>
+            ) : null}
           </DialogTitle>
 
           {mode === 'create' ? (
@@ -556,7 +605,12 @@ export function IssueModal({
                   </>
                 ) : detail.state === 'OPEN' ? (
                   <>
-                    <Button data-testid="issue-edit" variant="ghost" onClick={startEdit}>
+                    {/* `disabled={busy}` for the same reason the buttons beside
+                        it carry it: entering edit mid-close loads the form from
+                        the pre-close `detail`, and the refetch that follows the
+                        close updates `detail` underneath without touching the
+                        form the user is now typing into. */}
+                    <Button data-testid="issue-edit" variant="ghost" disabled={busy} onClick={startEdit}>
                       Edit
                     </Button>
                     <Button
@@ -577,7 +631,7 @@ export function IssueModal({
                   </>
                 ) : (
                   <>
-                    <Button data-testid="issue-edit" variant="ghost" onClick={startEdit}>
+                    <Button data-testid="issue-edit" variant="ghost" disabled={busy} onClick={startEdit}>
                       Edit
                     </Button>
                     <Button data-testid="issue-reopen" disabled={busy} onClick={() => submitState('reopen')}>
@@ -591,6 +645,7 @@ export function IssueModal({
         </DialogContent>
       </Dialog>
       <ConfirmClosePane
+        subject="issue"
         open={pendingAction !== null}
         onCancel={() => setPendingAction(null)}
         onDiscard={() => {

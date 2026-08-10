@@ -14,8 +14,30 @@ function nextSort(current: IssueSort): IssueSort {
   return SORT_ORDER[(SORT_ORDER.indexOf(current) + 1) % SORT_ORDER.length]
 }
 
-/** What a failed `issuesList` left the column showing. */
-type Failure = { reason: IssuesFailure; message: string }
+/**
+ * What one `issuesList` reply left the column showing, stamped with the
+ * project and filter it was actually fetched under.
+ *
+ * The stamp is the whole point. A fetch takes as long as `gh` takes (seconds
+ * on a busy repository), and the column deliberately keeps the previous
+ * reply on screen while the next one is in flight rather than blanking. Held
+ * as loose `rows`/`repo`/`state` that pairs with whatever the live filter and
+ * project happen to be, that produces two different lies: a count and label
+ * from a filter the server was never asked about, and rows belonging to a
+ * project the user has already left, whose numbers a click or a quick-close
+ * would then apply to the project they switched TO. Keeping the target
+ * alongside the payload means the render can simply refuse to pair them.
+ */
+type Result =
+  | {
+      ok: true
+      projectId: string
+      state: IssueStateFilter
+      rows: IssueSummary[]
+      repo: IssueRepo
+      truncated: boolean
+    }
+  | { ok: false; projectId: string; reason: IssuesFailure; message: string }
 
 function StateButton({
   filter,
@@ -89,11 +111,7 @@ function Row({
       {onQuickClose ? (
         <button
           data-testid={`issue-quick-close-${row.number}`}
-          onClick={(event) => {
-            // Stops the row's own click from also opening the modal.
-            event.stopPropagation()
-            onQuickClose(row.number)
-          }}
+          onClick={() => onQuickClose(row.number)}
           title="Close as completed"
           className="absolute right-1 top-1 shrink-0 cursor-default border-none bg-transparent px-1 text-faint opacity-0 group-hover:opacity-100 hover:text-fg"
         >
@@ -126,10 +144,7 @@ export function IssuesPanel({
   // a note is prose. This column is a list of short titles, the same shape as
   // Git, Skills, Presets and Files, all of which take the 208 default.
   const { width, set, commit } = useColumnWidth('pterm:issuesWidth')
-  const [rows, setRows] = useState<IssueSummary[] | null>(null)
-  const [repo, setRepo] = useState<IssueRepo | null>(null)
-  const [truncated, setTruncated] = useState(false)
-  const [failure, setFailure] = useState<Failure | null>(null)
+  const [result, setResult] = useState<Result | null>(null)
   const [loading, setLoading] = useState(false)
   const [query, setQuery] = useState('')
   const [state, setState] = useState<IssueStateFilter>('open')
@@ -142,8 +157,10 @@ export function IssuesPanel({
   // The heading's `+`, a second and independent way to open the modal: see
   // `IssueModal`'s own doc comment for why this is not folded into `open`.
   const [creating, setCreating] = useState(false)
-  // A quick-close that failed. Cleared at the start of the next attempt,
-  // like `IssueModal`'s own `mutationError`.
+  // A quick-close that failed. Cleared at the start of the next attempt and
+  // by any list load, the same rule `IssueModal` applies to its own
+  // `mutationError`: cleared only by the next quick-close, it outlived the
+  // very refresh that proved it fixed, and outlived the project it was about.
   const [quickCloseError, setQuickCloseError] = useState<string | null>(null)
 
   // `load` has several callers (the effect below, the focus listener, the
@@ -159,50 +176,55 @@ export function IssuesPanel({
   const load = useCallback((): void => {
     const projectId = project?.id
     const token = ++requestId.current
+    setQuickCloseError(null)
     if (!projectId) {
-      setRows(null)
-      setRepo(null)
-      setTruncated(false)
-      setFailure(null)
+      setResult(null)
       setLoading(false)
       return
     }
     setLoading(true)
+    // `projectId` and `state` are read here, at the moment the call is made,
+    // and travel with the reply: by the time it lands either may already have
+    // moved on, and the reply describes neither of the new ones.
     window.pterm
       .issuesList(projectId, state)
-      .then((result) => {
+      .then((reply) => {
         if (requestId.current !== token) return
         lastFetchedAt.current = Date.now()
-        if (result.ok) {
-          setRepo(result.repo)
-          setRows(result.value)
-          setTruncated(result.truncated)
-          setFailure(null)
-        } else {
-          setRepo(null)
-          setRows(null)
-          setTruncated(false)
-          setFailure({ reason: result.reason, message: result.message })
-        }
+        setResult(
+          reply.ok
+            ? {
+                ok: true,
+                projectId,
+                state,
+                rows: reply.value,
+                repo: reply.repo,
+                truncated: reply.truncated,
+              }
+            : { ok: false, projectId, reason: reply.reason, message: reply.message },
+        )
         setLoading(false)
       })
       .catch(() => {
         if (requestId.current !== token) return
         lastFetchedAt.current = Date.now()
-        setRepo(null)
-        setRows(null)
-        setTruncated(false)
-        setFailure({ reason: 'failed', message: 'The GitHub CLI reported an error.' })
+        setResult({
+          ok: false,
+          projectId,
+          reason: 'failed',
+          message: 'The GitHub CLI reported an error.',
+        })
         setLoading(false)
       })
   }, [project?.id, state])
 
   // Mount (while expanded), project change and state change all fall out of
   // this one effect: `load`'s identity changes exactly when `project?.id` or
-  // `state` does, and collapsing/expanding toggles `collapsed` itself. Rows
-  // already on screen are left alone here, see `load`, which never clears
-  // them before a fetch lands, so this never blanks the list it is
-  // refreshing.
+  // `state` does, and collapsing/expanding toggles `collapsed` itself. Nothing
+  // on screen is cleared here or in `load`: a reply for the SAME project stays
+  // up until its replacement arrives, so a refresh or a filter change never
+  // blanks the list. A reply for a DIFFERENT project stops being rendered at
+  // all, see `current` below.
   useEffect(() => {
     if (collapsed) return
     load()
@@ -248,7 +270,13 @@ export function IssuesPanel({
     )
   }
 
-  const filtered = rows === null ? [] : sortIssues(filterIssues(rows, query), sort)
+  // The one gate between a stored reply and the screen: a reply is rendered
+  // only while it still describes the project on screen. Everything below
+  // reads `current` rather than `result`, so a switch shows the loading state
+  // until the new project's own reply lands, and there is never a row whose
+  // number could be sent to a repository it did not come from.
+  const current = result !== null && result.projectId === project?.id ? result : null
+  const filtered = current?.ok ? sortIssues(filterIssues(current.rows, query), sort) : []
   const now = Date.now()
 
   return (
@@ -291,22 +319,29 @@ export function IssuesPanel({
       ) : (
         <>
           <div className="flex items-center justify-between gap-2 px-2.5 pb-1 text-faint">
-            <span className="truncate">
-              {repo ? (
-                <>
-                  <span data-testid="issues-repo" className="text-muted">
-                    {repo.slug}
-                  </span>{' '}
-                  {/* The count is templated on `state` rather than the literal
-                      word "open": a reader on the Closed filter is shown how
-                      many CLOSED issues there are, not a stale "open" label
-                      left over from the default. */}
-                  <span data-testid="issues-count">
-                    {truncated ? '200+' : `${rows?.length ?? 0} ${state}`}
-                  </span>
-                </>
-              ) : null}
-            </span>
+            {current?.ok ? (
+              // The slug truncates on its own and the count sits outside it
+              // with `shrink-0`. Both inside one truncating span, an ordinary
+              // slug filled the row by itself and pushed the count past the
+              // clip boundary, so the count disappeared entirely instead of
+              // the name shortening: measured 164px of room against 272px of
+              // content at the 208px default width.
+              <span className="flex min-w-0 items-baseline gap-1">
+                <span data-testid="issues-repo" className="truncate text-muted">
+                  {current.repo.slug}
+                </span>
+                {/* Both halves come from `current`, so the number and the word
+                    beside it are the ones this row set was actually fetched
+                    under. Rendering the count against the LIVE filter instead
+                    captioned the previous filter's rows with the new filter's
+                    word for the length of the `gh` call. */}
+                <span data-testid="issues-count" className="shrink-0">
+                  {current.truncated ? '200+' : `${current.rows.length} ${current.state}`}
+                </span>
+              </span>
+            ) : (
+              <span />
+            )}
             <button
               data-testid="issues-refresh"
               disabled={loading}
@@ -343,19 +378,19 @@ export function IssuesPanel({
               {SORT_LABEL[sort]}
             </button>
           </div>
-          {failure ? (
-            <div data-testid={`issues-empty-${failure.reason}`} className="px-2.5 py-2 text-faint">
-              <p>{failure.message}</p>
-              {failure.reason === 'no-gh' ? (
+          {current !== null && !current.ok ? (
+            <div data-testid={`issues-empty-${current.reason}`} className="px-2.5 py-2 text-faint">
+              <p>{current.message}</p>
+              {current.reason === 'no-gh' ? (
                 <code className="mt-1 block select-text text-fg">brew install gh</code>
               ) : null}
-              {failure.reason === 'no-auth' ? (
+              {current.reason === 'no-auth' ? (
                 <code className="mt-1 block select-text text-fg">gh auth login</code>
               ) : null}
             </div>
           ) : (
             <div data-testid="issues-list" className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-              {rows === null ? (
+              {current === null ? (
                 <p data-testid="issues-loading" className="px-2.5 py-1 text-faint">
                   …
                 </p>
@@ -383,6 +418,11 @@ export function IssuesPanel({
           ) : null}
           <IssueModal
             projectId={project.id}
+            // Only used to name the repository a NEW issue would be filed
+            // against: the read and edit modes learn theirs from the reply
+            // that fetched the issue, which is the one that cannot disagree
+            // with what is on screen.
+            projectRepo={current?.ok ? current.repo.slug : null}
             number={open}
             create={creating}
             onClose={() => {

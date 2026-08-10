@@ -126,6 +126,24 @@ async function openIssue(row: { number: number }, detail: unknown): Promise<void
   await expect(page.getByTestId('issue-modal')).toBeVisible({ timeout: 15_000 })
 }
 
+/**
+ * Launches with `rows` as the list fixture and waits for the column, without
+ * opening any issue. Create is the one verb with no issue to open first.
+ */
+async function openColumn(rows: unknown[]): Promise<void> {
+  await writeFile(fixturePath, JSON.stringify(rows), 'utf8')
+  app = await launchApp({
+    socket: SOCKET, configDir, projectsRoot, claudeSettings: claudeSettingsPath, claudeHome, userDataDir,
+    ghBin: GH_BIN, ghStubFixture: fixturePath, ghStubLog: stubLog,
+  })
+  page = await app.firstWindow()
+  await expandColumn(page, 'issues')
+  // `issues-repo` rather than `issues-new`: the `+` renders as soon as there
+  // is a project, before the list has landed, and the create form takes the
+  // repository it names from the panel's own loaded reply.
+  await expect(page.getByTestId('issues-repo')).toBeVisible({ timeout: 15_000 })
+}
+
 /** Every argv the stub has logged so far, parsed back out of the log file. */
 async function loggedArgv(): Promise<string[][]> {
   const text = await readFile(stubLog, 'utf8').catch(() => '')
@@ -187,6 +205,54 @@ test('submitting a comment records the comment argv', async () => {
     .toBe(true)
   const commentCall = (await loggedArgv()).find((argv) => argv.includes('comment'))
   expect(commentCall).toEqual(['issue', 'comment', '42', '--repo', 'o/n', '--body-file', '-'])
+})
+
+test('the + button creates an issue and records the create argv', async () => {
+  await openColumn([OPEN_ROW])
+
+  await page.getByTestId('issues-new').click()
+  await expect(page.getByTestId('issue-title-input')).toBeVisible({ timeout: 15_000 })
+  // The heading names the repository a new issue would be filed against, so
+  // the create form is not the one place in this feature with no repository
+  // on screen at all.
+  await expect(page.getByTestId('issue-repo')).toHaveText('o/n')
+
+  await page.getByTestId('issue-title-input').fill('Something new')
+  await page.getByTestId('issue-create-submit').click()
+
+  await expect
+    .poll(async () => (await loggedArgv()).some((argv) => argv.includes('create')), { timeout: 15_000 })
+    .toBe(true)
+  const createCall = (await loggedArgv()).find((argv) => argv.includes('create'))
+  expect(createCall).toEqual([
+    'issue', 'create', '--repo', 'o/n', '--title', 'Something new', '--body-file', '-',
+  ])
+
+  // A successful create closes the dialog; the panel refetches behind it.
+  await expect(page.getByTestId('issue-modal')).toHaveCount(0)
+})
+
+test('the body editor does not double a markdown list marker on Enter', async () => {
+  // Typing `- one`, Enter, `- two` is how anyone writes a two-item list.
+  // `@codemirror/lang-markdown` binds Enter to a list continuation that
+  // inserts the next `- ` for you, silently, so the user's own `- ` landed on
+  // top of it and wrote `- - two` into a real issue during live testing.
+  await openColumn([OPEN_ROW])
+
+  await page.getByTestId('issues-new').click()
+  await expect(page.getByTestId('issue-body-editor')).toBeVisible({ timeout: 15_000 })
+
+  await page.getByTestId('issue-body-editor').locator('.cm-content').click()
+  await page.keyboard.type('- one')
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('- two')
+
+  // Read the document, not the painted lines: `.cm-content`'s textContent
+  // joins its line divs with no separator, so the newline has to come back
+  // from the editor's own state.
+  const text = await page.getByTestId('issue-body-editor').locator('.cm-line')
+    .allTextContents()
+  expect(text).toEqual(['- one', '- two'])
 })
 
 test('a close attempt under no-auth leaves issue-error visible', async () => {
