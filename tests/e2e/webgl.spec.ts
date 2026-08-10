@@ -20,14 +20,15 @@
  * xterm's fallback is permanent. The app keeping its own count under that cap
  * is what these tests are about.
  *
- * Four tests. The first three turn the budget down to two, because eviction
- * and recovery are hard to reach at twelve through this UI — the tab bar
- * scrolls once enough entries are in it and puts `+` behind itself, and
- * `App.tsx` refuses a split that would leave a pane under 20 columns. At a
- * budget of two the third pane hits exactly the same path as the thirteenth
- * would. The fourth test then runs with no override at all and drives sixteen
- * panes in a resized window, so the number the app actually ships is not
- * taken on faith.
+ * Five tests. Three of them turn the budget down to two, because eviction and
+ * recovery are hard to reach at twelve through this UI — the tab bar scrolls
+ * once enough entries are in it and puts `+` behind itself, and `App.tsx`
+ * refuses a split that would leave a pane under 20 columns. At a budget of two
+ * the third pane hits exactly the same path as the thirteenth would. A fourth
+ * reaches past the app and takes a context out from under a pane on screen,
+ * which is the one loss the budget cannot prevent. The last runs with no
+ * override at all and drives sixteen panes in a resized window, so the number
+ * the app actually ships is not taken on faith.
  *
  * **What this file does NOT see** — read off its own text unless a line says
  * measured:
@@ -40,15 +41,18 @@
  *   been typing in outranks its idle neighbour. Nothing here has two panes on
  *   one tab competing for the last context, so deleting that `markUsed` leaves
  *   this file green.
- * - **a context lost from under a pane the app did not choose.** The budget
- *   sits below Chromium's cap precisely so that does not happen, and there is
- *   no way to provoke it here without reaching past the app into its canvases.
+ * - **what a recovered pane MEASURES.** The fourth test asserts the renderer
+ *   comes back and says nothing about the re-fit that follows it. A size
+ *   assertion there could not fail: the pane never re-measured while it was on
+ *   the DOM renderer, so its columns are the WebGL ones either way.
  *
- * **Measured 2026-08-08**, so the four are known to be load-bearing rather
- * than assumed: hardcoding `claimRenderer`'s budget past the cap fails all
- * four; never evicting fails the first and third; letting a pane on screen be
- * evicted fails the second; deferring the claim until after the fit fails the
- * third on 133 columns where it should read 138.
+ * **Measured 2026-08-08**, so the first four are known to be load-bearing
+ * rather than assumed: hardcoding `claimRenderer`'s budget past the cap fails
+ * all of them; never evicting fails the first and third; letting a pane on
+ * screen be evicted fails the second; deferring the claim until after the fit
+ * fails the third on 133 columns where it should read 138. **Measured
+ * 2026-08-10** for the context-loss test: dropping the recovery out of
+ * `onContextLoss` leaves it red on `dom`.
  */
 import { test, expect, type ElectronApplication } from '@playwright/test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -242,6 +246,80 @@ test('a pane coming back on screen takes its renderer back, at the size it alrea
   // 1035px pane: 138 columns against 132.
   await window.waitForTimeout(1500)
   for (const name of names) expect(`${name}: ${await windowSize(name)}`).toBe(`${name}: ${sizes.get(name)}`)
+
+  await app.close()
+})
+
+/**
+ * A context taken from a pane the user is LOOKING at.
+ *
+ * The one failure the budget cannot prevent, and the one this file used to say
+ * it could not reach: the budget sits below Chromium's cap so the app never
+ * causes it, but anything else in the renderer process asking for a context
+ * still can, and then Chromium picks its victim by least-recently-DRAWN — an
+ * idle Claude Code session waiting for a prompt draws nothing, so the pane it
+ * takes from is routinely one somebody is reading.
+ *
+ * Before 2026-08-10 that was permanent. `onContextLoss` recorded `dom` and
+ * stopped; the only re-claim in the app hangs off the `visible` effect, and
+ * `visible` does not change for a pane that was already on screen, so nothing
+ * re-ran and the pane drew Claude Code's chrome as underscore slivers until
+ * the user happened to switch tabs and back. **Measured the same day** against
+ * the packaged 0.3.7 build: fifteen panes settled at eleven live contexts
+ * under a budget of twelve, and eleven is a count the app's own eviction
+ * cannot produce.
+ *
+ * Reaching past the app into its canvases is what this test is for, and it is
+ * the only honest way to provoke the case: `WEBGL_lose_context` is the same
+ * event Chromium raises when it force-loses one.
+ */
+test('a pane that loses its context while on screen takes it back on its own', async () => {
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  // Every warning the renderer prints, so the loss is known to have actually
+  // happened rather than assumed from the renderer reading `webgl` at the end
+  // — which is also what it reads if `loseContext` did nothing at all.
+  const warnings: string[] = []
+  window.on('console', (message) => warnings.push(message.text()))
+
+  await window.getByTestId('new-tab').click()
+  await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
+  await expect.poll(async () => (await sessionNames(SOCKET)).length, { timeout: 20_000 }).toBe(1)
+  await window.waitForTimeout(1500)
+  expect(Object.values(await renderersOf(window))).toEqual(['webgl'])
+
+  // Chromium hands back the SAME context object for a canvas that already has
+  // one, so this reaches the live context the addon is drawing through rather
+  // than making a second one.
+  const lost = await window.evaluate(() => {
+    let killed = 0
+    for (const canvas of document.querySelectorAll('canvas')) {
+      const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl')
+      const extension = gl?.getExtension('WEBGL_lose_context')
+      if (extension) {
+        extension.loseContext()
+        killed += 1
+      }
+    }
+    return killed
+  })
+  expect(lost).toBeGreaterThan(0)
+
+  // The pane's own handler ran, which is what makes the assertion below about
+  // recovery and not about a loss that never landed.
+  await expect
+    .poll(() => warnings.filter((line) => line.includes('lost its WebGL context')).length, {
+      timeout: 10_000,
+    })
+    .toBeGreaterThan(0)
+
+  // Back on WebGL without the tab being touched. Nothing here clicks a tab or
+  // changes `visible`: that path is the previous test's, and it is exactly the
+  // path a user staring at one pane never takes.
+  await expect
+    .poll(async () => Object.values(await renderersOf(window))[0], { timeout: 15_000 })
+    .toBe('webgl')
 
   await app.close()
 })

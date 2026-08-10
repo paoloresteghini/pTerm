@@ -58,6 +58,30 @@ let useTick = 0
  */
 const onScreen = new Set<string>()
 
+/**
+ * Each mounted pane's fit, so a re-measure can be driven from outside the
+ * component that owns it.
+ *
+ * The one caller is the context-loss recovery below, which runs in a callback
+ * xterm fires and not inside any effect, so the component's own `fitRef` is
+ * out of reach from there.
+ */
+const fits = new Map<string, () => void>()
+
+/**
+ * How many times each pane has been handed its renderer back after a context
+ * loss, and the cap on that.
+ *
+ * Bounded because the recovery can be the very thing that causes the next
+ * loss: a re-claim asks Chromium for a context, and if something outside this
+ * app's budget is what took the last one, the request can push it past its cap
+ * again. Unbounded, two panes could trade one back and forth. Three attempts
+ * is enough for a one-off loss — a GPU process restart, a driver hiccup — and
+ * small enough that a genuine shortage settles instead of looping.
+ */
+const lossRecoveries = new Map<string, number>()
+const MAX_LOSS_RECOVERIES = 3
+
 function markUsed(tabId: string): void {
   lastUsed.set(tabId, ++useTick)
 }
@@ -167,6 +191,42 @@ function claimRenderer(tabId: string, term: XTerm): void {
       // drawing box and block characters as underscore slivers, and nothing
       // else in the app would ever mention it.
       console.warn(`pTerm: pane ${tabId} lost its WebGL context; falling back to the DOM renderer`)
+
+      // A pane the user is not looking at already has its way back: the
+      // `visible` effect re-claims on the way in. A pane that is ON SCREEN
+      // when this fires has none — `visible` did not change, so no effect
+      // re-runs — and would draw slivers for as long as the user stays on
+      // that tab. **Measured 2026-08-10** against the packaged app: fifteen
+      // panes settled at eleven contexts under a budget of twelve, and eleven
+      // is a number this app's own eviction cannot produce, so the loss came
+      // from outside it and nothing took the renderer back.
+      if (!onScreen.has(tabId)) return
+      const recovered = lossRecoveries.get(tabId) ?? 0
+      if (recovered >= MAX_LOSS_RECOVERIES) {
+        console.warn(`pTerm: pane ${tabId} has lost its WebGL context ${recovered} times; leaving it on the DOM renderer`)
+        return
+      }
+      lossRecoveries.set(tabId, recovered + 1)
+      // Off this callback rather than inside it: xterm is still unwinding the
+      // addon that just died, and a second one built on top of that would be
+      // loading into a terminal mid-teardown.
+      queueMicrotask(() => {
+        const live = mounted.get(tabId)
+        // Everything here can have changed in the gap: the pane can have
+        // unmounted, the tab can have been switched away from — in which case
+        // the `visible` effect owns the claim again — or a re-claim can
+        // already have happened.
+        if (live === undefined || !onScreen.has(tabId) || addons.has(tabId)) return
+        claimRenderer(tabId, live)
+        // A re-fit, which is the opposite of what `releaseRenderer` does and
+        // for the opposite reason: that one leaves a pane nobody is looking
+        // at alone, where this pane is on screen and has just changed
+        // renderer under the user. The two disagree about cell width (7.83
+        // css against 7.5), so without this the pane keeps drawing the DOM
+        // renderer's column count on the WebGL one. After the claim, never
+        // before it — same ordering the `visible` effect turns on.
+        requestAnimationFrame(() => fits.get(tabId)?.())
+      })
     })
     term.loadAddon(webgl)
     addons.set(tabId, webgl)
@@ -495,6 +555,9 @@ export function Terminal({
       window.pterm.resize(tabId, term.cols, term.rows)
     }
     fitRef.current = fitToContainer
+    // The same function again under the pane's id, for the context-loss
+    // recovery in `claimRenderer`, which has no way to reach this ref.
+    fits.set(tabId, fitToContainer)
 
     fitToContainer()
 
@@ -513,6 +576,11 @@ export function Terminal({
       renderers.delete(tabId)
       lastUsed.delete(tabId)
       onScreen.delete(tabId)
+      fits.delete(tabId)
+      // Cleared with the rest, so a pane that used up its recovery attempts
+      // and is then closed and reopened gets them back. The cap exists to
+      // stop a loop inside one pane's life, not to mark an id for good.
+      lossRecoveries.delete(tabId)
       fitRef.current = null
       termRef.current = null
       // Only if it is still this terminal's entry. Nothing schedules a mount
