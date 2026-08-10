@@ -37,6 +37,11 @@
      one. */
   --color-group: #5e8322;
   --color-danger: #f87171;
+  /* Declared here for the reason the whole block is: Tailwind v4 emits a
+     utility only for a token it can see at build time. `applyTheme`
+     overrides the value at runtime, and `themeCss.test.ts` holds this
+     literal equal to Classic's. */
+  --color-warn: #fbbf24;
   /* Added for the diff pane's added-line colour, alongside the removed-line
      `--color-danger` it is paired with. Measured against `--color-bg`:
      11.42:1, clearing the 4.5:1 floor with room to spare. */

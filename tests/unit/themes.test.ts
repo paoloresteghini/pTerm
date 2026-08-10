@@ -127,6 +127,19 @@ describe('text in every theme', () => {
   })
 
   /**
+   * The medium-priority dot in the Todos column, and the first token added
+   * for a graphical mark rather than for text. Held to the text floor anyway:
+   * it is drawn at 6px, where anything looser is guesswork on a real screen.
+   */
+  it('clears AA for the warn colour on every fill', () => {
+    for (const { id, tokens } of themes) {
+      for (const ground of [tokens.bg, tokens.surface, tokens.raised, tokens.overlay]) {
+        expect(contrast(tokens.warn, ground), `${id} warn/${ground}`).toBeGreaterThanOrEqual(AA)
+      }
+    }
+  })
+
+  /**
    * `muted` is the one floor Classic does not clear: #71717a on #0c0c0e is
    * 4.04:1, and it ships that way today.
    *

@@ -55,6 +55,8 @@ export interface ThemeTokens {
   /** The tab bar's split-group strip. Blended, never picked. */
   group: string
   danger: string
+  /** The medium-priority mark in the Todos column. One value across the registry, like `danger`. */
+  warn: string
   ok: string
   /** xterm's foreground. Read in JS because a canvas cannot read CSS. */
   termFg: string
@@ -104,6 +106,7 @@ export const THEMES: Record<ThemeId, Theme> = {
       accent: '#a3e635',
       group: '#5e8322',
       danger: '#f87171',
+      warn: '#fbbf24',
       ok: '#4ade80',
       termFg: '#d4d4d8',
       inset: '#00000000',
@@ -127,6 +130,7 @@ export const THEMES: Record<ThemeId, Theme> = {
       accent: '#a3e635',
       group: '#5e8322',
       danger: '#f87171',
+      warn: '#fbbf24',
       ok: '#4ade80',
       termFg: '#d4d4d8',
       inset: '#00000000',
@@ -150,6 +154,7 @@ export const THEMES: Record<ThemeId, Theme> = {
       accent: '#a3e635',
       group: '#5c8120',
       danger: '#f87171',
+      warn: '#fbbf24',
       ok: '#4ade80',
       termFg: '#d4d4d8',
       inset: '#00000000',
@@ -173,6 +178,7 @@ export const THEMES: Record<ThemeId, Theme> = {
       accent: '#a3e635',
       group: '#5e8324',
       danger: '#fb7185',
+      warn: '#fbbf24',
       ok: '#4ade80',
       termFg: '#ccd2e0',
       inset: '#00000000',
@@ -196,6 +202,7 @@ export const THEMES: Record<ThemeId, Theme> = {
       accent: '#a3e635',
       group: '#5e8322',
       danger: '#f87171',
+      warn: '#fbbf24',
       ok: '#4ade80',
       termFg: '#d4d4d8',
       inset: '#ffffff0e',
