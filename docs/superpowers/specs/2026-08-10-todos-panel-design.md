@@ -244,16 +244,35 @@ beside the dot that consumes it.
 - `COLUMN_IDS` (`lib/columnVisibility.ts`) and `COLUMN_ORDER_DEFAULT`
   (`lib/columnOrder.ts`) gain `'todos'` **last** — right of Notes, at the end of
   the row.
-- `App.tsx` gains `todosCollapsed` state stored under `pterm:todosCollapsed`,
-  defaulting to collapsed, and a `case 'todos'` in `renderSlot`.
+- A column has **three** states in this app, and the new one needs all three
+  wired: HIDDEN (the View menu's doing, renders nothing at all), COLLAPSED (the
+  heading's doing, renders the 24px strip), and open. So `App.tsx` gains
+  `todosCollapsed` under `pterm:todosCollapsed`, an entry in `HIDDEN_KEYS`
+  (`pterm:todosHidden`) and in the `hiddenColumns` initialiser, entries in the
+  `setColumn` and `COLUMN_KEY` maps, a `toggleTodos` callback beside
+  `toggleIssues`, a `collapsedColumns` entry, and a `case 'todos'` in
+  `renderSlot`. Both flags default to `true`, so a fresh profile shows nothing
+  until ⌥⌘T or the menu item — the same as every other column.
 - `src/main/index.ts` View menu gains a `Todos` item with `Alt+CmdOrCtrl+T`
-  sending the `toggleTodos` menu command, and `App.tsx` gains the matching
-  `case 'toggleTodos'`. ⌥⌘T is free: ⌘T is New Tab and the Tabs column never
-  took an accelerator.
-- `CommandPalette` gains `Toggle Todos` and `New todo`.
-- The width and collapsed keys are added to `attachSavedFields` /
-  `src/main/ipc/restore.ts`. A config-only pane field silently vanishes on
-  relaunch unless restore names it.
+  sending the `toggleTodos` menu command; `MenuCommand` gains `'toggleTodos'`
+  and `App.tsx` the matching `case`. The keystroke is *also* handled by the
+  renderer's own keydown handler, in the `event.altKey && !event.shiftKey`
+  letter map beside `KeyI`/`KeyG`/`KeyN`, because these accelerators are
+  registered with `registerAccelerator: false` so the keystroke reaches the
+  renderer rather than being claimed by the menu. ⌥⌘T is free: the `KeyT`
+  branch above it is guarded on `!event.altKey`, and the Tabs column never took
+  an accelerator.
+- Widths and collapse flags live in **localStorage**, not in `config.json`
+  (`useColumnWidth` and `storedCollapsed` both read it), so there is nothing to
+  add to `attachSavedFields` or `restore.ts` — those carry pane fields. The
+  relaunch test is what proves the keys are read back.
+- `CommandPalette` gains `Toggle Todos` and `New todo`. Note this introduces
+  the palette's **first command actions**: today it offers sessions, skills to
+  insert, and files, and has no notion of an action that runs something. The
+  addition is small because `filterEntries` already matches any `{ name }`
+  shape, but it is a new concept in that component rather than another entry in
+  an existing list, and it gets its own testid prefix (`palette-command-`)
+  rather than reusing `palette-action-`, which belongs to skills.
 
 ## The modal: `src/renderer/TodoModal.tsx`
 
@@ -307,29 +326,37 @@ untouched and returns the current list; `setDone` flips only `done` and
 **Integration — broadcast:** one mutation delivers `todosChanged` to two
 subscribers.
 
-**E2E — `tests/e2e/todos.spec.ts`:** expand the column from its strip → create a
-todo → the row appears with the high-priority dot colour → search filters it →
-the priority filter excludes it → the sort toggle reorders → the row opens the
-modal → edit and save is reflected in the row → the hover ✕ dims the row →
-`Done` shows it and `Open` does not → delete behind the confirm removes it →
-after relaunch the surviving list is still there and the column's width and
-collapsed state restored.
+**E2E — `tests/e2e/todos.spec.ts`:** open the column → create a todo → the row
+appears with the high-priority dot colour → search filters it → the priority
+filter excludes it → the sort toggle reorders → the row opens the modal → edit
+and save is reflected in the row → the hover ✕ dims the row → `Done` shows it
+and `Open` does not → delete behind the confirm removes it → after relaunch the
+surviving list is still there and the column's width and collapse state
+restored.
 
-The spec drives the **strip and the menu command, never ⌥⌘T**: a synthetic
-Playwright keypress arrives below the layer Electron matches accelerators at, so
-an accelerator test passes whether or not the accelerator is registered.
+`⌥⌘T` **is** testable here, unlike a real Electron accelerator: the menu
+registers it with `registerAccelerator: false` and the renderer's own keydown
+handler is what acts on it, so a synthetic `Alt+Meta+t` reaches the same code
+path a user's keystroke does. `expandColumn` in `tests/e2e/harness.ts` already
+relies on exactly that for hidden columns, and gains `todos: 't'` in its
+`COLUMN_KEY` map plus `'todos'` in its `name` union.
 
-The expand helper asserts `todos-panel` is present after paint rather than
-blind-clicking `todos-toggle`. Strip and heading share that testid, so a second
-blind click collapses the column again.
+The spec goes through `expandColumn` rather than clicking `todos-toggle`
+directly. That helper waits for the titlebar to paint, returns early if the
+panel is already open, and picks the shortcut or the strip depending on which of
+the three states the column is in — a blind click on `todos-toggle` (shared by
+strip and heading) collapses an already-open column instead of opening it.
 
-## Known fallout, fixed in the same change
+## Fallout to verify, not assume
 
-Adding a slot to the flex row changes the terminal's leftover width, and
-`tests/e2e/splits.spec.ts` hardcodes pixel constants that encode the whole row.
-The last column to land broke five of its tests that way. A collapsed column
-still occupies its strip's width, so this happens even though Todos starts
-collapsed. Those constants are recomputed as part of this work, not deferred.
+`tests/e2e/splits.spec.ts` hardcodes pixel arithmetic for the whole row, and a
+new column has broken it before. It should **not** break this time: both of the
+new column's flags default to `true`, and a HIDDEN column renders nothing at all
+— not even a strip — so a fresh profile, which is what every test in that file
+launches with, has exactly the pixels it has today. That file's own comment
+records the same reasoning for the six columns before it. The change still runs
+`splits.spec.ts` and treats a red there as a real finding rather than expected
+churn.
 
 ## Out of scope
 
