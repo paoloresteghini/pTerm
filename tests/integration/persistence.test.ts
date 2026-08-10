@@ -8,6 +8,7 @@ import type {
   Candidate,
   ExitEvent,
   HooksState,
+  JoinShape,
   NotificationConfig,
   ProjectDescriptor,
   RestoreResult,
@@ -2266,6 +2267,111 @@ describe('splitPane and closePane', () => {
     expect(at(founder.id)).toBeCloseTo(0.3125)
     expect(at(newPane!.id)).toBeCloseTo(0.3125)
     expect(row.layout.ratio.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1)
+  })
+})
+
+describe('joinPane', () => {
+  it('writes one row holding both panes after a join', async () => {
+    const target = await invoke<TerminalTabDescriptor>(CHANNELS.open, {
+      projectSlug: 'lumio',
+      cwd: tmpdir(),
+    })
+    await waitForPrompt(target.id)
+    const moved = await invoke<TerminalTabDescriptor>(CHANNELS.open, {
+      projectSlug: 'lumio',
+      cwd: tmpdir(),
+    })
+    await waitForPrompt(moved.id)
+
+    const shape = await invoke<JoinShape>(CHANNELS.joinPane, moved.id, target.id)
+
+    expect(shape.tabs.find((row) => row.id === target.id)?.layout.kids).toEqual([
+      target.id,
+      moved.id,
+    ])
+    expect(shape.dropped).toBe(moved.id)
+    const config = await written()
+    expect(config.tabs.find((row) => row.id === moved.id)).toBeUndefined()
+  })
+
+  it('keeps the source tab when it still has a pane left', async () => {
+    const founder = await invoke<TerminalTabDescriptor>(CHANNELS.open, {
+      projectSlug: 'lumio',
+      cwd: tmpdir(),
+    })
+    await waitForPrompt(founder.id)
+    const split = await invoke<TabShape>(CHANNELS.splitPane, {
+      paneId: founder.id,
+      dir: 'row',
+      cols: 100,
+      rows: 30,
+    })
+    const sibling = split.panes[1]
+    await waitForPrompt(sibling.id)
+    const other = await invoke<TerminalTabDescriptor>(CHANNELS.open, {
+      projectSlug: 'lumio',
+      cwd: tmpdir(),
+    })
+    await waitForPrompt(other.id)
+
+    const shape = await invoke<JoinShape>(CHANNELS.joinPane, sibling.id, other.id)
+
+    expect(shape.dropped).toBeNull()
+    expect(shape.tabs.find((row) => row.id === founder.id)?.layout.kids).toEqual([founder.id])
+    expect(shape.tabs.find((row) => row.id === other.id)?.layout.kids).toEqual([
+      other.id,
+      sibling.id,
+    ])
+  })
+
+  it('keeps the target tab existing axis instead of re-orienting it', async () => {
+    const founder = await invoke<TerminalTabDescriptor>(CHANNELS.open, {
+      projectSlug: 'lumio',
+      cwd: tmpdir(),
+    })
+    await waitForPrompt(founder.id)
+    const split = await invoke<TabShape>(CHANNELS.splitPane, {
+      paneId: founder.id,
+      dir: 'col',
+      cols: 100,
+      rows: 30,
+    })
+    await waitForPrompt(split.panes[1].id)
+    const other = await invoke<TerminalTabDescriptor>(CHANNELS.open, {
+      projectSlug: 'lumio',
+      cwd: tmpdir(),
+    })
+    await waitForPrompt(other.id)
+
+    const shape = await invoke<JoinShape>(CHANNELS.joinPane, other.id, founder.id)
+
+    expect(shape.tabs.find((row) => row.id === founder.id)?.layout.dir).toBe('col')
+  })
+
+  it('hands the source tab active pane to a survivor', async () => {
+    const founder = await invoke<TerminalTabDescriptor>(CHANNELS.open, {
+      projectSlug: 'lumio',
+      cwd: tmpdir(),
+    })
+    await waitForPrompt(founder.id)
+    const split = await invoke<TabShape>(CHANNELS.splitPane, {
+      paneId: founder.id,
+      dir: 'row',
+      cols: 100,
+      rows: 30,
+    })
+    const sibling = split.panes[1]
+    await waitForPrompt(sibling.id)
+    const other = await invoke<TerminalTabDescriptor>(CHANNELS.open, {
+      projectSlug: 'lumio',
+      cwd: tmpdir(),
+    })
+    await waitForPrompt(other.id)
+
+    await invoke<JoinShape>(CHANNELS.joinPane, sibling.id, other.id)
+
+    const config = await written()
+    expect(config.tabs.find((row) => row.id === founder.id)?.activePaneId).toBe(founder.id)
   })
 })
 

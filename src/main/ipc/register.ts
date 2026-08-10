@@ -11,6 +11,7 @@ import {
   type HistoryEntry,
   type HistoryScope,
   type IssueStateFilter,
+  type JoinShape,
   type NotificationConfig,
   type OpenRequest,
   type Preset,
@@ -1234,6 +1235,137 @@ export function registerIpc(
       return { panes: held(panes, kids), tabs: [row] }
     })
   })
+
+  /**
+   * A pane dragged out of its tab and dropped onto another: the target tab
+   * gains the pane, the source tab loses it.
+   *
+   * `tabIdOf(paneId)` has to run before `manager.joinTab`, which moves the
+   * pane into the target's tmux group: after that the moved pane no longer
+   * answers `tabIdOf` with its old tab, and there would be nothing left to
+   * ask. The source tab's live members are read before the move for a
+   * related but distinct reason: when the moved pane is its own tab's
+   * founder, `joinTab` renames the target's staging session back onto that
+   * founder's OWN session name, so the session `panesOfTab(sourceTabId)`
+   * would find by name after the move is the pane that just left, now
+   * sitting in the target's tmux group, rather than whatever the source tab
+   * has left. Read first, that lookup still sees the source tab as it stood
+   * with the moved pane still in it, which is all this handler needs: the
+   * moved pane is filtered out by id below regardless of when its
+   * membership was read. `joinTab` and the two `groupIdOf` calls are all
+   * tmux work, so they run outside `serialise` for the reason `splitPane`
+   * and `closePane` already do: the queue has no reentrancy protection, and
+   * anything it reaches that calls back into it deadlocks on its own caller.
+   *
+   * The target row is built the way `splitPane` builds a row for a tab that
+   * gained a pane (the moved pane is simply appended rather than inserted
+   * next to a sibling, since a join has no "split from" position to insert
+   * it at). The source row is built the way `closePane` builds one for a tab
+   * that lost a pane, including `tabRowFor` handing `activePaneId` to a
+   * survivor when the pane that left was the one in focus.
+   *
+   * Both rows go into one `store.write`, for the same reason `splitPane` and
+   * `closePane` write panes and tabs together: a separate write for each
+   * array would leave a window where the file holds a pane no tab lists.
+   * `rememberTab` is not used here for that reason, since it is itself a
+   * `serialise` wrapper and writes `config.panes` alone.
+   */
+  ipcMain.handle(
+    CHANNELS.joinPane,
+    async (_event, paneId: string, targetPaneId: string): Promise<JoinShape> => {
+      const sourceTabId = manager.tabIdOf(paneId)
+      if (!sourceTabId) throw new Error(`Cannot join: pane ${paneId} is not open`)
+      // Before the move: see the doc comment above for why after is wrong
+      // whenever the moved pane is its own tab's founder.
+      const sourceMembers = (await manager.panesOfTab(sourceTabId)).map((pane) => pane.id)
+
+      const { record, tabId } = await manager.joinTab({ paneId, targetPaneId })
+      const targetGroupId = await manager.groupIdOf(tabId)
+      const sourceGroupId = await manager.groupIdOf(sourceTabId)
+
+      return serialise(async () => {
+        const config = await store.read()
+        const panes = [...config.panes.filter((saved) => saved.id !== record.id), record]
+        const listed = new Set(panes.map((pane) => pane.id))
+
+        // The target tab's row, built the way `splitPane` builds one: the
+        // saved kids, unioned with any live pane the saved row does not
+        // claim (a restarted pane whose row entry a death dropped), plus the
+        // moved pane appended at the end.
+        const savedTarget = config.tabs.find((row) => row.id === tabId)
+        const targetSavedKids = savedTarget?.layout.kids ?? [targetPaneId]
+        const targetUnclaimed = (await manager.panesOfTab(tabId))
+          .map((pane) => pane.id)
+          .filter((id) => id !== record.id && !targetSavedKids.includes(id) && listed.has(id))
+        const targetSiblings = [...targetSavedKids, ...targetUnclaimed]
+        const targetKids = [...targetSiblings, record.id]
+
+        const targetRow: TabRow = {
+          id: tabId,
+          groupId: targetGroupId,
+          activePaneId: record.id,
+          layout: {
+            // The target's own axis, kept rather than re-orientated: unlike a
+            // split, a join carries no direction the user asked for.
+            dir: savedTarget?.layout.dir ?? 'row',
+            ratio: carveRatio({
+              tabId,
+              kids: targetKids,
+              sourcePaneId: targetPaneId,
+              newPaneId: record.id,
+              siblings: targetSiblings,
+              savedKids: targetSavedKids,
+              savedRatio: savedTarget?.layout.ratio ?? [],
+              tombstones,
+            }),
+            kids: targetKids,
+          },
+        }
+
+        // The source tab's row, built the way `closePane` builds one for a
+        // tab that has lost a pane: the moved pane dropped out of its saved
+        // kids, unioned with any other live pane the saved row did not
+        // claim, and `null` once nothing is left to lay out.
+        const savedSource = config.tabs.find((row) => row.id === sourceTabId)
+        const sourceSavedKids = savedSource?.layout.kids ?? []
+        const sourceUnclaimed = sourceMembers.filter(
+          (id) => id !== record.id && !sourceSavedKids.includes(id) && listed.has(id),
+        )
+        const sourceKids = [
+          ...sourceSavedKids.filter((kid) => kid !== record.id),
+          ...sourceUnclaimed,
+        ]
+        const sourceRow: TabRow | null =
+          sourceKids.length > 0
+            ? tabRowFor(
+                { id: sourceTabId, groupId: sourceGroupId },
+                sourceKids,
+                savedSource,
+                tombstones,
+              )
+            : null
+
+        const tabs = withTabRow(
+          withTabRow(config.tabs, tabId, targetRow),
+          sourceTabId,
+          sourceRow,
+        )
+        await store.write({ ...config, panes, tabs })
+
+        // The target row always first: Task 5's reducer reads `tabs[0]` to
+        // decide which pane to focus, and the source row second when the
+        // source tab survives. See `JoinShape`'s doc comment in
+        // `src/shared/ipc.ts`.
+        const rows = sourceRow ? [targetRow, sourceRow] : [targetRow]
+        const named = new Set(rows.flatMap((row) => row.layout.kids))
+        return {
+          panes: panes.filter((pane) => named.has(pane.id)),
+          tabs: rows,
+          dropped: sourceRow ? null : sourceTabId,
+        }
+      })
+    },
+  )
 
   /**
    * The one way a pane is closed.

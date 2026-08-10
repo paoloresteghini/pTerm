@@ -518,6 +518,9 @@ export interface TabShape {
  *
  * `panes` is every pane from both rows, in their layout order within each tab.
  * `tabs` carries the target row always, and the source row when it survives.
+ * The target row is always first: the reducer that applies this shape reads
+ * `tabs[0].activePaneId` to decide which pane gets focus, so the source row,
+ * when present, must come second.
  */
 export interface JoinShape {
   panes: TabDescriptor[]
