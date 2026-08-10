@@ -6,10 +6,21 @@
 @theme {
   --color-bg: #09090b;
   --color-surface: #0c0c0e;
+  /* Declared here because Tailwind v4 emits a utility only for a token it can
+     see at build time, and overridden at runtime by `applyTheme`. The values
+     below are the default theme's, held equal to `THEMES.classic` by
+     `tests/unit/themeCss.test.ts`.
+
+     `raised` and `overlay` are aliases of `surface` in this theme, which is
+     what makes introducing them change nothing on screen. The themes that
+     spend them are the ones that give them distinct values. */
+  --color-raised: #0c0c0e;
+  --color-overlay: #0c0c0e;
   --color-border: #27272a;
   --color-fg: #fafafa;
   --color-muted: #71717a;
   --color-faint: #3f3f46;
+  --color-border-strong: #3f3f46;
   /* Section labels (NOTES, SKILLS, PRESETS). Deliberately lighter than the
      rows beneath them: `--color-faint` measured 1.86:1 on `--color-surface`
      and was unreadable on a real screen, which is what this token was added
@@ -35,6 +46,10 @@
      Terminal.tsx repeats the two values it needs in a JS object. If you
      change --color-bg or --color-term-fg, change them there too. */
   --color-term-fg: #d4d4d8;
+  /* Eight digits so that "no lip" is a colour rather than a branch. Fully
+     transparent here; only the theme that separates by edge sets a visible
+     one. */
+  --color-inset: #00000000;
 
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
@@ -121,4 +136,14 @@ html, body, #root {
 .scroll-thin::-webkit-scrollbar-corner,
 .xterm-viewport::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* The 1px highlight along the top edge of a raised surface.
+
+   A class rather than a utility at each call site because it is one declaration
+   with one meaning, and because a theme that sets `--color-inset` transparent
+   gets a box-shadow that paints nothing, which costs less than every panel
+   branching on the theme. */
+.lip {
+  box-shadow: inset 0 1px 0 var(--color-inset);
 }
