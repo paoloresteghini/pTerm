@@ -26,3 +26,23 @@ export function contrast(a: string, b: string): number {
   const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x)
   return (hi + 0.05) / (lo + 0.05)
 }
+
+/**
+ * CIE L* lightness, 0 to 100.
+ *
+ * The contrast ratio above is the wrong instrument for two dark fills abutting:
+ * its +0.05 term dominates at low luminance, so every near-black pair collapses
+ * toward 1.0 and pure black against #1f1f1f reads as only 1.20:1. L* is a
+ * perceptual lightness scale, so the distance between two dark greys is a
+ * number that tracks what the eye reports. Text keeps the ratio, which is what
+ * the ratio is for.
+ */
+export function lightness(hex: string): number {
+  const y = luminance(hex)
+  return y <= 0.008856 ? 903.2963 * y : 116 * Math.cbrt(y) - 16
+}
+
+/** Distance in CIE L* between two colours, order independent. */
+export function lightnessGap(a: string, b: string): number {
+  return Math.abs(lightness(a) - lightness(b))
+}
