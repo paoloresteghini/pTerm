@@ -950,6 +950,113 @@ export class SessionManager {
   }
 
   /**
+   * Move a live pane out of its own tab and into another tab's group,
+   * keeping the shell running inside it alive throughout.
+   *
+   * The destination session is created FIRST, before the moving pane's own
+   * session is touched at all: `newGroupMember` is the one step in here tmux
+   * can refuse, and creating it before anything has moved means a refusal
+   * leaves the moving pane exactly where it started, not stranded mid-move
+   * with nothing left to undo it into. An earlier version of this method
+   * moved first and tried to recreate the source session afterward on
+   * failure; that cannot work; measured directly, `move-window -t <name>`
+   * refuses outright when `<name>` is not a live session and never creates
+   * one, and a standalone source session is destroyed by tmux the instant
+   * its one window leaves, so by the time a rollback ran there was nothing
+   * left to move the window back into.
+   *
+   * The staging session joins `group` through `newGroupMember` rather than
+   * founding anything of its own, so it starts life owning no window and no
+   * shell — there is nothing here for `newGroupMember`'s own leaked-shell
+   * comment to apply to.
+   *
+   * Every tmux call below that changes which window a session shows names
+   * `staging`, or `record.tmuxSession` once it has been renamed onto
+   * `staging`'s identity — never an existing member of `group` directly.
+   * Measured on a throwaway socket: joining a new session through a live one
+   * leaves the session joined THROUGH exactly where it was, and `move-window
+   * -t <name>` only ever re-points the session `-t` names. So no other
+   * member of `group` is read or written here at all, and none needs its
+   * window snapshotted beforehand or restored after — "leaves every member
+   * of the target group on a window of its own" is what holds this, and it
+   * goes red the moment this method is changed to move a window into an
+   * existing member instead of into `staging` (checked by making exactly
+   * that change and watching the test fail).
+   */
+  async joinTab(input: {
+    paneId: string
+    targetPaneId: string
+  }): Promise<{ record: TerminalPaneRecord; tabId: string }> {
+    const moving = this.entries.get(input.paneId)
+    const target = this.entries.get(input.targetPaneId)
+    if (!moving) throw new Error(`joinTab: no pane ${input.paneId}`)
+    if (!target) throw new Error(`joinTab: no pane ${input.targetPaneId}`)
+    if (moving.tabId === target.tabId) {
+      throw new Error(`joinTab: pane ${input.paneId} is already in that tab`)
+    }
+
+    const targetTabId = target.tabId
+    const group = await this.groupNameOf(input.targetPaneId)
+    const record = moving.record
+    // Read off the entry before `detach` below deletes it.
+    const { cols, rows } = moving
+
+    const movedWindow = await this.adapter.windowIdOf(record.tmuxSession)
+    if (!movedWindow) {
+      throw new Error(`joinTab: tmux would not name ${record.tmuxSession}'s window`)
+    }
+
+    const staging = `${record.tmuxSession}-joining`
+    await this.adapter.newGroupMember(group, staging, { PTERM_TAB_ID: record.id })
+
+    this.detach(input.paneId)
+    try {
+      await this.adapter.moveWindow(record.tmuxSession, staging)
+      // A session that is still a member of a real group survives losing its
+      // window — its siblings' shared window list keeps it alive — but a
+      // standalone session does not: tmux destroys it the moment its one
+      // window is gone. Only the surviving case needs an explicit kill; the
+      // other has already gone by the time this runs.
+      if (await this.adapter.hasSession(record.tmuxSession)) {
+        await this.adapter.killSession(record.tmuxSession)
+      }
+      await this.adapter.renameSession(staging, record.tmuxSession)
+    } catch (error) {
+      // Nothing has moved if `newGroupMember` above is what threw, so there
+      // is nothing to undo there. If the move itself failed after staging
+      // was created, the moved window and its shell are wherever they were
+      // before this call ran; the one thing left over worth cleaning up is
+      // the empty staging session, before it becomes a session nothing in
+      // this app can reach again.
+      await this.adapter.killSession(staging).catch(() => undefined)
+      throw error
+    }
+
+    const windows = await this.adapter.windowsOf(record.tmuxSession)
+    const indexOf = new Map(windows.map((window) => [window.id, window.index]))
+    const movedIndex = indexOf.get(movedWindow)
+    if (!movedIndex) {
+      throw new Error(`joinTab: ${movedWindow} is not in ${group} after the move`)
+    }
+    await this.adapter.selectWindow(record.tmuxSession, movedIndex)
+
+    return {
+      record: this.open({
+        id: record.id,
+        projectSlug: record.projectSlug,
+        cwd: record.cwd,
+        command: record.command,
+        tmuxSession: record.tmuxSession,
+        type: record.type,
+        cols,
+        rows,
+        tabId: targetTabId,
+      }),
+      tabId: targetTabId,
+    }
+  }
+
+  /**
    * Bring a pane that has died back into the tab it belonged to.
    *
    * Three cases, and the tab this manager RECORDED for the pane — the founder
