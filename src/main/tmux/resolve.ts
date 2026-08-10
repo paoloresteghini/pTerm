@@ -1,23 +1,11 @@
-import { accessSync, constants } from 'node:fs'
-import { delimiter, isAbsolute, join } from 'node:path'
+import { FALLBACK_DIRS, resolveBin } from '../bin/resolve'
 
 /**
- * Where tmux lives when `PATH` doesn't say. An app launched from Finder or the
- * Dock inherits launchd's `PATH` — `/usr/bin:/bin:/usr/sbin:/sbin` — not the
- * one from your shell profile, so a Homebrew tmux is invisible to it. Every
- * test and every `npm start` runs from a shell that already has Homebrew on
- * `PATH`, which is why this only bites the packaged app.
+ * Where tmux lives when `PATH` doesn't say. Kept as its own export because
+ * the tests here pin the Finder/Dock case against it by name; the list itself
+ * is the shared one, and the reason it exists is documented on `FALLBACK_DIRS`.
  */
-export const TMUX_FALLBACK_DIRS = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin']
-
-function isExecutable(candidate: string): boolean {
-  try {
-    accessSync(candidate, constants.X_OK)
-    return true
-  } catch {
-    return false
-  }
-}
+export const TMUX_FALLBACK_DIRS = FALLBACK_DIRS
 
 /**
  * Absolute path to a usable tmux, or `'tmux'` when none is found — leaving the
@@ -32,12 +20,5 @@ export function resolveTmuxBin(
 ): string {
   const override = env.PTERM_TMUX_BIN
   if (override) return override
-
-  const pathDirs = (env.PATH ?? '').split(delimiter).filter(Boolean).filter(isAbsolute)
-  for (const dir of [...pathDirs, ...fallbackDirs]) {
-    const candidate = join(dir, 'tmux')
-    if (isExecutable(candidate)) return candidate
-  }
-
-  return 'tmux'
+  return resolveBin('tmux', env, fallbackDirs)
 }
