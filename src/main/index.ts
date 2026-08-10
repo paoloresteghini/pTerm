@@ -423,9 +423,31 @@ function installMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
+/**
+ * A window created some time after startup, painted in the theme as it is NOW.
+ *
+ * `storedTheme` is read once at startup and handed to each window on its
+ * command line, because the renderer has to paint before it could ask over
+ * IPC. That is correct for the first window and wrong for every later one: the
+ * user can change the theme, close the window (which does not quit the app on
+ * macOS), and reopen from the Dock, and without this refresh that window is
+ * launched with the id from startup. It would paint the old palette, hand its
+ * terminals the old foreground, and mark the old card as chosen in the picker,
+ * with nothing to correct it for the life of the window.
+ *
+ * Re-reading here rather than keeping `storedTheme` current from the
+ * `updateTheme` handler: the config file is the thing that survives, and a
+ * window opening is exactly the moment its value is needed. It also covers a
+ * theme changed by hand in `config.json` between windows.
+ */
+async function createWindowWithCurrentTheme(): Promise<void> {
+  storedTheme = (await store.read()).theme
+  createWindow()
+}
+
 app.on('second-instance', () => {
   if (!mainWindow) {
-    createWindow()
+    void createWindowWithCurrentTheme()
     return
   }
   if (mainWindow.isMinimized()) mainWindow.restore()
@@ -549,7 +571,7 @@ app.whenReady().then(async () => {
   scheduleUpdateChecks(() => mainWindow)
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) void createWindowWithCurrentTheme()
   })
 })
 
