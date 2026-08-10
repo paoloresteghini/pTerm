@@ -12,12 +12,25 @@ export interface PaletteSession {
   severity: number
 }
 
+/**
+ * One thing the palette can DO, as opposed to something it can switch to.
+ *
+ * Sessions, skills and files are all things to jump to or insert; a command
+ * runs `run` in `App` instead. `name` is both the label and what the query
+ * matches, so it goes through the same `filterEntries` ranking as skills.
+ */
+export interface PaletteCommand {
+  name: string
+  run: () => void
+}
+
 export function CommandPalette({
   open,
   onOpenChange,
   sessions,
   projectCwd,
   projectId,
+  commands,
   onSelectSession,
   onInsert,
   onOpenFile,
@@ -28,6 +41,7 @@ export function CommandPalette({
   projectCwd: string | undefined
   /** The project whose files are offered. Undefined means none are. */
   projectId: string | undefined
+  commands: PaletteCommand[]
   onSelectSession: (id: string) => void
   onInsert: (name: string) => void
   /** A file chosen by its project-relative path. */
@@ -97,6 +111,10 @@ export function CommandPalette({
   // would bury the dozen things being switched between. Capped at 40 rows
   // because a fuzzy list past that is scrolled, not read.
   const matchedFiles = query.length === 0 ? [] : rankFiles(query, files).slice(0, 40)
+  // Commands sit behind the same gate as skills and files, for the same
+  // reason: an empty query is the session switcher, not a list of things to
+  // run.
+  const matchedCommands = query.length === 0 ? [] : filterEntries(query, commands)
 
   const choose = (run: () => void): void => {
     run()
@@ -147,6 +165,22 @@ export function CommandPalette({
               <span className="ml-2 flex-1 truncate text-faint">{file.path}</span>
             </button>
           ))}
+          {matchedCommands.map((entry) => (
+            <button
+              key={entry.name}
+              data-testid={`palette-command-${entry.name}`}
+              onClick={() => {
+                // Closes before running: the callback may itself change what
+                // the palette would render (showing a column, opening another
+                // dialog), and that should happen against a closed palette.
+                onOpenChange(false)
+                entry.run()
+              }}
+              className="flex w-full cursor-default border-none bg-transparent px-1 py-1 text-left text-muted hover:bg-border hover:text-fg"
+            >
+              <span className="flex-1 truncate">{entry.name}</span>
+            </button>
+          ))}
           {matchedActions.map((entry) => (
             // Composite key for the same reason the panel uses one: `name` is
             // unique across today's entries but nothing guarantees it.
@@ -162,7 +196,8 @@ export function CommandPalette({
           ))}
           {matchedSessions.length === 0 &&
           matchedActions.length === 0 &&
-          matchedFiles.length === 0 ? (
+          matchedFiles.length === 0 &&
+          matchedCommands.length === 0 ? (
             <p data-testid="palette-empty" className="px-1 py-2 text-faint">
               Nothing matches.
             </p>

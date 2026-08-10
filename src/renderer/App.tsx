@@ -2176,6 +2176,19 @@ export function App() {
           sessions={paletteSessions}
           projectCwd={project?.cwd}
           projectId={project?.id}
+          commands={[
+            { name: 'Toggle Todos', run: toggleTodos },
+            {
+              name: 'New todo',
+              // Shows the column as well as setting the flag: the column is
+              // hidden on a fresh profile, and `renderSlot` below never mounts
+              // `TodosPanel` (and so never mounts its modal) while it is.
+              run: () => {
+                if (hiddenColumns.todos) toggleTodos()
+                setCreatingTodo(true)
+              },
+            },
+          ]}
           onOpenFile={openFile}
           onSelectSession={(id) => {
             const tab = state.panes.find((candidate) => candidate.id === id)

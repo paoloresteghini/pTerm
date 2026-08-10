@@ -239,8 +239,43 @@ test('a successful modal mutation clears an error the list left behind', async (
   await expect(page.getByTestId(`todo-row-${id}`)).toContainText('chase invoice properly')
   await expect(page.getByTestId('todos-error')).toHaveCount(0)
 
-  // Last test in the file, and it leaves that todo renamed. Both `chmod`s are
-  // balanced above, and `afterAll` restores the mode again in case they are not.
+  // Leaves that todo renamed. Both `chmod`s are balanced above, and `afterAll`
+  // restores the mode again in case they are not.
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('todo-modal')).toHaveCount(0)
+})
+
+test('the palette can open the Todos column and start a new todo', async () => {
+  // Every earlier test in this file leaves the column visible, but this test
+  // must run from it hidden, the state a fresh profile launches into. Toggled
+  // only if it is currently shown, with the same shortcut `expandColumn` uses,
+  // so the test reaches the same starting point whether it runs after them or
+  // (as when isolated with `-g`) on its own against a profile already hidden.
+  if ((await page.getByTestId('todos-panel').count()) > 0) {
+    await page.keyboard.press('Alt+Meta+t')
+  }
+  await expect(page.getByTestId('todos-panel')).toHaveCount(0)
+
+  // "New todo" from a hidden column, with no "Toggle Todos" first: it has to
+  // show the column itself, or the modal it also opens has nothing to mount
+  // into.
+  await page.keyboard.press('Meta+k')
+  await page.getByTestId('palette-input').fill('todo')
+  await page.getByTestId('palette-command-New todo').click()
+  await expect(page.getByTestId('todos-panel')).toBeVisible()
+  await expect(page.getByTestId('todo-title-input')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('todo-modal')).toHaveCount(0)
+
+  // Hides it again and brings it back with "Toggle Todos" itself, so the
+  // other command is covered too.
+  await page.keyboard.press('Alt+Meta+t')
+  await expect(page.getByTestId('todos-panel')).toHaveCount(0)
+  await page.keyboard.press('Meta+k')
+  await page.getByTestId('palette-input').fill('todo')
+  await page.getByTestId('palette-command-Toggle Todos').click()
+  await expect(page.getByTestId('todos-panel')).toBeVisible()
+
+  // Last test in the file, and it leaves the column visible, matching how
+  // every earlier test here left it.
 })
