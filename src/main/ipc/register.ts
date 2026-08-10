@@ -1,4 +1,5 @@
 import { app, clipboard, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
+import { appendFile } from 'node:fs/promises'
 import {
   CHANNELS,
   canHaveSession,
@@ -1412,6 +1413,17 @@ export function registerIpc(
   // `file:` or a custom-scheme URL to whatever claims it. See `isOpenable`.
   ipcMain.handle(CHANNELS.openExternal, async (_event, url: string) => {
     if (!isOpenable(url)) return
+    // `shell` is non-writable, so a spec cannot stub this and an e2e that
+    // clicks a link reaches the real OS: before this diversion existed, a full
+    // suite run opened a browser tab on the developer's machine pointing at a
+    // release tag that does not exist. With the variable set, the URL is
+    // recorded and the browser is left alone, which also lets a spec assert
+    // which URL the click sent.
+    const log = process.env.PTERM_EXTERNAL_LOG
+    if (log !== undefined) {
+      await appendFile(log, `${url}\n`, 'utf8')
+      return
+    }
     await shell.openExternal(url)
   })
 

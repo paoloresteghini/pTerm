@@ -168,6 +168,8 @@ export async function launchApp(opts: {
   ghStubMode?: string
   ghStubFixture?: string
   ghStubLog?: string
+  /** Diverts `shell.openExternal` to this file instead of the real browser. */
+  externalLog?: string
   ghStubDelayMs?: number
 }): Promise<ElectronApplication> {
   assertTestSocket(opts.socket)
@@ -261,6 +263,7 @@ export async function launchApp(opts: {
       ...(opts.ghStubMode !== undefined ? { PTERM_GH_STUB_MODE: opts.ghStubMode } : {}),
       ...(opts.ghStubFixture !== undefined ? { PTERM_GH_STUB_FIXTURE: opts.ghStubFixture } : {}),
       ...(opts.ghStubLog !== undefined ? { PTERM_GH_STUB_LOG: opts.ghStubLog } : {}),
+      ...(opts.externalLog !== undefined ? { PTERM_EXTERNAL_LOG: opts.externalLog } : {}),
       ...(opts.ghStubDelayMs !== undefined
         ? { PTERM_GH_STUB_DELAY_MS: String(opts.ghStubDelayMs) }
         : {}),

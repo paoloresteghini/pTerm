@@ -45,6 +45,7 @@ let projectsRoot: string
 let claudeHome: string
 let userDataDir: string
 let claudeSettings: string
+let externalLog: string
 
 test.beforeEach(async () => {
   await killServer(SOCKET)
@@ -53,6 +54,7 @@ test.beforeEach(async () => {
   claudeHome = await mkdtemp(join(tmpdir(), 'pterm-claude-'))
   userDataDir = await mkdtemp(join(tmpdir(), 'pterm-userdata-'))
   claudeSettings = join(claudeHome, 'settings.json')
+  externalLog = join(claudeHome, 'external.log')
   app = await launchApp({
     socket: SOCKET,
     configDir,
@@ -60,6 +62,7 @@ test.beforeEach(async () => {
     claudeSettings,
     claudeHome,
     userDataDir,
+    externalLog,
   })
 })
 
@@ -159,19 +162,25 @@ test('skip hides the bar and writes the version to disk', async () => {
 })
 
 /**
- * Download hides the bar. Whether it opened a browser is NOT asserted.
+ * Download hides the bar, and hands the release URL to the external opener.
  *
- * `shell.openExternal` cannot be intercepted from a spec: Electron exposes
- * `shell`'s members as non-writable, so the monkeypatch a test would need
- * either throws or silently no-ops, and a test built on a patch that did not
- * install passes against a broken app. The remaining risk is one line,
- * `window.pterm.openExternal(update.url)` in `App.tsx`, whose scheme guard IS
- * covered by `tests/unit/openable.test.ts`.
+ * `shell.openExternal` cannot be monkeypatched from a spec: Electron exposes
+ * `shell`'s members as non-writable, so a patch either throws or silently
+ * no-ops, and a test built on a patch that did not install passes against a
+ * broken app. So main diverts instead: under `PTERM_EXTERNAL_LOG` it appends
+ * the URL to that file rather than calling `shell.openExternal`.
+ *
+ * That is not only for assertability. Without it this click reached the real
+ * OS and opened a browser tab on the machine running the suite, pointing at a
+ * release tag that does not exist, once per full run.
  */
-test('download hides the bar', async () => {
+test('download hides the bar and hands the release URL to the opener', async () => {
   const page = await app.firstWindow()
   await expect(page.getByTestId('titlebar')).toBeVisible()
   await pushUpdate()
   await page.getByTestId('update-download').click()
   await expect(page.getByTestId('update-bar')).toHaveCount(0)
+  await expect
+    .poll(() => readFile(externalLog, 'utf8').catch(() => ''))
+    .toContain(RELEASE_URL)
 })
