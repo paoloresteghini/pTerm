@@ -26,11 +26,16 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   }
 })
 
-const { installHooks, readHooksState, uninstallHooks } = await import('../../src/main/hooks/install')
+const { hookCommand, installHooks, migrateLegacyHooks, readHooksState, uninstallHooks } =
+  await import('../../src/main/hooks/install')
 
 let dir: string
 let settings: string
-const saved = { config: process.env.PTERM_CONFIG_DIR, claude: process.env.PTERM_CLAUDE_SETTINGS }
+const saved = {
+  config: process.env.PTERM_CONFIG_DIR,
+  claude: process.env.PTERM_CLAUDE_SETTINGS,
+  home: process.env.HOME,
+}
 
 const ORIGINAL = {
   model: 'opusplan',
@@ -50,6 +55,7 @@ beforeEach(async () => {
 afterEach(async () => {
   process.env.PTERM_CONFIG_DIR = saved.config
   process.env.PTERM_CLAUDE_SETTINGS = saved.claude
+  process.env.HOME = saved.home
   copyFileControl.next = null
   await rm(dir, { recursive: true, force: true })
 })
@@ -278,5 +284,86 @@ describe('a settings file whose "hooks" has a shape pTerm does not recognise', (
     )
 
     await expect(readHooksState()).resolves.toBeTruthy()
+  })
+})
+
+/**
+ * The pre-rename install, on disk, against the real file writer.
+ *
+ * `legacyHookPaths()` resolves against `os.homedir()`, which on POSIX reads
+ * `$HOME` — so pointing HOME at the temp dir is what keeps this test off the
+ * real `~/.prcli`, the same way `PTERM_CONFIG_DIR` keeps it off `~/.pterm`.
+ */
+describe('migrateLegacyHooks', () => {
+  let legacy: string
+
+  beforeEach(async () => {
+    process.env.HOME = dir
+    legacy = join(dir, '.prcli', 'bin', 'prcli-hook')
+    await writeFile(
+      settings,
+      `${JSON.stringify(
+        {
+          model: 'opusplan',
+          hooks: {
+            Stop: [
+              { hooks: [{ type: 'command', command: 'afplay /System/Library/Sounds/Glass.aiff' }] },
+              { hooks: [{ type: 'command', command: hookCommand(legacy, 'Stop') }] },
+            ],
+            SessionEnd: [{ hooks: [{ type: 'command', command: hookCommand(legacy, 'SessionEnd') }] }],
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    )
+  })
+
+  it('re-points a pre-rename install and leaves the file installed', async () => {
+    const { stripped, added } = await migrateLegacyHooks()
+    expect(stripped).toHaveLength(2)
+    expect(added.length).toBeGreaterThan(0)
+
+    const written = await readFile(settings, 'utf8')
+    expect(written).not.toContain('.prcli')
+    expect(written).toContain(join(dir, 'bin', 'pterm-hook'))
+    // The user's own afplay hook survived a rewrite it had no part in.
+    expect(written).toContain('Glass.aiff')
+    expect((await readHooksState()).installed).toBe(true)
+  })
+
+  it('backs the file up before rewriting it', async () => {
+    await migrateLegacyHooks()
+    const backups = (await readdir(dir)).filter((name) => name.endsWith('.bak'))
+    expect(backups).toHaveLength(1)
+    expect(await readFile(join(dir, backups[0]), 'utf8')).toContain('.prcli')
+  })
+
+  it('writes nothing at all when there is no pre-rename install', async () => {
+    await writeFile(settings, `${JSON.stringify(ORIGINAL, null, 2)}\n`, 'utf8')
+    const before = await stat(settings)
+    const { stripped, added } = await migrateLegacyHooks()
+    expect(stripped).toEqual([])
+    expect(added).toEqual([])
+    // mtime, not just content: this runs on every launch, so a no-op must be
+    // a genuine no-op rather than a rewrite of identical bytes.
+    expect((await stat(settings)).mtimeMs).toBe(before.mtimeMs)
+    expect((await readdir(dir)).filter((name) => name.endsWith('.bak'))).toEqual([])
+  })
+
+  it('is idempotent — a second launch rewrites nothing', async () => {
+    await migrateLegacyHooks()
+    const first = await readFile(settings, 'utf8')
+    const { stripped, added } = await migrateLegacyHooks()
+    expect(stripped).toEqual([])
+    expect(added).toEqual([])
+    expect(await readFile(settings, 'utf8')).toBe(first)
+  })
+
+  it('refuses a settings file it cannot parse, and writes nothing', async () => {
+    await writeFile(settings, '{ this is not json', 'utf8')
+    await expect(migrateLegacyHooks()).rejects.toThrow()
+    expect(await readFile(settings, 'utf8')).toBe('{ this is not json')
   })
 })

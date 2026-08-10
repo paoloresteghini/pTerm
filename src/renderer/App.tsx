@@ -28,6 +28,7 @@ import { ConfirmClosePane } from './ConfirmClosePane'
 import { SettingsPane } from './settings/SettingsPane'
 import { TitleBar } from './TitleBar'
 import { UpdateBar } from './UpdateBar'
+import { HooksBar } from './HooksBar'
 import { StatusBar } from './StatusBar'
 import { Welcome } from './Welcome'
 import { CommandPalette, type PaletteSession } from './CommandPalette'
@@ -242,6 +243,13 @@ export function App() {
   // dismissed: none of those close the app, so there is nothing else that
   // would clear it.
   const [update, setUpdate] = useState<UpdateInfo | null>(null)
+  /**
+   * Whether to warn that no dot will ever move. Null until the first read
+   * answers, so a slow reply shows nothing rather than a strip that appears
+   * and then retracts. Dismissal writes `false` and lasts the run — see
+   * `HooksBar` for why it is not persisted.
+   */
+  const [hooksMissing, setHooksMissing] = useState<boolean | null>(null)
   // The pane `ConfirmClosePane` is asking about, or null when it is not open.
   // Only ever set by `requestClosePane` below, and only for a dirty pane.
   const [pendingClose, setPendingClose] = useState<string | null>(null)
@@ -1083,6 +1091,18 @@ export function App() {
   // Pushed by main on its own schedule, not polled: see `onUpdateAvailable`'s
   // own comment in `shared/ipc.ts`.
   useEffect(() => window.pterm.onUpdateAvailable(setUpdate), [])
+
+  // Once, at mount, and deliberately after main's startup migration has had
+  // its turn: an install that only needed re-pointing is already repaired by
+  // the time this asks, so the strip stays down for the case that fixed
+  // itself. A read that throws — an unparseable settings.json — is not a
+  // reason to warn about hooks; the settings pane is where that error belongs.
+  useEffect(() => {
+    window.pterm
+      .hooksState()
+      .then((state) => setHooksMissing(!state.installed))
+      .catch(() => setHooksMissing(false))
+  }, [])
 
   const restartTab = useCallback(
     (tab: TabDescriptor) => {
@@ -1956,6 +1976,21 @@ export function App() {
             setUpdate(null)
           }}
           onDismiss={() => setUpdate(null)}
+        />
+      ) : null}
+
+      {hooksMissing ? (
+        <HooksBar
+          onInstall={() => {
+            // Optimism would be wrong here: the install writes a file every
+            // Claude session on the machine reads, and a failure must leave
+            // the warning up rather than replace it with silence.
+            void window.pterm
+              .installHooks()
+              .then((state) => setHooksMissing(!state.installed))
+              .catch(() => setHooksMissing(true))
+          }}
+          onDismiss={() => setHooksMissing(false)}
         />
       ) : null}
 

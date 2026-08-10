@@ -2,8 +2,11 @@ import { describe, it, expect } from 'vitest'
 import {
   hookCommand,
   isInstalled,
+  legacyHookPaths,
   merge,
+  migrateLegacy,
   soundCollisions,
+  stripLegacy,
   unmerge,
 } from '../../src/main/hooks/install'
 import { HOOK_EVENTS } from '../../src/main/status/machine'
@@ -269,5 +272,156 @@ describe('malformed hook shapes', () => {
     expect(isInstalled(settings, HOOK)).toBe(false)
     const { added } = merge(settings, HOOK)
     expect(added).toContain('PreToolUse')
+  })
+})
+
+const LEGACY = '/Users/someone/.prcli/bin/prcli-hook'
+const LEGACY_PATHS = [LEGACY]
+
+/**
+ * `realistic()` with pTerm's pre-rename install already in it — the exact
+ * state the rename left on a machine that had pressed Install before it: our
+ * seven commands, still quoted, still pointing at ~/.prcli.
+ */
+function preRename(): Record<string, unknown> {
+  const settings = realistic()
+  const hooks = settings.hooks as Record<string, unknown[]>
+  for (const event of HOOK_EVENTS) {
+    const groups = hooks[event] ?? []
+    hooks[event] = [
+      ...groups,
+      { hooks: [{ type: 'command', command: hookCommand(LEGACY, event) }] },
+    ]
+  }
+  return settings
+}
+
+describe('stripLegacy', () => {
+  it('removes every pre-rename command and nothing else', () => {
+    const { next, stripped } = stripLegacy(preRename(), LEGACY_PATHS)
+    expect(stripped).toHaveLength(HOOK_EVENTS.length)
+    expect(JSON.stringify(next)).not.toContain('.prcli')
+    // The file it was built from, minus our old install, is the original.
+    expect(next).toEqual(realistic())
+  })
+
+  it('removes nothing from a file that never had the old install', () => {
+    const { next, stripped } = stripLegacy(realistic(), LEGACY_PATHS)
+    expect(stripped).toEqual([])
+    expect(next).toEqual(realistic())
+  })
+
+  it("keeps a user's own command in a group it shares with ours", () => {
+    // The reason this is entry-level and unmerge is not: taking the group
+    // would take the user's hook with it, unattended, at startup.
+    const settings = {
+      hooks: {
+        Stop: [
+          {
+            hooks: [
+              { type: 'command', command: hookCommand(LEGACY, 'Stop') },
+              { type: 'command', command: '/Users/someone/.claude/mine.sh' },
+            ],
+          },
+        ],
+      },
+    }
+    const { next, stripped } = stripLegacy(settings, LEGACY_PATHS)
+    expect(stripped).toHaveLength(1)
+    expect(next).toEqual({
+      hooks: {
+        Stop: [{ hooks: [{ type: 'command', command: '/Users/someone/.claude/mine.sh' }] }],
+      },
+    })
+  })
+
+  it('drops an event key whose only group was ours', () => {
+    const settings = {
+      hooks: { SessionEnd: [{ hooks: [{ type: 'command', command: hookCommand(LEGACY, 'SessionEnd') }] }] },
+    }
+    const { next } = stripLegacy(settings, LEGACY_PATHS)
+    expect(next).toEqual({})
+  })
+
+  it('does not mutate the settings it was given', () => {
+    const settings = preRename()
+    const before = JSON.stringify(settings)
+    stripLegacy(settings, LEGACY_PATHS)
+    expect(JSON.stringify(settings)).toBe(before)
+  })
+
+  it("does not mistake a longer path sharing our prefix for ours", () => {
+    const settings = {
+      hooks: { Stop: [{ hooks: [{ type: 'command', command: `"${LEGACY}-other" Stop` }] }] },
+    }
+    const { stripped } = stripLegacy(settings, LEGACY_PATHS)
+    expect(stripped).toEqual([])
+  })
+
+  it('does not crash on the malformed shapes merge already tolerates', () => {
+    const settings = {
+      hooks: {
+        Stop: [null, { hooks: {} }, { hooks: [null, { type: 'command', command: 7 }] }],
+      },
+    }
+    expect(() => stripLegacy(settings, LEGACY_PATHS)).not.toThrow()
+    const { next, stripped } = stripLegacy(settings, LEGACY_PATHS)
+    expect(stripped).toEqual([])
+    expect(next).toEqual(settings)
+  })
+})
+
+describe('migrateLegacy', () => {
+  it('re-points a pre-rename install at the current script', () => {
+    const { next, stripped, added } = migrateLegacy(preRename(), HOOK, LEGACY_PATHS)
+    expect(stripped).toHaveLength(HOOK_EVENTS.length)
+    expect(added).toEqual([...HOOK_EVENTS])
+    expect(isInstalled(next, HOOK)).toBe(true)
+    expect(JSON.stringify(next)).not.toContain('.prcli')
+  })
+
+  it('installs nothing when there was no pre-rename install to move', () => {
+    // The consent rule: a file with no pTerm hook in it belongs to someone who
+    // never pressed Install, and startup must not press it for them.
+    const { next, stripped, added } = migrateLegacy(realistic(), HOOK, LEGACY_PATHS)
+    expect(stripped).toEqual([])
+    expect(added).toEqual([])
+    expect(isInstalled(next, HOOK)).toBe(false)
+    expect(next).toEqual(realistic())
+  })
+
+  it('strips the old install without re-adding when the new one is already there', () => {
+    const both = merge(preRename(), HOOK).next
+    const { next, stripped, added } = migrateLegacy(both, HOOK, LEGACY_PATHS)
+    expect(stripped).toHaveLength(HOOK_EVENTS.length)
+    expect(added).toEqual([])
+    expect(isInstalled(next, HOOK)).toBe(true)
+    expect(JSON.stringify(next)).not.toContain('.prcli')
+  })
+
+  it('is idempotent — a second pass over a migrated file changes nothing', () => {
+    const once = migrateLegacy(preRename(), HOOK, LEGACY_PATHS).next
+    const twice = migrateLegacy(once, HOOK, LEGACY_PATHS)
+    expect(twice.stripped).toEqual([])
+    expect(twice.added).toEqual([])
+    expect(twice.next).toEqual(once)
+  })
+
+  it('leaves every other top-level key untouched', () => {
+    const { next } = migrateLegacy(preRename(), HOOK, LEGACY_PATHS)
+    const original = realistic()
+    for (const key of Object.keys(original)) {
+      if (key === 'hooks') continue
+      expect(next[key]).toEqual(original[key])
+    }
+  })
+})
+
+describe('legacyHookPaths', () => {
+  it('names an absolute path under the running user home', () => {
+    const paths = legacyHookPaths()
+    expect(paths).toHaveLength(1)
+    expect(paths[0].startsWith('/')).toBe(true)
+    expect(paths[0].endsWith('/.prcli/bin/prcli-hook')).toBe(true)
   })
 })

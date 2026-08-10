@@ -12,7 +12,7 @@ import { createHookInbox } from './status/inbox'
 import { mergeTab, NotificationRouter } from './notify/router'
 import { ConfigStore } from './state/store'
 import { HookServer } from './hooks/server'
-import { hookPaths, writeScript } from './hooks/install'
+import { hookPaths, migrateLegacyHooks, writeScript } from './hooks/install'
 import {
   CHANNELS,
   columnIsCollapsed,
@@ -556,6 +556,24 @@ app.whenReady().then(async () => {
     await hookServer.start()
   } catch (error) {
     console.error('pTerm: failed to start the hook server', error)
+  }
+
+  // Separate from the block above, and after it, on purpose. That one has to
+  // succeed for a crashed pane to report at all; this one only repairs an
+  // install predating the rename, and a settings.json we cannot parse must
+  // cost the user a warning rather than the dots that still work. It writes
+  // nothing when there is nothing to repair, so it is free on every launch
+  // after the first. See `migrateLegacyHooks`.
+  try {
+    const { stripped, added } = await migrateLegacyHooks()
+    if (stripped.length > 0) {
+      console.info(
+        `pTerm: re-pointed ${stripped.length} pre-rename hook command(s) at ${hookPaths().script}` +
+          ` (${added.length} event(s) added)`,
+      )
+    }
+  } catch (error) {
+    console.error('pTerm: could not migrate pre-rename Claude hooks', error)
   }
 
   installMenu()

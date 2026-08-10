@@ -171,6 +171,30 @@ export function renderScript(paths: { socket: string; spool: string }): string {
   ].join('\n')
 }
 
+/**
+ * Hook scripts this app installed under a former name, relative to `$HOME`.
+ *
+ * `ef34779` renamed PRCLI to pTerm. That moved the config root from `~/.prcli`
+ * to `~/.pterm` and the hook script with it, but nothing went back for
+ * `~/.claude/settings.json` — a file this app writes and then never reads for
+ * repair. So every install predating the rename still names a script that
+ * gates on `$PRCLI_TAB_ID`, a variable no pane has exported since, which means
+ * it exits 0 before sending anything and the socket it would have written to
+ * no longer exists either. Every hook event went nowhere, for days, and the
+ * only symptom was dots that never appeared.
+ *
+ * Relative rather than absolute because the file being repaired belongs to
+ * whoever is running the app. Anything added here must be a path this app
+ * itself wrote; a path someone else's tool might also use does not belong in
+ * a list whose whole purpose is deciding what is safe to delete unattended.
+ */
+export const LEGACY_HOOK_SCRIPTS: readonly string[] = ['.prcli/bin/prcli-hook']
+
+/** `LEGACY_HOOK_SCRIPTS` resolved against the running user's home directory. */
+export function legacyHookPaths(): string[] {
+  return LEGACY_HOOK_SCRIPTS.map((relative) => join(homedir(), ...relative.split('/')))
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -330,6 +354,106 @@ export function unmerge(
   if (Object.keys(nextHooks).length > 0) next.hooks = nextHooks
   else delete next.hooks
   return { next, removed }
+}
+
+/**
+ * Drop hook entries pointing at a script this app installed under a former
+ * name, leaving everything else exactly as it was found.
+ *
+ * Entry-level, not group-level, which is where this deliberately differs from
+ * `unmerge`. That runs because the user pressed Uninstall, so taking a whole
+ * group is what was asked for. This runs unattended at startup, where a group
+ * someone had hand-edited to carry their own command alongside ours must come
+ * back still carrying it. A group left with no entries is dropped, and an
+ * event left with no groups loses its key, so a migrated file reads like one
+ * that never held the old install at all.
+ *
+ * Pure and non-mutating, for the same reason `merge` is: no pre-existing group
+ * object is written to, only replaced by a copy when its own entries changed.
+ */
+export function stripLegacy(
+  settings: unknown,
+  legacyPaths: readonly string[],
+): { next: ClaudeSettings; stripped: string[] } {
+  const base = asSettings(settings)
+  const hooks = hooksOf(base)
+  const prefixes = legacyPaths.map((path) => `"${path}"`)
+  const stripped: string[] = []
+  const nextHooks: Record<string, HookGroup[]> = {}
+
+  for (const [event, groups] of Object.entries(hooks)) {
+    const keptGroups: HookGroup[] = []
+    for (const group of groups) {
+      // Anything that does not parse as a group with an array of entries is
+      // not ours to touch — the same tolerance `commandsOf` already applies.
+      if (!isRecord(group) || !Array.isArray(group.hooks)) {
+        keptGroups.push(group)
+        continue
+      }
+      const entries = group.hooks as unknown[]
+      const kept = entries.filter((entry) => {
+        const command =
+          isRecord(entry) && typeof entry.command === 'string' ? entry.command : undefined
+        if (command === undefined) return true
+        if (!prefixes.some((prefix) => command.startsWith(prefix))) return true
+        stripped.push(command)
+        return false
+      })
+      if (kept.length === entries.length) keptGroups.push(group)
+      else if (kept.length > 0) keptGroups.push({ ...group, hooks: kept })
+    }
+    if (keptGroups.length > 0) nextHooks[event] = keptGroups
+  }
+
+  const next: ClaudeSettings = { ...base }
+  if (Object.keys(nextHooks).length > 0) next.hooks = nextHooks
+  else delete next.hooks
+  return { next, stripped }
+}
+
+/**
+ * Re-point a pre-rename install at the script this version actually writes.
+ *
+ * The current path is added **only** when a legacy one was found. That is the
+ * consent rule: a settings file carrying `~/.prcli/bin/prcli-hook` belongs to
+ * someone who already pressed Install once, so moving them to the new path
+ * honours a decision they made rather than making one for them. A file with no
+ * pTerm hook in it at all is left alone — this must never become a startup
+ * that installs hooks nobody asked for into a file every Claude session on the
+ * machine reads.
+ */
+export function migrateLegacy(
+  settings: unknown,
+  hookPath: string,
+  legacyPaths: readonly string[],
+): { next: ClaudeSettings; stripped: string[]; added: HookEvent[] } {
+  const { next: cleaned, stripped } = stripLegacy(settings, legacyPaths)
+  if (stripped.length === 0) return { next: cleaned, stripped, added: [] }
+  const { next, added } = merge(cleaned, hookPath)
+  return { next, stripped, added }
+}
+
+/**
+ * Apply `migrateLegacy` to the real settings file.
+ *
+ * Writes nothing when there is nothing to strip, which is what makes this safe
+ * to run on every launch: the second run over a migrated file finds no legacy
+ * command, returns early, and leaves the file's mtime alone.
+ *
+ * Throws on an unreadable or unrecognised settings file rather than repairing
+ * it, exactly like `installHooks` — the caller at startup is responsible for
+ * keeping that off the path that opens a window.
+ */
+export async function migrateLegacyHooks(): Promise<{ stripped: string[]; added: HookEvent[] }> {
+  const settingsPath = claudeSettingsPath()
+  const { script } = hookPaths()
+  const settings = await readSettings(settingsPath)
+  assertRecognisedHooksShape(settings, settingsPath)
+  const { next, stripped, added } = migrateLegacy(settings, script, legacyHookPaths())
+  if (stripped.length === 0) return { stripped, added }
+  await backupIfPresent(settingsPath)
+  await writeFile(settingsPath, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
+  return { stripped, added }
 }
 
 /**
