@@ -130,21 +130,30 @@ export function parseDetail(stdout: string): IssueDetail | null {
   }
 }
 
+/** A `resolveRepo` failure, carrying the remote when there was one to reject. */
+export type RepoFailure = { ok: false; reason: IssuesFailure; remote?: string }
+
 /**
  * Finds the GitHub repository behind `cwd`, or the reason it could not:
  * not inside a git repository, no `origin` remote, or a remote that is not
  * GitHub. Every issues command starts here, since none of them can name a
  * `--repo` without it.
+ *
+ * `not-github` carries the URL it rejected. The host rule is an allowlist
+ * (`repo.ts`), so someone running a GitHub Enterprise Server on a host it
+ * does not admit is told their GitHub remote is not GitHub; naming the URL
+ * is what makes that a rule they can see rather than a contradiction of
+ * `git remote -v`.
  */
 export async function resolveRepo(
   cwd: string,
-): Promise<{ ok: true; ref: RepoRef } | { ok: false; reason: IssuesFailure }> {
+): Promise<{ ok: true; ref: RepoRef } | RepoFailure> {
   const root = await repoRoot(cwd)
   if (root === null) return { ok: false, reason: 'no-repo' }
   const remote = await git(root, ['remote', 'get-url', 'origin'])
   if (remote.code !== 0) return { ok: false, reason: 'no-remote' }
   const ref = parseRemote(remote.stdout)
-  if (ref === null) return { ok: false, reason: 'not-github' }
+  if (ref === null) return { ok: false, reason: 'not-github', remote: remote.stdout.trim() }
   return { ok: true, ref }
 }
 
@@ -174,13 +183,42 @@ function failure<T>(reason: IssuesFailure, detail?: string): IssuesResult<T> {
   }
 }
 
+/**
+ * The failed `IssuesResult` for a repository that could not be resolved.
+ * Everything but `not-github` is `MESSAGES` verbatim; that one names the URL
+ * it rejected, for the reason `resolveRepo` gives. Falls back to the plain
+ * sentence when there is no URL to name, which `resolveRepo` only produces
+ * for an `origin` whose value is entirely whitespace.
+ */
+function repoFailure<T>(resolved: RepoFailure): IssuesResult<T> {
+  if (resolved.reason === 'not-github' && resolved.remote !== undefined && resolved.remote !== '') {
+    return {
+      ok: false,
+      reason: 'not-github',
+      message: `The origin remote ${resolved.remote} does not point at GitHub.`,
+    }
+  }
+  return failure(resolved.reason)
+}
+
+/**
+ * The reply every issues IPC handler sends when the project id names nothing
+ * in the workspace. Here rather than inlined at each handler so the sentence
+ * the user reads is the one `MESSAGES` defines, alongside the other seven.
+ */
+export const NO_PROJECT: IssuesResult<never> = {
+  ok: false,
+  reason: 'no-project',
+  message: MESSAGES['no-project'],
+}
+
 /** Lists issues in the repository at `cwd`, filtered by `state`. */
 export async function listIssues(
   cwd: string,
   state: IssueStateFilter,
 ): Promise<IssuesResult<IssueSummary[]>> {
   const resolved = await resolveRepo(cwd)
-  if (!resolved.ok) return failure(resolved.reason)
+  if (!resolved.ok) return repoFailure(resolved)
   const arg = repoArg(resolved.ref)
   const run = await gh(cwd, [
     'issue',
@@ -207,7 +245,7 @@ export async function listIssues(
 /** Fetches one issue's full detail from the repository at `cwd`. */
 export async function getIssue(cwd: string, number: number): Promise<IssuesResult<IssueDetail>> {
   const resolved = await resolveRepo(cwd)
-  if (!resolved.ok) return failure(resolved.reason)
+  if (!resolved.ok) return repoFailure(resolved)
   const arg = repoArg(resolved.ref)
   const run = await gh(cwd, ['issue', 'view', String(number), '--repo', arg, '--json', DETAIL_FIELDS])
   if (run.code !== 0 || run.spawnFailed) return failure(classify(run), run.stderr)
@@ -256,7 +294,7 @@ async function mutate<T>(
   read: (run: { stdout: string }) => T,
 ): Promise<IssuesResult<T>> {
   const resolved = await resolveRepo(cwd)
-  if (!resolved.ok) return failure(resolved.reason)
+  if (!resolved.ok) return repoFailure(resolved)
   const arg = repoArg(resolved.ref)
   const built = build(arg)
   const run = await gh(cwd, built.args, built.stdin)
@@ -314,6 +352,20 @@ export function editIssue(
 }
 
 /**
+ * The new issue's number, read out of the URL `gh issue create` prints on
+ * stdout. `0` for anything that does not end in `/issues/<digits>`: an empty
+ * reply, a URL with no number, or extra output after it.
+ *
+ * A named function rather than a regex inline in `createIssue` so it can be
+ * asserted without spawning `gh`, which is the only way this branch is
+ * reachable from a test at all.
+ */
+export function issueNumberFromUrl(stdout: string): number {
+  const match = /\/issues\/(\d+)\s*$/.exec(stdout.trim())
+  return match ? Number(match[1]) : 0
+}
+
+/**
  * Opens a new issue in the repository at `cwd`, answering with its number.
  *
  * `gh issue create` prints the new issue's URL on stdout rather than JSON,
@@ -330,9 +382,6 @@ export function createIssue(cwd: string, title: string, body: string): Promise<I
       args: ['issue', 'create', '--repo', arg, '--title', title, '--body-file', '-'],
       stdin: body,
     }),
-    (run) => {
-      const match = /\/issues\/(\d+)\s*$/.exec(run.stdout.trim())
-      return match ? Number(match[1]) : 0
-    },
+    (run) => issueNumberFromUrl(run.stdout),
   )
 }

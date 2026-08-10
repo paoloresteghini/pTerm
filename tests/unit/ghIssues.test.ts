@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseDetail, parseSummaries } from '../../src/main/gh/issues'
+import { issueNumberFromUrl, parseDetail, parseSummaries } from '../../src/main/gh/issues'
 
 const LIST = JSON.stringify([
   {
@@ -132,5 +132,43 @@ describe('parseDetail', () => {
     const parsed = parseDetail(JSON.stringify(detail))
     expect(parsed?.comments).toHaveLength(1)
     expect(parsed?.comments[0].body).toBe('ok')
+  })
+})
+
+describe('issueNumberFromUrl', () => {
+  it('reads the number out of what gh issue create prints', () => {
+    expect(issueNumberFromUrl('https://github.com/o/n/issues/42\n')).toBe(42)
+  })
+
+  it('reads a multi-digit number rather than one digit of it', () => {
+    expect(issueNumberFromUrl('https://github.com/o/n/issues/1234\n')).toBe(1234)
+  })
+
+  it('reads an enterprise host the same way', () => {
+    expect(issueNumberFromUrl('https://github.corp.ghe.com/o/n/issues/7\n')).toBe(7)
+  })
+
+  it('tolerates the trailing whitespace gh actually sends', () => {
+    expect(issueNumberFromUrl('  https://github.com/o/n/issues/42  \n\n')).toBe(42)
+  })
+
+  it('answers 0 for an empty reply rather than NaN', () => {
+    expect(issueNumberFromUrl('')).toBe(0)
+    expect(issueNumberFromUrl('\n')).toBe(0)
+  })
+
+  it('answers 0 for a URL with no issue number', () => {
+    expect(issueNumberFromUrl('https://github.com/o/n/issues\n')).toBe(0)
+    expect(issueNumberFromUrl('https://github.com/o/n\n')).toBe(0)
+  })
+
+  it('answers 0 when the number is not the last thing on the line', () => {
+    // `gh` prints the URL alone, so anything after it means the output is not
+    // the shape this parse assumes and a guessed number would be worse than 0.
+    expect(issueNumberFromUrl('https://github.com/o/n/issues/42/comments')).toBe(0)
+  })
+
+  it('answers 0 for a pull request URL', () => {
+    expect(issueNumberFromUrl('https://github.com/o/n/pull/42\n')).toBe(0)
   })
 })

@@ -47,6 +47,7 @@ import {
   editIssue,
   getIssue,
   listIssues,
+  NO_PROJECT,
   setIssueState,
 } from '../gh/issues'
 import { attachSavedFields } from './savedFields'
@@ -1478,9 +1479,7 @@ export function registerIpc(
     async (_event, projectId: string, state: IssueStateFilter) => {
       const config = await store.read()
       const project = config.projects.find((row) => row.id === projectId)
-      if (!project) {
-        return { ok: false as const, reason: 'no-project' as const, message: 'No project' }
-      }
+      if (!project) return NO_PROJECT
       return listIssues(project.cwd, state)
     },
   )
@@ -1488,9 +1487,7 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.issuesGet, async (_event, projectId: string, number: number) => {
     const config = await store.read()
     const project = config.projects.find((row) => row.id === projectId)
-    if (!project) {
-      return { ok: false as const, reason: 'no-project' as const, message: 'No project' }
-    }
+    if (!project) return NO_PROJECT
     return getIssue(project.cwd, number)
   })
 
@@ -1502,9 +1499,7 @@ export function registerIpc(
     async (_event, projectId: string, title: string, body: string) => {
       const config = await store.read()
       const project = config.projects.find((row) => row.id === projectId)
-      if (!project) {
-        return { ok: false as const, reason: 'no-project' as const, message: 'No project' }
-      }
+      if (!project) return NO_PROJECT
       return createIssue(project.cwd, title, body)
     },
   )
@@ -1514,9 +1509,7 @@ export function registerIpc(
     async (_event, projectId: string, number: number, title: string, body: string) => {
       const config = await store.read()
       const project = config.projects.find((row) => row.id === projectId)
-      if (!project) {
-        return { ok: false as const, reason: 'no-project' as const, message: 'No project' }
-      }
+      if (!project) return NO_PROJECT
       return editIssue(project.cwd, number, title, body)
     },
   )
@@ -1532,9 +1525,7 @@ export function registerIpc(
     ) => {
       const config = await store.read()
       const project = config.projects.find((row) => row.id === projectId)
-      if (!project) {
-        return { ok: false as const, reason: 'no-project' as const, message: 'No project' }
-      }
+      if (!project) return NO_PROJECT
       return setIssueState(project.cwd, number, action, reason)
     },
   )
@@ -1544,9 +1535,7 @@ export function registerIpc(
     async (_event, projectId: string, number: number, body: string) => {
       const config = await store.read()
       const project = config.projects.find((row) => row.id === projectId)
-      if (!project) {
-        return { ok: false as const, reason: 'no-project' as const, message: 'No project' }
-      }
+      if (!project) return NO_PROJECT
       return commentIssue(project.cwd, number, body)
     },
   )

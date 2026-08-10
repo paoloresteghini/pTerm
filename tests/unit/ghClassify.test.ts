@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { classify, gh, type GhRun } from '../../src/main/gh/run'
+import { classify, gh, isSpawnFailure, type GhRun } from '../../src/main/gh/run'
 
 function run(over: Partial<GhRun>): GhRun {
   return { code: 1, stdout: '', stderr: '', spawnFailed: false, ...over }
@@ -50,6 +50,29 @@ describe('classify', () => {
     const stderr = `HTTP 401: Bad credentials (https://api.github.com/graphql)
 Try authenticating with:  gh auth login -h github.com`
     expect(classify(run({ stderr }))).toBe('no-auth')
+  })
+
+  it('does not read a maxBuffer overflow as a missing binary', () => {
+    // Node reports this as a STRING `error.code`, from a `gh` that spawned
+    // and ran; the old `typeof code === 'string'` rule classified it `no-gh`
+    // and told the user to `brew install gh` on a machine that has it.
+    expect(isSpawnFailure('ERR_CHILD_PROCESS_STDIO_MAXBUFFER')).toBe(false)
+    expect(classify(run({ spawnFailed: isSpawnFailure('ERR_CHILD_PROCESS_STDIO_MAXBUFFER') }))).toBe(
+      'failed',
+    )
+  })
+
+  it('reads only the real spawn codes as a missing binary', () => {
+    expect(isSpawnFailure('ENOENT')).toBe(true)
+    expect(isSpawnFailure('EACCES')).toBe(true)
+    expect(isSpawnFailure('ENOTDIR')).toBe(true)
+  })
+
+  it('does not read a timeout or an exit status as a missing binary', () => {
+    // A `timeout` kill yields `code: null`, an ordinary non-zero exit a number.
+    expect(isSpawnFailure(null)).toBe(false)
+    expect(isSpawnFailure(1)).toBe(false)
+    expect(isSpawnFailure(undefined)).toBe(false)
   })
 
   it('detects spawn failure when gh binary does not exist', async () => {
