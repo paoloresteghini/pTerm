@@ -158,9 +158,11 @@ export function IssuesPanel({
   // `IssueModal`'s own doc comment for why this is not folded into `open`.
   const [creating, setCreating] = useState(false)
   // A quick-close that failed. Cleared at the start of the next attempt and
-  // by any list load, the same rule `IssueModal` applies to its own
-  // `mutationError`: cleared only by the next quick-close, it outlived the
-  // very refresh that proved it fixed, and outlived the project it was about.
+  // by every list load, which is the rule `IssueModal` follows for its own
+  // `mutationError` (cleared by the next submit and by a target change).
+  // Cleared only by the next quick-close, as it was, the strip survived the
+  // refresh that proved the problem fixed and the project switch that made it
+  // about a repository nobody was looking at.
   const [quickCloseError, setQuickCloseError] = useState<string | null>(null)
 
   // `load` has several callers (the effect below, the focus listener, the
@@ -183,9 +185,10 @@ export function IssuesPanel({
       return
     }
     setLoading(true)
-    // `projectId` and `state` are read here, at the moment the call is made,
-    // and travel with the reply: by the time it lands either may already have
-    // moved on, and the reply describes neither of the new ones.
+    // `projectId` and `state` are captured here, at the moment the call is
+    // made, and travel with the reply into `setResult` below. Either can have
+    // moved on by the time it lands, and the reply describes the pair it was
+    // sent with rather than whatever they have since become.
     window.pterm
       .issuesList(projectId, state)
       .then((reply) => {
