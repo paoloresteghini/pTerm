@@ -340,17 +340,23 @@ Add to `src/main/sessions/manager.ts`, near `splitTab`:
     const shown = new Map<string, string>()
     for (const member of members) shown.set(member, await this.adapter.windowIdOf(member))
 
-    this.detach(input.paneId)
-    await this.adapter.moveWindow(record.tmuxSession, target.record.tmuxSession)
-    if (await this.adapter.hasSession(record.tmuxSession)) {
-      await this.adapter.killSession(record.tmuxSession)
-    }
-    if (await this.adapter.hasSession(record.tmuxSession)) {
-      throw new Error(`joinTab: ${record.tmuxSession} would not go away`)
-    }
-    await this.adapter.newGroupMember(group, record.tmuxSession, { PTERM_TAB_ID: record.id })
+    // Create the destination BEFORE anything moves. See the ordering note below.
+    const staging = `${record.tmuxSession}-joining`
+    await this.adapter.newGroupMember(group, staging, { PTERM_TAB_ID: record.id })
 
-    const windows = await this.adapter.windowsOf(target.record.tmuxSession)
+    this.detach(input.paneId)
+    try {
+      await this.adapter.moveWindow(record.tmuxSession, staging)
+      if (await this.adapter.hasSession(record.tmuxSession)) {
+        await this.adapter.killSession(record.tmuxSession)
+      }
+      await this.adapter.renameSession(staging, record.tmuxSession)
+    } catch (error) {
+      await this.adapter.killSession(staging).catch(() => undefined)
+      throw error
+    }
+
+    const windows = await this.adapter.windowsOf(record.tmuxSession)
     const indexOf = new Map(windows.map((window) => [window.id, window.index]))
     for (const [member, windowId] of shown) {
       const index = indexOf.get(windowId)
@@ -383,45 +389,48 @@ Add to `src/main/sessions/manager.ts`, near `splitTab`:
   }
 ```
 
-Order matters and is the subject of the spec. `detach` before the move because
-it deletes the entry this method read `cols`/`rows` off, which is why both are
-captured above it. The `shown` snapshot is taken before the move because
+**Why the destination is created first (revised 2026-08-10, after measurement).**
+An earlier draft moved the window, killed the source session, then recreated it
+under the same name, with a rollback if that recreate failed. That rollback could
+not work, and the implementer proved it before writing any code: in the
+standalone-to-standalone case the source session self-destructs the instant its
+only window leaves, so by the time the rollback ran, the session name it was
+trying to move the window back into no longer existed. Its failure was swallowed
+and the window stayed stranded in the target group.
+
+Creating the destination first removes the failure rather than recovering from
+it. `newGroupMember` is the one step likely to fail, and now nothing has moved
+when it runs. It also creates no new window and no new shell, because a session
+joining a group shares that group's existing window list. That matters: read
+`newGroupMember`'s own comment in `src/main/tmux/adapter.ts`, which records 287
+leaked shells against a 511-pty budget from a session founded outside a group.
+Any fix that spawns a placeholder shell to move a window into is that same leak.
+
+Measured on a throwaway socket, both cases: standalone onto standalone, and a
+split member onto a standalone. In both, every shell kept its pid, each session
+ended on its own distinct window, and `PTERM_TAB_ID` survived the rename.
+
+The rest of the ordering: `detach` comes after the staging session exists but
+before the move, and `cols`/`rows` are captured above it because `detach` deletes
+the entry they live on. The `shown` snapshot is taken before the move because
 `move-window` re-points the target session at the moved window, and restoring
 every member's own window is what stops `withoutSharedWindows` killing a live
 pane on the next launch.
 
-- [ ] **Step 4: Add the rollback the spec calls for**
+The `catch` kills only the staging session, never a window. If the move already
+succeeded, the moved window stays in the target group with its shell running and
+its pane recoverable, which is the behaviour the spec asks for: a stranded
+window is acceptable, a dead shell is not.
 
-The spec's "Failure handling" section requires that a failure to recreate the
-session leaves the shell recoverable rather than stranded. `newGroupMember` is
-the one step that can fail after the window has already moved, so wrap it and
-the selection work that follows:
+- [ ] **Step 4: Write the failure test**
 
-```ts
-    const sourceGroup = await this.groupNameOf(input.paneId).catch(() => record.tmuxSession)
-```
-
-Capture that BEFORE `this.detach(input.paneId)`, since `groupNameOf` reads the
-entry. Then wrap everything from `newGroupMember` onward:
+There is no rollback to write, because Step 3's ordering means the step most
+likely to fail now runs before anything has changed. What needs proving is that
+this is true: a failed join must leave the source pane exactly where it was,
+with its shell alive.
 
 ```ts
-    try {
-      await this.adapter.newGroupMember(group, record.tmuxSession, { PTERM_TAB_ID: record.id })
-      // ... the selection work and the return, unchanged
-    } catch (error) {
-      await this.adapter.moveWindow(target.record.tmuxSession, sourceGroup).catch(() => undefined)
-      throw error
-    }
-```
-
-The rollback is deliberately best-effort and never throws over the original
-error: the shell is alive either way, and replacing the real failure with a
-rollback failure would hide why the join was refused.
-
-- [ ] **Step 5: Write the rollback test**
-
-```ts
-it('leaves the process alive when the regroup fails', async () => {
+it('leaves the source pane untouched when the join cannot start', async () => {
   manager.open({ id: 'aaa', projectSlug: 'demo', cwd })
   const moved = manager.open({ id: 'bbb', projectSlug: 'demo', cwd })
   await settle()
@@ -430,23 +439,37 @@ it('leaves the process alive when the regroup fails', async () => {
 
   await expect(manager.joinTab({ paneId: 'bbb', targetPaneId: 'aaa' })).rejects.toThrow('nope')
 
-  const windows = await adapter.windowsOf(
-    encodeSessionName({ projectSlug: 'demo', id: 'aaa' }),
-  )
-  const pids = await Promise.all(
-    windows.map(async (window) =>
-      (await run('tmux', [
-        '-L', SOCKET, 'display-message', '-p', '-t', window.id, '#{pane_pid}',
-      ])).stdout.trim(),
-    ),
-  )
-  expect(pids).not.toContain(before)
+  expect(await adapter.hasSession(moved.tmuxSession)).toBe(true)
+  expect(await panePid(moved.tmuxSession)).toBe(before)
+  const rows = await adapter.listSessionsWithGroups()
+  expect(rows.find((row) => row.name === moved.tmuxSession)?.group).toBeFalsy()
 })
 ```
 
-The assertion is that the moved shell is no longer sitting inside the target
-group after the rollback, and it is still alive: check it separately with
-`ps -p <before>` if the window search is not evidence enough on its own.
+Three assertions, each failing on a different regression: the session still
+exists, its shell is the same process, and it is still ungrouped rather than
+half-joined to the target.
+
+- [ ] **Step 5: Write the staging-cleanup test**
+
+A failure AFTER the staging session exists must not leave that session behind,
+because a stray `pterm-*` session is one nothing in the app can ever see or
+reach again.
+
+```ts
+it('cleans up the staging session when the move fails', async () => {
+  manager.open({ id: 'aaa', projectSlug: 'demo', cwd })
+  const moved = manager.open({ id: 'bbb', projectSlug: 'demo', cwd })
+  await settle()
+  vi.spyOn(adapter, 'moveWindow').mockRejectedValueOnce(new Error('nope'))
+
+  await expect(manager.joinTab({ paneId: 'bbb', targetPaneId: 'aaa' })).rejects.toThrow('nope')
+
+  const names = (await adapter.listSessionsWithGroups()).map((row) => row.name)
+  expect(names.filter((name) => name.includes('-joining'))).toEqual([])
+  expect(await adapter.hasSession(moved.tmuxSession)).toBe(true)
+})
+```
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
