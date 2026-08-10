@@ -129,7 +129,8 @@ describe('text in every theme', () => {
   /**
    * The medium-priority dot in the Todos column, and the first token added
    * for a graphical mark rather than for text. Held to the text floor anyway:
-   * it is drawn at 6px, where anything looser is guesswork on a real screen.
+   * it will be a 6px dot per `PRIORITY_DOT`'s classes, where anything looser
+   * is guesswork on a real screen.
    */
   it('clears AA for the warn colour on every fill', () => {
     for (const { id, tokens } of themes) {

@@ -55,7 +55,7 @@ export interface ThemeTokens {
   /** The tab bar's split-group strip. Blended, never picked. */
   group: string
   danger: string
-  /** The medium-priority mark in the Todos column. One value across the registry, like `danger`. */
+  /** The medium-priority mark in the Todos column. Takes one value in all five themes. */
   warn: string
   ok: string
   /** xterm's foreground. Read in JS because a canvas cannot read CSS. */
