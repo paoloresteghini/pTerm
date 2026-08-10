@@ -68,7 +68,7 @@ const manager = new SessionManager(adapter)
 
 beforeAll(async () => {
   await killServer()
-  // The shared test socket's server exits the moment its last session dies —
+  // The shared test socket's server exits the moment its last session dies.
   // `joinTab` kills and recreates sessions constantly, so without a session
   // that outlives every test the server itself could disappear mid-file and
   // every test after that would be running against a socket nothing is

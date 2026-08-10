@@ -967,17 +967,17 @@ export class SessionManager {
    *
    * The staging session joins `group` through `newGroupMember` rather than
    * founding anything of its own, so it starts life owning no window and no
-   * shell — there is nothing here for `newGroupMember`'s own leaked-shell
+   * shell. There is nothing here for `newGroupMember`'s own leaked-shell
    * comment to apply to.
    *
    * Every tmux call below that changes which window a session shows names
    * `staging`, or `record.tmuxSession` once it has been renamed onto
-   * `staging`'s identity — never an existing member of `group` directly.
+   * `staging`'s identity, never an existing member of `group` directly.
    * Measured on a throwaway socket: joining a new session through a live one
    * leaves the session joined THROUGH exactly where it was, and `move-window
    * -t <name>` only ever re-points the session `-t` names. So no other
    * member of `group` is read or written here at all, and none needs its
-   * window snapshotted beforehand or restored after — "leaves every member
+   * window snapshotted beforehand or restored after. "Leaves every member
    * of the target group on a window of its own" is what holds this, and it
    * goes red the moment this method is changed to move a window into an
    * existing member instead of into `staging` (checked by making exactly
@@ -1013,7 +1013,7 @@ export class SessionManager {
     try {
       await this.adapter.moveWindow(record.tmuxSession, staging)
       // A session that is still a member of a real group survives losing its
-      // window — its siblings' shared window list keeps it alive — but a
+      // window, because its siblings' shared window list keeps it alive. A
       // standalone session does not: tmux destroys it the moment its one
       // window is gone. Only the surviving case needs an explicit kill; the
       // other has already gone by the time this runs.
