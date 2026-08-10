@@ -59,8 +59,8 @@ export function nextTodoSort(current: TodoSort): TodoSort {
  * Whether one row answers the query.
  *
  * Title and body, case-insensitive substring. Deliberately not `lib/match.ts`:
- * that module RANKS `{ name }`-shaped entries for ⌘K and the skills filter,
- * and has no notion of a second searchable field.
+ * that module scores a single field with sophisticated ranking for ⌘K and skills,
+ * while two independent fields need simpler symmetric treatment.
  */
 function matches(todo: TodoRecord, query: string): boolean {
   const needle = query.trim().toLowerCase()
@@ -92,7 +92,7 @@ function stamp(iso: string): number {
  * `Array.prototype.sort` is stable in every engine this app runs on, which is
  * what leaves rows the comparator cannot separate in the order the file holds
  * them. `priority` breaks its ties on `updatedAt` descending, so the top of
- * the list is the high priority item touched most recently.
+ * the list is the high-priority item touched most recently.
  */
 export function sortTodos(rows: TodoRecord[], sort: TodoSort): TodoRecord[] {
   const copy = [...rows]

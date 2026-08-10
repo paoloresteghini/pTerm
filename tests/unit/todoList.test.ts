@@ -103,8 +103,12 @@ describe('sortTodos', () => {
     expect(sortTodos(rows, 'updated').map((row) => row.id)).toEqual(['fresh', 'stale'])
   })
 
-  it('is stable for rows the sort cannot separate', () => {
-    const rows = [todo({ id: 'a' }), todo({ id: 'b' }), todo({ id: 'c' })]
+  it('keeps input order for rows with equal priority and equal updatedAt', () => {
+    const rows = [
+      todo({ id: 'a', priority: 'high', updatedAt: '2026-08-05T00:00:00.000Z' }),
+      todo({ id: 'b', priority: 'high', updatedAt: '2026-08-05T00:00:00.000Z' }),
+      todo({ id: 'c', priority: 'high', updatedAt: '2026-08-05T00:00:00.000Z' }),
+    ]
     expect(sortTodos(rows, 'priority').map((row) => row.id)).toEqual(['a', 'b', 'c'])
   })
 
@@ -112,6 +116,14 @@ describe('sortTodos', () => {
     const rows = [todo({ id: 'low', priority: 'low' }), todo({ id: 'high', priority: 'high' })]
     sortTodos(rows, 'priority')
     expect(rows.map((row) => row.id)).toEqual(['low', 'high'])
+  })
+
+  it('sorts unparseable dates as epoch, last under updated sort', () => {
+    const rows = [
+      todo({ id: 'valid', updatedAt: '2026-08-05T00:00:00.000Z' }),
+      todo({ id: 'invalid', updatedAt: 'not-a-date' }),
+    ]
+    expect(sortTodos(rows, 'updated').map((row) => row.id)).toEqual(['valid', 'invalid'])
   })
 })
 
