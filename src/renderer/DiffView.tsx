@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { DiffSide } from '../shared/ipc'
-import { PANE_COLOR_DEFAULT, type PaneColor } from '../shared/paneColors'
+import type { PaneColor } from '../shared/paneColors'
 import { classifyDiffLines, type DiffLineKind } from './lib/diffLines'
 
 const CLASS_FOR_KIND: Record<DiffLineKind, string> = {
@@ -26,12 +26,13 @@ export function DiffView({
   projectId,
   relPath,
   side,
-  color = PANE_COLOR_DEFAULT,
+  paneColor,
 }: {
   projectId: string
   relPath: string | null
   side: DiffSide
-  color?: PaneColor
+  /** The pane's own background, or undefined when it has none of its own. */
+  paneColor?: PaneColor
 }) {
   const [text, setText] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
@@ -64,7 +65,10 @@ export function DiffView({
   return (
     <div
       className="scroll-thin h-full w-full overflow-auto font-mono text-[12px]"
-      style={{ background: color }}
+      // `var(--color-bg)` for an uncoloured pane rather than a literal: the
+      // canvas moves with the theme, and a hex here would leave a diff pane
+      // on the shipped palette's ground under every other one.
+      style={{ background: paneColor ?? 'var(--color-bg)' }}
     >
       {loaded && (text === null || text.trim() === '') ? (
         <p data-testid="diff-empty" className="p-2 text-faint">

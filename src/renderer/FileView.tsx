@@ -6,7 +6,9 @@ import { syntaxHighlighting } from '@codemirror/language'
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
 import { languageForPath } from './lib/languageForPath'
 import { GUTTER_TEXT, syntaxColorStyle } from './lib/syntaxColors'
-import { PANE_COLOR_DEFAULT, type PaneColor } from '../shared/paneColors'
+import type { PaneColor } from '../shared/paneColors'
+import type { ThemeId } from '../shared/themes'
+import { xtermTheme } from './lib/xtermTheme'
 
 /**
  * Every mounted editor pane's save function, by pane id.
@@ -49,16 +51,19 @@ export function saveEditorPane(paneId: string): Promise<void> {
  * removed and reading `getComputedStyle` off the real elements in a running
  * window. None of them is decoration.
  *
- * `color: '#d4d4d8'` on `&`. Without it the content computes `rgb(0, 0, 0)`
+ * The foreground on `&`. Without it the content computes `rgb(0, 0, 0)`
  * over a `rgb(9, 9, 11)` pane, about 1.06:1, which is not dim text but
  * invisible text: CodeMirror's base theme sets no foreground at all, and
- * nothing between this element and `<html>` does either. #d4d4d8 is what xterm
- * is handed as its foreground (`Terminal.tsx` repeats the value by hand; the
- * reason it gives for that is written at its own `new Terminal` call, and is
- * not restated here), so an editor pane and a terminal pane in one row read
- * as the same surface. It is hardcoded rather
- * than derived from `color` because `PANE_COLORS` were chosen against this
- * exact value: its own doc records the worst of the six at 7.89:1.
+ * nothing between this element and `<html>` does either.
+ *
+ * It comes from `xtermTheme`, the same function that tells xterm what to draw,
+ * so an editor pane and a terminal pane in one row read as the same surface.
+ * That used to be a hardcoded `#d4d4d8` matching a literal in `Terminal.tsx`;
+ * both now read the theme instead, which is what lets the pair stay in step
+ * across five palettes rather than only in the one they were written against.
+ * `PANE_COLORS` were chosen against that foreground, and the requirement did
+ * not go away: `tests/unit/themes.test.ts` holds every theme's foreground
+ * above 7:1 on every one of the six.
  *
  * `backgroundColor` on `.cm-gutters`, and NOT on `&`. The pane box in
  * `App.tsx` already paints itself `pane.color`, so `&` needs nothing: measured
@@ -112,15 +117,20 @@ export function saveEditorPane(paneId: string): Promise<void> {
  * opens `rgb(245, 245, 245)` with black text. Under `&dark` those are
  * `rgb(255, 255, 255)` and `rgb(51, 51, 56)` with white text.
  */
-function themeFor(color: PaneColor): Extension {
+function themeFor(theme: ThemeId, paneColor: PaneColor | undefined): Extension {
+  // The pane's own colour when it has one, the theme's canvas when it does
+  // not, and the theme's foreground either way. CodeMirror needs real values
+  // here rather than `var(--color-bg)`, because these are written into a
+  // generated stylesheet rather than resolved against the document.
+  const { background, foreground } = xtermTheme(theme, paneColor)
   return EditorView.theme(
     {
-      '&': { color: '#d4d4d8', height: '100%' },
+      '&': { color: foreground, height: '100%' },
       '.cm-scroller': {
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
         fontSize: '11px',
       },
-      '.cm-gutters': { backgroundColor: color, color: GUTTER_TEXT, border: 'none' },
+      '.cm-gutters': { backgroundColor: background, color: GUTTER_TEXT, border: 'none' },
       // The base theme's own focus ring is `1px dotted #212121`. This app
       // marks a focused pane differently, with an inset accent ring on the box
       // (`App.tsx`).
@@ -151,13 +161,17 @@ function themeFor(color: PaneColor): Extension {
 export function FileView({
   projectId,
   relPath,
-  color = PANE_COLOR_DEFAULT,
+  paneColor,
+  theme,
   paneId,
   onDirtyChange,
 }: {
   projectId: string
   relPath: string | null
-  color?: PaneColor
+  /** The pane's own background, or undefined when it has none of its own. */
+  paneColor?: PaneColor
+  /** The palette in force. Supplies the gutter ground and the text colour. */
+  theme: ThemeId
   paneId: string
   onDirtyChange: (paneId: string, dirty: boolean) => void
 }) {
@@ -232,20 +246,21 @@ export function FileView({
    * above only writes it once per `relPath`, and Task 3's dirty tracking has
    * to keep it that way.
    *
-   * **`color` is deliberately NOT a dependency here.** It was, and that was a
-   * data-loss bug waiting for the next task: recolouring a pane from its
-   * right-click menu re-ran this effect, and the rebuild dropped whatever had
-   * been typed back to what was read from disk. The theme lives in a
-   * `Compartment` instead, reconfigured in place by the effect below, so a
-   * colour change never touches the document. `themes` is a ref rather than a
-   * value so the same compartment key survives a rebuild for a new file.
+   * **Neither `paneColor` nor `theme` is a dependency here.** `paneColor` was,
+   * and that was a data-loss bug waiting for the next task: recolouring a pane
+   * from its right-click menu re-ran this effect, and the rebuild dropped
+   * whatever had been typed back to what was read from disk. Both live in a
+   * `Compartment` instead, reconfigured in place by the effect below, so
+   * neither a recolour nor a theme switch touches the document. `themes` is a
+   * ref rather than a value so the same compartment key survives a rebuild for
+   * a new file.
    *
-   * Reading `color` without depending on it is safe rather than stale: this
+   * Reading them without depending on them is safe rather than stale: this
    * closure is the one from the render it runs in, so a build always uses the
-   * current colour, and any LATER change arrives through the reconfigure.
+   * current pair, and any LATER change arrives through the reconfigure.
    *
    * **`onDirtyChange` and `paneId` join the dependency list below, and the
-   * same rule as `color` almost bit this: an unstable `onDirtyChange` would
+   * same rule as `paneColor` almost bit this: an unstable `onDirtyChange` would
    * rebuild the view, and therefore drop the cursor, on every render. Unlike
    * `color` there is no compartment side-step available, because an update
    * listener has to be part of the state a view is created with. So the fix
@@ -274,7 +289,7 @@ export function FileView({
         syntaxHighlighting(syntaxColorStyle, { fallback: true }),
         keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
         ...languageForPath(relPath ?? ''),
-        themes.current.of(themeFor(color)),
+        themes.current.of(themeFor(theme, paneColor)),
         // The baseline is the document the view was created with, so dirty is
         // "differs from what was read", not "was typed in". Typing a
         // character and deleting it again leaves the pane clean, which is
@@ -300,15 +315,18 @@ export function FileView({
   }, [text, relPath, paneId, onDirtyChange])
 
   /**
-   * A recolour, applied without rebuilding anything.
+   * A recolour or a theme switch, applied without rebuilding anything.
    *
    * The whole reason the theme is compartmented. On the first render there is
    * no view yet and this does nothing; the build above runs first and already
-   * has the right colour in it.
+   * has the right pair in it.
+   *
+   * Two triggers, for the two ways this pane's ground can move: the user
+   * recolours the pane, or the palette changes under it.
    */
   useEffect(() => {
-    view.current?.dispatch({ effects: themes.current.reconfigure(themeFor(color)) })
-  }, [color])
+    view.current?.dispatch({ effects: themes.current.reconfigure(themeFor(theme, paneColor)) })
+  }, [theme, paneColor])
 
   const save = useCallback(async () => {
     const current = view.current

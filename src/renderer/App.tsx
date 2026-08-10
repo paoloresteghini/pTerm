@@ -1564,13 +1564,14 @@ export function App() {
                     // path is only a fallback for one that predates it.
                     relPath={box.pane.diffRelPath ?? editorRelPath(box.pane)}
                     side={box.pane.diffSide ?? 'worktree'}
-                    color={box.pane.color ?? PANE_COLOR_DEFAULT}
+                    paneColor={box.pane.color}
                   />
                 ) : box.pane.type === 'editor' ? (
                   <FileView
                     projectId={projectIdForTab(state.projects, box.pane)}
                     relPath={editorRelPath(box.pane)}
-                    color={box.pane.color ?? PANE_COLOR_DEFAULT}
+                    paneColor={box.pane.color}
+                    theme={theme}
                     paneId={box.pane.id}
                     onDirtyChange={onDirtyChange}
                   />
