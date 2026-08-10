@@ -1,4 +1,4 @@
-# Todos column — design
+# Todos column: design
 
 Date: 2026-08-10
 
@@ -90,7 +90,7 @@ Its read and write halves:
   `{ version, todos: [] }` all read as `[]`. A malformed *record* inside an
   otherwise good file is dropped rather than failing the whole read: the same
   degrade-don't-throw rule `orderFromStored` and `ConfigStore.read` already
-  follow, for the same reason — a hand-edited file should cost the user an
+  follow, for the same reason: a hand-edited file should cost the user an
   entry, not the column.
 - `writeTodos(todos: TodoRecord[]): Promise<void>` writes
   `todos.json.<pid>.tmp` in the same directory and renames it over the target,
@@ -104,7 +104,7 @@ yet branched on; it exists so a future shape change has somewhere to look.
 ## IPC surface
 
 Added to `PTermApi` in `src/shared/ipc.ts`, and to the preload bridge (which is
-frozen at construction, so the channel has to be declared there — it cannot be
+frozen at construction, so the channel has to be declared there, and it cannot be
 patched on later):
 
 ```ts
@@ -135,7 +135,7 @@ is read → apply → write → broadcast:
 - A create whose trimmed title is empty is refused: the list comes back
   unchanged, and no broadcast fires.
 - Broadcast walks `BrowserWindow.getAllWindows()` and sends `todosChanged` with
-  the new list to every window, the originator included — the payload is
+  the new list to every window, the originator included. The payload is
   identical to the reply it already applied, so the extra render is idempotent.
 
 `onTodosChanged` is exposed as an `ipcRenderer.on` subscription returning its
@@ -200,8 +200,10 @@ touches:
   `THEMES.classic`, and whichever of `themes.test.ts` / `themeApply.test.ts`
   enumerates token keys.
 
-One `PRIORITY_DOT: Record<TodoPriority, string>` map of Tailwind classes lives
-beside the dot that consumes it.
+One `PRIORITY_DOT: Record<TodoPriority, string>` map of Tailwind classes carries
+the three. It lives in `lib/todoList.ts`, not in the panel that draws it: the
+panel imports the modal and the modal draws the same mark, so exporting it from
+the panel would make those two files import each other.
 
 ## The column: `src/renderer/TodosPanel.tsx`
 
@@ -251,7 +253,7 @@ beside the dot that consumes it.
 
 - `ColumnId` in `src/shared/ipc.ts` gains `'todos'`.
 - `COLUMN_IDS` (`lib/columnVisibility.ts`) and `COLUMN_ORDER_DEFAULT`
-  (`lib/columnOrder.ts`) gain `'todos'` **last** — right of Notes, at the end of
+  (`lib/columnOrder.ts`) gain `'todos'` **last**, right of Notes, at the end of
   the row.
 - A column has **three** states in this app, and the new one needs all three
   wired: HIDDEN (the View menu's doing, renders nothing at all), COLLAPSED (the
@@ -261,7 +263,7 @@ beside the dot that consumes it.
   `setColumn` and `COLUMN_KEY` maps, a `toggleTodos` callback beside
   `toggleIssues`, a `collapsedColumns` entry, and a `case 'todos'` in
   `renderSlot`. Both flags default to `true`, so a fresh profile shows nothing
-  until ⌥⌘T or the menu item — the same as every other column.
+  until ⌥⌘T or the menu item, the same as every other column.
 - `src/main/index.ts` View menu gains a `Todos` item with `Alt+CmdOrCtrl+T`
   sending the `toggleTodos` menu command; `MenuCommand` gains `'toggleTodos'`
   and `App.tsx` the matching `case`. The keystroke is *also* handled by the
@@ -273,7 +275,7 @@ beside the dot that consumes it.
   an accelerator.
 - Widths and collapse flags live in **localStorage**, not in `config.json`
   (`useColumnWidth` and `storedCollapsed` both read it), so there is nothing to
-  add to `attachSavedFields` or `restore.ts` — those carry pane fields. The
+  add to `attachSavedFields` or `restore.ts`, which carry pane fields. The
   relaunch test is what proves the keys are read back.
 - `CommandPalette` gains `Toggle Todos` and `New todo`. Note this introduces
   the palette's **first command actions**: today it offers sessions, skills to
@@ -288,16 +290,16 @@ beside the dot that consumes it.
 Three modes, following `IssueModal`'s structure without the `gh` concerns
 (no comments, no labels, no assignees, no repo):
 
-- **Read** — title, priority dot and word, `MarkdownView` of the body,
+- **Read**: title, priority dot and word, `MarkdownView` of the body,
   created/updated ago-strings, and `Edit` / `Delete` / done-toggle.
-- **Edit** — title input, priority as three buttons, body textarea, `Save` /
+- **Edit**: title input, priority as three buttons, body textarea, `Save` /
   `Cancel`. Save is disabled while the trimmed title is empty.
-- **Create** — the same fields, empty, priority defaulting to `medium`.
-- **Delete** — an inline confirm inside the modal.
+- **Create**: the same fields, empty, priority defaulting to `medium`.
+- **Delete**: an inline confirm inside the modal.
 
 Two rules carried from the bug fixed in `IssueModal` this morning (`55bcb73`):
 
-1. **Closing the modal resets every piece of its session state** — `editing`,
+1. **Closing the modal resets every piece of its session state**: `editing`,
    the dirty flag, the draft fields, and the delete-confirm flag. The defect
    that fix addressed was a stale draft rendering under empty state, and an
    orphaned confirm dialog surviving a close. Its regression test is the model
@@ -307,7 +309,7 @@ Two rules carried from the bug fixed in `IssueModal` this morning (`55bcb73`):
 
 The dirty guard on Escape and backdrop click is plain local state. It does not
 use `lib/mutationGuard.ts`, which exists to keep a `busy` flag from outliving
-the *project* a mutation was sent to — a per-project hazard a global list does
+the *project* a mutation was sent to, a per-project hazard a global list does
 not have.
 
 `open`/`creating` are held by `TodosPanel` and handed down, the same split
@@ -316,23 +318,23 @@ back to `null` on close.
 
 ## Tests
 
-**Unit — `tests/unit/todoList.test.ts`:** filter by query (title hit, body hit,
+**Unit, `tests/unit/todoList.test.ts`:** filter by query (title hit, body hit,
 case-insensitivity, whitespace-only query matches everything), by state, by
 priority, and the three combined; each of the three sorts; the priority
 tie-break on `updatedAt`; sort stability; `nextTodoSort` cycling back round.
 
-**Unit — `tests/unit/todosStore.test.ts`:** missing file → `[]`; unparseable
+**Unit, `tests/unit/todosStore.test.ts`:** missing file → `[]`; unparseable
 JSON → `[]`; wrong top-level shape → `[]`; a malformed record dropped while its
 good siblings survive; unknown priority normalised to `medium`; round-trip
 through `writeTodos`/`readTodos`; no `.tmp` file left behind on success or on a
 failed write.
 
-**Unit — mutation behaviour:** create trims the title and refuses an empty one;
+**Unit, mutation behaviour:** create trims the title and refuses an empty one;
 update stamps `updatedAt`; an unknown id is a no-op that leaves `updatedAt`
 untouched and returns the current list; `setDone` flips only `done` and
 `updatedAt`; delete removes exactly one record.
 
-**Unit — broadcast:** the window-fan-out is extracted as
+**Unit, broadcast:** the window-fan-out is extracted as
 `broadcastTodos(windows, todos)` over a structural `{ isDestroyed, webContents }`
 target, so a node-environment test can assert that two live windows both receive
 the payload and a destroyed one is skipped rather than throwing. That is as far
@@ -341,7 +343,7 @@ constructed in vitest, and the e2e suite drives one window. **Nothing proves two
 real windows sync**; that check belongs to the hand pass, and is named here so it
 is not mistaken for covered.
 
-**E2E — `tests/e2e/todos.spec.ts`:** open the column → create a todo → the row
+**E2E, `tests/e2e/todos.spec.ts`:** open the column → create a todo → the row
 appears with the high-priority dot colour → search filters it → the priority
 filter excludes it → the sort toggle reorders → the row opens the modal → edit
 and save is reflected in the row → the hover ✕ dims the row → `Done` shows it
@@ -359,7 +361,7 @@ relies on exactly that for hidden columns, and gains `todos: 't'` in its
 The spec goes through `expandColumn` rather than clicking `todos-toggle`
 directly. That helper waits for the titlebar to paint, returns early if the
 panel is already open, and picks the shortcut or the strip depending on which of
-the three states the column is in — a blind click on `todos-toggle` (shared by
+the three states the column is in. A blind click on `todos-toggle` (shared by
 strip and heading) collapses an already-open column instead of opening it.
 
 ## Fallout to verify, not assume
@@ -367,7 +369,7 @@ strip and heading) collapses an already-open column instead of opening it.
 `tests/e2e/splits.spec.ts` hardcodes pixel arithmetic for the whole row, and a
 new column has broken it before. It should **not** break this time: both of the
 new column's flags default to `true`, and a HIDDEN column renders nothing at all
-— not even a strip — so a fresh profile, which is what every test in that file
+(not even a strip), so a fresh profile, which is what every test in that file
 launches with, has exactly the pixels it has today. That file's own comment
 records the same reasoning for the six columns before it. The change still runs
 `splits.spec.ts` and treats a red there as a real finding rather than expected
