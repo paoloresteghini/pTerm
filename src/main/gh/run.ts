@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import type { IssuesFailure } from '../../shared/ipc'
+import { FALLBACK_DIRS, resolveBin } from '../bin/resolve'
 
 export type { IssuesFailure }
 
@@ -12,8 +13,27 @@ export interface GhRun {
   spawnFailed: boolean
 }
 
-export function ghBin(): string {
-  return process.env.PTERM_GH_BIN ?? 'gh'
+/**
+ * Absolute path to a usable `gh`, or `'gh'` when none is found — leaving the
+ * spawn to fail with ENOENT, which `classify` turns into the `no-gh` message
+ * telling the user to install it.
+ *
+ * Resolved rather than spawned by bare name because a Finder or Dock launch
+ * inherits launchd's `PATH`, which has no Homebrew in it: a packaged app told
+ * a user with a working `brew install gh` to go and install `gh`.
+ *
+ * Not cached. `gh` installed while the app is running has to become visible
+ * without a relaunch, and the stat this costs is nothing beside spawning the
+ * CLI it precedes.
+ *
+ * `PTERM_GH_BIN` overrides everything: the e2e suite points it at a stub, and
+ * a non-standard install needs it for the same reason tmux does.
+ */
+export function ghBin(
+  env: NodeJS.ProcessEnv = process.env,
+  fallbackDirs: readonly string[] = FALLBACK_DIRS,
+): string {
+  return env.PTERM_GH_BIN ?? resolveBin('gh', env, fallbackDirs)
 }
 
 /**
