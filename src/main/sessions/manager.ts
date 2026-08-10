@@ -1006,18 +1006,39 @@ export class SessionManager {
       throw new Error(`joinTab: tmux would not name ${record.tmuxSession}'s window`)
     }
 
+    // Read before anything below mutates tmux. `hasSession` after the move
+    // only answers whether the source session survived losing its window,
+    // and it survives whenever its group's window list is still non-empty
+    // afterward: a lone session holding two windows survives losing one of
+    // them the same way a session with a live sibling does (measured), so
+    // "survived" does not by itself mean "safe to kill". What makes it safe
+    // is captured here instead: whether another live session already shares
+    // the source's group. If one does, that session's own view keeps
+    // whatever windows remain reachable, and killing this one takes nothing
+    // down with it. If none does, this may be the group's only live session,
+    // and killing it would destroy every window the group still holds,
+    // including one whose own member session already died and has no other
+    // view onto it: a live shell nobody asked to close.
+    const sourceRows = await this.adapter.listSessionsWithGroups()
+    const sourceGroup =
+      sourceRows.find((row) => row.name === record.tmuxSession)?.group || record.tmuxSession
+    const sourceHasOtherLiveMember = sourceRows.some(
+      (row) => row.group === sourceGroup && row.name !== record.tmuxSession,
+    )
+
     const staging = `${record.tmuxSession}-joining`
     await this.adapter.newGroupMember(group, staging, { PTERM_TAB_ID: record.id })
 
     this.detach(input.paneId)
     try {
       await this.adapter.moveWindow(record.tmuxSession, staging)
-      // A session that is still a member of a real group survives losing its
-      // window, because its siblings' shared window list keeps it alive. A
-      // standalone session does not: tmux destroys it the moment its one
-      // window is gone. Only the surviving case needs an explicit kill; the
-      // other has already gone by the time this runs.
-      if (await this.adapter.hasSession(record.tmuxSession)) {
+      // Skipped rather than killed when no other live session shares the
+      // source's group: see the comment above `sourceHasOtherLiveMember`.
+      // Left alone, the worst case is an extra session lingering under a
+      // name `renameSession` below then refuses to reuse, which fails the
+      // join (the `catch` handles that the same as any other failure here)
+      // rather than destroying a window nothing else has a view onto.
+      if ((await this.adapter.hasSession(record.tmuxSession)) && sourceHasOtherLiveMember) {
         await this.adapter.killSession(record.tmuxSession)
       }
       await this.adapter.renameSession(staging, record.tmuxSession)

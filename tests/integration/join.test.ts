@@ -19,13 +19,15 @@ let idCounter = 0
  * `ID_RE`), which `padStart` satisfies for any counter value this file will
  * reach. Every test used to open panes under the same literal `aaa`/`bbb`/
  * `ccc`, sharing one `manager` and one `adapter` across the whole file the
- * way its neighbours do; a controller-measured flake (`join.test.ts`, "no
- * pane <id>" from `splitTab`, a manager entry missing moments after
- * `manager.open` created it) traced to a previous test's pty still
- * finishing its async exit against the OLD entry for that same id after the
- * next test had already opened a NEW one under it. Distinct ids per test
- * remove the possibility of that collision outright, rather than trying to
- * close the race.
+ * way its neighbours do, which would let a previous test's pty still be
+ * finishing its async exit against an OLD entry for an id the next test had
+ * just reopened. This removes that whole collision class outright, whether
+ * or not it was ever the real cause of anything: the one red run this file
+ * produced happened while a second, unrelated agent was concurrently
+ * reverting and restoring this repository's own `manager.ts` underneath the
+ * test process, and no run since has been attributable to id reuse with
+ * that contamination ruled out. Kept as hygiene, not as a fix for a
+ * measured bug.
  */
 function freshId(): string {
   idCounter += 1
@@ -63,6 +65,28 @@ async function shownWindows(names: string[]): Promise<string[]> {
   )
 }
 
+/** The pid of the process running in a window, addressed by window id rather
+ *  than by session name: a window whose own member session has already died
+ *  has no session name left to ask through. */
+async function windowPid(windowId: string): Promise<string> {
+  const { stdout } = await run('tmux', ['-L', SOCKET, 'display-message', '-p', '-t', windowId, '#{pane_pid}'])
+  return stdout.trim()
+}
+
+/**
+ * Whether a process with this pid still exists. Signal `0` sends nothing, it
+ * only asks the kernel whether the pid is live, so this cannot disturb the
+ * process it is checking.
+ */
+function isRunning(pid: string): boolean {
+  try {
+    process.kill(Number(pid), 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
 const adapter = new TmuxAdapter({ socket: SOCKET })
 const manager = new SessionManager(adapter)
 
@@ -83,12 +107,16 @@ afterEach(async () => {
   vi.restoreAllMocks()
   manager.detachAll()
   // Not `killServer()`: that would take `holder` down with everything else
-  // and the next test would start against a dead socket. Every session
-  // `joinTab` and `manager.open` can make is `pterm-*`, which is exactly
-  // what `listPTermSessions` reports, so this clears out anything this
-  // test left running without touching `holder`.
-  for (const name of await adapter.listPTermSessions()) {
-    await adapter.killSession(name).catch(() => undefined)
+  // and the next test would start against a dead socket. Matched on the
+  // `pterm-` prefix directly rather than through `listPTermSessions`: that
+  // helper decodes each name and only reports the three-part
+  // `pterm-<slug>-<hex>` shape, so it never sees the `-joining` staging name
+  // `joinTab` mints mid-move, which has a fourth dash-separated part and does
+  // not decode. A staging session left behind by a failing test would
+  // survive this sweep under that helper and go on holding its group's
+  // windows alive into every later test in the file.
+  for (const name of await adapter.listSessions()) {
+    if (name.startsWith('pterm-')) await adapter.killSession(name).catch(() => undefined)
   }
 })
 
@@ -214,5 +242,39 @@ describe('SessionManager.joinTab', () => {
     const names = (await adapter.listSessionsWithGroups()).map((row) => row.name)
     expect(names.filter((name) => name.includes('-joining'))).toEqual([])
     expect(await adapter.hasSession(moved.tmuxSession)).toBe(true)
+  })
+
+  it('does not kill the source session when doing so would destroy a window nothing else holds', async () => {
+    const aaa = freshId()
+    const ccc = freshId()
+    manager.open({ id: aaa, projectSlug: 'demo', cwd })
+    manager.open({ id: ccc, projectSlug: 'demo', cwd })
+    await settle()
+    const orphan = await manager.splitTab({ paneId: aaa, cols: 80, rows: 24 })
+    await settle()
+    const orphanWindow = await adapter.windowIdOf(orphan.tmuxSession)
+    const orphanPid = await panePid(orphan.tmuxSession)
+    manager.detach(orphan.id)
+    // Kill only the member session, the way a crash or a bare `kill-session`
+    // would, and never through `manager.kill`, which also reaps the window:
+    // this is what leaves `aaa`'s group holding a window (`orphan`'s) that no
+    // live session anywhere names any more, with `aaa` its only live member.
+    await adapter.killSession(orphan.tmuxSession)
+    expect(await adapter.hasSession(orphan.tmuxSession)).toBe(false)
+    expect(isRunning(orphanPid)).toBe(true)
+
+    // Moving `aaa`'s own window away leaves `aaa`'s group holding only the
+    // orphaned window, so `aaa` survives (falls back onto it) exactly the way
+    // the review measured a lone session surviving losing its one window
+    // does. Whether the join itself succeeds or fails here is not the point
+    // of this test (a join that must not kill `aaa` for this reason can find
+    // itself unable to reuse `aaa`'s name for the rename that follows, which
+    // fails safely rather than succeeding by way of the kill this guards
+    // against): the property under test is that the orphaned shell survives
+    // either way.
+    await manager.joinTab({ paneId: aaa, targetPaneId: ccc }).catch(() => undefined)
+
+    expect(await windowPid(orphanWindow)).toBe(orphanPid)
+    expect(isRunning(orphanPid)).toBe(true)
   })
 })
