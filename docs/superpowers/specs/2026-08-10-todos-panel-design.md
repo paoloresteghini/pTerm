@@ -133,7 +133,13 @@ is read → apply → write → broadcast:
   resolves with the current list**. A peer window that deleted the same todo a
   moment earlier must not produce an error in the second window.
 - A create whose trimmed title is empty is refused: the list comes back
-  unchanged, and no broadcast fires.
+  unchanged. The broadcast still fires, carrying the list every window already
+  has. An earlier draft of this section said it did not, and the review of the
+  IPC task caught the disagreement with the code. Suppressing it would mean
+  either a second copy of the empty-title rule in the handler, or a store that
+  reports whether it wrote; a uniform handler shape is worth more than avoiding
+  one idempotent push, especially for a keystroke the UI cannot produce, since
+  the modal disables Save on an empty title.
 - Broadcast walks `BrowserWindow.getAllWindows()` and sends `todosChanged` with
   the new list to every window, the originator included. The payload is
   identical to the reply it already applied, so the extra render is idempotent.
