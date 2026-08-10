@@ -13,8 +13,19 @@ import { parseRemote, repoArg, type RepoRef } from './repo'
 /** `gh issue list` caps out here; past it the list is a `--limit` away from complete. */
 const LIMIT = 200
 
-const LIST_FIELDS = 'number,title,state,stateReason,labels,assignees,comments,updatedAt,author'
-const DETAIL_FIELDS = `${LIST_FIELDS},body,url,createdAt`
+/**
+ * `comments` is deliberately absent here and present in `DETAIL_FIELDS`.
+ *
+ * `gh issue list --json comments` has no comment-count scalar: asking for the
+ * count means receiving every comment object, bodies included, for every issue
+ * in the page. Measured against `cli/cli` at `--state all --limit 200` on
+ * 2026-08-09: 575,729 bytes and 6.98s with the field, 96,134 bytes and 1.48s
+ * without. The list is refetched on expand, project switch, filter change,
+ * every window focus past the throttle, after every mutation, and on demand,
+ * so that difference is paid constantly to render one number per row.
+ */
+const LIST_FIELDS = 'number,title,state,stateReason,labels,assignees,updatedAt,author'
+const DETAIL_FIELDS = `${LIST_FIELDS},body,url,createdAt,comments`
 
 /**
  * True for a value that can safely have its properties read, i.e. an object
@@ -39,7 +50,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function summary(row: Record<string, unknown>): IssueSummary | null {
   const number = row.number
   if (typeof number !== 'number') return null
-  const comments = Array.isArray(row.comments) ? row.comments : []
   const labels = (Array.isArray(row.labels) ? row.labels : []).filter(isRecord)
   const assignees = (Array.isArray(row.assignees) ? row.assignees : []).filter(isRecord)
   const author = (row.author ?? {}) as { login?: unknown }
@@ -64,7 +74,6 @@ function summary(row: Record<string, unknown>): IssueSummary | null {
       const user = entry as { login?: unknown }
       return { login: typeof user.login === 'string' ? user.login : '' }
     }),
-    commentCount: comments.length,
     updatedAt: typeof row.updatedAt === 'string' ? row.updatedAt : '',
     author: { login: typeof author.login === 'string' ? author.login : '' },
   }
@@ -117,6 +126,7 @@ export function parseDetail(stdout: string): IssueDetail | null {
     body: typeof row.body === 'string' ? row.body : '',
     url: typeof row.url === 'string' ? row.url : '',
     createdAt: typeof row.createdAt === 'string' ? row.createdAt : '',
+    commentCount: comments.length,
     comments: comments.map((entry) => {
       const comment = entry as { author?: { login?: unknown }; body?: unknown; createdAt?: unknown }
       return {

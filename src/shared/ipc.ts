@@ -765,7 +765,6 @@ export interface IssueSummary {
   stateReason: IssueStateReason
   labels: IssueLabel[]
   assignees: IssueUser[]
-  commentCount: number
   updatedAt: string
   author: IssueUser
 }
@@ -780,6 +779,12 @@ export interface IssueDetail extends IssueSummary {
   body: string
   url: string
   createdAt: string
+  /**
+   * Only the detail carries a comment count, because only the detail fetches
+   * comments. `gh issue list` offers no count scalar, so a per-row count would
+   * mean pulling every comment body for every issue on every refetch.
+   */
+  commentCount: number
   comments: IssueComment[]
 }
 

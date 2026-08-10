@@ -56,9 +56,8 @@ describe('parseSummaries', () => {
     expect(parseSummaries(LIST)[0].labels[0]).toEqual({ name: 'bug', color: 'd73a4a' })
   })
 
-  it('collapses the comments array to a count', () => {
-    expect(parseSummaries(LIST)[0].commentCount).toBe(3)
-    expect(parseSummaries(LIST)[1].commentCount).toBe(0)
+  it('does not carry a comment count, which the list payload no longer fetches', () => {
+    expect('commentCount' in parseSummaries(LIST)[0]).toBe(false)
   })
 
   it('returns an empty list for an empty reply', () => {

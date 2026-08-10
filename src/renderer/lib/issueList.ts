@@ -6,7 +6,14 @@ import type { IssueState, IssueStateReason, IssueSummary } from '../../shared/ip
  * nothing that lives inside a component is reachable from a unit test here.
  */
 
-export type IssueSort = 'updated' | 'newest' | 'comments'
+/**
+ * There is no sort by comment count, and there deliberately cannot be one from
+ * the list payload. `gh issue list` exposes no comment-count scalar, so ranking
+ * by it means fetching every comment body for every issue on every refetch:
+ * measured at 575,729 bytes and 6.98s against `cli/cli`, versus 96,134 bytes
+ * and 1.48s without. See `LIST_FIELDS` in `src/main/gh/issues.ts`.
+ */
+export type IssueSort = 'updated' | 'newest'
 
 /**
  * Rows whose title, number or a label name contains `query`, case
@@ -32,7 +39,6 @@ export function filterIssues(rows: IssueSummary[], query: string): IssueSummary[
 export function sortIssues(rows: IssueSummary[], sort: IssueSort): IssueSummary[] {
   const copy = [...rows]
   if (sort === 'newest') return copy.sort((a, b) => b.number - a.number)
-  if (sort === 'comments') return copy.sort((a, b) => b.commentCount - a.commentCount)
   return copy.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
 }
 

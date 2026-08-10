@@ -16,7 +16,6 @@ function issue(over: Partial<IssueSummary>): IssueSummary {
     stateReason: null,
     labels: [],
     assignees: [],
-    commentCount: 0,
     updatedAt: '2026-08-01T00:00:00Z',
     author: { login: 'paolo' },
     ...over,
@@ -60,9 +59,9 @@ describe('filterIssues', () => {
 
 describe('sortIssues', () => {
   const rows = [
-    issue({ number: 1, updatedAt: '2026-08-01T00:00:00Z', commentCount: 5 }),
-    issue({ number: 9, updatedAt: '2026-08-09T00:00:00Z', commentCount: 0 }),
-    issue({ number: 5, updatedAt: '2026-08-05T00:00:00Z', commentCount: 2 }),
+    issue({ number: 1, updatedAt: '2026-08-01T00:00:00Z' }),
+    issue({ number: 9, updatedAt: '2026-08-09T00:00:00Z' }),
+    issue({ number: 5, updatedAt: '2026-08-05T00:00:00Z' }),
   ]
 
   it('sorts by most recently updated', () => {
@@ -73,20 +72,16 @@ describe('sortIssues', () => {
     expect(sortIssues(rows, 'newest').map((row) => row.number)).toEqual([9, 5, 1])
   })
 
-  it('sorts by comment count', () => {
-    expect(sortIssues(rows, 'comments').map((row) => row.number)).toEqual([1, 5, 9])
-  })
-
   it('does not mutate its input', () => {
     const before = rows.map((row) => row.number)
-    sortIssues(rows, 'comments')
+    sortIssues(rows, 'newest')
     expect(rows.map((row) => row.number)).toEqual(before)
   })
 
   it('separates newest from recently updated', () => {
     const mixed = [
-      issue({ number: 100, updatedAt: '2026-01-01T00:00:00Z', commentCount: 0 }),
-      issue({ number: 2, updatedAt: '2026-08-09T00:00:00Z', commentCount: 0 }),
+      issue({ number: 100, updatedAt: '2026-01-01T00:00:00Z' }),
+      issue({ number: 2, updatedAt: '2026-08-09T00:00:00Z' }),
     ]
     expect(sortIssues(mixed, 'newest').map((row) => row.number)).toEqual([100, 2])
     expect(sortIssues(mixed, 'updated').map((row) => row.number)).toEqual([2, 100])

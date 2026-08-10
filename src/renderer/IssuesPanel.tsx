@@ -7,8 +7,8 @@ import { cn } from './lib/cn'
 import { ColumnResizer, PanelHeading, PanelStrip, type PanelSide } from './ui/Panel'
 import { IssueModal } from './IssueModal'
 
-const SORT_ORDER: IssueSort[] = ['updated', 'newest', 'comments']
-const SORT_LABEL: Record<IssueSort, string> = { updated: 'Updated', newest: 'Newest', comments: 'Comments' }
+const SORT_ORDER: IssueSort[] = ['updated', 'newest']
+const SORT_LABEL: Record<IssueSort, string> = { updated: 'Updated', newest: 'Newest' }
 
 function nextSort(current: IssueSort): IssueSort {
   return SORT_ORDER[(SORT_ORDER.indexOf(current) + 1) % SORT_ORDER.length]
@@ -91,9 +91,6 @@ function Row({
         </span>
         <span className="flex w-full items-center gap-1.5 text-faint">
           <span className="shrink-0">{historyAgo(updatedSeconds, now)}</span>
-          <span className="shrink-0">
-            {row.commentCount} {row.commentCount === 1 ? 'comment' : 'comments'}
-          </span>
           {row.labels.length > 0 ? (
             <span className="flex items-center gap-1">
               {row.labels.map((label) => (
