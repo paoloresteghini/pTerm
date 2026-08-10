@@ -334,8 +334,19 @@ The rename touches the `PanelHeading` label, the `PanelStrip` label, and the `Vi
 `toggle-git` in `src/main/index.ts`. The accelerator and the `ColumnId` (`git`) do not change;
 this is a label change, not an identity change.
 
-The Git column also gains the same self-explaining empty state as the Issues column for the
-case where the active project is not a git repository, which it does not currently have.
+This document originally added a second item here: give the Git column the same
+self-explaining empty state as the Issues column, "which it does not currently have". **That
+claim was false when it was written.** `GitPanel.tsx` has rendered `gitpanel-norepo` reading
+"Not a git repository." since `ec9e6d9` on 2026-08-06, in the very commit that introduced the
+column, and `gitpanel.spec.ts` has asserted it since then too.
+
+So the rename is the whole of the Git work. Adding a second empty state would have produced
+two competing elements and a testid breaking the `gitpanel-` convention every other testid in
+that file follows.
+
+The lesson is worth more than the correction: a task whose premise is "X is missing" deserves
+a check that X is actually missing before it is planned, let alone implemented. Read the code,
+not the plan's memory of the code.
 
 ## Testing
 

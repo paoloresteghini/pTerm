@@ -1642,13 +1642,15 @@ Note that `PanelStrip` renders its label in `writingMode: 'vertical-rl'`, so "Gi
 
 - [ ] **Step 3: Add the no-repo empty state**
 
-In `GitPanel.tsx`, when the project's `gitChanges` call returns null, render a message with `data-testid="git-empty-no-repo"` reading that the project is not inside a git repository, instead of an empty file list. Read the component's current null handling first; it may already have a branch to extend rather than a new one to add.
+**Nothing to do here. This step's premise was false.** `GitPanel.tsx` has rendered `data-testid="gitpanel-norepo"` reading "Not a git repository." since `ec9e6d9` on 2026-08-06, the commit that introduced the column, and `tests/e2e/gitpanel.spec.ts` has asserted it ever since.
+
+Adding the `git-empty-no-repo` element this step originally specified would have created two competing empty states and a testid that breaks the `gitpanel-` convention every other testid in that file uses. Verify the existing one is present and passing, then move on.
 
 - [ ] **Step 4: Update the failing specs**
 
 Run: `npx playwright test tests/e2e/gitpanel.spec.ts tests/e2e/menuColumns.spec.ts tests/e2e/columns.spec.ts`
 
-Fix each assertion that named the old label. Add a test that a project pointed at a non-repository directory shows `git-empty-no-repo`.
+Fix each assertion that named the old label. Do not add a test for the no-repo empty state: `gitpanel.spec.ts` already has one ("says so when the project is not a repository", asserting `gitpanel-norepo`), and it should pass unchanged.
 
 - [ ] **Step 5: Run and commit**
 
