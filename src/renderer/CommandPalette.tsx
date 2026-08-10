@@ -169,13 +169,7 @@ export function CommandPalette({
             <button
               key={entry.name}
               data-testid={`palette-command-${entry.name}`}
-              onClick={() => {
-                // Closes before running: the callback may itself change what
-                // the palette would render (showing a column, opening another
-                // dialog), and that should happen against a closed palette.
-                onOpenChange(false)
-                entry.run()
-              }}
+              onClick={() => choose(entry.run)}
               className="flex w-full cursor-default border-none bg-transparent px-1 py-1 text-left text-muted hover:bg-border hover:text-fg"
             >
               <span className="flex-1 truncate">{entry.name}</span>

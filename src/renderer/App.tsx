@@ -2181,7 +2181,7 @@ export function App() {
             {
               name: 'New todo',
               // Shows the column as well as setting the flag: the column is
-              // hidden on a fresh profile, and `renderSlot` below never mounts
+              // hidden on a fresh profile, and `renderSlot` never mounts
               // `TodosPanel` (and so never mounts its modal) while it is.
               run: () => {
                 if (hiddenColumns.todos) toggleTodos()
