@@ -232,6 +232,45 @@ test('the + button creates an issue and records the create argv', async () => {
   await expect(page.getByTestId('issue-modal')).toHaveCount(0)
 })
 
+test('a new draft opens empty after an edit session, and files what it shows', async () => {
+  // The defect this covers filed EMPTY issues while text sat on screen.
+  //
+  // `BodyEditor` builds its view once, from the value it is handed at mount,
+  // because rebuilding it would drop what had been typed. The create reset is
+  // an effect, so it ran after that mount: a draft opened after an edit
+  // session showed the PREVIOUS issue's body while `body` state was empty
+  // behind it, and Create sent the empty string.
+  //
+  // Asserting the argv rather than the pixels is what makes it a real test:
+  // the screen looked right in the broken version, and only the recorded
+  // `--body-file` payload told the truth.
+  await openIssue(OPEN_ROW, OPEN_DETAIL)
+
+  await page.getByTestId('issue-edit').click()
+  await expect(page.getByTestId('issue-body-editor')).toBeVisible({ timeout: 15_000 })
+  await page.getByTestId('issue-body-editor').locator('.cm-content').click()
+  await page.keyboard.type('text from the edit session')
+
+  // Out through the confirm, which is the path the old code left half done.
+  await page.getByTestId('issue-cancel').click()
+  await expect(page.getByTestId('confirm-close')).toBeVisible({ timeout: 15_000 })
+  await page.getByTestId('confirm-close-discard').click()
+  await expect(page.getByTestId('confirm-close')).toHaveCount(0)
+
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('issue-modal')).toHaveCount(0)
+
+  // The confirm must not come back on its own once the modal is gone.
+  await expect(page.getByTestId('confirm-close')).toHaveCount(0)
+
+  await page.getByTestId('issues-new').click()
+  await expect(page.getByTestId('issue-body-editor')).toBeVisible({ timeout: 15_000 })
+
+  // The assertion that fails in the broken version: the draft opened carrying
+  // the previous issue's body, on screen, while the state behind it was empty.
+  await expect(page.getByTestId('issue-body-editor').locator('.cm-content')).toHaveText('')
+})
+
 test('the body editor does not double a markdown list marker on Enter', async () => {
   // Typing `- one`, Enter, `- two` is how anyone writes a two-item list.
   // `@codemirror/lang-markdown` binds Enter to a list continuation that

@@ -65,6 +65,18 @@ export function gh(cwd: string, args: string[], stdin?: string): Promise<GhRun> 
       },
     )
     if (stdin !== undefined) {
+      // The listener is not optional. `gh` can exit before draining this pipe,
+      // which is exactly what happens when it is missing or unauthenticated,
+      // and a body larger than the pipe buffer then raises EPIPE on the
+      // stream. A stream error with nothing listening is an unhandled error
+      // event, and this runs in the MAIN process, so it would take the whole
+      // app down over a failed issue create.
+      //
+      // Swallowed rather than surfaced: the exit code and stderr collected by
+      // the callback above are what the caller classifies, and they already
+      // describe the failure. An EPIPE here is a symptom of that same exit,
+      // not a second thing to report.
+      child.stdin?.on('error', () => undefined)
       child.stdin?.end(stdin)
     }
   })

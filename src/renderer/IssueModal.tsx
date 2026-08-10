@@ -299,7 +299,40 @@ export function IssueModal({
     setEditing(true)
   }, [detail, projectId, number])
 
+  /**
+   * Ends the session, then hides the dialog. Both halves matter.
+   *
+   * Hiding alone left `editing`, `title` and `body` holding the last
+   * session's text, and two defects fell out of that.
+   *
+   * The first is silent and costs data. `BodyEditor` builds its view once,
+   * from the `value` it is handed at mount, because rebuilding it would drop
+   * whatever had been typed. `resetForTarget` clears the pair for a create,
+   * but it is an effect, so it runs AFTER the child has already mounted from
+   * the stale value. Open an issue, Edit, Cancel, close, then press the
+   * panel's `+`: the new draft opened showing the previous issue's body while
+   * `body` state was empty behind it, so Create filed an EMPTY issue despite
+   * the text on screen, and typing appended to text that was never really
+   * there. Clearing on the way out means the next session mounts from state
+   * that is already empty, which is the only ordering that works.
+   *
+   * The second is visible and merely stuck. With `editing` still true the
+   * mode stayed `edit`, so `dirty` stayed true; closing changed
+   * `resetForTarget`'s identity, its effect re-ran, saw `dirty` and re-armed
+   * the confirm. The "Unsaved changes" dialog reappeared over an app with no
+   * issue modal behind it and took a second dismissal to clear.
+   *
+   * `pendingAction` is cleared here because this is what a confirm's own
+   * Discard button runs: leaving it set would re-show the dialog it just
+   * dismissed.
+   */
   const closeNow = useCallback(() => {
+    setEditing(false)
+    setTitle('')
+    setBody('')
+    setComment('')
+    setMutationError(null)
+    setPendingAction(null)
     onClose()
   }, [onClose])
 
@@ -419,6 +452,12 @@ export function IssueModal({
         return
       }
       setEditing(false)
+      // Cleared for the same reason `closeNow` clears them: abandoned text
+      // must not survive to be mounted into whatever session comes next.
+      // `startEdit` fills both from the fetched issue, so a later edit does
+      // not depend on what is left here.
+      setTitle('')
+      setBody('')
       setMutationError(null)
     }
     if (dirty) {
