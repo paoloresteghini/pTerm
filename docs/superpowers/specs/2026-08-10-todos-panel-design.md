@@ -76,7 +76,14 @@ only invite drift.
 
 ### `src/main/todos/store.ts`
 
-Two functions, modelled on `src/main/notes/store.ts`:
+Modelled on `src/main/prompts/store.ts`, which is the closest existing thing: a
+global JSON file beside `config.json`, an atomic write, a `serialise` queue so
+two read-modify-writes in one process cannot lose each other, and mutations that
+resolve with the whole new list rather than the changed entry. `notes/store.ts`
+supplies only the temp-file-and-rename shape; the queue and the return-the-list
+convention come from prompts.
+
+Its read and write halves:
 
 - `readTodos(): Promise<TodoRecord[]>` never rejects. A missing file, unreadable
   file, unparseable JSON, or a top-level shape that is not
@@ -221,9 +228,11 @@ beside the dot that consumes it.
   collapse the column.
 - Every text input carries `data-shortcuts="off"`. Without it, ⌘W typed while
   searching closes a pane and destroys its tmux session.
-- The hover ✕ marks the todo **done**, not deleted. Delete is destructive and
-  irreversible, so it lives in the modal behind a confirm; a destructive action
-  revealed by hover is a mis-click away at all times.
+- The hover control marks the todo **done** (`✓`, and `↺` on a done row to
+  reopen it), never deleted. Delete is destructive and irreversible, so it lives
+  in the modal behind a confirm; a destructive action revealed by hover is a
+  mis-click away at all times. A `✕` glyph is deliberately not used: it means
+  close-as-completed in the Issues column one seam away, and it reads as delete.
 - Two empty states only: `No todos.` and `Nothing matches.` (the latter when the
   query or a filter is what emptied the list).
 - Data flow is one `todosList()` on mount plus
@@ -323,8 +332,14 @@ update stamps `updatedAt`; an unknown id is a no-op that leaves `updatedAt`
 untouched and returns the current list; `setDone` flips only `done` and
 `updatedAt`; delete removes exactly one record.
 
-**Integration — broadcast:** one mutation delivers `todosChanged` to two
-subscribers.
+**Unit — broadcast:** the window-fan-out is extracted as
+`broadcastTodos(windows, todos)` over a structural `{ isDestroyed, webContents }`
+target, so a node-environment test can assert that two live windows both receive
+the payload and a destroyed one is skipped rather than throwing. That is as far
+as automation reaches: `ipcMain` and a real second `BrowserWindow` cannot be
+constructed in vitest, and the e2e suite drives one window. **Nothing proves two
+real windows sync**; that check belongs to the hand pass, and is named here so it
+is not mistaken for covered.
 
 **E2E — `tests/e2e/todos.spec.ts`:** open the column → create a todo → the row
 appears with the high-priority dot colour → search filters it → the priority
