@@ -294,6 +294,39 @@ export class TmuxAdapter {
   }
 
   /**
+   * Move the source session's current window into the target session.
+   * The process running in the window is kept alive, and the source
+   * session is destroyed if it has no windows left.
+   */
+  async moveWindow(sourceSession: string, targetSession: string): Promise<void> {
+    await this.exec(['move-window', '-s', `=${sourceSession}:`, '-t', `=${targetSession}:`])
+  }
+
+  /**
+   * List the windows in a session, returning their indices and ids.
+   * Returns an empty array if tmux does not know the session.
+   */
+  async windowsOf(session: string): Promise<{ index: string; id: string }[]> {
+    try {
+      const stdout = await this.exec([
+        'list-windows', '-t', `=${session}`, '-F', '#{window_index}\t#{window_id}',
+      ])
+      return stdout
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => {
+          const [index, id = ''] = line.split('\t')
+          return { index, id }
+        })
+    } catch (error) {
+      if (error instanceof TmuxNotInstalledError) throw error
+      if (isNoSuchSession(error)) return []
+      throw error
+    }
+  }
+
+  /**
    * A window-scoped option. `remain-on-exit` is set this way rather than on the
    * session so a sibling pane's window is left alone — measured: the sibling
    * window reads unset afterwards.

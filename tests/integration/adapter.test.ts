@@ -460,3 +460,45 @@ describe('TmuxAdapter.newGroupMember when the group is gone', () => {
     expect(member?.group).toBe('pterm-host-0123456789abcdef')
   })
 })
+
+describe('TmuxAdapter.moveWindow and windowsOf', () => {
+  it('moves a session current window into another session, keeping the process', async () => {
+    await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-s', 'holder'])
+    await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-s', 'src'])
+    await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-s', 'dst'])
+    const before = await run('tmux', [
+      '-L', SOCKET, 'display-message', '-p', '-t', '=src:', '#{pane_pid}',
+    ])
+
+    await adapter.moveWindow('src', 'dst')
+
+    const windows = await adapter.windowsOf('dst')
+    const pids = await Promise.all(
+      windows.map(async (window) =>
+        (await run('tmux', [
+          '-L', SOCKET, 'display-message', '-p', '-t', window.id, '#{pane_pid}',
+        ])).stdout.trim(),
+      ),
+    )
+    expect(windows).toHaveLength(2)
+    expect(pids).toContain(before.stdout.trim())
+    expect(await adapter.hasSession('src')).toBe(false)
+  })
+
+  it('reports window indices and ids together', async () => {
+    await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-s', 'holder'])
+    await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-s', 'solo'])
+
+    const windows = await adapter.windowsOf('solo')
+
+    expect(windows).toHaveLength(1)
+    expect(windows[0].index).toMatch(/^\d+$/)
+    expect(windows[0].id).toMatch(/^@\d+$/)
+  })
+
+  it('answers with no windows for a session tmux does not have', async () => {
+    await run('tmux', ['-L', SOCKET, 'new-session', '-d', '-s', 'holder'])
+
+    expect(await adapter.windowsOf('nosuchsession')).toEqual([])
+  })
+})
