@@ -182,7 +182,7 @@ export function TodoModal({
    * this, over an app with no modal behind it; leaving `confirmDelete` set
    * would open the next read view already asking to delete.
    */
-  const closeNow = useCallback(() => {
+  const endSession = useCallback(() => {
     setEditing(false)
     setTitle('')
     setBody('')
@@ -190,8 +190,12 @@ export function TodoModal({
     setMutationError(null)
     setConfirmDelete(false)
     setPendingAction(null)
+  }, [])
+
+  const closeNow = useCallback(() => {
+    endSession()
     onClose()
-  }, [onClose])
+  }, [endSession, onClose])
 
   // The one place Escape, an outside click and Radix's own dismissal all land:
   // `Dialog`'s `onOpenChange` fires for every one of them alike.
@@ -219,6 +223,16 @@ export function TodoModal({
 
   const target = todo?.id ?? null
   useEffect(() => {
+    // Nothing to defer behind a confirm while the dialog is not on screen.
+    //
+    // Measured rather than assumed: the effect below is what actually ends the
+    // session, and with it in place this line can be deleted and the covering
+    // test stays green, because that effect clears `pendingAction` a beat
+    // later. What this earns is independence from the order the two effects are
+    // declared in. Swap them and, without this guard, the confirm is armed
+    // after the cleanup instead of before it, and no test in the suite can see
+    // the difference.
+    if (!open) return
     if (dirty) {
       setPendingAction(() => resetForTarget)
       return
@@ -226,7 +240,28 @@ export function TodoModal({
     resetForTarget()
     // Keyed on the target, not on `dirty`: a keystroke must not re-run this.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [target, create, resetForTarget])
+  }, [target, create, open, resetForTarget])
+
+  /**
+   * Ends the session when the dialog closes without anyone asking it to.
+   *
+   * `open` is derived: `todo` comes from `TodosPanel` looking the open id up in
+   * the list it holds, so a record that leaves that list takes this dialog off
+   * screen with it. Radix only calls `onOpenChange` for dismissals it handles
+   * itself (Escape, an outside click, its own close), so a close that happens
+   * this way runs neither `requestClose` nor `closeNow`, and every piece of
+   * session state survives into the next one: `editing` still true, the draft
+   * still populated, and `BodyEditor` mounting the vanished body over it.
+   *
+   * `onClose` is deliberately NOT called here. The caller is what set `todo`
+   * to null, so telling it to close would be answering it with its own news,
+   * and in this component's case `onClose` also clears `create`, which no
+   * disappearing record should touch.
+   */
+  useEffect(() => {
+    if (open) return
+    endSession()
+  }, [open, endSession])
 
   const startEdit = useCallback(() => {
     if (todo === null) return

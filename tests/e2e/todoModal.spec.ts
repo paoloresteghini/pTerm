@@ -179,6 +179,71 @@ test('delete asks first, then removes the row', async () => {
   await expect(page.getByTestId('todo-modal')).toHaveCount(0)
 })
 
+test('a todo vanishing under an open edit closes the modal without stranding a confirm', async () => {
+  // The reachable version of "the record went away while you had it open":
+  // `todos.json` is edited outside the app (another tool, or a hand edit) and
+  // `todos-refresh` re-reads it. `TodosPanel` derives the modal's `todo` prop
+  // by looking the open id up in the list, so a record that is no longer there
+  // makes that prop null, which flips `Dialog`'s controlled `open` to false
+  // WITHOUT `onOpenChange` firing. Nothing then runs the modal's own close
+  // path, so its `editing` flag and draft survive, the target-change effect
+  // sees them as dirty, and it arms the unsaved-changes confirm over an app
+  // with no modal behind it.
+  // Two of its own: the test before this one deletes the list's only row, and
+  // this needs a record to lose plus one left standing to prove the session
+  // really ended.
+  await expandColumn(page, 'todos')
+  for (const title of ['stays behind', 'about to vanish']) {
+    await page.getByTestId('todos-new').click()
+    await expect(page.getByTestId('todo-title-input')).toBeVisible({ timeout: 15_000 })
+    await page.getByTestId('todo-title-input').fill(title)
+    await page.getByTestId('todo-save').click()
+    await expect(page.getByTestId('todos-list')).toContainText(title)
+  }
+
+  const doomed = rows(page).filter({ hasText: 'about to vanish' })
+  const doomedTestid = await doomed.getAttribute('data-testid')
+  if (doomedTestid === null) throw new Error('the doomed row carries no data-testid')
+  const id = doomedTestid.replace('todo-row-', '')
+
+  await doomed.click()
+  await page.getByTestId('todo-edit').click()
+  // Dirty, which is what arms the confirm. The title is enough and does not
+  // need the CodeMirror body.
+  await page.getByTestId('todo-title-input').fill('edited but about to vanish')
+
+  // Driven through the bridge rather than the UI, deliberately, and this is
+  // the honest reason: no click can do it. The modal's overlay covers the
+  // column, so `todos-refresh` and the rows behind it cannot be reached while
+  // it is open (measured: the overlay intercepts the click), the panel has no
+  // polling and no focus refetch, and the modal's own done and delete buttons
+  // live in read mode where nothing is dirty. The list changing under an open
+  // dirty edit therefore needs a mutation from outside the modal, which today
+  // means this call, and tomorrow means a second window, a file watcher, or a
+  // refetch someone adds. `todosDelete` here reaches the panel the same way a
+  // real one would: main writes, then broadcasts `todosChanged`, and the
+  // panel's subscription applies it.
+  const removed = await page.evaluate((target) => window.pterm.todosDelete(target), id)
+  expect(removed.some((todo) => todo.id === id)).toBe(false)
+  await expect(page.getByTestId(`todo-row-${id}`)).toHaveCount(0)
+
+  // The two things the strand costs: a dialog nobody asked for, and a session
+  // that stays dirty behind it.
+  await expect(page.getByTestId('confirm-close')).toHaveCount(0)
+  await expect(page.getByTestId('todo-modal')).toHaveCount(0)
+
+  // And the session is genuinely over rather than merely hidden: opening the
+  // survivor lands in READ mode showing its own title, not back in the edit
+  // form still holding the vanished draft. `todo-title-input` exists only in
+  // the edit and create forms, so its absence is what says which mode this is.
+  await rows(page).filter({ hasText: 'stays behind' }).click()
+  await expect(page.getByTestId('todo-edit')).toBeVisible()
+  await expect(page.getByTestId('todo-title-input')).toHaveCount(0)
+  await expect(page.getByTestId('todo-modal')).toContainText('stays behind')
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('todo-modal')).toHaveCount(0)
+})
+
 test('hiding the column while a draft is open clears the draft, so showing it again does not reopen it', async () => {
   await expandColumn(page, 'todos')
   await page.getByTestId('todos-new').click()

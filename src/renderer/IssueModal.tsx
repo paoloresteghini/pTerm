@@ -282,13 +282,19 @@ export function IssueModal({
   // so the same gate covers it regardless of how a future change might
   // reach here.
   useEffect(() => {
+    // Nothing to defer behind a confirm while the dialog is not on screen. No
+    // path reaches this with `open` false today (see the effect below
+    // `closeNow` for why), so this is the same guard `TodoModal` carries and
+    // for the same reason: it keeps the outcome independent of the order these
+    // two effects are declared in.
+    if (!open) return
     if (dirty) {
       setPendingAction(() => resetForTarget)
       return
     }
     resetForTarget()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resetForTarget])
+  }, [open, resetForTarget])
 
   const startEdit = useCallback(() => {
     if (detail === null) return
@@ -326,15 +332,42 @@ export function IssueModal({
    * Discard button runs: leaving it set would re-show the dialog it just
    * dismissed.
    */
-  const closeNow = useCallback(() => {
+  const endSession = useCallback(() => {
     setEditing(false)
     setTitle('')
     setBody('')
     setComment('')
     setMutationError(null)
     setPendingAction(null)
+  }, [])
+
+  const closeNow = useCallback(() => {
+    endSession()
     onClose()
-  }, [onClose])
+  }, [endSession, onClose])
+
+  /**
+   * Ends the session if this dialog ever closes without `onOpenChange` firing.
+   *
+   * It cannot happen here today, and that is worth writing down rather than
+   * leaving as a puzzle. `open` is `number !== null || create`, and both come
+   * from `IssuesPanel` state whose only writers are a row click, the heading's
+   * `+`, and the `onClose` this component calls itself (`IssuesPanel.tsx`,
+   * `setOpen` and `setCreating`). So nothing outside can take this dialog off
+   * screen, and `closeNow` runs on every real exit.
+   *
+   * `TodoModal` is the same component shape with one difference: its panel
+   * derives the record by looking the open id up in the list it holds, so a
+   * record leaving that list closed the dialog with no dismissal event, and
+   * every piece of session state survived into the next one. This effect is
+   * what stops that, and it lives here too so that deriving `number` from a
+   * list later cannot quietly reintroduce it. If you are reading this because
+   * you just made that change, the guard is already in place.
+   */
+  useEffect(() => {
+    if (open) return
+    endSession()
+  }, [open, endSession])
 
   // The one place Escape, an outside click and Radix's own dismissal all
   // land: `Dialog`'s `onOpenChange` fires for every one of them alike. A
