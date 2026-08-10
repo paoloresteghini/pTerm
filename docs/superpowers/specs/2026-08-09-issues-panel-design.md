@@ -1,7 +1,7 @@
 # Issues panel
 
 Date: 2026-08-09
-Status: approved, planned, in implementation
+Status: implemented and reviewed 2026-08-10. Unpushed. See the plan for the task record.
 
 An eighth side column listing the active project's GitHub issues, with search, filtering,
 sorting, and a modal for reading, creating, editing, commenting and closing. It reaches
@@ -25,7 +25,7 @@ issue templates.
 | Issue body rendering | Read-only CodeMirror over the markdown **source**, not rendered HTML |
 | Freshness | No interval poll. Expand, project switch, throttled window focus, own mutations, manual refresh |
 | Search | Client-side over the loaded set, with an honest truncation marker |
-| Also in scope | The Git column is renamed **Git Changes** and gains the same self-explaining empty state |
+| Also in scope | The Git column is renamed **Git Changes**. Its no-repo empty state already existed |
 
 ## Why `gh` and not the API
 
@@ -64,11 +64,11 @@ which is what "click the one you want to work on" means.
 │      │                     │        │
 │      │                     │ ○ #42  │
 │      │                     │ Fix th…│
-│      │                     │ 2h · 3 │
+│      │                     │ 2h  ●● │
 │      │                     │        │
 │      │                     │ ● #38  │
 │      │                     │ Rename…│
-│      │                     │ 1d · 0 │
+│      │                     │ 1d     │
 └──────┴─────────────────────┴────────┘
 ```
 
@@ -91,15 +91,24 @@ spares `splits.spec.ts`, whose pixel constants encode the whole flex row.
    back at its limit.
 3. A full-width search input.
 4. One compact row: an `Open` / `Closed` / `All` segmented control, and a sort icon-button
-   opening a menu of `Recently updated` / `Newest` / `Most commented`.
+   opening a menu of `Recently updated` / `Newest`.
 5. The list.
 
-Two rows of chrome, not three. 256px does not have the budget for a third.
+Two rows of chrome, not three. 208px does not have the budget for a third.
+
+**There is no sort by comment count, and no per-row comment count.** Both were specified here
+originally and both were removed on 2026-08-10. `gh issue list` exposes no comment-count
+scalar, so producing one means receiving every comment object, bodies included, for every
+issue in the page. Measured against `cli/cli` at `--state all --limit 200`: 581,278 bytes and
+9.48s with the field, 96,491 bytes and 1.74s without. The list refetches on expand, project
+switch, filter change, every window focus past the throttle, after every mutation, and on
+demand, so that was paid constantly to draw one number per row. The detail view still fetches
+comments, because it shows them.
 
 ### Rows
 
 Two lines each. Line one: a state glyph, `#42` dimmed, and the title truncated to one line.
-Line two: relative time, comment count, and label dots.
+Line two: relative time and label dots.
 
 The whole row is the click target and it opens the modal. Everything else lives in icon
 buttons revealed on hover at the row's right edge, so a resting list is a list of titles and
