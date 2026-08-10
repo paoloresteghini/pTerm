@@ -50,6 +50,11 @@ export const FOCUS_REFETCH_THROTTLE_MS = 60_000
  * through rather than making a component that has never fetched wait out a
  * window before its first `focus`.
  */
+export function shouldRefetchOnFocus(lastFetchedAt: number | null, now: number): boolean {
+  if (lastFetchedAt === null) return true
+  return now - lastFetchedAt >= FOCUS_REFETCH_THROTTLE_MS
+}
+
 /**
  * The detail modal's state chip text, from `state` and `stateReason` alone.
  *
@@ -66,9 +71,4 @@ export const FOCUS_REFETCH_THROTTLE_MS = 60_000
 export function issueStateLabel(state: IssueState, stateReason: IssueStateReason): string {
   if (state === 'OPEN') return 'Open'
   return stateReason === 'NOT_PLANNED' ? 'Closed as not planned' : 'Closed as completed'
-}
-
-export function shouldRefetchOnFocus(lastFetchedAt: number | null, now: number): boolean {
-  if (lastFetchedAt === null) return true
-  return now - lastFetchedAt >= FOCUS_REFETCH_THROTTLE_MS
 }

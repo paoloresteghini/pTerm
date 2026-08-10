@@ -2,8 +2,11 @@
  * The Issues column's registration: hidden by default, reachable from the
  * View menu, and collapsible to a strip like every other column.
  *
- * This does not test anything the column draws once open; it has nothing to
- * draw yet, see `IssuesPanel.tsx`.
+ * Registration only: nothing here launches `gh` or asserts a row. What the
+ * column draws once open is covered by `issuesList.spec.ts` (list, search,
+ * heading, empty states), `issueModal.spec.ts` and `issueMutations.spec.ts`,
+ * all of which point `PTERM_GH_BIN` at a stub this file deliberately does not
+ * need.
  */
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
