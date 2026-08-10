@@ -139,6 +139,24 @@ const api: PTermApi = {
     ipcRenderer.invoke(CHANNELS.issuesList, projectId, state),
   issuesGet: (projectId: string, number: number): Promise<IssuesResult<IssueDetail>> =>
     ipcRenderer.invoke(CHANNELS.issuesGet, projectId, number),
+  issuesCreate: (projectId: string, title: string, body: string): Promise<IssuesResult<number>> =>
+    ipcRenderer.invoke(CHANNELS.issuesCreate, projectId, title, body),
+  issuesEdit: (
+    projectId: string,
+    number: number,
+    title: string,
+    body: string,
+  ): Promise<IssuesResult<true>> =>
+    ipcRenderer.invoke(CHANNELS.issuesEdit, projectId, number, title, body),
+  issuesSetState: (
+    projectId: string,
+    number: number,
+    action: 'close' | 'reopen',
+    reason?: 'completed' | 'not planned',
+  ): Promise<IssuesResult<true>> =>
+    ipcRenderer.invoke(CHANNELS.issuesSetState, projectId, number, action, reason),
+  issuesComment: (projectId: string, number: number, body: string): Promise<IssuesResult<true>> =>
+    ipcRenderer.invoke(CHANNELS.issuesComment, projectId, number, body),
   gitStage: (projectId: string, paths: string[]): Promise<GitMutation> =>
     ipcRenderer.invoke(CHANNELS.gitStage, projectId, paths),
   gitUnstage: (projectId: string, paths: string[]): Promise<GitMutation> =>

@@ -41,37 +41,66 @@ function StateButton({
   )
 }
 
-function Row({ row, now, onSelect }: { row: IssueSummary; now: number; onSelect: (number: number) => void }) {
+function Row({
+  row,
+  now,
+  onSelect,
+  onQuickClose,
+}: {
+  row: IssueSummary
+  now: number
+  onSelect: (number: number) => void
+  /** Undefined for a closed row: quick-close only ever closes an open issue. */
+  onQuickClose?: (number: number) => void
+}) {
   const updatedSeconds = Math.floor(new Date(row.updatedAt).getTime() / 1000)
   return (
-    <button
-      data-testid={`issue-row-${row.number}`}
-      onClick={() => onSelect(row.number)}
-      className="flex w-full cursor-default flex-col items-start gap-0.5 border-none bg-transparent px-2.5 py-1 text-left text-muted hover:text-fg"
-    >
-      <span className="flex w-full items-baseline gap-1.5">
-        <span className="shrink-0 text-faint">#{row.number}</span>
-        <span className="truncate">{row.title}</span>
-      </span>
-      <span className="flex w-full items-center gap-1.5 text-faint">
-        <span className="shrink-0">{historyAgo(updatedSeconds, now)}</span>
-        <span className="shrink-0">
-          {row.commentCount} {row.commentCount === 1 ? 'comment' : 'comments'}
+    // `group` for the quick-close button's hover reveal, the same pattern
+    // `GitPanel`'s own row uses for its stage/unstage/discard buttons.
+    <div className="group relative flex w-full items-start">
+      <button
+        data-testid={`issue-row-${row.number}`}
+        onClick={() => onSelect(row.number)}
+        className="flex w-full cursor-default flex-col items-start gap-0.5 border-none bg-transparent px-2.5 py-1 text-left text-muted hover:text-fg"
+      >
+        <span className="flex w-full items-baseline gap-1.5">
+          <span className="shrink-0 text-faint">#{row.number}</span>
+          <span className="truncate">{row.title}</span>
         </span>
-        {row.labels.length > 0 ? (
-          <span className="flex items-center gap-1">
-            {row.labels.map((label) => (
-              <span
-                key={label.name}
-                title={label.name}
-                style={{ backgroundColor: `#${label.color}` }}
-                className="h-1.5 w-1.5 shrink-0 rounded-full"
-              />
-            ))}
+        <span className="flex w-full items-center gap-1.5 text-faint">
+          <span className="shrink-0">{historyAgo(updatedSeconds, now)}</span>
+          <span className="shrink-0">
+            {row.commentCount} {row.commentCount === 1 ? 'comment' : 'comments'}
           </span>
-        ) : null}
-      </span>
-    </button>
+          {row.labels.length > 0 ? (
+            <span className="flex items-center gap-1">
+              {row.labels.map((label) => (
+                <span
+                  key={label.name}
+                  title={label.name}
+                  style={{ backgroundColor: `#${label.color}` }}
+                  className="h-1.5 w-1.5 shrink-0 rounded-full"
+                />
+              ))}
+            </span>
+          ) : null}
+        </span>
+      </button>
+      {onQuickClose ? (
+        <button
+          data-testid={`issue-quick-close-${row.number}`}
+          onClick={(event) => {
+            // Stops the row's own click from also opening the modal.
+            event.stopPropagation()
+            onQuickClose(row.number)
+          }}
+          title="Close as completed"
+          className="absolute right-1 top-1 shrink-0 cursor-default border-none bg-transparent px-1 text-faint opacity-0 group-hover:opacity-100 hover:text-fg"
+        >
+          ✕
+        </button>
+      ) : null}
+    </div>
   )
 }
 
@@ -110,6 +139,12 @@ export function IssuesPanel({
   // modal can hand it back to null on close, the split `SettingsPane`'s
   // caller already uses for its own `open` flag.
   const [open, setOpen] = useState<number | null>(null)
+  // The heading's `+`, a second and independent way to open the modal: see
+  // `IssueModal`'s own doc comment for why this is not folded into `open`.
+  const [creating, setCreating] = useState(false)
+  // A quick-close that failed. Cleared at the start of the next attempt,
+  // like `IssueModal`'s own `mutationError`.
+  const [quickCloseError, setQuickCloseError] = useState<string | null>(null)
 
   // `load` has several callers (the effect below, the focus listener, the
   // refresh button), unlike `NotesPanel`'s single fetch site, so a closured
@@ -184,6 +219,23 @@ export function IssuesPanel({
     return () => window.removeEventListener('focus', onFocus)
   }, [collapsed, load])
 
+  // The row's hover ✕: close as completed, then refetch. On success the row
+  // disappearing from the OPEN filter is the only feedback this needs; on
+  // failure it says why, the same rule the modal's own mutations follow,
+  // rather than a toast that has come and gone before it is read.
+  const quickClose = (number: number): void => {
+    const projectId = project?.id
+    if (!projectId) return
+    setQuickCloseError(null)
+    window.pterm
+      .issuesSetState(projectId, number, 'close', 'completed')
+      .then((result) => {
+        if (result.ok) load()
+        else setQuickCloseError(result.message)
+      })
+      .catch(() => setQuickCloseError('The GitHub CLI reported an error.'))
+  }
+
   if (collapsed) {
     return (
       <PanelStrip
@@ -211,12 +263,27 @@ export function IssuesPanel({
       )}
       style={{ width }}
     >
-      <PanelHeading
-        testid="issues-toggle"
-        label="Issues"
-        onClick={onToggle}
-        onDragStart={onDragStart}
-      />
+      {/* Heading and `+` as siblings, the same layout `PromptsPanel` uses and
+          for the same reason: a button inside a button is invalid HTML, and
+          the inner click would bubble out and collapse the column. */}
+      <div className="flex items-center justify-between pr-2.5">
+        <PanelHeading
+          testid="issues-toggle"
+          label="Issues"
+          onClick={onToggle}
+          onDragStart={onDragStart}
+        />
+        {project ? (
+          <button
+            data-testid="issues-new"
+            aria-label="New issue"
+            onClick={() => setCreating(true)}
+            className="cursor-default border-none bg-transparent p-0 text-[13px] leading-none text-faint hover:text-fg"
+          >
+            +
+          </button>
+        ) : null}
+      </div>
       {!project ? (
         <p data-testid="issues-no-project" className="px-2.5 py-1 text-faint">
           No project selected.
@@ -297,11 +364,33 @@ export function IssuesPanel({
                   {query.trim() !== '' ? 'Nothing matches.' : 'No issues.'}
                 </p>
               ) : (
-                filtered.map((row) => <Row key={row.number} row={row} now={now} onSelect={setOpen} />)
+                filtered.map((row) => (
+                  <Row
+                    key={row.number}
+                    row={row}
+                    now={now}
+                    onSelect={setOpen}
+                    onQuickClose={row.state === 'OPEN' ? quickClose : undefined}
+                  />
+                ))
               )}
             </div>
           )}
-          <IssueModal projectId={project.id} number={open} onClose={() => setOpen(null)} />
+          {quickCloseError ? (
+            <p data-testid="issues-quick-close-error" className="px-2.5 py-1 text-[11px] text-danger">
+              {quickCloseError}
+            </p>
+          ) : null}
+          <IssueModal
+            projectId={project.id}
+            number={open}
+            create={creating}
+            onClose={() => {
+              setOpen(null)
+              setCreating(false)
+            }}
+            onMutated={load}
+          />
         </>
       )}
       <ColumnResizer

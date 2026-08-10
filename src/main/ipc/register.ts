@@ -41,7 +41,14 @@ import {
   rescaledClaims,
   type Claim,
 } from './shares'
-import { getIssue, listIssues } from '../gh/issues'
+import {
+  commentIssue,
+  createIssue,
+  editIssue,
+  getIssue,
+  listIssues,
+  setIssueState,
+} from '../gh/issues'
 import { attachSavedFields } from './savedFields'
 import { isDirectory } from '../fsutil'
 import { scanCandidates } from '../projects/discovery'
@@ -1486,6 +1493,63 @@ export function registerIpc(
     }
     return getIssue(project.cwd, number)
   })
+
+  // The four mutations, beside the two reads above and outside `serialise`
+  // for the same reason they are: these read and write a GitHub repository
+  // by way of `gh`, never pTerm's own config.
+  ipcMain.handle(
+    CHANNELS.issuesCreate,
+    async (_event, projectId: string, title: string, body: string) => {
+      const config = await store.read()
+      const project = config.projects.find((row) => row.id === projectId)
+      if (!project) {
+        return { ok: false as const, reason: 'no-project' as const, message: 'No project' }
+      }
+      return createIssue(project.cwd, title, body)
+    },
+  )
+
+  ipcMain.handle(
+    CHANNELS.issuesEdit,
+    async (_event, projectId: string, number: number, title: string, body: string) => {
+      const config = await store.read()
+      const project = config.projects.find((row) => row.id === projectId)
+      if (!project) {
+        return { ok: false as const, reason: 'no-project' as const, message: 'No project' }
+      }
+      return editIssue(project.cwd, number, title, body)
+    },
+  )
+
+  ipcMain.handle(
+    CHANNELS.issuesSetState,
+    async (
+      _event,
+      projectId: string,
+      number: number,
+      action: 'close' | 'reopen',
+      reason?: 'completed' | 'not planned',
+    ) => {
+      const config = await store.read()
+      const project = config.projects.find((row) => row.id === projectId)
+      if (!project) {
+        return { ok: false as const, reason: 'no-project' as const, message: 'No project' }
+      }
+      return setIssueState(project.cwd, number, action, reason)
+    },
+  )
+
+  ipcMain.handle(
+    CHANNELS.issuesComment,
+    async (_event, projectId: string, number: number, body: string) => {
+      const config = await store.read()
+      const project = config.projects.find((row) => row.id === projectId)
+      if (!project) {
+        return { ok: false as const, reason: 'no-project' as const, message: 'No project' }
+      }
+      return commentIssue(project.cwd, number, body)
+    },
+  )
 
   /**
    * The repository root behind a project id, or null when there is no project

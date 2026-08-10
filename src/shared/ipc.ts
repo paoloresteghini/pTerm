@@ -1245,6 +1245,19 @@ export interface PTermApi {
   issuesList(projectId: string, state: IssueStateFilter): Promise<IssuesResult<IssueSummary[]>>
   /** Fetches one issue's full detail from the active project's repository. */
   issuesGet(projectId: string, number: number): Promise<IssuesResult<IssueDetail>>
+  /** Opens a new issue in the active project's repository, answering with its number. */
+  issuesCreate(projectId: string, title: string, body: string): Promise<IssuesResult<number>>
+  /** Rewrites an issue's title and body in the active project's repository. */
+  issuesEdit(projectId: string, number: number, title: string, body: string): Promise<IssuesResult<true>>
+  /** Closes or reopens an issue in the active project's repository. */
+  issuesSetState(
+    projectId: string,
+    number: number,
+    action: 'close' | 'reopen',
+    reason?: 'completed' | 'not planned',
+  ): Promise<IssuesResult<true>>
+  /** Adds a comment to an issue in the active project's repository. */
+  issuesComment(projectId: string, number: number, body: string): Promise<IssuesResult<true>>
   /**
    * Tell main which side columns are collapsed, so the View menu's checkboxes
    * and its hide-all label can show the truth.

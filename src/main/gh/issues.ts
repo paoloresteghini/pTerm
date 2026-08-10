@@ -220,3 +220,119 @@ export async function getIssue(cwd: string, number: number): Promise<IssuesResul
     truncated: false,
   }
 }
+
+/**
+ * The argv for `gh issue close` or `gh issue reopen`, split out so it can be
+ * asserted without spawning anything.
+ *
+ * `reason` is only ever appended for `close`: `gh issue reopen` has no
+ * `--reason` flag of its own. `'not planned'` carries a space and is passed
+ * as one argv element regardless, since `gh` (via `execFile`) is never run
+ * through a shell and there is nothing here that needs escaping.
+ */
+export function issueArgs(
+  action: 'close' | 'reopen',
+  number: number,
+  arg: string,
+  reason?: 'completed' | 'not planned',
+): string[] {
+  const args = ['issue', action, String(number), '--repo', arg]
+  if (action === 'close' && reason !== undefined) args.push('--reason', reason)
+  return args
+}
+
+/**
+ * Shared shape behind every mutation below: resolve the repository, build
+ * the command against it, run `gh`, and read the result.
+ *
+ * `build` gets the resolved `--repo` argument and returns both the argv and
+ * an optional stdin, so a caller that needs neither (`setIssueState`) can
+ * leave stdin out rather than passing an empty string `gh` would see as a
+ * blank body.
+ */
+async function mutate<T>(
+  cwd: string,
+  build: (arg: string) => { args: string[]; stdin?: string },
+  read: (run: { stdout: string }) => T,
+): Promise<IssuesResult<T>> {
+  const resolved = await resolveRepo(cwd)
+  if (!resolved.ok) return failure(resolved.reason)
+  const arg = repoArg(resolved.ref)
+  const built = build(arg)
+  const run = await gh(cwd, built.args, built.stdin)
+  if (run.code !== 0 || run.spawnFailed) return failure(classify(run), run.stderr)
+  return {
+    ok: true,
+    repo: { slug: `${resolved.ref.owner}/${resolved.ref.name}`, arg },
+    value: read(run),
+    truncated: false,
+  }
+}
+
+/** Closes or reopens an issue in the repository at `cwd`. */
+export function setIssueState(
+  cwd: string,
+  number: number,
+  action: 'close' | 'reopen',
+  reason?: 'completed' | 'not planned',
+): Promise<IssuesResult<true>> {
+  return mutate(cwd, (arg) => ({ args: issueArgs(action, number, arg, reason) }), () => true)
+}
+
+/**
+ * Adds a comment to an issue in the repository at `cwd`.
+ *
+ * `body` goes over stdin via `--body-file -`, never `--body <string>`: argv
+ * has a length ceiling and a comment is unbounded markdown.
+ */
+export function commentIssue(cwd: string, number: number, body: string): Promise<IssuesResult<true>> {
+  return mutate(
+    cwd,
+    (arg) => ({
+      args: ['issue', 'comment', String(number), '--repo', arg, '--body-file', '-'],
+      stdin: body,
+    }),
+    () => true,
+  )
+}
+
+/** Rewrites an issue's title and body in the repository at `cwd`. */
+export function editIssue(
+  cwd: string,
+  number: number,
+  title: string,
+  body: string,
+): Promise<IssuesResult<true>> {
+  return mutate(
+    cwd,
+    (arg) => ({
+      args: ['issue', 'edit', String(number), '--repo', arg, '--title', title, '--body-file', '-'],
+      stdin: body,
+    }),
+    () => true,
+  )
+}
+
+/**
+ * Opens a new issue in the repository at `cwd`, answering with its number.
+ *
+ * `gh issue create` prints the new issue's URL on stdout rather than JSON,
+ * unlike every other command in this file, which is why the number is read
+ * out of the URL's last path segment instead of parsed as JSON. `0` means
+ * the issue was created but the number could not be read from the URL; the
+ * caller refetches the list either way, so this is a display detail rather
+ * than a failure.
+ */
+export function createIssue(cwd: string, title: string, body: string): Promise<IssuesResult<number>> {
+  return mutate(
+    cwd,
+    (arg) => ({
+      args: ['issue', 'create', '--repo', arg, '--title', title, '--body-file', '-'],
+      stdin: body,
+    }),
+    (run) => {
+      const match = /\/issues\/(\d+)\s*$/.exec(run.stdout.trim())
+      return match ? Number(match[1]) : 0
+    },
+  )
+}
