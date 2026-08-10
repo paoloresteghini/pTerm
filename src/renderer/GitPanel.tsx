@@ -301,7 +301,7 @@ export function GitPanel({
     return (
       <PanelStrip
         testid="git-toggle"
-        label="Git"
+        label="Git Changes"
         side={side}
         onClick={onToggle}
         onDragStart={onDragStart}
@@ -326,7 +326,7 @@ export function GitPanel({
     >
       <PanelHeading
         testid="git-toggle"
-        label="Git"
+        label="Git Changes"
         onClick={onToggle}
         onDragStart={onDragStart}
       />

@@ -310,7 +310,7 @@ function installMenu(): void {
         },
         {
           id: 'toggle-git',
-          label: 'Git',
+          label: 'Git Changes',
           type: 'checkbox',
           accelerator: 'Alt+CmdOrCtrl+G',
           registerAccelerator: false,
