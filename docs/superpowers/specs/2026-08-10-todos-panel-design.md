@@ -65,7 +65,7 @@ export interface TodoDraft {
   priority: TodoPriority
 }
 
-/** Every field optional: the modal sends only what the user changed. */
+/** Every field optional: an absent field keeps the stored value. */
 export type TodoPatch = Partial<TodoDraft>
 ```
 
@@ -117,9 +117,10 @@ onTodosChanged(cb: (todos: TodoRecord[]) => void): () => void
 ```
 
 Field-level mutations rather than a whole-list write. A `todosWrite(list)` would
-be two handlers instead of five, but a stale renderer array then overwrites a
-peer window's concurrent edit, and the broadcast that follows makes the loss
-invisible to both windows. Nobody sends a list.
+be two handlers instead of five, but it would also mean either duplicating the
+empty-title rule and the `updatedAt`/`id` stamping in the renderer, or trusting
+whatever list the renderer last had, which turns an unknown id into a silently
+lost write instead of the no-op it is below. Nobody sends a list.
 
 Every mutation resolves with the **new full list**, so the calling window
 renders from its own reply and never waits on the event round trip.
@@ -130,8 +131,9 @@ is read → apply → write → broadcast:
 - `updatedAt` and `id` are stamped in main, never by the renderer, so two
   windows cannot disagree about clock or ordering.
 - An unknown `id` on update, `setDone` or delete is a **no-op that still
-  resolves with the current list**. A peer window that deleted the same todo a
-  moment earlier must not produce an error in the second window.
+  resolves with the current list**. The modal can still be open on a todo's id
+  after `todos-refresh` re-reads a `todos.json` that was hand-edited to remove
+  it, and saving from that stale open id must not produce an error.
 - A create whose trimmed title is empty is refused: the list comes back
   unchanged. The broadcast still fires, carrying the list every window already
   has. An earlier draft of this section said it did not, and the review of the

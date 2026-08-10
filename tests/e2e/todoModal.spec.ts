@@ -42,6 +42,17 @@ async function firstRowId(target: Page): Promise<string> {
   return testid.replace('todo-row-', '')
 }
 
+/**
+ * Fire the View menu's "Todos" item by id, the way a click on the real menu
+ * bar would. Driven through the main process, because Playwright cannot
+ * reach the macOS menu bar, the same approach `menuColumns.spec.ts` uses.
+ */
+async function clickToggleTodos(): Promise<void> {
+  await app?.evaluate(({ Menu }) => {
+    Menu.getApplicationMenu()?.getMenuItemById('toggle-todos')?.click()
+  })
+}
+
 test.beforeAll(async () => {
   userDataDir = await mkdtemp(join(tmpdir(), 'pterm-todomodal-user-'))
   configDir = await mkdtemp(join(tmpdir(), 'pterm-todomodal-config-'))
@@ -168,11 +179,36 @@ test('delete asks first, then removes the row', async () => {
   await expect(page.getByTestId('todo-modal')).toHaveCount(0)
 })
 
-test('the list survives a relaunch', async () => {
+test('hiding the column while a draft is open clears the draft, so showing it again does not reopen it', async () => {
+  await expandColumn(page, 'todos')
+  await page.getByTestId('todos-new').click()
+  // Autofocus lands in the title field, which carries `data-shortcuts="off"`
+  // and would swallow a keyboard shortcut, so this drives the View menu item
+  // instead: the other of the two paths that hide the column, and the one
+  // the draft's own focus cannot block.
+  await expect(page.getByTestId('todo-title-input')).toBeVisible({ timeout: 15_000 })
+
+  // Hides the column outright, which unmounts it (and the dialog inside it)
+  // without ever calling the modal's own `onClose`. That is the path that
+  // used to leave `creatingTodo` stuck at `true`.
+  await clickToggleTodos()
+  await expect(page.getByTestId('todos-panel')).toHaveCount(0)
+
+  await clickToggleTodos()
+  await expect(page.getByTestId('todos-panel')).toBeVisible()
+  await expect(page.getByTestId('todo-modal')).toHaveCount(0)
+})
+
+test('the list survives a relaunch, and so does the column width', async () => {
   await page.getByTestId('todos-new').click()
   await page.getByTestId('todo-title-input').fill('survives')
   await page.getByTestId('todo-save').click()
   await expect(page.getByTestId('todos-list')).toContainText('survives')
+
+  // Away from `COLUMN_WIDTH_DEFAULT` (208), so the relaunch has something to
+  // prove: the default renders correctly whether or not `pterm:todosWidth`
+  // was ever read back.
+  await page.evaluate(() => localStorage.setItem('pterm:todosWidth', '340'))
 
   // Relaunched against the SAME config dir, which is what makes this a test of
   // `todos.json` rather than of React state. The temp dirs are the ones
@@ -188,6 +224,17 @@ test('the list survives a relaunch', async () => {
     userDataDir,
   })
   page = await app.firstWindow()
-  await expandColumn(page, 'todos')
+
+  // Read directly rather than through `expandColumn`: that helper opens the
+  // column itself when it finds one hidden or collapsed, which would make
+  // this pass whether or not the hidden/collapsed flags were restored. Every
+  // earlier test in this file leaves the column shown, so it must already be
+  // on screen here if `pterm:todosHidden` and `pterm:todosCollapsed` were
+  // actually read back.
+  await expect(page.getByTestId('titlebar')).toBeVisible()
+  const panel = page.getByTestId('todos-panel')
+  await expect(panel).toBeVisible()
+  const box = await panel.boundingBox()
+  expect(Math.round(box!.width)).toBe(340)
   await expect(page.getByTestId('todos-list')).toContainText('survives')
 })

@@ -307,6 +307,11 @@ export function App() {
   const setColumnHidden = useCallback((id: ColumnId, hidden: boolean) => {
     setHiddenColumns((was) => ({ ...was, [id]: hidden }))
     localStorage.setItem(HIDDEN_KEYS[id], hidden ? '1' : '0')
+    // Hiding unmounts TodosPanel, so nothing there is left to clear its own
+    // create-draft flag. Every path that hides the column, the shortcut, the
+    // View menu item, and Hide All Columns, calls this function, so clearing
+    // it here is the one place that covers all of them.
+    if (hidden && id === 'todos') setCreatingTodo(false)
     if (!hidden) {
       setColumn[id](false)
       localStorage.setItem(COLUMN_KEY[id], '0')

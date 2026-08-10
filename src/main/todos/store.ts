@@ -86,10 +86,13 @@ async function write(todos: TodoRecord[]): Promise<void> {
 
 /**
  * Serialises every mutation in this process against every other, exactly as
- * `prompts/store.ts` does: all five below are read-modify-write, and two
- * windows interleaving them would lose whichever read first. It does NOT
- * defend against a second pTerm process, the same bound `ConfigStore`'s own
- * queue has.
+ * `prompts/store.ts` does: all five below are read-modify-write, and two of
+ * them interleaving would lose whichever read first. Reachable from one
+ * window alone: the row's done-toggle in `TodosPanel.tsx` has no busy guard,
+ * so two quick clicks on two different rows issue overlapping calls, and this
+ * queue is what stops the second one clobbering the first's write. It does
+ * NOT defend against a second pTerm process, the same bound `ConfigStore`'s
+ * own queue has.
  */
 let queue: Promise<unknown> = Promise.resolve()
 function serialise<T>(work: () => Promise<T>): Promise<T> {
@@ -137,8 +140,9 @@ export function createTodo(draft: TodoDraft): Promise<TodoRecord[]> {
 
 /**
  * Apply `patch` to one todo. An unknown id is a no-op that still answers with
- * the current list: a peer window that deleted the same todo a moment earlier
- * must not turn into an error in this one.
+ * the current list: the modal can still be open on a todo's id after
+ * `todos-refresh` re-reads a `todos.json` that was hand-edited to remove it,
+ * and saving from that stale open id must not turn into an error.
  */
 export function updateTodo(id: string, patch: TodoPatch): Promise<TodoRecord[]> {
   return serialise(async () => {

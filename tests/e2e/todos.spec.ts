@@ -165,7 +165,18 @@ test('the priority filter excludes other levels', async () => {
 test('the hover action marks a todo done and the Done filter finds it', async () => {
   await expandColumn(page, 'todos')
   const id = await firstRowId(page)
-  await page.getByTestId(`todo-done-${id}`).click()
+  const row = page.getByTestId(`todo-row-${id}`)
+  const doneButton = page.getByTestId(`todo-done-${id}`)
+
+  // Hidden until the row is hovered (`opacity-0 group-hover:opacity-100`),
+  // read before moving the mouse there: Playwright clicks a 0-opacity element
+  // without complaint, so a click alone does not prove the hover mechanism
+  // this test is named for.
+  await expect(doneButton).toHaveCSS('opacity', '0')
+  await row.hover()
+  await expect(doneButton).toHaveCSS('opacity', '1')
+
+  await doneButton.click()
   await expect(page.getByTestId('todos-list').locator(`[data-testid="todo-row-${id}"]`)).toHaveCount(0)
   await page.getByTestId('todos-state-done').click()
   await expect(page.getByTestId(`todo-row-${id}`)).toBeVisible()
@@ -174,8 +185,31 @@ test('the hover action marks a todo done and the Done filter finds it', async ()
   // changes the LIST, and the next one reads the first row under the default
   // sort: left done, that row would be a different todo at a different
   // priority, and the assertion below would be about the wrong colour.
-  await page.getByTestId(`todo-done-${id}`).click()
+  await row.hover()
+  await doneButton.click()
   await expect(page.getByTestId('todos-list').locator(`[data-testid="todo-row-${id}"]`)).toHaveCount(0)
+  await page.getByTestId('todos-state-open').click()
+  await expect(page.getByTestId('todos-count')).toHaveText('2 open')
+})
+
+test('marking the last open todo done says "Nothing matches.", not "No todos."', async () => {
+  await expandColumn(page, 'todos')
+  // Isolate to exactly one open todo first: mark `book flights` done so only
+  // `chase invoice` remains under the (default) Open filter.
+  await page.getByTestId(`todo-done-${SEEDED[1].id}`).click()
+  await expect(page.getByTestId('todos-count')).toHaveText('1 open')
+
+  // Mark the last open one done too. The Open filter now matches nothing,
+  // but two todos still sit under Done, so the empty state has to say
+  // "Nothing matches.", not claim the list itself is empty.
+  await page.getByTestId(`todo-done-${SEEDED[0].id}`).click()
+  await expect(rows(page)).toHaveCount(0)
+  await expect(page.getByTestId('todos-empty-list')).toHaveText('Nothing matches.')
+
+  // Restore: unmark both from under the Done filter where they now sit.
+  await page.getByTestId('todos-state-done').click()
+  await page.getByTestId(`todo-done-${SEEDED[0].id}`).click()
+  await page.getByTestId(`todo-done-${SEEDED[1].id}`).click()
   await page.getByTestId('todos-state-open').click()
   await expect(page.getByTestId('todos-count')).toHaveText('2 open')
 })
@@ -190,6 +224,33 @@ test('the priority dot is drawn in the theme token, not a literal', async () => 
     getComputedStyle(document.documentElement).getPropertyValue('--color-danger').trim(),
   )
   expect(parseRgb(colour)).toBe(token)
+})
+
+/**
+ * The high dot above only proves `--color-danger` reaches a pixel. `medium`
+ * and `low` are separate entries in `PRIORITY_DOT` (`bg-warn`, `bg-faint`),
+ * so a typo in either class would render transparent and the test above
+ * would not catch it. `renew the domain` (medium) is done, so the state
+ * filter has to widen to `all` to see its dot.
+ */
+test('the medium and low priority dots are drawn in their theme tokens too', async () => {
+  await expandColumn(page, 'todos')
+  await page.getByTestId('todos-state-all').click()
+  for (const [id, cssVar] of [
+    [SEEDED[2].id, '--color-warn'],
+    [SEEDED[1].id, '--color-faint'],
+  ] as const) {
+    const colour = await page
+      .getByTestId(`todo-dot-${id}`)
+      .evaluate((node) => getComputedStyle(node).backgroundColor)
+    const token = await page.evaluate(
+      (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim(),
+      cssVar,
+    )
+    expect(parseRgb(colour)).toBe(token)
+  }
+  // Restored, same as every other test here that touches a filter.
+  await page.getByTestId('todos-state-open').click()
 })
 
 test('a failed write says so, and the next successful read clears it', async () => {

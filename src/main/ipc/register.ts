@@ -1450,10 +1450,10 @@ export function registerIpc(
   // written through their own module, imported above, not through this
   // file's config queue.
   //
-  // Every mutation below pushes the new list to every live window rather
-  // than only the caller's, via `broadcastTodos`: the todo list is global to
-  // the app, unlike `send` above which targets one window through
-  // `getWindow()`.
+  // Every mutation below pushes the new list to every live window via
+  // `broadcastTodos`, unlike `send` above, which targets one window through
+  // `getWindow()`: the todo list is global to the app rather than scoped to
+  // a window the way `send`'s payloads are.
   ipcMain.handle(CHANNELS.todosList, () => readTodos())
   ipcMain.handle(CHANNELS.todosCreate, async (_event, draft: TodoDraft) => {
     const todos = await createTodo(draft)

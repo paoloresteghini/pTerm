@@ -551,7 +551,7 @@ export interface TodoDraft {
   priority: TodoPriority
 }
 
-/** Every field optional: an edit sends only what changed. */
+/** Every field optional: an absent field keeps the stored value. */
 export type TodoPatch = Partial<TodoDraft>
 
 /**

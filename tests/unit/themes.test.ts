@@ -128,9 +128,11 @@ describe('text in every theme', () => {
 
   /**
    * The medium-priority dot in the Todos column, and the first token added
-   * for a graphical mark rather than for text. Held to the text floor anyway:
-   * it will be a 6px dot per `PRIORITY_DOT`'s classes, where anything looser
-   * is guesswork on a real screen.
+   * for a graphical mark rather than for text. `danger` and `faint`, the
+   * other two dots in `PRIORITY_DOT`, keep whatever contrast they already
+   * shipped with; `warn` is new, and holding a new token to the stricter text
+   * floor rather than the looser graphical one is the conservative default
+   * for a colour with no prior track record.
    */
   it('clears AA for the warn colour on every fill', () => {
     for (const { id, tokens } of themes) {

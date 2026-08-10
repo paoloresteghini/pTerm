@@ -152,9 +152,13 @@ export function TodosPanel({
   // an error cleared only by the next failure outlives the refresh that proved
   // it fixed.
   //
-  // NOT cleared by the pushed list below. A push means SOME window wrote, which
-  // says nothing about the write that failed here, and this message is about
-  // this window's own attempt.
+  // NOT cleared by the pushed list below. The rule is: a push means SOME
+  // window wrote, which says nothing about the write that failed in THIS one.
+  // This app is single-window, so today the only push this window ever gets
+  // is the echo of its own successful mutation, and `applyMutation` has
+  // already cleared the error from that same reply by the time it arrives —
+  // the rule currently guards against nothing observable. It is kept because
+  // it is the correct rule regardless.
   const [error, setError] = useState<string | null>(null)
 
   /**
@@ -318,7 +322,7 @@ export function TodosPanel({
           ) : null
         ) : visible.length === 0 ? (
           <p data-testid="todos-empty-list" className="px-2.5 py-1 text-faint">
-            {query.trim() !== '' || priority !== 'all' || state !== 'open' ? 'Nothing matches.' : 'No todos.'}
+            {rows.length === 0 ? 'No todos.' : 'Nothing matches.'}
           </p>
         ) : (
           visible.map((todo) => (

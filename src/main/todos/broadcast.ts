@@ -16,10 +16,13 @@ export interface TodoBroadcastTarget {
 /**
  * Hand the new list to every live window, the originator included.
  *
- * Sent to every window rather than every window but the caller's: the list
- * is global, so a second window holding the same todos needs the same push a
- * peer window's edit produces. A destroyed window is skipped because
- * `webContents.send` throws on one.
+ * Sent to every window rather than every window but the caller's, because the
+ * list is global rather than scoped to one window. This app is single-window
+ * by construction, so today the only recipient is the caller itself, and it
+ * has already applied the identical reply from its own mutation call: the
+ * push has no observable effect right now. Sending to all windows is still
+ * the rule that is correct if that ever changes. A destroyed window is
+ * skipped because `webContents.send` throws on one.
  */
 export function broadcastTodos(windows: TodoBroadcastTarget[], todos: TodoRecord[]): void {
   for (const window of windows) {
