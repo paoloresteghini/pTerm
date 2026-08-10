@@ -58,9 +58,9 @@ export function nextTodoSort(current: TodoSort): TodoSort {
 /**
  * Whether one row answers the query.
  *
- * Title and body, case-insensitive substring. Deliberately not `lib/match.ts`:
- * that module scores a single field with sophisticated ranking for ⌘K and skills,
- * while two independent fields need simpler symmetric treatment.
+ * Simple case-insensitive substring search over title and body, with no ranking or
+ * scoring. Rows are filtered by this Boolean only; any relevance ordering comes
+ * from the sort mode the user picked. Fuzzy ranking would have nothing to order.
  */
 function matches(todo: TodoRecord, query: string): boolean {
   const needle = query.trim().toLowerCase()

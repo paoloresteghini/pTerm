@@ -120,8 +120,8 @@ describe('sortTodos', () => {
 
   it('sorts unparseable dates as epoch, last under updated sort', () => {
     const rows = [
-      todo({ id: 'valid', updatedAt: '2026-08-05T00:00:00.000Z' }),
       todo({ id: 'invalid', updatedAt: 'not-a-date' }),
+      todo({ id: 'valid', updatedAt: '2026-08-05T00:00:00.000Z' }),
     ]
     expect(sortTodos(rows, 'updated').map((row) => row.id)).toEqual(['valid', 'invalid'])
   })
