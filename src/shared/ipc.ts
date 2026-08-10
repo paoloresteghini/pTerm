@@ -516,6 +516,37 @@ export interface Preset {
   command: string
 }
 
+export type TodoPriority = 'high' | 'medium' | 'low'
+
+/**
+ * One item on the global todo list.
+ *
+ * Global rather than per project: this is the user's own brain-dump, and the
+ * Notes column is where per-project text lives. `id` is app-allocated and
+ * never user text, the same rule `PromptEntry` follows.
+ */
+export interface TodoRecord {
+  id: string
+  /** Trimmed and non-empty. A create or update that would empty it is refused. */
+  title: string
+  /** Markdown. `''` for no body, never null. */
+  body: string
+  priority: TodoPriority
+  done: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+/** What the modal sends to create one: everything the user can type. */
+export interface TodoDraft {
+  title: string
+  body: string
+  priority: TodoPriority
+}
+
+/** Every field optional: an edit sends only what changed. */
+export type TodoPatch = Partial<TodoDraft>
+
 /**
  * A preset as the renderer sees it: user and repo presets already merged.
  * Declared here rather than in src/main/projects/manifest.ts, which now
