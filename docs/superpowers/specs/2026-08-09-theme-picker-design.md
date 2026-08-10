@@ -129,14 +129,26 @@ sites) from the visual work (the palettes), so each can be verified alone.
 Call sites to repoint:
 
 - `ui/Dialog.tsx` — `bg-surface` → `bg-overlay`, `border-border` → `border-border-strong`
-- `IssueModal.tsx`, `CommandPalette.tsx`, `HistoryOverlay.tsx` — same treatment
-- `TabBar.tsx:270` — the tab context menu, currently `bg-bg`
-- `Sidebar.tsx:140`, `TabBar.tsx:202`, `IssuesPanel.tsx` — selected rows, currently `bg-bg`
+- `IssueModal.tsx:89` — the modal's body well, currently `bg-bg` → `bg-raised`
+- `FileTreeMenu.tsx:69`, `Sidebar.tsx:195`, `TabBar.tsx:270` — context menus, floating
+- `Sidebar.tsx:140,167,297`, `TabBar.tsx:246` — selected rows and inputs, currently `bg-bg`
 
 That last group is the subtle one. `bg-bg` currently does double duty as "the
 canvas" and "this row is selected". Those are different intents that share a hex
 today. Lifted chrome breaks them apart: a selected row must not become the
 terminal's black. Splitting them is required for correctness, not cosmetics.
+
+Two call sites named in an earlier draft of this spec turned out not to need
+touching, and one that is not obvious does:
+
+- **`CommandPalette.tsx` and `settings/SettingsPane.tsx` need no edit.** Both
+  render through `DialogContent`, so the `Dialog.tsx` change carries them.
+- **`IssuesPanel.tsx` is not a repoint site.** It marks selection with `text-fg`
+  alone and has no `bg-bg`.
+- **`TabBar.tsx:202`, the active tab, deliberately stays `bg-bg`.** An active tab
+  is continuous with the terminal beneath it, and that unbroken fill from tab
+  into canvas is what makes it read as the front one. Under Lifted chrome it is
+  the whole effect.
 
 ### Per-theme values that must be recomputed, not copied
 
@@ -281,8 +293,17 @@ ground. Taken over eating user data.
   theme cannot be added without stating which rule judges it.
 - **Text floors.** `label` ≥ 4.5:1 on `surface`, per theme — WCAG ratio, which is
   the correct instrument for text. This generalises the existing
-  `labelContrast.test.ts` from one palette to five. `fg` and `muted` against
-  every ground they land on.
+  `labelContrast.test.ts` from one palette to five. `fg`, `ok` and `danger`
+  against every ground they land on.
+- **`muted`, and the one exemption.** Held at 4.5:1 on every ground for the four
+  new themes; all four clear it. **Classic does not**: `#71717a` on `#0c0c0e` is
+  4.04:1, and it ships that way today. `FileTree.tsx:384-389` already measured
+  that figure and accepted it, on the stated grounds that *"this background is
+  fixed chrome the user cannot recolour"* — a premise this feature falsifies.
+  The floor is therefore demanded of every theme the feature adds, Classic keeps
+  its value because leaving today's palette untouched is the point of it, and
+  its exemption is pinned to the measured number so it cannot drift further.
+  That comment in `FileTree.tsx` is now stale.
 - **Pane ramp.** Every `PANE_COLORS` entry against every theme's foreground,
   worst case ≥ 7:1.
 - **Registry/CSS sync.** Parse the `@theme` block out of `index.css` and assert
