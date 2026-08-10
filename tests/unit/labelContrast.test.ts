@@ -101,6 +101,7 @@ describe('the section-label colour', () => {
       'UpdatesSection.tsx',
       'SettingsTabs.tsx',
       'SettingsPane.tsx',
+      'AppearanceSection.tsx',
     ]) {
       const source = readFileSync(new URL(file, dir), 'utf8')
       expect(source).not.toContain('text-faint')

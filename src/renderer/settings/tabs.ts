@@ -1,10 +1,16 @@
 /**
- * The settings tabs, in the order the strip draws them. Notifications leads
- * because it is the only one of the four a user changes more than once; the
- * other three are one-time installs and a button you press when you wonder.
- * The pane opens on the first entry.
+ * The settings tabs, in the order the strip draws them. The pane opens on the
+ * first entry.
+ *
+ * Appearance leads, and it is the one tab whose section is worth opening onto:
+ * choosing a theme applies it to the whole window immediately, and this pane
+ * is a dialog over that window, so the tab shows its own effect. Notifications
+ * led before it existed, on the reasoning that it was the only one a user
+ * returns to; that is still true of Notifications relative to the three below
+ * it, which are two one-time installs and a button you press when you wonder.
  */
 export const SETTINGS_TABS = [
+  { id: 'appearance', label: 'Appearance' },
   { id: 'notifications', label: 'Notifications' },
   { id: 'hooks', label: 'Hooks' },
   { id: 'shell-history', label: 'Shell history' },

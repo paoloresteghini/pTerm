@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import type { NotificationConfig } from '../../shared/ipc'
+import type { ThemeId } from '../../shared/themes'
 import { Dialog, DialogContent, DialogTitle } from '../ui/Dialog'
 import { SettingsTabs } from './SettingsTabs'
 import { SETTINGS_TABS, type SettingsTabId } from './tabs'
+import { AppearanceSection } from './AppearanceSection'
 import { HooksSection } from './HooksSection'
 import { ShellHistorySection } from './ShellHistorySection'
 import { NotificationsSection } from './NotificationsSection'
@@ -13,11 +15,16 @@ export function SettingsPane({
   onOpenChange,
   notifications,
   onNotificationsChange,
+  theme,
+  onThemeChange,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   notifications: NotificationConfig | null
   onNotificationsChange: (config: NotificationConfig) => void
+  /** The palette in force, so the picker can mark the chosen card. */
+  theme: ThemeId
+  onThemeChange: (id: ThemeId) => void
 }) {
   const [tab, setTab] = useState<SettingsTabId>(SETTINGS_TABS[0].id)
   const [version, setVersion] = useState<string | null>(null)
@@ -67,6 +74,9 @@ export function SettingsPane({
             others, which just costs it nothing since there is no listener or
             timer on it to clean up either. */}
         <div role="tabpanel" id={`settings-panel-${tab}`} aria-labelledby={`settings-tab-${tab}`}>
+          {tab === 'appearance' ? (
+            <AppearanceSection theme={theme} onThemeChange={onThemeChange} />
+          ) : null}
           {tab === 'notifications' ? (
             <NotificationsSection
               notifications={notifications}

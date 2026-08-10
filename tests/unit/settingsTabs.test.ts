@@ -2,12 +2,15 @@ import { describe, it, expect } from 'vitest'
 import { SETTINGS_TABS, nextTabIndex } from '../../src/renderer/settings/tabs'
 
 describe('SETTINGS_TABS', () => {
-  // The order is a decision, not an accident: Notifications is first because
-  // it is the only tab a user changes more than once, and the settings pane
-  // opens on the first tab. tests/e2e/settingsTabs.spec.ts presses ArrowRight
-  // from Notifications and expects Hooks, which is this order.
-  it('runs Notifications, Hooks, Shell history, Updates', () => {
+  // The order is a decision, not an accident. The pane opens on the first tab,
+  // and Appearance is the one whose section shows its own effect: choosing a
+  // theme repaints the window this dialog is floating over. Notifications
+  // leads the rest for the reason it used to lead outright, being the only one
+  // of those a user returns to. tests/e2e/settingsTabs.spec.ts navigates by
+  // arrow key through exactly this order.
+  it('runs Appearance, Notifications, Hooks, Shell history, Updates', () => {
     expect(SETTINGS_TABS.map((tab) => tab.id)).toEqual([
+      'appearance',
       'notifications',
       'hooks',
       'shell-history',

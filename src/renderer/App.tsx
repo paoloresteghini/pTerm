@@ -71,7 +71,7 @@ import { groupedTabs, tabTree } from './lib/tabGroups'
 import { projectMuted, toggleProjectMute } from './mute'
 import { PANE_COLOR_DEFAULT, type PaneColor } from '../shared/paneColors'
 import type { ThemeId } from '../shared/themes'
-import { bootTheme } from './theme'
+import { applyTheme, bootTheme } from './theme'
 import { ColorSwatches } from './ColorSwatches'
 import {
   UNSORTED_ID,
@@ -232,10 +232,7 @@ export function App() {
   // before this component mounted, and a second read over IPC could only
   // disagree with what is on screen. This state is what React renders from,
   // and what carries a change into every live terminal.
-  //
-  // Read-only for now: nothing changes the theme until the picker exists, and
-  // a setter nothing calls is a type error rather than a harmless placeholder.
-  const [theme] = useState<ThemeId>(() => bootTheme())
+  const [theme, setTheme] = useState<ThemeId>(() => bootTheme())
   // Which editor panes have unsaved edits, renderer-only and never persisted
   // (see `dirtyPanes.ts`). Keyed by pane id rather than tab id: `TabBar` maps
   // a tab to its one pane before reading this.
@@ -251,6 +248,26 @@ export function App() {
   // Stable across renders on purpose: `FileView` puts this in its
   // view-building effect's dependency array, and a new function each render
   // would rebuild the `EditorView` (and drop the cursor) on every keystroke.
+  /**
+   * Painted first, stored second.
+   *
+   * The write is a round trip and the click has to feel instant, so the
+   * document and the React state move immediately and the config catches up.
+   * If the write fails, what is on screen is still the palette the user asked
+   * for, and the stored value is corrected by the next change; the alternative
+   * is a picker that stutters on every click to guard against a failure that
+   * costs nothing when it happens.
+   *
+   * `applyTheme` as well as `setTheme` because they reach different things:
+   * the first sets the custom properties every CSS surface reads, the second
+   * is what re-renders the terminals, which cannot read those properties.
+   */
+  const onThemeChange = useCallback((id: ThemeId) => {
+    setTheme(id)
+    applyTheme(id)
+    window.pterm.updateTheme(id).catch(() => undefined)
+  }, [])
+
   const onDirtyChange = useCallback((paneId: string, isDirty: boolean) => {
     setDirtyPanes((was) => markDirty(was, paneId, isDirty))
   }, [])
@@ -2117,6 +2134,8 @@ export function App() {
           onOpenChange={setSettingsOpen}
           notifications={notifications}
           onNotificationsChange={setNotifications}
+          theme={theme}
+          onThemeChange={onThemeChange}
         />
 
         <ConfirmClosePane open={pendingClose !== null} onCancel={cancelClose} onDiscard={discardClose} />

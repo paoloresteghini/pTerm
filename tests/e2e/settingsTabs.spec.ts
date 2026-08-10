@@ -81,14 +81,15 @@ const openSettings = async (): Promise<void> => {
   await expect(page.getByTestId('settings-pane')).toBeVisible()
 }
 
-test('opens on Notifications and mounts only that section', async () => {
+test('opens on Appearance and mounts only that section', async () => {
   await expect(page.getByTestId('titlebar')).toBeVisible()
   await openSettings()
 
-  await expect(page.getByTestId('settings-tab-notifications')).toHaveAttribute('aria-selected', 'true')
-  await expect(page.getByTestId('mute-when-focused')).toBeVisible()
+  await expect(page.getByTestId('settings-tab-appearance')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByTestId('theme-picker')).toBeVisible()
 
-  // The other three sections are not in the DOM at all.
+  // The other four sections are not in the DOM at all.
+  await expect(page.getByTestId('mute-when-focused')).toHaveCount(0)
   await expect(page.getByTestId('hooks-status')).toHaveCount(0)
   await expect(page.getByTestId('shell-history-status')).toHaveCount(0)
   await expect(page.getByTestId('update-check-now')).toHaveCount(0)
@@ -139,18 +140,22 @@ test('the arrow keys move the selection', async () => {
   await expect(page.getByTestId('settings-tab-hooks')).toBeFocused()
   await expect(page.getByTestId('hooks-status')).toBeVisible()
 
-  // Wrapping backwards off the first tab reaches the last.
+  // Wrapping backwards off the first tab reaches the last. Three presses, not
+  // two: Appearance sits ahead of Notifications now, so the walk from Hooks is
+  // Notifications, Appearance, then the wrap.
   await page.keyboard.press('ArrowLeft')
+  await page.keyboard.press('ArrowLeft')
+  await expect(page.getByTestId('settings-tab-appearance')).toHaveAttribute('aria-selected', 'true')
   await page.keyboard.press('ArrowLeft')
   await expect(page.getByTestId('settings-tab-updates')).toHaveAttribute('aria-selected', 'true')
 })
 
-test('reopening the pane goes back to Notifications', async () => {
+test('reopening the pane goes back to Appearance', async () => {
   await page.getByTestId('settings-tab-updates').click()
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('settings-pane')).toHaveCount(0)
 
   await openSettings()
-  await expect(page.getByTestId('settings-tab-notifications')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByTestId('settings-tab-appearance')).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByTestId('update-check-now')).toHaveCount(0)
 })
