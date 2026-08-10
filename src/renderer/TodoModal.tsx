@@ -30,6 +30,12 @@ const LEVELS: readonly TodoPriority[] = ['high', 'medium', 'low']
  * create, unmounts the previous instance and remounts this one, which is
  * what makes `value` safe to read only as the INITIAL document. Reassigning
  * it later would rebuild the view and drop whatever the user had typed.
+ *
+ * `IssueModal.tsx` holds a twin of this component, identical but for its
+ * testid, so a bug found in either belongs in both. Extracting one copy is
+ * deliberately deferred: `issueMutations.spec.ts` reads the other one's
+ * `issue-body-editor` testid, so a shared version has to keep both testids
+ * working, and that is a change to the issues feature rather than to this one.
  */
 function BodyEditor({ value, onChange }: { value: string; onChange: (text: string) => void }) {
   const host = useRef<HTMLDivElement | null>(null)

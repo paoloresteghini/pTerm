@@ -289,11 +289,12 @@ test('a column drag does not change the terminal container width', async () => {
   // `gap` helper's drop targets cost the row.
   const before = await boxOf(page, 'terminal-column')
 
-  // The regression this pins: the `column-gap-*` elements, one per seam in the
-  // row, used to take real width in the flex row the instant a drag started (`w-1 shrink-0`, no
-  // `--spacing` override), and the terminal was the row's only `flex-1`
-  // item, so it absorbed all of it. `Terminal.tsx`'s unconditional
-  // `ResizeObserver` then fit the real tmux session to the narrowed box.
+  // The regression this pins: the `column-gap-*` elements, one at each seam
+  // between two columns plus one at either end of the row, used to take real
+  // width the instant a drag started (`w-1 shrink-0`, no `--spacing`
+  // override), and the terminal was the row's only `flex-1` item, so it
+  // absorbed all of it. `Terminal.tsx`'s unconditional `ResizeObserver` then
+  // fit the real tmux session to the narrowed box.
   const dataTransfer = await page.evaluateHandle(() => new DataTransfer())
   await page.getByTestId('files-toggle').dispatchEvent('dragstart', { dataTransfer })
   // Waits for the gaps to actually paint, the same reason `dragColumnTo`

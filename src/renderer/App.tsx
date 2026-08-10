@@ -112,9 +112,8 @@ const MIN_PANE_ROWS = 5
  * costs 208px by default, so the keys below plus the 208px sidebar already add
  * up to more than the 1280px window `src/main/index.ts` opens, and expanding
  * all of them on that window leaves no room for a terminal. Nothing stops a
- * user from doing it anyway on a wider or maximised window. The state
- * persists per column, so
- * this default is the first run only.
+ * user from doing it anyway on a wider or maximised window. The state persists
+ * per column, so this default is the first run only.
  */
 const SKILLS_KEY = 'pterm:skillsCollapsed'
 const PRESETS_KEY = 'pterm:presetsCollapsed'

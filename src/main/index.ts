@@ -335,20 +335,22 @@ function installMenu(): void {
           click: () => sendMenuCommand('toggleIssues'),
         },
         {
-          id: 'toggle-todos',
-          label: 'Todos',
-          type: 'checkbox',
-          accelerator: 'Alt+CmdOrCtrl+T',
-          registerAccelerator: false,
-          click: () => sendMenuCommand('toggleTodos'),
-        },
-        {
           id: 'toggle-notes',
           label: 'Notes',
           type: 'checkbox',
           accelerator: 'Alt+CmdOrCtrl+N',
           registerAccelerator: false,
           click: () => sendMenuCommand('toggleNotes'),
+        },
+        // Last, because the column sits at the right-hand end of the row and
+        // this submenu lists the columns in the order they appear on screen.
+        {
+          id: 'toggle-todos',
+          label: 'Todos',
+          type: 'checkbox',
+          accelerator: 'Alt+CmdOrCtrl+T',
+          registerAccelerator: false,
+          click: () => sendMenuCommand('toggleTodos'),
         },
         { type: 'separator' },
         {

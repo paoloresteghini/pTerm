@@ -4,14 +4,13 @@ import { Button } from './ui/Button'
 /**
  * Asks before something with unsaved edits is closed.
  *
- * Only ever opened for something already known to be dirty; each caller checks
- * that before it passes `open`. There are two: `App.tsx` opens it from
- * `requestClosePane` for a pane, and `IssueModal.tsx` from its own
- * `pendingAction` gate for an issue edit or a create draft. `subject` is what
- * the body copy calls the thing, since "pane" is a lie in the second case.
- * Cancelling and the dialog's own dismissal (Escape, an outside click) are the
- * same action, both routed through `onCancel`, so there is exactly one way to
- * back out.
+ * Only ever opened for something already known to be dirty: checking that is
+ * the caller's job, and every caller does it before passing `open`. Callers
+ * are not all closing a pane, which is why `subject` exists: it is the word the
+ * body copy uses for the thing holding the edits, and defaulting it to "pane"
+ * would be a lie anywhere else. Cancelling and the dialog's own dismissal
+ * (Escape, an outside click) are the same action, both routed through
+ * `onCancel`, so there is exactly one way to back out.
  */
 export function ConfirmClosePane({
   open,

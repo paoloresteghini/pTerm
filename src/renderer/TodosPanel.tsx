@@ -146,12 +146,22 @@ export function TodosPanel({
   const [priority, setPriority] = useState<TodoPriorityFilter>('all')
   const [sort, setSort] = useState<TodoSort>('priority')
   const [open, setOpen] = useState<string | null>(null)
+  // A read or a write that failed, shown below the list. Cleared at the start
+  // of the next attempt at either, which is the rule `IssuesPanel`'s own
+  // `quickCloseError` follows: an error cleared only by the next failure
+  // outlives the refresh that proved it fixed.
+  const [error, setError] = useState<string | null>(null)
 
   const load = useCallback((): void => {
+    setError(null)
     window.pterm
       .todosList()
       .then(setTodos)
-      .catch(() => setTodos([]))
+      // `todos` is left as it was, so a first load that failed keeps it null
+      // and nothing below claims the list is empty. Reading `[]` in here said
+      // "No todos." for a file the app could not read at all, which the user
+      // cannot tell from a list they have not written yet.
+      .catch(() => setError('Reading the todo list failed.'))
   }, [])
 
   // One fetch on mount plus the push subscription, which is why nothing here
@@ -272,9 +282,14 @@ export function TodosPanel({
       </div>
       <div data-testid="todos-list" className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         {todos === null ? (
-          <p data-testid="todos-loading" className="px-2.5 py-1 text-faint">
-            …
-          </p>
+          // No `…` while an error is up: that row means a load is still
+          // running, and the message below has already said one finished and
+          // failed.
+          error === null ? (
+            <p data-testid="todos-loading" className="px-2.5 py-1 text-faint">
+              …
+            </p>
+          ) : null
         ) : visible.length === 0 ? (
           <p data-testid="todos-empty-list" className="px-2.5 py-1 text-faint">
             {query.trim() !== '' || priority !== 'all' || state !== 'open' ? 'Nothing matches.' : 'No todos.'}
@@ -286,14 +301,25 @@ export function TodosPanel({
               todo={todo}
               onSelect={setOpen}
               onToggleDone={(id, done) => {
+                setError(null)
                 // The reply carries the new list, so nothing here has to
-                // refetch.
-                window.pterm.todosSetDone(id, done).then(setTodos).catch(() => undefined)
+                // refetch. On failure the row stays exactly as it was, and the
+                // message below is the only feedback there is: the row not
+                // moving looks identical to a click that never landed.
+                window.pterm
+                  .todosSetDone(id, done)
+                  .then(setTodos)
+                  .catch(() => setError('Writing the todo list failed.'))
               }}
             />
           ))
         )}
       </div>
+      {error !== null ? (
+        <p data-testid="todos-error" className="px-2.5 py-1 text-[11px] text-danger">
+          {error}
+        </p>
+      ) : null}
       {modal}
       <ColumnResizer testid="resize-todos" side={side} width={width} onResize={set} onCommit={commit} />
     </div>

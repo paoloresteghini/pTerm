@@ -13,7 +13,7 @@
  * opens.
  */
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises'
+import { chmod, mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchApp, killServer, expandColumn } from './harness'
@@ -124,6 +124,12 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await app?.close()
   await killServer(SOCKET)
+  // Before the `rm` below, because the last test makes `configDir` read-only
+  // to force a write failure. A test that aborts between the two `chmod`s
+  // leaves it that way, and `rm` then fails with EACCES on the subdirectories
+  // the app created inside it: measured, the temp dir leaked and teardown
+  // threw on top of the real failure.
+  await chmod(configDir, 0o700).catch(() => undefined)
   for (const dir of [userDataDir, configDir, projectsRoot, claudeSettingsDir, claudeHome]) {
     await rm(dir, { recursive: true, force: true })
   }
@@ -184,4 +190,28 @@ test('the priority dot is drawn in the theme token, not a literal', async () => 
     getComputedStyle(document.documentElement).getPropertyValue('--color-danger').trim(),
   )
   expect(parseRgb(colour)).toBe(token)
+})
+
+test('a failed write says so, and the next successful read clears it', async () => {
+  await expandColumn(page, 'todos')
+  const id = await firstRowId(page)
+
+  // The config dir made read-only, so the store's atomic write cannot create
+  // the temp file it renames into place. Nothing in the app is stubbed for
+  // this: the rejection travels the real path, from `writeFile`'s EACCES
+  // through `ipcMain.handle` to the panel's own `catch`.
+  await chmod(configDir, 0o500)
+  await page.getByTestId(`todo-done-${id}`).click()
+  await expect(page.getByTestId('todos-error')).toHaveText('Writing the todo list failed.')
+  // The row staying put is on its own indistinguishable from a click that
+  // never landed, which is why the message above has to exist.
+  await expect(page.getByTestId(`todo-row-${id}`)).toBeVisible()
+
+  // Restored, and the error goes with the next load rather than sitting there
+  // over a column that is working again. Last test in the file, but it puts
+  // both the permissions and the list back regardless.
+  await chmod(configDir, 0o700)
+  await page.getByTestId('todos-refresh').click()
+  await expect(page.getByTestId('todos-error')).toHaveCount(0)
+  await expect(page.getByTestId('todos-count')).toHaveText('2 open')
 })
