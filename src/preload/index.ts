@@ -21,6 +21,11 @@ import {
   type UpdateInfo,
 } from '../shared/ipc'
 
+/** The value of a `--flag=value` argument, or undefined if it was not passed. */
+function argValue(prefix: string): string | undefined {
+  return process.argv.find((arg) => arg.startsWith(prefix))?.slice(prefix.length)
+}
+
 const api: PTermApi = {
   open: (request: OpenRequest) => ipcRenderer.invoke(CHANNELS.open, request),
   list: () => ipcRenderer.invoke(CHANNELS.list),
@@ -182,14 +187,15 @@ const api: PTermApi = {
     ipcRenderer.invoke(CHANNELS.openDiff, projectId, relPath, side),
   columnsVisible: (collapsed) => ipcRenderer.send(CHANNELS.columnsVisible, collapsed),
   // Off `process.argv`, not `process.env`: vite compiles this bundle with
-  // `process.env` replaced by an empty object literal, so reading the variable
+  // `process.env` replaced by an empty object literal, so reading a variable
   // here would be statically undefined and silently do nothing. `createWindow`
-  // in `src/main/index.ts` puts it on the command line for exactly that
+  // in `src/main/index.ts` puts these on the command line for exactly that
   // reason, and its comment is the long version. See the field in
-  // `shared/ipc.ts` for why it is a value and not a call.
-  webglLimit: process.argv
-    .find((arg) => arg.startsWith('--pterm-webgl-limit='))
-    ?.slice('--pterm-webgl-limit='.length),
+  // `shared/ipc.ts` for why it is one object and not a value each.
+  env: {
+    webglLimit: argValue('--pterm-webgl-limit='),
+    theme: argValue('--pterm-theme='),
+  },
 }
 
 contextBridge.exposeInMainWorld('pterm', api)

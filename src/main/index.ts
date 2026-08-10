@@ -20,6 +20,7 @@ import {
   type ColumnVisibility,
   type MenuCommand,
 } from '../shared/ipc'
+import { THEME_DEFAULT, type ThemeId } from '../shared/themes'
 import { scheduleUpdateChecks } from './update/schedule'
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string
@@ -36,6 +37,14 @@ let mainWindow: BrowserWindow | null = null
  * per call: the harness sets it before launch and nothing changes it after.
  */
 const backgroundWindow = process.env.PTERM_BACKGROUND_WINDOW === '1'
+
+/**
+ * The stored theme, read once at startup so `createWindow` can pass it
+ * synchronously. `createWindow` is called from three places including
+ * `activate` and `second-instance`, and making it async to await a config read
+ * would put a window creation behind a promise in all three.
+ */
+let storedTheme: ThemeId = THEME_DEFAULT
 
 // `PTERM_TMUX_SOCKET` exists so tests run against their own tmux server and can
 // never see, adopt or kill the user's real sessions.
@@ -462,10 +471,12 @@ function createWindow(): void {
        * process is a different bundle and reads its own env normally, which is
        * why every other `PTERM_*` variable is consumed on this side.
        */
-      additionalArguments:
-        process.env.PTERM_WEBGL_LIMIT === undefined
+      additionalArguments: [
+        ...(process.env.PTERM_WEBGL_LIMIT === undefined
           ? []
-          : [`--pterm-webgl-limit=${process.env.PTERM_WEBGL_LIMIT}`],
+          : [`--pterm-webgl-limit=${process.env.PTERM_WEBGL_LIMIT}`]),
+        `--pterm-theme=${storedTheme}`,
+      ],
     },
   })
 
@@ -533,6 +544,7 @@ app.whenReady().then(async () => {
   registerIpc(manager, () => mainWindow, registry, store, setAttendedTab, () =>
     router.refreshBadge(),
   )
+  storedTheme = (await store.read()).theme
   createWindow()
   scheduleUpdateChecks(() => mainWindow)
 

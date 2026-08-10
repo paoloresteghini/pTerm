@@ -1276,16 +1276,20 @@ export interface PTermApi {
    */
   columnsVisible(collapsed: ColumnVisibility): void
   /**
-   * `PTERM_WEBGL_LIMIT`, verbatim, or undefined when it is unset.
+   * Values the main process puts on the command line at window creation,
+   * readable synchronously before the first frame.
    *
-   * A value rather than a call, and read in the preload rather than over IPC:
-   * `Terminal.tsx` needs it while a pane is mounting, which is not a moment
-   * that can wait for a round trip, and the variable cannot change while the
-   * app is running. `webglPaneBudget` in `renderer/lib/webglBudget.ts` is what
-   * interprets it — this end deliberately does no parsing, so there is one
-   * place that decides what a bad value means.
+   * An object rather than a field each: these are read once, at startup, by
+   * code that cannot wait for a round trip, and a flat field per value grows
+   * the bridge every time another one is needed. Both members are optional
+   * because neither is always set.
+   *
+   * `webglLimit` is `PTERM_WEBGL_LIMIT`, verbatim: `webglPaneBudget` in
+   * `renderer/lib/webglBudget.ts` is what interprets it, this end
+   * deliberately does no parsing, so there is one place that decides what a
+   * bad value means. `theme` is read by `bootTheme` in `renderer/theme.ts`.
    */
-  webglLimit: string | undefined
+  env: { webglLimit?: string; theme?: string }
 }
 
 /**

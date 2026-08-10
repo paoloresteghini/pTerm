@@ -122,7 +122,7 @@ function releaseRenderer(tabId: string): void {
  */
 function claimRenderer(tabId: string, term: XTerm): void {
   if (addons.has(tabId)) return
-  const budget = webglPaneBudget(window.pterm.webglLimit)
+  const budget = webglPaneBudget(window.pterm.env.webglLimit)
   while (addons.size >= budget) {
     const victim = leastRecentlyUsed(
       [...addons.keys()].filter((id) => id !== tabId && !onScreen.has(id)),
