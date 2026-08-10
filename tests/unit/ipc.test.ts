@@ -1,5 +1,22 @@
 import { describe, it, expect } from 'vitest'
-import { columnIsCollapsed, type ColumnVisibility } from '../../src/shared/ipc'
+import { CHANNELS, columnIsCollapsed, type ColumnVisibility } from '../../src/shared/ipc'
+
+describe('CHANNELS', () => {
+  // Every entry is a string `ipcMain.handle`/`ipcMain.on` registers a listener
+  // under. Two entries sharing a value would route two different APIs to
+  // whichever handler registered last, and `tsc` has no way to see it: the
+  // object's values are all just `string`, distinct keys included.
+  it('gives every channel a unique wire value', () => {
+    const ownerOf = new Map<string, string>()
+    const duplicates: string[] = []
+    for (const [key, value] of Object.entries(CHANNELS)) {
+      const owner = ownerOf.get(value)
+      if (owner !== undefined) duplicates.push(`${value} (used by both ${owner} and ${key})`)
+      else ownerOf.set(value, key)
+    }
+    expect(duplicates).toEqual([])
+  })
+})
 
 describe('columnIsCollapsed', () => {
   it('reads an explicit false as open', () => {

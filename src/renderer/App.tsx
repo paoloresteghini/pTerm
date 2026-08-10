@@ -1258,6 +1258,15 @@ export function App() {
             return
           case 'settings':
             setSettingsOpen(true)
+            return
+          default: {
+            // Same reasoning as `renderSlot`'s own `default`: assigning `command`
+            // to `never` only typechecks once every member of `MenuCommand` has
+            // a case above it, so a command added to the union without one
+            // fails `tsc` on this line instead of doing nothing when clicked.
+            const unreachable: never = command
+            return unreachable
+          }
         }
       }),
     [

@@ -1019,12 +1019,14 @@ export interface PTermApi {
   todosList(): Promise<TodoRecord[]>
   /**
    * Resolves with the todo list as it now stands. A refused create (empty
-   * title) and an unknown id both resolve with the list unchanged rather
-   * than rejecting.
+   * title) resolves with the list unchanged rather than rejecting.
    */
   todosCreate(draft: TodoDraft): Promise<TodoRecord[]>
+  /** An unknown id is a no-op: resolves with the list unchanged rather than rejecting. */
   todosUpdate(id: string, patch: TodoPatch): Promise<TodoRecord[]>
+  /** An unknown id is a no-op: resolves with the list unchanged rather than rejecting. */
   todosSetDone(id: string, done: boolean): Promise<TodoRecord[]>
+  /** An unknown id is a no-op: resolves with the list unchanged rather than rejecting. */
   todosDelete(id: string): Promise<TodoRecord[]>
   /** Pushed to every window after any mutation, the originator included. */
   onTodosChanged(listener: (todos: TodoRecord[]) => void): () => void

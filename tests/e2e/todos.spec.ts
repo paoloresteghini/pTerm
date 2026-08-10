@@ -208,8 +208,8 @@ test('a failed write says so, and the next successful read clears it', async () 
   await expect(page.getByTestId(`todo-row-${id}`)).toBeVisible()
 
   // Restored, and the error goes with the next load rather than sitting there
-  // over a column that is working again. Last test in the file, but it puts
-  // both the permissions and the list back regardless.
+  // over a column that is working again. This puts both the permissions and
+  // the list back regardless of what runs after it.
   await chmod(configDir, 0o700)
   await page.getByTestId('todos-refresh').click()
   await expect(page.getByTestId('todos-error')).toHaveCount(0)
