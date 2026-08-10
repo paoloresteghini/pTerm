@@ -215,3 +215,32 @@ test('a failed write says so, and the next successful read clears it', async () 
   await expect(page.getByTestId('todos-error')).toHaveCount(0)
   await expect(page.getByTestId('todos-count')).toHaveText('2 open')
 })
+
+test('a successful modal mutation clears an error the list left behind', async () => {
+  // The regression the first fix round introduced. The modal hands its reply
+  // straight back as the new list, deliberately, since the reply carries the
+  // whole thing; the error state was not on that path, so a stale write failure
+  // sat over a list a later edit had already put right.
+  await expandColumn(page, 'todos')
+  const id = await firstRowId(page)
+
+  await chmod(configDir, 0o500)
+  await page.getByTestId(`todo-done-${id}`).click()
+  await expect(page.getByTestId('todos-error')).toHaveText('Writing the todo list failed.')
+  await chmod(configDir, 0o700)
+
+  // A mutation through the MODAL, not the refresh button: refresh goes through
+  // `load`, which cleared the error even before the fix, so it cannot tell the
+  // two versions apart.
+  await page.getByTestId(`todo-row-${id}`).click()
+  await page.getByTestId('todo-edit').click()
+  await page.getByTestId('todo-title-input').fill('chase invoice properly')
+  await page.getByTestId('todo-save').click()
+  await expect(page.getByTestId(`todo-row-${id}`)).toContainText('chase invoice properly')
+  await expect(page.getByTestId('todos-error')).toHaveCount(0)
+
+  // Last test in the file, and it leaves that todo renamed. Both `chmod`s are
+  // balanced above, and `afterAll` restores the mode again in case they are not.
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('todo-modal')).toHaveCount(0)
+})

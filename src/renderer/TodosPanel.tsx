@@ -147,21 +147,47 @@ export function TodosPanel({
   const [sort, setSort] = useState<TodoSort>('priority')
   const [open, setOpen] = useState<string | null>(null)
   // A read or a write that failed, shown below the list. Cleared at the start
-  // of the next attempt at either, which is the rule `IssuesPanel`'s own
-  // `quickCloseError` follows: an error cleared only by the next failure
-  // outlives the refresh that proved it fixed.
+  // of the next attempt at either and again by `applyMutation` when one
+  // succeeds, which is the rule `IssuesPanel`'s own `quickCloseError` follows:
+  // an error cleared only by the next failure outlives the refresh that proved
+  // it fixed.
+  //
+  // NOT cleared by the pushed list below. A push means SOME window wrote, which
+  // says nothing about the write that failed here, and this message is about
+  // this window's own attempt.
   const [error, setError] = useState<string | null>(null)
+
+  /**
+   * What every successful mutation lands on, from this column or from the
+   * modal: the new list, and the error cleared.
+   *
+   * One function rather than a bare `setTodos` at each call site, because the
+   * clearing half is what got missed. The modal's reply is the source of the
+   * list (it carries the whole thing, so there is nothing to refetch), and
+   * without this a stale "Writing the todo list failed." sat over a list that
+   * a later modal edit had already put right.
+   */
+  const applyMutation = useCallback((rows: TodoRecord[]): void => {
+    setTodos(rows)
+    setError(null)
+  }, [])
 
   const load = useCallback((): void => {
     setError(null)
     window.pterm
       .todosList()
       .then(setTodos)
-      // `todos` is left as it was, so a first load that failed keeps it null
-      // and nothing below claims the list is empty. Reading `[]` in here said
-      // "No todos." for a file the app could not read at all, which the user
-      // cannot tell from a list they have not written yet.
-      .catch(() => setError('Reading the todo list failed.'))
+      // A rejected `todosList` is a call that did not COMPLETE: no handler
+      // registered yet, or the main process going away mid-flight. It is not
+      // how a damaged file arrives. `readTodos` in `src/main/todos/store.ts`
+      // answers a missing or unparseable `todos.json` with an empty list on
+      // purpose, so a bad file renders as "No todos." below and never reaches
+      // here. Hence the wording: the list could not be reached, not that it
+      // could not be read.
+      //
+      // `todos` is left as it was either way, so a first load that failed
+      // keeps it null and nothing below claims the list is empty.
+      .catch(() => setError('Could not reach the todo list.'))
   }, [])
 
   // One fetch on mount plus the push subscription, which is why nothing here
@@ -185,7 +211,7 @@ export function TodosPanel({
         setOpen(null)
         onCreatingChange(false)
       }}
-      onChanged={setTodos}
+      onChanged={applyMutation}
     />
   )
 
@@ -308,7 +334,7 @@ export function TodosPanel({
                 // moving looks identical to a click that never landed.
                 window.pterm
                   .todosSetDone(id, done)
-                  .then(setTodos)
+                  .then(applyMutation)
                   .catch(() => setError('Writing the todo list failed.'))
               }}
             />
