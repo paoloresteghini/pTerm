@@ -7,7 +7,7 @@
  * the row, then overwrites the fixture with the detail shape before clicking
  * it open. What matters here is not what the modal shows afterwards, since
  * the stub keeps no state and a second `issue view` would just echo the same
- * fixture back — it is the argv `PTERM_GH_STUB_LOG` recorded for the
+ * fixture back: it is the argv `PTERM_GH_STUB_LOG` recorded for the
  * mutating call, which is the contract main and the renderer actually agree
  * on.
  */
@@ -213,4 +213,23 @@ test('a close attempt under no-auth leaves issue-error visible', async () => {
   await page.getByTestId('issue-close-completed').click()
 
   await expect(page.getByTestId('issue-error')).toBeVisible({ timeout: 15_000 })
+})
+
+test('clicking Cancel on a dirty edit asks for confirmation, and dismissing it keeps the edit', async () => {
+  await openIssue(OPEN_ROW, OPEN_DETAIL)
+
+  await page.getByTestId('issue-edit').click()
+  await expect(page.getByTestId('issue-title-input')).toBeVisible({ timeout: 15_000 })
+  await page.getByTestId('issue-title-input').fill('Fix the resizer for real this time')
+
+  await page.getByTestId('issue-cancel').click()
+
+  await expect(page.getByTestId('confirm-close')).toBeVisible({ timeout: 15_000 })
+
+  // Dismissing (not discarding) must leave the edit exactly as it was:
+  // still in edit mode, still holding the typed title.
+  await page.getByTestId('confirm-close-cancel').click()
+
+  await expect(page.getByTestId('confirm-close')).toHaveCount(0)
+  await expect(page.getByTestId('issue-title-input')).toHaveValue('Fix the resizer for real this time')
 })

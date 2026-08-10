@@ -78,6 +78,13 @@ function BodyEditor({ value, onChange }: { value: string; onChange: (text: strin
   return (
     <div
       data-testid="issue-body-editor"
+      // Same reason the title input and the comment box carry this: without
+      // it, a ⌘ shortcut typed while the body has focus (⌘+digit to switch
+      // the active project among them) reaches `App.tsx`'s window-level
+      // handler instead of the editor, since CodeMirror's own keymap only
+      // intercepts the bindings it recognises and lets everything else
+      // bubble past it.
+      data-shortcuts="off"
       ref={host}
       className="scroll-thin mb-3 border border-border bg-bg"
     />
@@ -93,8 +100,8 @@ function BodyEditor({ value, onChange }: { value: string; onChange: (text: strin
  * pair: `null` is closed, and any other value both opens the dialog and
  * names the fetch to run. `create` is a second, independent way to be open:
  * the panel's `+` sets it with `number` still `null`, since there is no
- * issue yet to name. The two are never both meaningful at once — `create`
- * wins when it is true — and `IssuesPanel` is the one place that decides
+ * issue yet to name. The two are never both meaningful at once (`create`
+ * wins when it is true), and `IssuesPanel` is the one place that decides
  * which of them is set.
  *
  * Every mutation here is pessimistic: a submit disables its button and shows
@@ -125,7 +132,12 @@ export function IssueModal({
   const [comment, setComment] = useState('')
   const [busy, setBusy] = useState(false)
   const [mutationError, setMutationError] = useState<string | null>(null)
-  const [confirmDiscard, setConfirmDiscard] = useState(false)
+  // The single choke point every way out of a dirty edit or create goes
+  // through: Escape, an outside click, the Cancel button, and a target
+  // change that lands mid-edit all store the action they would otherwise
+  // have run immediately, and `ConfirmClosePane`'s own Discard button is
+  // the only thing that actually runs it. `null` means nothing is pending.
+  const [pendingAction, setPendingAction] = useState<(() => void) | null>(null)
 
   const mode = create ? 'create' : editing ? 'edit' : 'read'
   const open = number !== null || create
@@ -135,6 +147,16 @@ export function IssueModal({
   // earlier call (a project or issue switch, or simply a slower request
   // overtaken by a newer one) and is dropped rather than landing.
   const fetchToken = useRef(0)
+
+  // The project and issue an in-progress edit or create actually targets,
+  // frozen at the moment that session started (`resetForTarget` below is the
+  // only writer). `submitEdit`/`submitCreate` read this instead of the live
+  // `projectId`/`number` props: if a target change lands while dirty (see
+  // the effect below) the confirm blocks further submits until it is
+  // answered, but a project switch by ⌘+digit can still land the instant
+  // BEFORE that effect runs, and reading the live props at submit time would
+  // then send an edit to a repository the user was never shown.
+  const activeTarget = useRef<{ projectId: string; number: number | null }>({ projectId, number })
 
   // `clear` is false for a refetch after a mutation on the SAME issue: the
   // detail already on screen stays there until the fresh copy arrives,
@@ -167,32 +189,11 @@ export function IssueModal({
     [projectId, number],
   )
 
-  // Fresh session on every new target: a different issue, a project switch,
-  // or `create` toggling on. Skipped entirely while closed (see `fetchDetail`
-  // itself for the `number === null` guard, which also covers `create`).
-  useEffect(() => {
-    setEditing(false)
-    setMutationError(null)
-    setConfirmDiscard(false)
-    setComment('')
-    if (create) {
-      setTitle('')
-      setBody('')
-    }
-    fetchDetail(true)
-  }, [fetchDetail, create])
-
-  const startEdit = useCallback(() => {
-    if (detail === null) return
-    setTitle(detail.title)
-    setBody(detail.body)
-    setMutationError(null)
-    setEditing(true)
-  }, [detail])
-
   // A create draft is dirty the moment either box has something in it; an
   // edit is dirty when either differs from the issue as it was fetched. Read
-  // mode is never dirty, since nothing in it is typed.
+  // mode is never dirty, since nothing in it is typed. Computed before the
+  // effect below, which reads it as a plain closure value rather than a
+  // dependency: see that effect's own comment for why.
   const dirty =
     mode === 'create'
       ? title.trim() !== '' || body.trim() !== ''
@@ -200,8 +201,55 @@ export function IssueModal({
         ? title !== (detail?.title ?? '') || body !== (detail?.body ?? '')
         : false
 
+  // Adopts whatever target this render names (a different issue, a project
+  // switch, or `create` toggling on): clears the edit/create/comment state,
+  // freezes `activeTarget` to match, and fetches fresh detail. Skipped
+  // entirely while closed, via `fetchDetail`'s own `number === null` guard,
+  // which also covers `create`.
+  const resetForTarget = useCallback(() => {
+    activeTarget.current = { projectId, number }
+    setEditing(false)
+    setMutationError(null)
+    setComment('')
+    if (create) {
+      setTitle('')
+      setBody('')
+    }
+    fetchDetail(true)
+  }, [projectId, number, create, fetchDetail])
+
+  // Runs only when the TARGET actually changes (`resetForTarget`'s own
+  // identity, which moves with `projectId`, `number` and `create`), never on
+  // a keystroke that merely flips `dirty`. A dirty edit or create defers the
+  // reset behind the same confirm every other exit uses instead of running
+  // it straight away, which is what stops a target change from silently
+  // discarding unsaved text: without this, a project switch by ⌘+digit
+  // landing while `BodyEditor` did not have focus (nothing marked it
+  // `data-shortcuts="off"` until this fix) wiped an in-progress edit with no
+  // warning at all. Radix's own `modal=true` blocks a stray click reaching
+  // another row or the panel's `+` while this dialog is open, but that is a
+  // property of the current UI rather than a defence this component owns,
+  // so the same gate covers it regardless of how a future change might
+  // reach here.
+  useEffect(() => {
+    if (dirty) {
+      setPendingAction(() => resetForTarget)
+      return
+    }
+    resetForTarget()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resetForTarget])
+
+  const startEdit = useCallback(() => {
+    if (detail === null) return
+    activeTarget.current = { projectId, number }
+    setTitle(detail.title)
+    setBody(detail.body)
+    setMutationError(null)
+    setEditing(true)
+  }, [detail, projectId, number])
+
   const closeNow = useCallback(() => {
-    setConfirmDiscard(false)
     onClose()
   }, [onClose])
 
@@ -211,7 +259,7 @@ export function IssueModal({
   // immediately; its own Discard button is what actually closes from there.
   const requestClose = useCallback(() => {
     if (dirty) {
-      setConfirmDiscard(true)
+      setPendingAction(() => closeNow)
       return
     }
     closeNow()
@@ -219,10 +267,11 @@ export function IssueModal({
 
   const submitCreate = useCallback(() => {
     if (busy || title.trim() === '') return
+    const target = activeTarget.current
     setBusy(true)
     setMutationError(null)
     window.pterm
-      .issuesCreate(projectId, title, body)
+      .issuesCreate(target.projectId, title, body)
       .then((result) => {
         if (!result.ok) {
           setMutationError(result.message)
@@ -233,14 +282,15 @@ export function IssueModal({
       })
       .catch(() => setMutationError('The GitHub CLI reported an error.'))
       .finally(() => setBusy(false))
-  }, [busy, projectId, title, body, onMutated, closeNow])
+  }, [busy, title, body, onMutated, closeNow])
 
   const submitEdit = useCallback(() => {
-    if (busy || number === null || title.trim() === '') return
+    const target = activeTarget.current
+    if (busy || target.number === null || title.trim() === '') return
     setBusy(true)
     setMutationError(null)
     window.pterm
-      .issuesEdit(projectId, number, title, body)
+      .issuesEdit(target.projectId, target.number, title, body)
       .then((result) => {
         if (!result.ok) {
           setMutationError(result.message)
@@ -252,7 +302,7 @@ export function IssueModal({
       })
       .catch(() => setMutationError('The GitHub CLI reported an error.'))
       .finally(() => setBusy(false))
-  }, [busy, projectId, number, title, body, onMutated, fetchDetail])
+  }, [busy, title, body, onMutated, fetchDetail])
 
   const submitState = useCallback(
     (action: 'close' | 'reopen', reason?: 'completed' | 'not planned') => {
@@ -308,17 +358,25 @@ export function IssueModal({
     [mode, submitCreate, submitEdit, submitComment],
   )
 
+  // What Cancel actually does once it is allowed to run: back out of create
+  // entirely, or drop back to read mode from edit. Routed through the same
+  // dirty check as every other exit below, since a Cancel click is just as
+  // capable of throwing away typed text as Escape is.
   const cancelEditOrCreate = useCallback(() => {
-    if (mode === 'create') {
-      // An explicit Cancel click is already the confirmation a discard
-      // needs; only the accidental routes (Escape, an outside click) go
-      // through `ConfirmClosePane`.
-      closeNow()
+    const runCancel = (): void => {
+      if (mode === 'create') {
+        closeNow()
+        return
+      }
+      setEditing(false)
+      setMutationError(null)
+    }
+    if (dirty) {
+      setPendingAction(() => runCancel)
       return
     }
-    setEditing(false)
-    setMutationError(null)
-  }, [mode, closeNow])
+    runCancel()
+  }, [mode, dirty, closeNow])
 
   return (
     <>
@@ -532,7 +590,15 @@ export function IssueModal({
           )}
         </DialogContent>
       </Dialog>
-      <ConfirmClosePane open={confirmDiscard} onCancel={() => setConfirmDiscard(false)} onDiscard={closeNow} />
+      <ConfirmClosePane
+        open={pendingAction !== null}
+        onCancel={() => setPendingAction(null)}
+        onDiscard={() => {
+          const action = pendingAction
+          setPendingAction(null)
+          action?.()
+        }}
+      />
     </>
   )
 }
