@@ -484,7 +484,7 @@ export async function restoreWorkspace(
     const restored = attachSavedFields(merged.panes, saved.panes)
 
     await store.write({
-      version: 8,
+      version: 9,
       // Only real projects are persisted; the Unsorted row is synthetic.
       // Matched by id rather than by index: `describeProjects` returns one row
       // per project today, but adding a `filter` or a `continue` to it would
@@ -509,6 +509,10 @@ export async function restoreWorkspace(
       // through `mergeSessionlessPanes` instead.
       tabs: merged.tabs,
       notifications: saved.notifications,
+      // Rides along with `notifications` above, for the same reason: nothing
+      // between `store.read()` and here ever touches it, so writing anything
+      // but what was read would silently revert the picker on every relaunch.
+      theme: saved.theme,
     })
 
     // `tabs` rides along with `panes` rather than being dropped here as it

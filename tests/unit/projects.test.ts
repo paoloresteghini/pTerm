@@ -11,12 +11,13 @@ import {
 import { DEFAULT_NOTIFICATIONS, type PTermConfig } from '../../src/main/state/store'
 
 const EMPTY: PTermConfig = {
-  version: 8,
+  version: 9,
   projects: [],
   activeProjectId: null,
   panes: [],
   tabs: [],
   notifications: DEFAULT_NOTIFICATIONS,
+  theme: 'classic',
 }
 
 function withProjects(...names: string[]): PTermConfig {

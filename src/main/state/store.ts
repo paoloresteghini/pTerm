@@ -7,6 +7,7 @@ import type { PaneRecord } from '../sessions/manager'
 // drift. Re-exported so existing importers keep working.
 import type { NotificationConfig, Preset, TabLayout, TabRow, TabType } from '../../shared/ipc'
 import { isPaneColor } from '../../shared/paneColors'
+import { isThemeId, THEME_DEFAULT, type ThemeId } from '../../shared/themes'
 
 export type { Preset, TabLayout, TabRow }
 
@@ -33,7 +34,7 @@ export interface ProjectRecord {
 }
 
 export interface PTermConfig {
-  version: 8
+  version: 9
   /** Array order is sidebar order, and the order ⌘1–9 follows. */
   projects: ProjectRecord[]
   activeProjectId: string | null
@@ -46,6 +47,8 @@ export interface PTermConfig {
    */
   tabs: TabRow[]
   notifications: NotificationConfig
+  /** Which palette the window paints in. See `src/shared/themes.ts`. */
+  theme: ThemeId
 }
 
 /**
@@ -67,12 +70,13 @@ export const DEFAULT_NOTIFICATIONS: NotificationConfig = {
 }
 
 const EMPTY: PTermConfig = {
-  version: 8,
+  version: 9,
   projects: [],
   activeProjectId: null,
   panes: [],
   tabs: [],
   notifications: DEFAULT_NOTIFICATIONS,
+  theme: THEME_DEFAULT,
 }
 
 /**
@@ -347,6 +351,17 @@ function normaliseNotifications(value: unknown): NotificationConfig {
 }
 
 /**
+ * The stored theme id, or the default.
+ *
+ * Same shape as `normaliseNotifications` and for the same reason: a field read
+ * out of a text file is a field that can be anything, and the cost of trusting
+ * this one is a window painted from an undefined palette.
+ */
+function normaliseTheme(value: unknown): ThemeId {
+  return isThemeId(value) ? value : THEME_DEFAULT
+}
+
+/**
  * v1 had no active tab. v2 had one, globally — a notion v3 replaced with one
  * per project, so it is dropped rather than guessed at. v4 adds a tab type and
  * notification rules; neither is derivable from an older file, so both take
@@ -363,7 +378,7 @@ function normaliseNotifications(value: unknown): NotificationConfig {
  * that slug is the auto-create-from-slug behaviour M2b rejected, so migrated
  * panes belong to nothing and restore lists them under Unsorted.
  */
-function migrate(value: unknown): PTermConfig {
+export function migrate(value: unknown): PTermConfig {
   if (!hasVersion(value)) return { ...EMPTY }
   const candidate = value as {
     projects?: unknown
@@ -371,27 +386,36 @@ function migrate(value: unknown): PTermConfig {
     panes?: unknown
     tabs?: unknown
     notifications?: unknown
+    theme?: unknown
   }
   const rows: unknown[] = Array.isArray(candidate.projects) ? candidate.projects : []
   const projects = rows.filter(isProject).map(normaliseProject)
   const activeProjectId =
     typeof candidate.activeProjectId === 'string' ? candidate.activeProjectId : null
 
-  // 5, 6, 7 and 8 share a shape. v6 added an optional pane title, v7 an
-  // optional pane colour, and v8 an optional file path plus a session that is
-  // optional per kind. In every case an older row not having the field is
-  // exactly what "never set" already means, so there is nothing to convert and
-  // one branch reads all four. A v7 row is a terminal row by construction,
-  // because no version before v8 could express a pane without a session.
-  if (value.version === 5 || value.version === 6 || value.version === 7 || value.version === 8) {
+  // 5 through 9 share a shape. v6 added an optional pane title, v7 an optional
+  // pane colour, v8 an optional file path plus a session that is optional per
+  // kind, and v9 an optional theme id. In every case an older file not having
+  // the field is exactly what "never set" already means, so there is nothing
+  // to convert and one branch reads all five. A v7 row is a terminal row by
+  // construction, because no version before v8 could express a pane without a
+  // session.
+  if (
+    value.version === 5 ||
+    value.version === 6 ||
+    value.version === 7 ||
+    value.version === 8 ||
+    value.version === 9
+  ) {
     const panes = paneRows(candidate.panes)
     return {
-      version: 8,
+      version: 9,
       projects,
       activeProjectId,
       panes,
       tabs: tabRows(candidate.tabs, panes),
       notifications: normaliseNotifications(candidate.notifications),
+      theme: normaliseTheme(candidate.theme),
     }
   }
   if ([1, 2, 3, 4].includes(value.version)) {
@@ -399,12 +423,13 @@ function migrate(value: unknown): PTermConfig {
     // and a tab holding just that pane, full width and necessarily selected.
     const panes = paneRows(candidate.tabs)
     return {
-      version: 8,
+      version: 9,
       projects,
       activeProjectId,
       panes,
       tabs: oneTabPerPane(panes),
       notifications: normaliseNotifications(candidate.notifications),
+      theme: normaliseTheme(candidate.theme),
     }
   }
   // A version from the future: refuse to guess at its shape.
