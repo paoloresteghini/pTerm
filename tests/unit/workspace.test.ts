@@ -1348,6 +1348,67 @@ describe('workspaceReducer', () => {
     })
   })
 
+  describe('joined', () => {
+    it('folds both rows of a join into state', () => {
+      // bbb starts as its own one-pane tab, with a row of its own (exactly
+      // what `joinPane` finds when the source tab is later dropped).
+      const state: WorkspaceState = { ...three, tabs: [tabRow('bbb', ['bbb'])] }
+      const next = workspaceReducer(state, {
+        type: 'joined',
+        shape: {
+          panes: [tab('aaa'), tab('bbb')],
+          tabs: [tabRow('aaa', ['aaa', 'bbb'])],
+          dropped: 'bbb',
+        },
+      })
+      expect(next.tabs.find((row) => row.id === 'aaa')?.layout.kids).toEqual(['aaa', 'bbb'])
+      expect(next.tabs.find((row) => row.id === 'bbb')).toBeUndefined()
+    })
+
+    it('keeps a source row that survived the join', () => {
+      // ccc already carries a second pane, ddd, before the join: the row
+      // this test needs still standing afterwards.
+      const state: WorkspaceState = {
+        ...three,
+        panes: [...three.panes, tab('ddd')],
+        tabs: [tabRow('ccc', ['ccc', 'ddd'])],
+      }
+      const next = workspaceReducer(state, {
+        type: 'joined',
+        shape: {
+          panes: [tab('aaa'), tab('ccc'), tab('ddd')],
+          tabs: [tabRow('ccc', ['ccc', 'ddd']), tabRow('aaa', ['aaa'])],
+          dropped: null,
+        },
+      })
+      expect(next.tabs.find((row) => row.id === 'aaa')?.layout.kids).toEqual(['aaa'])
+      expect(next.tabs.find((row) => row.id === 'ccc')?.layout.kids).toEqual(['ccc', 'ddd'])
+    })
+
+    it('makes the joined pane the active tab of its project', () => {
+      // ccc starts split into two panes; ddd is the one about to be dragged
+      // onto aaa, so the reply carries BOTH rows: aaa (the target, gaining
+      // ddd) at index 0 and ccc (the source, keeping just itself) at index 1.
+      // Two distinct activePaneIds, so a reducer reading the wrong row lands
+      // on a different pane than a correct one, unlike a single-row shape,
+      // where `tabs[1] ?? tabs[0]` silently falls back to the right answer.
+      const state: WorkspaceState = {
+        ...three,
+        panes: [...three.panes, tab('ddd')],
+        tabs: [tabRow('ccc', ['ccc', 'ddd'])],
+      }
+      const next = workspaceReducer(state, {
+        type: 'joined',
+        shape: {
+          panes: [tab('aaa'), tab('ddd'), tab('ccc')],
+          tabs: [tabRow('aaa', ['aaa', 'ddd'], 'ddd'), tabRow('ccc', ['ccc'], 'ccc')],
+          dropped: null,
+        },
+      })
+      expect(activeTabId(next)).toBe('ddd')
+    })
+  })
+
   describe('activatedPane', () => {
     it('sets the tab\'s activePaneId', () => {
       const state: WorkspaceState = {

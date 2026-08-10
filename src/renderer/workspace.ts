@@ -1,6 +1,7 @@
 import {
   UNSORTED_ID,
   canHaveSession,
+  type JoinShape,
   type ProjectDescriptor,
   type TabDescriptor,
   type TabRow,
@@ -87,6 +88,8 @@ export type WorkspaceAction =
   | { type: 'dismissed'; id: string }
   /** What `splitPane` resolved to: the new pane, and the tab's replacement row. */
   | { type: 'split'; shape: TabShape }
+  /** What `joinPane` resolved to: the target row, and the source row when it survived. */
+  | { type: 'joined'; shape: JoinShape }
   /**
    * What `closePane` resolved to. `paneId` is what was asked to close — the
    * one piece `shape` cannot carry, since a tab's last pane closing leaves
@@ -900,6 +903,53 @@ function applyTabShape(state: WorkspaceState, shape: TabShape): WorkspaceState {
   return { ...state, panes, tabs }
 }
 
+/**
+ * Folds a `JoinShape` reply into state: every pane it names is upserted into
+ * `state.panes`, exactly as `applyTabShape` does, and each row it names
+ * either replaces the matching entry in `state.tabs` or is appended. Unlike
+ * `applyTabShape`, this can also SUBTRACT a row: `shape.dropped`, when set,
+ * names the source tab whose last pane the join took, and that row is
+ * removed rather than left stale.
+ *
+ * Not built on `applyTabShape`: that helper's own doc comment says it
+ * deliberately never subtracts, because `closedPane` needed the same
+ * upsert-only behaviour and bending one signature to answer both "replace or
+ * insert" and "replace, insert or remove" would make it answer two different
+ * questions. A join needs both parts every time it runs, so this is its own
+ * short block instead of a flag threaded through the other one.
+ *
+ * Each incoming row goes through `withKeptPanes`, same as `applyTabShape`,
+ * so a tombstone this window is holding for either tab survives the join.
+ *
+ * `shape.tabs[0]` is read as the target row's `activePaneId` to select it.
+ * That ordering is a convention of the reply, not something this function
+ * enforces: the target is placed first by the code that builds `shape`, and
+ * a producer-side test pins it there.
+ */
+function applyJoinShape(state: WorkspaceState, shape: JoinShape): WorkspaceState {
+  const panes = [
+    ...state.panes.map((pane) => shape.panes.find((incoming) => incoming.id === pane.id) ?? pane),
+    ...shape.panes.filter((incoming) => !state.panes.some((pane) => pane.id === incoming.id)),
+  ]
+
+  let tabs = state.tabs.filter((row) => row.id !== shape.dropped)
+  for (const incoming of shape.tabs) {
+    const row = withKeptPanes(
+      tabs.find((candidate) => candidate.id === incoming.id),
+      incoming,
+      panes,
+    )
+    tabs = tabs.some((candidate) => candidate.id === row.id)
+      ? tabs.map((candidate) => (candidate.id === row.id ? row : candidate))
+      : [...tabs, row]
+  }
+
+  const next = { ...state, panes, tabs }
+  const joined = shape.tabs[0]?.activePaneId
+  const pane = joined ? panes.find((candidate) => candidate.id === joined) : undefined
+  return pane ? setActiveTab(next, projectIdForTab(next.projects, pane), pane.id) : next
+}
+
 function setActiveTab(
   state: WorkspaceState,
   projectId: string,
@@ -1169,6 +1219,9 @@ export function workspaceReducer(
 
     case 'split':
       return applyTabShape(state, action.shape)
+
+    case 'joined':
+      return applyJoinShape(state, action.shape)
 
     case 'closedPane': {
       // The row from before the close, found by its old `kids` — `shape`
