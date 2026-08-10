@@ -66,7 +66,7 @@ export function FileTreeMenu({
       onMouseDown={(event) => event.stopPropagation()}
       style={{ left, top }}
       className={cn(
-        'fixed z-50 min-w-[160px] rounded border border-border bg-surface py-1 font-sans text-[12px] shadow-lg',
+        'fixed z-50 min-w-[160px] rounded border border-border-strong bg-overlay py-1 font-sans text-[12px] shadow-lg',
       )}
     >
       {isDir ? null : item('open', 'Open')}

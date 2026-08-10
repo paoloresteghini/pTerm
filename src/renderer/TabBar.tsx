@@ -243,7 +243,7 @@ export function TabBar({
                 // Stops the click that lands in the field from also
                 // re-activating the tab underneath it.
                 onClick={(event) => event.stopPropagation()}
-                className="min-w-0 flex-1 border border-border bg-bg px-1 text-fg outline-none"
+                className="min-w-0 flex-1 border border-border bg-raised px-1 text-fg outline-none"
               />
             ) : (
               <span
@@ -267,7 +267,7 @@ export function TabBar({
                 // the button) bubbles to the tab container and activates it.
                 onClick={(event) => event.stopPropagation()}
                 style={{ left: menu.left, top: menu.top }}
-                className="fixed z-20 flex flex-col border border-border bg-bg py-0.5 text-[11px]"
+                className="fixed z-20 flex flex-col border border-border-strong bg-overlay py-0.5 text-[11px]"
               >
                 <button
                   data-testid={`trename-${tab.id}`}

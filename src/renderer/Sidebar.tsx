@@ -137,7 +137,7 @@ export function Sidebar({
                 onClick={() => onSelectProject(project.id)}
                 className={cn(
                   'group flex cursor-default items-center gap-1.5 px-2.5 py-1',
-                  active ? 'bg-bg text-fg' : 'text-muted hover:text-fg',
+                  active ? 'bg-raised text-fg' : 'text-muted hover:text-fg',
                 )}
               >
                 {/* ⌘1–9 follows sidebar order, so the number is the shortcut. */}
@@ -164,7 +164,7 @@ export function Sidebar({
                       if (event.key === 'Enter') finishRename(project.id, true)
                       if (event.key === 'Escape') finishRename(project.id, false)
                     }}
-                    className="min-w-0 flex-1 border border-border bg-bg px-1 text-fg outline-none"
+                    className="min-w-0 flex-1 border border-border bg-raised px-1 text-fg outline-none"
                   />
                 ) : (
                   <span className="flex-1 truncate">{project.name}</span>
@@ -192,7 +192,7 @@ export function Sidebar({
               </div>
 
               {menuFor === project.id ? (
-                <div className="flex flex-col border-y border-border bg-bg py-0.5">
+                <div className="flex flex-col border-y border-border-strong bg-overlay py-0.5">
                   <MenuItem
                     testid={`prename-${project.id}`}
                     label="Rename…"
@@ -294,7 +294,7 @@ export function Sidebar({
                           onChange={(event) => {
                             if (event.target.value) onMoveTab(tab.id, event.target.value)
                           }}
-                          className="cursor-default border border-border bg-bg text-[10px] text-muted"
+                          className="cursor-default border border-border bg-raised text-[10px] text-muted"
                         >
                           <option value="">move…</option>
                           {projects

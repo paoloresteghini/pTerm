@@ -86,7 +86,7 @@ function BodyEditor({ value, onChange }: { value: string; onChange: (text: strin
       // bubble past it.
       data-shortcuts="off"
       ref={host}
-      className="scroll-thin mb-3 border border-border bg-bg"
+      className="scroll-thin mb-3 border border-border bg-raised"
     />
   )
 }

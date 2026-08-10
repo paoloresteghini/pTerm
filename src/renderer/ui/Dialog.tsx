@@ -17,7 +17,7 @@ export function DialogContent({
       <DialogPrimitive.Content
         className={cn(
           'fixed left-1/2 top-1/2 z-50 w-[520px] max-w-[90vw] -translate-x-1/2 -translate-y-1/2',
-          'rounded border border-border bg-surface p-4 font-mono text-fg shadow-xl',
+          'lip rounded border border-border-strong bg-overlay p-4 font-mono text-fg shadow-xl',
           className,
         )}
         {...props}
