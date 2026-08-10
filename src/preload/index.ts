@@ -17,6 +17,9 @@ import {
   type PTermApi,
   type StatusEvent,
   type TabDescriptor,
+  type TodoDraft,
+  type TodoPatch,
+  type TodoRecord,
   type UpdateCheckResult,
   type UpdateInfo,
 } from '../shared/ipc'
@@ -89,6 +92,20 @@ const api: PTermApi = {
   uninstallShellHistory: () => ipcRenderer.invoke(CHANNELS.uninstallShellHistory),
   setLayout: (tabId, shares) => ipcRenderer.send(CHANNELS.setLayout, tabId, shares),
   skills: (projectCwd) => ipcRenderer.invoke(CHANNELS.skills, projectCwd),
+  todosList: (): Promise<TodoRecord[]> => ipcRenderer.invoke(CHANNELS.todosList),
+  todosCreate: (draft: TodoDraft): Promise<TodoRecord[]> =>
+    ipcRenderer.invoke(CHANNELS.todosCreate, draft),
+  todosUpdate: (id: string, patch: TodoPatch): Promise<TodoRecord[]> =>
+    ipcRenderer.invoke(CHANNELS.todosUpdate, id, patch),
+  todosSetDone: (id: string, done: boolean): Promise<TodoRecord[]> =>
+    ipcRenderer.invoke(CHANNELS.todosSetDone, id, done),
+  todosDelete: (id: string): Promise<TodoRecord[]> =>
+    ipcRenderer.invoke(CHANNELS.todosDelete, id),
+  onTodosChanged: (listener: (todos: TodoRecord[]) => void) => {
+    const handler = (_event: IpcRendererEvent, payload: TodoRecord[]): void => listener(payload)
+    ipcRenderer.on(CHANNELS.todosChanged, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.todosChanged, handler)
+  },
   notesRead: (projectId) => ipcRenderer.invoke(CHANNELS.notesRead, projectId),
   notesWrite: (projectId, text) => ipcRenderer.invoke(CHANNELS.notesWrite, projectId, text),
   promptsList: () => ipcRenderer.invoke(CHANNELS.promptsList),

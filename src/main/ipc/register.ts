@@ -1,4 +1,4 @@
-import { app, clipboard, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import { appendFile } from 'node:fs/promises'
 import {
   CHANNELS,
@@ -23,6 +23,8 @@ import {
   type TabDescriptor,
   type TabRow,
   type TabShape,
+  type TodoDraft,
+  type TodoPatch,
 } from '../../shared/ipc'
 import type { ExitReason, SessionManager, PaneRecord, TerminalPaneRecord } from '../sessions/manager'
 import { ConfigStore, type PTermConfig } from '../state/store'
@@ -64,6 +66,8 @@ import {
 } from '../shell/install'
 import { listSkills } from '../skills/scan'
 import { readNote, writeNote } from '../notes/store'
+import { createTodo, deleteTodo, readTodos, setTodoDone, updateTodo } from '../todos/store'
+import { broadcastTodos } from '../todos/broadcast'
 import { realUpdateService } from '../update/service'
 import { readSkipped, writeSkipped } from '../update/store'
 import { isOpenable } from '../update/openable'
@@ -1441,6 +1445,36 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.notesWrite, (_event, projectId: string, text: string) =>
     writeNote(projectId, text),
   )
+
+  // Outside `serialise`, like the notes handlers above: todos are read and
+  // written through their own module, imported above, not through this
+  // file's config queue.
+  //
+  // Every mutation below pushes the new list to every live window rather
+  // than only the caller's, via `broadcastTodos`: the todo list is global to
+  // the app, unlike `send` above which targets one window through
+  // `getWindow()`.
+  ipcMain.handle(CHANNELS.todosList, () => readTodos())
+  ipcMain.handle(CHANNELS.todosCreate, async (_event, draft: TodoDraft) => {
+    const todos = await createTodo(draft)
+    broadcastTodos(BrowserWindow.getAllWindows(), todos)
+    return todos
+  })
+  ipcMain.handle(CHANNELS.todosUpdate, async (_event, id: string, patch: TodoPatch) => {
+    const todos = await updateTodo(id, patch)
+    broadcastTodos(BrowserWindow.getAllWindows(), todos)
+    return todos
+  })
+  ipcMain.handle(CHANNELS.todosSetDone, async (_event, id: string, done: boolean) => {
+    const todos = await setTodoDone(id, done)
+    broadcastTodos(BrowserWindow.getAllWindows(), todos)
+    return todos
+  })
+  ipcMain.handle(CHANNELS.todosDelete, async (_event, id: string) => {
+    const todos = await deleteTodo(id)
+    broadcastTodos(BrowserWindow.getAllWindows(), todos)
+    return todos
+  })
 
   // Outside `serialise` for the same reason as notes: prompts live in
   // `prompts.json` beside config.json and never inside it. The store has a

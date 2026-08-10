@@ -87,6 +87,12 @@ export const CHANNELS = {
   issuesEdit: 'pterm:issuesEdit',
   issuesSetState: 'pterm:issuesSetState',
   issuesComment: 'pterm:issuesComment',
+  todosList: 'pterm:todosList',
+  todosCreate: 'pterm:todosCreate',
+  todosUpdate: 'pterm:todosUpdate',
+  todosSetDone: 'pterm:todosSetDone',
+  todosDelete: 'pterm:todosDelete',
+  todosChanged: 'pterm:todosChanged',
 } as const
 
 /**
@@ -1008,6 +1014,19 @@ export interface PTermApi {
    * both call this on open, and a skill written a minute ago should be there.
    */
   skills(projectCwd: string): Promise<SkillEntry[]>
+  /** The whole global todo list. */
+  todosList(): Promise<TodoRecord[]>
+  /**
+   * Resolves with the todo list as it now stands. A refused create (empty
+   * title) and an unknown id both resolve with the list unchanged rather
+   * than rejecting.
+   */
+  todosCreate(draft: TodoDraft): Promise<TodoRecord[]>
+  todosUpdate(id: string, patch: TodoPatch): Promise<TodoRecord[]>
+  todosSetDone(id: string, done: boolean): Promise<TodoRecord[]>
+  todosDelete(id: string): Promise<TodoRecord[]>
+  /** Pushed to every window after any mutation, the originator included. */
+  onTodosChanged(listener: (todos: TodoRecord[]) => void): () => void
   /** The project's note text, `''` when none has been written. */
   notesRead(projectId: string): Promise<string>
   /**
