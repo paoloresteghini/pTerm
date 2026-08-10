@@ -850,9 +850,17 @@ git commit -m "Fold a two-row join reply into workspace state"
 ### Task 6: The drag gesture
 
 **Files:**
+- Create: `src/renderer/lib/usePaneDragDrop.ts`
 - Modify: `src/renderer/TabsPanel.tsx`
 - Modify: `src/renderer/TabBar.tsx`
 - Modify: `src/renderer/App.tsx`
+
+**RULING (2026-08-10, decided by the human partner before execution):** the two
+surfaces share ONE hook rather than each carrying a copy of the handlers. An
+earlier draft of this task told you to duplicate five handlers and two pieces of
+state into `TabBar.tsx`. Do not do that. The requirement is that both surfaces
+behave identically, and a shared hook is what makes that true by construction
+instead of by inspection.
 
 **Interfaces:**
 - Consumes: `bridge.joinPane` (Task 3), the `joined` action (Task 5).
@@ -868,70 +876,105 @@ The MIME type is `application/x-pterm-pane`. A bare `text/plain` would let any
 dragged text look like a pane id, and would let a pane id dropped into a
 terminal read as a paste.
 
-- [ ] **Step 1: Add the drag source and drop target to `TabsPanel`**
+- [ ] **Step 1: Write the shared hook**
 
-Inside `row(...)` in `src/renderer/TabsPanel.tsx`, add to the row `div`:
-
-```tsx
-        draggable
-        onDragStart={(event) => {
-          event.stopPropagation()
-          event.dataTransfer.setData('application/x-pterm-pane', pane.id)
-          event.dataTransfer.effectAllowed = 'move'
-          setDragged(pane.id)
-        }}
-        onDragEnd={() => {
-          setDragged(null)
-          setOver(null)
-        }}
-        onDragOver={(event) => {
-          if (!dragged || !canJoin(dragged, pane.id)) return
-          event.preventDefault()
-          event.dataTransfer.dropEffect = 'move'
-          setOver(pane.id)
-        }}
-        onDragLeave={() => setOver((was) => (was === pane.id ? null : was))}
-        onDrop={(event) => {
-          const from = event.dataTransfer.getData('application/x-pterm-pane') || dragged
-          setOver(null)
-          setDragged(null)
-          if (!from || !canJoin(from, pane.id)) return
-          event.preventDefault()
-          onJoin(from, pane.id)
-        }}
-```
-
-`event.stopPropagation()` on `onDragStart` matters: the column heading above
-these rows is itself a drag source for column reordering, and without it a row
-drag also starts a column drag.
-
-Add above `row`, inside the component:
+Create `src/renderer/lib/usePaneDragDrop.ts`. It owns the two pieces of state
+and returns a function giving one pane's handler props, so a surface spreads the
+result onto each row or tab element and carries no drag logic of its own.
 
 ```tsx
+import { useState } from 'react'
+
+export interface PaneDragDrop {
+  /** Spread onto the element representing `paneId`. */
+  propsFor: (paneId: string) => {
+    draggable: true
+    onDragStart: (event: React.DragEvent) => void
+    onDragEnd: () => void
+    onDragOver: (event: React.DragEvent) => void
+    onDragLeave: () => void
+    onDrop: (event: React.DragEvent) => void
+  }
+  /** The pane currently under a valid drag, for the drop highlight. */
+  over: string | null
+}
+
+const MIME = 'application/x-pterm-pane'
+
+export function usePaneDragDrop(
+  canJoin: (from: string, to: string) => boolean,
+  onJoin: (from: string, to: string) => void,
+): PaneDragDrop {
   const [dragged, setDragged] = useState<string | null>(null)
   const [over, setOver] = useState<string | null>(null)
+
+  return {
+    over,
+    propsFor: (paneId: string) => ({
+      draggable: true,
+      onDragStart: (event: React.DragEvent) => {
+        event.stopPropagation()
+        event.dataTransfer.setData(MIME, paneId)
+        event.dataTransfer.effectAllowed = 'move'
+        setDragged(paneId)
+      },
+      onDragEnd: () => {
+        setDragged(null)
+        setOver(null)
+      },
+      onDragOver: (event: React.DragEvent) => {
+        if (!dragged || !canJoin(dragged, paneId)) return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'move'
+        setOver(paneId)
+      },
+      onDragLeave: () => setOver((was) => (was === paneId ? null : was)),
+      onDrop: (event: React.DragEvent) => {
+        const from = event.dataTransfer.getData(MIME) || dragged
+        setOver(null)
+        setDragged(null)
+        if (!from || !canJoin(from, paneId)) return
+        event.preventDefault()
+        onJoin(from, paneId)
+      },
+    }),
+  }
+}
 ```
 
 `dragged` exists because `dataTransfer.getData` returns an empty string during
 `dragover` by browser design: only the TYPE is readable there, not the value. So
-the id the refusal rule needs during the hover has to be held in component
-state, and `getData` is used only on `drop`, where it does work. `|| dragged` in
-`onDrop` is the fallback for a drop event that arrives with a cleared
-`dataTransfer`.
+the id the refusal rule needs during the hover has to be held in state, and
+`getData` is used only on `drop`, where it does work. `|| dragged` in `onDrop`
+covers a drop that arrives with a cleared `dataTransfer`.
 
-Give the highlighted row a visible ring by extending its `className` with
+`event.stopPropagation()` on `onDragStart` matters: the tabs column heading is
+itself a drag source for column reordering, and without it a row drag also
+starts a column drag.
+
+The MIME type is deliberate. A bare `text/plain` would let any dragged text look
+like a pane id, and would let a pane id dropped into a terminal read as a paste.
+
+- [ ] **Step 2: Use the hook in `TabsPanel`**
+
+Call `usePaneDragDrop(canJoin, onJoin)` once in the component and spread
+`propsFor(pane.id)` onto each row `div` in `row(...)`. Give the highlighted row
+a ring by extending its `className` with
 `over === pane.id ? 'ring-1 ring-inset ring-accent' : ''` through the existing
 `cn(...)` call, and add `data-over={over === pane.id || undefined}` so the e2e
 specs have something to assert on.
 
-- [ ] **Step 2: Add the same to `TabBar`**
+- [ ] **Step 3: Use the same hook in `TabBar`**
 
-Read `src/renderer/TabBar.tsx` and apply the identical five handlers, the same
-two pieces of state and the same `canJoin` prop to each tab element. The bar
-does not have a column-reorder drag above it, but keep `stopPropagation` anyway
-so the two surfaces behave the same way.
+Read `src/renderer/TabBar.tsx` and call `usePaneDragDrop(canJoin, onJoin)` there
+too, spreading `propsFor(<pane id>)` onto each tab element and using `over` for
+its highlight. No drag logic is written twice: if you find yourself copying a
+handler body out of the hook, stop and widen the hook instead.
 
-- [ ] **Step 3: Wire `App.tsx`**
+Match the bar's own visual language for the highlight rather than transplanting
+the column's ring, and add the same `data-over` attribute.
+
+- [ ] **Step 4: Wire `App.tsx`**
 
 Add beside the existing split handler in `src/renderer/App.tsx`:
 
@@ -977,7 +1020,7 @@ would put a pane in a group whose name carries a different slug.
 
 Pass `onJoin={joinPanes}` and `canJoin={canJoin}` to both surfaces.
 
-- [ ] **Step 4: Verify by hand**
+- [ ] **Step 5: Verify by hand**
 
 Run: `npm start`. Open three tabs. Drag one onto another. Confirm the two
 appear bracketed in the Tabs column, both terminals still show their scrollback,
@@ -985,11 +1028,11 @@ and anything that was running in the dragged tab is still running. Then quit and
 relaunch and confirm the split is still there. This is the check no test in this
 plan performs.
 
-- [ ] **Step 5: Typecheck and commit**
+- [ ] **Step 6: Typecheck and commit**
 
 ```bash
 npm run typecheck
-git add src/renderer/TabsPanel.tsx src/renderer/TabBar.tsx src/renderer/App.tsx
+git add src/renderer/lib/usePaneDragDrop.ts src/renderer/TabsPanel.tsx src/renderer/TabBar.tsx src/renderer/App.tsx
 git commit -m "Drag a tab onto another to merge them into a split"
 ```
 
