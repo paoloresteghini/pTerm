@@ -70,6 +70,8 @@ import {
 import { groupedTabs, tabTree } from './lib/tabGroups'
 import { projectMuted, toggleProjectMute } from './mute'
 import { PANE_COLOR_DEFAULT, type PaneColor } from '../shared/paneColors'
+import type { ThemeId } from '../shared/themes'
+import { bootTheme } from './theme'
 import { ColorSwatches } from './ColorSwatches'
 import {
   UNSORTED_ID,
@@ -225,6 +227,15 @@ export function App() {
   // which the mute toggle treats as "nothing to toggle yet" rather than
   // guessing at a shape it has not seen.
   const [notifications, setNotifications] = useState<NotificationConfig | null>(null)
+  // The palette in force. Seeded from the command line rather than fetched,
+  // because `main.tsx` has already painted the document from that same value
+  // before this component mounted, and a second read over IPC could only
+  // disagree with what is on screen. This state is what React renders from,
+  // and what carries a change into every live terminal.
+  //
+  // Read-only for now: nothing changes the theme until the picker exists, and
+  // a setter nothing calls is a type error rather than a harmless placeholder.
+  const [theme] = useState<ThemeId>(() => bootTheme())
   // Which editor panes have unsaved edits, renderer-only and never persisted
   // (see `dirtyPanes.ts`). Keyed by pane id rather than tab id: `TabBar` maps
   // a tab to its one pane before reading this.
@@ -1514,7 +1525,12 @@ export function App() {
                     box.pane.id === activePaneId &&
                     'shadow-[inset_0_0_0_1px_var(--color-accent)]',
                 )}
-                style={{ ...box.style, background: box.pane.color ?? PANE_COLOR_DEFAULT }}
+                // `var(--color-bg)` rather than the default hex: an uncoloured
+                // pane's box has to follow whatever canvas the theme is
+                // painting, and the token already does that. A literal here
+                // would leave the box on one palette's canvas while the
+                // terminal drawn inside it moved to another.
+                style={{ ...box.style, background: box.pane.color ?? 'var(--color-bg)' }}
               >
                 {/* The pane's contents, by kind. Every pane was a terminal
                     until this slice; an editor or diff pane has no session
@@ -1544,7 +1560,12 @@ export function App() {
                 ) : (
                   <Terminal
                     tabId={box.pane.id}
-                    color={box.pane.color ?? PANE_COLOR_DEFAULT}
+                    // Passed undefined-able, deliberately. Resolving it here
+                    // is what would stop an uncoloured pane following the
+                    // theme: `xtermTheme` needs to see the absence to
+                    // substitute the current canvas for it.
+                    paneColor={box.pane.color}
+                    theme={theme}
                     visible={group.visible}
                     // Never for a tab that is off screen: taking focus into one
                     // would move typing to a terminal the user cannot see.

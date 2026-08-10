@@ -4,9 +4,11 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import type { PaneColor } from '../shared/paneColors'
+import type { ThemeId } from '../shared/themes'
 import { findLinks, followsLink, linkRange } from './lib/terminalLinks'
 import { dropText } from './lib/shellQuote'
 import { leastRecentlyUsed, webglPaneBudget } from './lib/webglBudget'
+import { xtermTheme } from './lib/xtermTheme'
 
 /**
  * Every mounted pane's terminal, by tab id.
@@ -286,8 +288,17 @@ export function Terminal({
   visible,
   /** Whether this pane is the one the keyboard is talking to. */
   focused,
-  /** This pane's background. `PANE_COLOR_DEFAULT` when it has none of its own. */
-  color,
+  /**
+   * This pane's own background, or undefined when it has none.
+   *
+   * Undefined-able on purpose, and the caller must not resolve it first: a
+   * pane with no colour of its own follows the theme's canvas, and collapsing
+   * the absence into a hex at the call site is what would leave every default
+   * pane painting one palette's canvas under all five.
+   */
+  paneColor,
+  /** The palette in force. Its canvas is the fallback for an uncoloured pane. */
+  theme,
   /**
    * Offer this pane's Up to the history overlay. `true` means the overlay took
    * it and xterm must not also send `\x1b[A`; `false` means it declined and
@@ -298,7 +309,8 @@ export function Terminal({
   tabId: string
   visible: boolean
   focused: boolean
-  color: PaneColor
+  paneColor: PaneColor | undefined
+  theme: ThemeId
   onHistoryRequested: (paneId: string) => boolean
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -342,14 +354,14 @@ export function Terminal({
       // tmux keeps the deeper history.
       scrollback: 5000,
       // xterm renders to a canvas and cannot read the CSS variables in
-      // index.css, so the foreground repeats --color-term-fg by hand. The
-      // background is the pane's own, defaulting to --color-bg, and the
-      // effect below is what carries a later change to it.
+      // index.css, so both values come out of the theme registry instead.
+      // `lib/xtermTheme.ts` is the single place that reads them, which is what
+      // the hardcoded foreground this replaces had no way to be.
       //
-      // Set here as well as there so a pane that mounts already coloured
-      // never paints one frame of the default first, which a restored window
-      // full of coloured panes would show as a flash on every launch.
-      theme: { background: color, foreground: '#d4d4d8' },
+      // Set here as well as in the effect below so a pane that mounts already
+      // coloured never paints one frame of the default first, which a restored
+      // window full of coloured panes would show as a flash on every launch.
+      theme: xtermTheme(theme, paneColor),
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
@@ -511,18 +523,24 @@ export function Terminal({
     }
   }, [tabId])
 
-  // Live, rather than by recreating the terminal: `theme` is a settable
-  // option, and rebuilding an xterm to repaint it would throw away the
+  // Live, rather than by recreating the terminal: xterm's `theme` is a
+  // settable option, and rebuilding one to repaint it would throw away the
   // scrollback the pane is holding, which is the one thing a terminal cannot
   // be asked to lose over a colour.
   //
-  // Not in the mount effect's dependencies for the same reason: adding
-  // `color` there would tear down and rebuild the terminal on every change.
+  // Two triggers now, not one. A pane repaints when the user recolours it and
+  // when the palette changes under it, and the second is what carries a theme
+  // switch into every live terminal at once. Both write both values, since a
+  // theme moves the foreground as well as the canvas.
+  //
+  // Neither belongs in the mount effect's dependencies: either one there would
+  // tear the terminal down and rebuild it on every change, which is the
+  // scrollback loss this effect exists to avoid.
   useEffect(() => {
     const term = termRef.current
     if (!term) return
-    term.options.theme = { ...term.options.theme, background: color }
-  }, [color])
+    term.options.theme = { ...term.options.theme, ...xtermTheme(theme, paneColor) }
+  }, [theme, paneColor])
 
   // A tab coming back on screen is what makes its panes recently used, and the
   // moment to take a WebGL context back for them: a pane that gave one up
