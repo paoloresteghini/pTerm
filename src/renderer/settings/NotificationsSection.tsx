@@ -86,7 +86,7 @@ export function NotificationsSection({
                     value={rule?.sound ?? ''}
                     disabled={!notifications}
                     onChange={(event) => updateRule(state, { sound: event.target.value || null })}
-                    className="cursor-default border border-border bg-bg text-[10px] text-muted"
+                    className="cursor-default border border-border bg-raised text-[10px] text-muted"
                   >
                     {SOUNDS.map((sound) => (
                       <option key={sound || 'none'} value={sound}>
@@ -104,7 +104,7 @@ export function NotificationsSection({
                     onChange={(event) =>
                       updateRule(state, { urgency: event.target.value === 'high' ? 'high' : 'low' })
                     }
-                    className="cursor-default border border-border bg-bg text-[10px] text-muted"
+                    className="cursor-default border border-border bg-raised text-[10px] text-muted"
                   >
                     <option value="low">low</option>
                     <option value="high">high</option>

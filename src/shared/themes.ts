@@ -96,7 +96,7 @@ export const THEMES: Record<ThemeId, Theme> = {
       raised: '#0c0c0e',
       overlay: '#0c0c0e',
       border: '#27272a',
-      borderStrong: '#3f3f46',
+      borderStrong: '#27272a',
       fg: '#fafafa',
       muted: '#71717a',
       faint: '#3f3f46',

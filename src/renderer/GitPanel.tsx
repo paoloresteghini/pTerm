@@ -368,7 +368,7 @@ export function GitPanel({
             }}
             rows={2}
             placeholder="Message (⌘Enter to commit)"
-            className="scroll-thin resize-none rounded border border-border bg-bg px-1.5 py-1 font-mono text-[11px] text-fg placeholder:text-faint focus:outline-none"
+            className="scroll-thin resize-none rounded border border-border bg-raised px-1.5 py-1 font-mono text-[11px] text-fg placeholder:text-faint focus:outline-none"
           />
           <button
             data-testid="gitpanel-commit"

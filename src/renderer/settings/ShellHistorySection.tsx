@@ -106,7 +106,7 @@ export function ShellHistorySection() {
 
           <pre
             data-testid="shell-history-pending"
-            className="scroll-thin mb-2 max-h-40 overflow-auto whitespace-pre-wrap break-all border border-border bg-bg p-1.5 text-[10px] text-muted"
+            className="scroll-thin mb-2 max-h-40 overflow-auto whitespace-pre-wrap break-all border border-border bg-raised p-1.5 text-[10px] text-muted"
           >
             {shellHistory.pending}
           </pre>

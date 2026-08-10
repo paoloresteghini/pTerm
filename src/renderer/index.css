@@ -20,7 +20,7 @@
   --color-fg: #fafafa;
   --color-muted: #71717a;
   --color-faint: #3f3f46;
-  --color-border-strong: #3f3f46;
+  --color-border-strong: #27272a;
   /* Section labels (NOTES, SKILLS, PRESETS). Deliberately lighter than the
      rows beneath them: `--color-faint` measured 1.86:1 on `--color-surface`
      and was unreadable on a real screen, which is what this token was added

@@ -1959,7 +1959,7 @@ export function App() {
             // the document listener before reaching a swatch.
             onClick={(event) => event.stopPropagation()}
             style={{ left: paneMenu.left, top: paneMenu.top }}
-            className="fixed z-30 flex flex-col border border-border bg-bg py-0.5 text-[11px]"
+            className="fixed z-30 flex flex-col border border-border-strong bg-overlay py-0.5 text-[11px]"
           >
             {/* Terminal actions above the swatches, and only for a pane that
                 has a terminal: an editor pane has no selection to copy and

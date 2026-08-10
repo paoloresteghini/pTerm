@@ -103,7 +103,7 @@ describe('the baseline theme', () => {
   it('aliases the new tokens onto the surfaces they replace', () => {
     expect(classic.tokens.raised).toBe(classic.tokens.surface)
     expect(classic.tokens.overlay).toBe(classic.tokens.surface)
-    expect(classic.tokens.borderStrong).toBe(classic.tokens.faint)
+    expect(classic.tokens.borderStrong).toBe(classic.tokens.border)
     expect(classic.tokens.inset).toMatch(/00$/)
   })
 })
