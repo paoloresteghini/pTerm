@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { IssueSummary } from '../../src/shared/ipc'
-import { filterIssues, shouldRefetchOnFocus, sortIssues, FOCUS_REFETCH_THROTTLE_MS } from '../../src/renderer/lib/issueList'
+import {
+  filterIssues,
+  issueStateLabel,
+  shouldRefetchOnFocus,
+  sortIssues,
+  FOCUS_REFETCH_THROTTLE_MS,
+} from '../../src/renderer/lib/issueList'
 
 function issue(over: Partial<IssueSummary>): IssueSummary {
   return {
@@ -84,6 +90,25 @@ describe('sortIssues', () => {
     ]
     expect(sortIssues(mixed, 'newest').map((row) => row.number)).toEqual([100, 2])
     expect(sortIssues(mixed, 'updated').map((row) => row.number)).toEqual([2, 100])
+  })
+})
+
+describe('issueStateLabel', () => {
+  it('reads open issues as Open regardless of a leftover reason', () => {
+    expect(issueStateLabel('OPEN', null)).toBe('Open')
+    expect(issueStateLabel('OPEN', 'REOPENED')).toBe('Open')
+  })
+
+  it('reads a closed issue with no reason as completed', () => {
+    expect(issueStateLabel('CLOSED', null)).toBe('Closed as completed')
+  })
+
+  it('reads a closed issue marked completed as completed', () => {
+    expect(issueStateLabel('CLOSED', 'COMPLETED')).toBe('Closed as completed')
+  })
+
+  it('reads a closed issue marked not planned as not planned', () => {
+    expect(issueStateLabel('CLOSED', 'NOT_PLANNED')).toBe('Closed as not planned')
   })
 })
 

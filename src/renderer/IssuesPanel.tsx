@@ -5,6 +5,7 @@ import { historyAgo } from './lib/historyAgo'
 import { useColumnWidth } from './lib/columnWidth'
 import { cn } from './lib/cn'
 import { ColumnResizer, PanelHeading, PanelStrip, type PanelSide } from './ui/Panel'
+import { IssueModal } from './IssueModal'
 
 const SORT_ORDER: IssueSort[] = ['updated', 'newest', 'comments']
 const SORT_LABEL: Record<IssueSort, string> = { updated: 'Updated', newest: 'Newest', comments: 'Comments' }
@@ -40,11 +41,12 @@ function StateButton({
   )
 }
 
-function Row({ row, now }: { row: IssueSummary; now: number }) {
+function Row({ row, now, onSelect }: { row: IssueSummary; now: number; onSelect: (number: number) => void }) {
   const updatedSeconds = Math.floor(new Date(row.updatedAt).getTime() / 1000)
   return (
     <button
       data-testid={`issue-row-${row.number}`}
+      onClick={() => onSelect(row.number)}
       className="flex w-full cursor-default flex-col items-start gap-0.5 border-none bg-transparent px-2.5 py-1 text-left text-muted hover:text-fg"
     >
       <span className="flex w-full items-baseline gap-1.5">
@@ -103,6 +105,11 @@ export function IssuesPanel({
   const [query, setQuery] = useState('')
   const [state, setState] = useState<IssueStateFilter>('open')
   const [sort, setSort] = useState<IssueSort>('updated')
+  // The issue a row click opened, or null for no modal. Held here rather
+  // than inside `IssueModal` itself so a row can set it directly and the
+  // modal can hand it back to null on close, the split `SettingsPane`'s
+  // caller already uses for its own `open` flag.
+  const [open, setOpen] = useState<number | null>(null)
 
   // `load` has several callers (the effect below, the focus listener, the
   // refresh button), unlike `NotesPanel`'s single fetch site, so a closured
@@ -290,10 +297,11 @@ export function IssuesPanel({
                   {query.trim() !== '' ? 'Nothing matches.' : 'No issues.'}
                 </p>
               ) : (
-                filtered.map((row) => <Row key={row.number} row={row} now={now} />)
+                filtered.map((row) => <Row key={row.number} row={row} now={now} onSelect={setOpen} />)
               )}
             </div>
           )}
+          <IssueModal projectId={project.id} number={open} onClose={() => setOpen(null)} />
         </>
       )}
       <ColumnResizer

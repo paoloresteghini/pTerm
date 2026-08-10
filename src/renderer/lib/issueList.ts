@@ -1,4 +1,4 @@
-import type { IssueSummary } from '../../shared/ipc'
+import type { IssueState, IssueStateReason, IssueSummary } from '../../shared/ipc'
 
 /**
  * In a module of its own rather than inside `IssuesPanel`, for the reason
@@ -50,6 +50,24 @@ export const FOCUS_REFETCH_THROTTLE_MS = 60_000
  * through rather than making a component that has never fetched wait out a
  * window before its first `focus`.
  */
+/**
+ * The detail modal's state chip text, from `state` and `stateReason` alone.
+ *
+ * In this module rather than in `IssueModal.tsx` for the reason every other
+ * function here is: vitest runs with no DOM, so a pure branch like this one
+ * is reachable from a unit test only if nothing in it touches a component.
+ *
+ * `REOPENED` and `null` both read as plain `'Open'` when `state` is `OPEN`,
+ * which is every case `REOPENED` can occur in; `gh` only ever pairs it with
+ * an open issue. A `CLOSED` issue with no reason it recognises still needs a
+ * label, so it defaults to `'Closed as completed'` rather than leaving the
+ * chip blank.
+ */
+export function issueStateLabel(state: IssueState, stateReason: IssueStateReason): string {
+  if (state === 'OPEN') return 'Open'
+  return stateReason === 'NOT_PLANNED' ? 'Closed as not planned' : 'Closed as completed'
+}
+
 export function shouldRefetchOnFocus(lastFetchedAt: number | null, now: number): boolean {
   if (lastFetchedAt === null) return true
   return now - lastFetchedAt >= FOCUS_REFETCH_THROTTLE_MS
