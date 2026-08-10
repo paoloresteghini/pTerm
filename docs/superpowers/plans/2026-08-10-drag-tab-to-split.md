@@ -336,10 +336,6 @@ Add to `src/main/sessions/manager.ts`, near `splitTab`:
     const movedWindow = await this.adapter.windowIdOf(record.tmuxSession)
     if (!movedWindow) throw new Error(`joinTab: tmux would not name ${record.tmuxSession}'s window`)
 
-    const members = await this.groupMembers(group, target.record.tmuxSession)
-    const shown = new Map<string, string>()
-    for (const member of members) shown.set(member, await this.adapter.windowIdOf(member))
-
     // Create the destination BEFORE anything moves. See the ordering note below.
     const staging = `${record.tmuxSession}-joining`
     await this.adapter.newGroupMember(group, staging, { PTERM_TAB_ID: record.id })
@@ -358,10 +354,6 @@ Add to `src/main/sessions/manager.ts`, near `splitTab`:
 
     const windows = await this.adapter.windowsOf(record.tmuxSession)
     const indexOf = new Map(windows.map((window) => [window.id, window.index]))
-    for (const [member, windowId] of shown) {
-      const index = indexOf.get(windowId)
-      if (index) await this.adapter.selectWindow(member, index)
-    }
     const movedIndex = indexOf.get(movedWindow)
     if (!movedIndex) throw new Error(`joinTab: ${movedWindow} is not in ${group} after the move`)
     await this.adapter.selectWindow(record.tmuxSession, movedIndex)
@@ -380,12 +372,6 @@ Add to `src/main/sessions/manager.ts`, near `splitTab`:
       }),
       tabId: targetTabId,
     }
-  }
-
-  private async groupMembers(group: string, fallback: string): Promise<string[]> {
-    const rows = await this.adapter.listSessionsWithGroups()
-    const named = rows.filter((row) => row.group === group).map((row) => row.name)
-    return named.length > 0 ? named : [fallback]
   }
 ```
 
@@ -412,10 +398,24 @@ ended on its own distinct window, and `PTERM_TAB_ID` survived the rename.
 
 The rest of the ordering: `detach` comes after the staging session exists but
 before the move, and `cols`/`rows` are captured above it because `detach` deletes
-the entry they live on. The `shown` snapshot is taken before the move because
-`move-window` re-points the target session at the moved window, and restoring
-every member's own window is what stops `withoutSharedWindows` killing a live
-pane on the next launch.
+the entry they live on.
+
+**The staging session also removes the shadow hazard, which is why there is no
+snapshot-and-restore of member selections here (revised 2026-08-10, measured
+twice).** `move-window` re-points the session named in its `-t`, and in this
+design that is always `staging`, never a session the user already has a pane in.
+An earlier draft moved straight into the target pane's own session, and that DID
+re-point it: measured, two sessions of one group both ended up showing window
+`@2`. That is the state `withoutSharedWindows` (`src/main/ipc/restore.ts:154-162`)
+reads as one session shadowing another, on which it calls `killShadowMember`,
+losing a live pane on the next launch.
+
+So the protection is now structural rather than compensatory. The test that holds
+it is "leaves every member of the target group on a window of its own": it fails
+if anyone changes the move to target a member session directly, which is exactly
+the regression a restore loop would have been insurance against. Do not add the
+loop back. A restore loop here would be code that cannot be made to fail, and the
+comment justifying it would be false about its own design.
 
 The `catch` kills only the staging session, never a window. If the move already
 succeeded, the moved window stays in the target group with its shell running and
@@ -478,10 +478,17 @@ Expected: PASS, all seven.
 
 - [ ] **Step 7: Prove the load-bearing step is load-bearing**
 
-Temporarily delete the `for (const [member, windowId] of shown)` loop, re-run
-the file, and confirm "leaves every member of the target group on a window of
-its own" FAILS. Restore the loop. If that test still passes without the loop it
-is not testing what it claims and must be fixed before moving on.
+Mutate the move to target the target pane's session directly, in other words
+replace the staging move with
+`await this.adapter.moveWindow(record.tmuxSession, target.record.tmuxSession)`,
+re-run the file, and confirm "leaves every member of the target group on a window
+of its own" FAILS. Then restore the staging move.
+
+That mutation is the old, wrong design, and it is what this test exists to
+reject. If the test still passes under it, the test is not testing what it claims
+and must be fixed before moving on, because the failure it is meant to catch is
+one that costs the user a live pane on their next launch and is invisible until
+then.
 
 - [ ] **Step 8: Typecheck and commit**
 
