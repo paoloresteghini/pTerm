@@ -74,7 +74,9 @@ which is what "click the one you want to work on" means.
 
 The column uses the shared chrome in `src/renderer/ui/Panel.tsx` (`PanelStrip`,
 `PanelHeading`, `ColumnResizer`) and persists its width at `pterm:issuesWidth` through
-`useColumnWidth`, default 256, exactly as `NotesPanel` does. It takes a place in
+`useColumnWidth`, default **208**, not the 256 this document first specified. 256 was copied
+from `NotesPanel`, whose own comment justifies it because a note is prose; every column holding
+a list (Git Changes, Skills, Presets, Files) uses 208, and this is a list. It takes a place in
 `COLUMN_ORDER_DEFAULT` next to `git`, and is draggable in the row like every other column.
 
 **Collapsed by default on a fresh profile.** This is the rule already written into
