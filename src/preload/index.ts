@@ -73,6 +73,8 @@ const api: PTermApi = {
   },
   notifications: () => ipcRenderer.invoke(CHANNELS.notifications),
   updateNotifications: (patch) => ipcRenderer.invoke(CHANNELS.updateNotifications, patch),
+  theme: () => ipcRenderer.invoke(CHANNELS.theme),
+  updateTheme: (id) => ipcRenderer.invoke(CHANNELS.updateTheme, id),
   hooksState: () => ipcRenderer.invoke(CHANNELS.hooksState),
   installHooks: () => ipcRenderer.invoke(CHANNELS.installHooks),
   uninstallHooks: () => ipcRenderer.invoke(CHANNELS.uninstallHooks),

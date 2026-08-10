@@ -1,5 +1,6 @@
 import type { TabState } from './status'
 import type { PaneColor } from './paneColors'
+import type { ThemeId } from './themes'
 
 export type { TabState }
 
@@ -33,6 +34,8 @@ export const CHANNELS = {
   focusTab: 'pterm:focusTab',
   notifications: 'pterm:notifications',
   updateNotifications: 'pterm:updateNotifications',
+  theme: 'pterm:theme',
+  updateTheme: 'pterm:updateTheme',
   hooksState: 'pterm:hooksState',
   installHooks: 'pterm:installHooks',
   uninstallHooks: 'pterm:uninstallHooks',
@@ -938,6 +941,10 @@ export interface PTermApi {
   notifications(): Promise<NotificationConfig>
   /** Merges `patch` into the stored notification config and returns the result. */
   updateNotifications(patch: Partial<NotificationConfig>): Promise<NotificationConfig>
+  /** The stored theme id. */
+  theme(): Promise<ThemeId>
+  /** Stores `id` and returns what was stored. */
+  updateTheme(id: ThemeId): Promise<ThemeId>
   /** Whether pTerm's hooks are installed, and what installing would add. */
   hooksState(): Promise<HooksState>
   /** Writes a timestamped backup, then merges pTerm's hooks into settings.json. */

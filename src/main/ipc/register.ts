@@ -83,6 +83,7 @@ import {
   updateProject,
 } from '../projects/projects'
 import { isPaneColor, PANE_COLOR_DEFAULT, type PaneColor } from '../../shared/paneColors'
+import { isThemeId, type ThemeId } from '../../shared/themes'
 
 /**
  * The new pane's ratio, carved out of the pane it split from.
@@ -1357,6 +1358,20 @@ export function registerIpc(
         await store.write({ ...config, notifications })
         return notifications
       }),
+  )
+
+  ipcMain.handle(CHANNELS.theme, async () => (await store.read()).theme)
+
+  ipcMain.handle(CHANNELS.updateTheme, (_event, id: ThemeId): Promise<ThemeId> =>
+    serialise(async () => {
+      const config = await store.read()
+      // Through the same queue every other config write uses. Two writes racing
+      // on this file is how a theme change loses a tab row written a
+      // millisecond earlier.
+      const theme = isThemeId(id) ? id : config.theme
+      await store.write({ ...config, theme })
+      return theme
+    }),
   )
 
   // installHooks/uninstallHooks write ~/.claude/settings.json, not pTerm's own
