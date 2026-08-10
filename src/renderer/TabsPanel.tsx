@@ -4,6 +4,7 @@ import { StatusDot } from './StatusDot'
 import { elapsedLabel } from './lib/elapsed'
 import { tabLabel } from './lib/tabLabel'
 import { useColumnWidth } from './lib/columnWidth'
+import { usePaneDragDrop } from './lib/usePaneDragDrop'
 import { ColumnResizer, PanelHeading, PanelStrip, type PanelSide } from './ui/Panel'
 import { cn } from './lib/cn'
 
@@ -33,6 +34,8 @@ export function TabsPanel({
   onDragStart,
   onSelect,
   onClose,
+  onJoin,
+  canJoin,
   side,
 }: {
   nodes: TabTreeNode[]
@@ -48,9 +51,14 @@ export function TabsPanel({
   onDragStart: () => void
   onSelect: (paneId: string) => void
   onClose: (paneId: string) => void
+  /** Drag one pane's row onto another's to merge them into a split. */
+  onJoin: (paneId: string, targetPaneId: string) => void
+  /** Whether dragging `paneId` onto `targetPaneId` would do anything. */
+  canJoin: (paneId: string, targetPaneId: string) => boolean
   side: PanelSide
 }) {
   const { width, set, commit } = useColumnWidth('pterm:tabsWidth', 208)
+  const drag = usePaneDragDrop(canJoin, onJoin)
   if (collapsed) {
     return (
       <PanelStrip
@@ -94,12 +102,15 @@ export function TabsPanel({
         // group is reported by `data-bracket` instead.
         data-testid={`vpane-${pane.id}`}
         data-bracket={bracket ?? undefined}
+        data-over={drag.over === pane.id || undefined}
         onClick={() => onSelect(pane.id)}
         className={cn(
           'group flex cursor-default items-center gap-1 py-0.5 pr-1 text-[11px]',
           pane.id === activeId ? 'bg-surface text-fg' : 'text-muted hover:text-fg',
+          drag.over === pane.id ? 'ring-1 ring-inset ring-accent' : '',
         )}
         style={{ paddingLeft: 8 }}
+        {...drag.propsFor(pane.id)}
       >
         {/* One slot, always reserved, so every swatch lines up on the same x
             whether or not its row is part of a split. The same trade

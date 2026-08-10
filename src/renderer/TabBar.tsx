@@ -4,6 +4,7 @@ import { StatusDot } from './StatusDot'
 import { elapsedLabel } from './lib/elapsed'
 import { cn } from './lib/cn'
 import { tabLabel } from './lib/tabLabel'
+import { usePaneDragDrop } from './lib/usePaneDragDrop'
 import { ColorSwatches } from './ColorSwatches'
 import { PANE_COLOR_DEFAULT, type PaneColor } from '../shared/paneColors'
 import type { TabGroupEntry } from './lib/tabGroups'
@@ -23,6 +24,8 @@ export function TabBar({
   onNew,
   onRename,
   onRecolor,
+  onJoin,
+  canJoin,
   canOpen,
 }: {
   tabs: TabGroupEntry[]
@@ -41,6 +44,10 @@ export function TabBar({
   onNew: () => void
   onRename: (id: string, title: string) => void
   onRecolor: (id: string, color: PaneColor | null) => void
+  /** Drag one tab onto another to merge them into a split. Matches `TabsPanel`'s prop of the same name. */
+  onJoin: (paneId: string, targetPaneId: string) => void
+  /** Whether dragging `paneId` onto `targetPaneId` would do anything. Matches `TabsPanel`'s prop of the same name. */
+  canJoin: (paneId: string, targetPaneId: string) => boolean
   canOpen: boolean
 }) {
   // The open menu, with the viewport coordinates it is drawn at.
@@ -79,6 +86,8 @@ export function TabBar({
   // blur: the handlers must not depend on that to avoid committing twice, or
   // committing what Escape discarded. Mirrors Sidebar's project rename.
   const editing = useRef<string | null>(null)
+
+  const drag = usePaneDragDrop(canJoin, onJoin)
 
   const startRename = (tab: TabDescriptor): void => {
     editing.current = tab.id
@@ -169,6 +178,7 @@ export function TabBar({
             // `pos` says whether there is actually a split to frame.
             data-group-id={entry.pos !== null ? (entry.groupId ?? undefined) : undefined}
             data-group-pos={entry.pos ?? undefined}
+            data-over={drag.over === tab.id || undefined}
             onClick={() => onActivate(tab.id)}
             onContextMenu={(event) => {
               event.preventDefault()
@@ -177,21 +187,24 @@ export function TabBar({
               const box = event.currentTarget.getBoundingClientRect()
               setMenu({ id: tab.id, left: box.left, top: box.bottom })
             }}
-            // Two insets on two edges that compose rather than replace: the
-            // top strip says "these panes are one split" and the bottom line
-            // says "this pane is focused", so a grouped active tab shows
-            // both. Inline rather than a Tailwind arbitrary value because the
-            // list is built from two independent conditions and an arbitrary
-            // value holding a comma is not worth the escaping.
+            // Insets on the box's edges that compose rather than replace: the
+            // top strip says "these panes are one split", the bottom line
+            // says "this pane is focused", and the drag ring says "dropping
+            // here joins the tabs", so a grouped active tab under a drag
+            // shows all three. Inline rather than a Tailwind arbitrary value
+            // because the list is built from independent conditions and an
+            // arbitrary value holding commas is not worth the escaping.
             style={{
               boxShadow:
                 [
                   entry.pos === null ? null : 'inset 0 2px 0 var(--color-group)',
                   active ? 'inset 0 -1px 0 var(--color-accent)' : null,
+                  drag.over === tab.id ? 'inset 0 0 0 1px var(--color-accent)' : null,
                 ]
                   .filter((inset): inset is string => inset !== null)
                   .join(', ') || undefined,
             }}
+            {...drag.propsFor(tab.id)}
             className={cn(
               'flex cursor-default items-center gap-1.5 whitespace-nowrap px-2.5',
               // Kept on the group's LAST member and on every ungrouped tab, so

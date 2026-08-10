@@ -865,6 +865,43 @@ export function App() {
     [activePaneId, fail],
   )
 
+  /** Drag one pane onto another to merge them into a split. */
+  const joinPanes = useCallback(
+    (paneId: string, targetPaneId: string) => {
+      void window.pterm
+        .joinPane(paneId, targetPaneId)
+        .then((shape) => dispatch({ type: 'joined', shape }))
+        .catch((error) => {
+          console.error('pTerm: could not join those tabs', error)
+        })
+    },
+    [dispatch],
+  )
+
+  /**
+   * Whether dragging `from` onto `to` would do anything. Passed to both
+   * `TabsPanel` and `TabBar` so the two surfaces refuse identically: neither
+   * of them knows about tab rows or projects, so the rule lives here once
+   * instead of being derived twice.
+   */
+  const canJoin = useCallback(
+    (from: string, to: string): boolean => {
+      if (from === to) return false
+      const fromPane = state.panes.find((pane) => pane.id === from)
+      const toPane = state.panes.find((pane) => pane.id === to)
+      if (!fromPane || !toPane) return false
+      if (fromPane.projectSlug !== toPane.projectSlug) return false
+      // Falls back to the pane's own id rather than null, because a pane no
+      // row names is a tab of one that has never been split, and reading
+      // that as "unknown, so refuse" would make the commonest case in the
+      // app undraggable.
+      const tabOf = (paneId: string) =>
+        state.tabs.find((row) => row.layout.kids.includes(paneId))?.id ?? paneId
+      return tabOf(from) !== tabOf(to)
+    },
+    [state.panes, state.tabs],
+  )
+
   /** Make `paneId` the pane the keyboard talks to, and record it on its tab. */
   const selectPane = useCallback(
     (paneId: string) => {
@@ -1503,6 +1540,8 @@ export function App() {
           onNew={openTab}
           onRename={renameTab}
           onRecolor={recolorPane}
+          onJoin={joinPanes}
+          canJoin={canJoin}
           canOpen={canOpen}
         />
       ) : null}
@@ -1856,6 +1895,8 @@ export function App() {
             onDragStart={() => setDragging('tabs')}
             onSelect={selectPane}
             onClose={requestClosePane}
+            onJoin={joinPanes}
+            canJoin={canJoin}
             side={resizerSideFor(columnOrder, 'tabs')}
           />
         )
