@@ -150,8 +150,14 @@ export function IssueModal({
   // The repository this dialog is about, shown under the title. Without it
   // nothing on screen distinguished two repositories' issue #42, and a ⌘+digit
   // project switch with the dialog open refetches the same NUMBER against the
-  // new repository and repaints in place. Frozen with the rest of the target
-  // by `resetForTarget`, so it names what the buttons would actually act on.
+  // new repository and repaints in place.
+  //
+  // Two writers, one per mode. Read and edit get it from the `issuesGet` reply
+  // that fetched the issue, which is the source that cannot disagree with the
+  // detail beside it; `resetForTarget` clears it first, so the switch above
+  // repaints the slug along with everything else. Create has no fetch, so
+  // `resetForTarget` takes the panel's and freezes it there with the rest of
+  // the target, which is what `submitCreate` actually files against.
   const [repoSlug, setRepoSlug] = useState<string | null>(null)
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)

@@ -356,9 +356,9 @@ export function editIssue(
  * stdout. `0` for anything that does not end in `/issues/<digits>`: an empty
  * reply, a URL with no number, or extra output after it.
  *
- * A named function rather than a regex inline in `createIssue` so it can be
- * asserted without spawning `gh`, which is the only way this branch is
- * reachable from a test at all.
+ * A named function rather than a regex inline in `createIssue` so its edge
+ * cases can be asserted directly, without a stub `gh` and a launched app
+ * between the test and the branch it is about.
  */
 export function issueNumberFromUrl(stdout: string): number {
   const match = /\/issues\/(\d+)\s*$/.exec(stdout.trim())

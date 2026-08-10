@@ -4,8 +4,8 @@ import { Button } from './ui/Button'
 /**
  * Asks before something with unsaved edits is closed.
  *
- * Only ever shown for something already known to be dirty; each caller checks
- * that before this component exists. There are two: `App.tsx` opens it from
+ * Only ever opened for something already known to be dirty; each caller checks
+ * that before it passes `open`. There are two: `App.tsx` opens it from
  * `requestClosePane` for a pane, and `IssueModal.tsx` from its own
  * `pendingAction` gate for an issue edit or a create draft. `subject` is what
  * the body copy calls the thing, since "pane" is a lie in the second case.
