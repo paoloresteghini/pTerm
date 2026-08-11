@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { DidNavigateEvent, DidNavigateInPageEvent, PageTitleUpdatedEvent } from 'electron'
+import type { DidNavigateEvent, DidNavigateInPageEvent } from 'electron'
 import { Button } from './ui/Button'
 import { normaliseUrl } from '../shared/browserUrl'
 import { UNSORTED_ID } from '../shared/ipc'
@@ -99,12 +99,6 @@ export function BrowserPane({
   const [typed, setTyped] = useState(address)
   const [canGoBack, setCanGoBack] = useState(false)
   const [canGoForward, setCanGoForward] = useState(false)
-  // The page's own title, live while the pane is open. Kept in memory only:
-  // `page-title-updated` fires far more often than a navigation settles (a
-  // single-page app can retitle itself on every route change), and none of
-  // that is worth a round trip to main, let alone a write. `about:blank` and
-  // a page that has not set one yet leave this undefined.
-  const [pageTitle, setPageTitle] = useState<string | undefined>()
   // Holds the debounce timer between `did-navigate` events, so a burst of
   // them (a page redirecting several times on one load) resets one timer
   // instead of scheduling several writes that would land in whatever order
@@ -161,30 +155,10 @@ export function BrowserPane({
     }
   }, [])
 
-  // Its own effect rather than folded into the one above: this listener
-  // updates nothing the sync effect already coordinates (no back/forward
-  // state, no address bar, no write to main), so there is no reason to
-  // register or tear it down alongside those.
-  useEffect(() => {
-    const node = view.current
-    if (!node) return
-    const onTitleUpdated = (event: Event) => setPageTitle((event as PageTitleUpdatedEvent).title)
-    node.addEventListener('page-title-updated', onTitleUpdated)
-    return () => node.removeEventListener('page-title-updated', onTitleUpdated)
-  }, [])
-
   return (
     <div
       className="flex h-full flex-col"
       data-testid={`browserpane-${paneId}`}
-      // The live page title as a native tooltip: this pane has no visible
-      // title bar of its own (the chrome strip below is buttons and an
-      // address, and `splits.spec.ts` pins its whole pixel budget, so
-      // nothing here adds a new element to it), and the tab bar this pane
-      // sits under is drawn from the persisted `TabDescriptor` rather than
-      // from this component. Hovering the pane is the only place this
-      // pane's own copy of `pageTitle` currently surfaces.
-      title={pageTitle}
       // `var(--color-bg)` for an uncoloured pane rather than a literal, the
       // same fallback and the same reasoning `DiffView.tsx` uses: the canvas
       // has to move with the theme rather than pin to one palette's hex.
