@@ -126,15 +126,16 @@ export function BrowserPane({
   const [typed, setTyped] = useState(address)
   const [canGoBack, setCanGoBack] = useState(false)
   const [canGoForward, setCanGoForward] = useState(false)
-  // Two of the three failure states Task 7 covers: `did-fail-load` (when
+  // The two failure states this pane shows: `did-fail-load` (when
   // `isRealLoadFailure` says so) and `render-process-gone`. Both render a
   // card over the webview rather than closing the pane or its tab: a
   // browser pane cannot die the way a terminal can, and `canHaveSession` is
   // false for it, so the `DeadPane` path this app uses for a crashed
   // terminal does not apply here. Mutually exclusive in practice (a crashed
-  // renderer does not also fail a load), but kept as two separate booleans
-  // rather than one enum: nothing here needs to distinguish a third state
-  // from "neither", and an enum would need that name.
+  // renderer does not also fail a load), but kept as two independent
+  // optionals rather than one shared enum: neither ever needs a value
+  // meaning "both", so an enum would only add a name for a case that
+  // cannot happen.
   const [loadFailure, setLoadFailure] = useState<{
     errorCode: number
     errorDescription: string
@@ -327,7 +328,7 @@ export function BrowserPane({
             data-testid={`browsercrashed-${paneId}`}
             className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-surface p-4 text-center font-mono text-[11px] text-fg"
           >
-            <div className="text-muted">This page crashed ({crashed})</div>
+            <div className="text-muted">This page's renderer is gone ({crashed})</div>
             <Button
               data-testid={`browsercrashedreload-${paneId}`}
               onClick={() => view.current?.reload()}
