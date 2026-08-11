@@ -34,6 +34,7 @@ const api: PTermApi = {
   list: () => ipcRenderer.invoke(CHANNELS.list),
   restore: () => ipcRenderer.invoke(CHANNELS.restore),
   setActive: (id) => ipcRenderer.send(CHANNELS.setActive, id),
+  setActiveBrowser: (id) => ipcRenderer.send(CHANNELS.setActiveBrowser, id),
   addProject: (input) => ipcRenderer.invoke(CHANNELS.addProject, input),
   updateProject: (id, patch) => ipcRenderer.invoke(CHANNELS.updateProject, id, patch),
   removeProject: (id) => ipcRenderer.invoke(CHANNELS.removeProject, id),

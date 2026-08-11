@@ -65,7 +65,15 @@ let store: Store
 
 /** The one project every test in this file opens a browser pane against. */
 function project(): ProjectRecord {
-  return { id: 'p1', name: 'Demo', slug: 'demo', cwd: configDir, presets: [], activeTabId: null }
+  return {
+    id: 'p1',
+    name: 'Demo',
+    slug: 'demo',
+    cwd: configDir,
+    presets: [],
+    activeTabId: null,
+    activeBrowserTabId: null,
+  }
 }
 
 beforeEach(async () => {

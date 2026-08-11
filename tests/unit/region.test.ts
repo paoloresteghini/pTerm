@@ -8,6 +8,8 @@ import {
   workspaceReducer,
   type WorkspaceState,
 } from '../../src/renderer/workspace'
+import { describeProjects } from '../../src/main/ipc/restore'
+import type { ProjectRecord } from '../../src/main/state/store'
 
 const pane = (type: TabType) => ({ type })
 
@@ -160,5 +162,46 @@ describe('reducer routing by region', () => {
     const next = workspaceReducer(state, { type: 'dismissed', id: 't1' })
     expect(next.projects[0]?.activeTabId).toBe('t2')
     expect(next.projects[0]?.activeBrowserTabId).toBe('b1')
+  })
+})
+
+const recordFor = (id: string): ProjectRecord => ({
+  id,
+  name: 'demo',
+  slug: 'demo',
+  cwd: '/tmp/demo',
+  presets: [],
+  activeTabId: null,
+  activeBrowserTabId: null,
+})
+
+describe('describeProjects', () => {
+  it('resolves each region its own saved selection', async () => {
+    const described = await describeProjects(
+      [{ ...recordFor('p1'), activeTabId: 't1', activeBrowserTabId: 'b1' }],
+      [paneOf('t1', 'shell'), paneOf('b1', 'browser')],
+    )
+    expect(described[0]?.activeTabId).toBe('t1')
+    expect(described[0]?.activeBrowserTabId).toBe('b1')
+  })
+
+  // The fallback is the reason this test exists. `own[0]` is the project's
+  // first pane in raw order, which after this change can be a browser, and a
+  // terminal region pointed at a browser draws nothing at all.
+  it('never falls back across the region boundary', async () => {
+    const described = await describeProjects(
+      [{ ...recordFor('p1'), activeTabId: null, activeBrowserTabId: null }],
+      [paneOf('b1', 'browser'), paneOf('t1', 'shell')],
+    )
+    expect(described[0]?.activeTabId).toBe('t1')
+    expect(described[0]?.activeBrowserTabId).toBe('b1')
+  })
+
+  it('leaves a region with no panes selecting nothing', async () => {
+    const described = await describeProjects(
+      [{ ...recordFor('p1'), activeTabId: null, activeBrowserTabId: null }],
+      [paneOf('t1', 'shell')],
+    )
+    expect(described[0]?.activeBrowserTabId).toBeNull()
   })
 })

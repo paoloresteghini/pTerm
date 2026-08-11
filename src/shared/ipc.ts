@@ -12,6 +12,7 @@ export const CHANNELS = {
   detach: 'pterm:detach',
   restore: 'pterm:restore',
   setActive: 'pterm:setActive',
+  setActiveBrowser: 'pterm:setActiveBrowser',
   addProject: 'pterm:addProject',
   updateProject: 'pterm:updateProject',
   removeProject: 'pterm:removeProject',
@@ -960,6 +961,15 @@ export interface PTermApi {
   /** Reattach tabs persisted by the previous run; returns what came back. */
   restore(): Promise<RestoreResult>
   setActive(id: string | null): void
+  /**
+   * Same shape as `setActive`, for the browser region's own selection, and a
+   * separate channel rather than a parameter on `setActive` because the two
+   * do not share a job: `setActive` also drives `onActiveTabChanged`, which
+   * the status router reads to decide whether a pane is attended, so routing
+   * a browser click through it would fire a notification for a terminal
+   * that is simply visible beside the page.
+   */
+  setActiveBrowser(id: string | null): void
   /**
    * Every project mutation resolves to the whole list the sidebar should draw,
    * Unsorted included — built by the same code path restore uses, so a mutation

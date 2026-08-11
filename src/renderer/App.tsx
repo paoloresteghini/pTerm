@@ -1136,6 +1136,11 @@ export function App() {
     window.pterm.setActive(currentTabId)
   }, [ready, currentTabId])
 
+  const currentBrowserTabId = activeTabId(state, 'browser')
+  useEffect(() => {
+    window.pterm.setActiveBrowser(currentBrowserTabId)
+  }, [currentBrowserTabId])
+
   useEffect(() => {
     if (!ready) return
     window.pterm.setActiveProject(state.activeProjectId)

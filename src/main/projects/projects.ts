@@ -49,6 +49,7 @@ export function addProject(
     cwd: input.cwd,
     presets: [],
     activeTabId: null,
+    activeBrowserTabId: null,
   }
   return {
     config: {

@@ -55,6 +55,7 @@ const sampleConfig: PTermConfig = {
       cwd: '/Users/paolo/Code/Lumio',
       presets: [{ id: 'pr1', label: 'dev', command: 'npm run dev' }],
       activeTabId: 'a1b2c3d4e5f60718',
+      activeBrowserTabId: null,
     },
   ],
   panes: [

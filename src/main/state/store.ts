@@ -31,6 +31,8 @@ export interface ProjectRecord {
    * recorded here rather than settled as a side effect of this migration.
    */
   activeTabId: string | null
+  /** Same as `activeTabId`, resolved by `describeProjects` against the browser region instead. */
+  activeBrowserTabId: string | null
 }
 
 export interface PTermConfig {
@@ -332,6 +334,8 @@ function normaliseProject(project: ProjectRecord): ProjectRecord {
     ...project,
     presets: Array.isArray(project.presets) ? project.presets : [],
     activeTabId: typeof project.activeTabId === 'string' ? project.activeTabId : null,
+    activeBrowserTabId:
+      typeof project.activeBrowserTabId === 'string' ? project.activeBrowserTabId : null,
   }
 }
 

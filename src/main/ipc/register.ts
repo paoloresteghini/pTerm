@@ -17,6 +17,7 @@ import {
   type Preset,
   type ProjectFileList,
   type ProjectDescriptor,
+  regionOf,
   type RestartRequest,
   type RestoreResult,
   type SplitRequest,
@@ -739,6 +740,29 @@ export function registerIpc(
         ...config,
         projects: config.projects.map((project) =>
           project.id === owner.id ? { ...project, activeTabId: id } : project,
+        ),
+      })
+    })
+  })
+
+  ipcMain.on(CHANNELS.setActiveBrowser, (_event, id: string | null) => {
+    // Persistence only: unlike `setActive` above, this never calls
+    // `onActiveTabChanged`. That callback is what the status router reads to
+    // decide whether a pane is attended, and a browser pane sitting beside a
+    // terminal is on screen whenever the terminal is, whether or not it is
+    // this project's selected browser tab, so its selection carries no
+    // attended/unattended meaning for the router to read.
+    void serialise(async () => {
+      if (id === null) return
+      const config = await store.read()
+      const tab = config.panes.find((saved) => saved.id === id)
+      if (!tab || regionOf(tab) !== 'browser') return
+      const owner = projectForSlug(config, tab.projectSlug)
+      if (!owner) return
+      await store.write({
+        ...config,
+        projects: config.projects.map((project) =>
+          project.id === owner.id ? { ...project, activeBrowserTabId: id } : project,
         ),
       })
     })

@@ -10,6 +10,7 @@ import { mergeSessionlessPanes } from './sessionlessPanes'
 // are the same shape, and duplicating the types here would let them drift.
 import {
   UNSORTED_ID,
+  regionOf,
   type ProjectDescriptor,
   type RestoreResult,
   type TabDescriptor,
@@ -35,14 +36,25 @@ export async function describeProjects(
   const described: ProjectDescriptor[] = []
   for (const project of projects) {
     const own = tabs.filter((tab) => tab.projectSlug === project.slug)
+    const terminals = own.filter((tab) => regionOf(tab) === 'terminal')
+    const browsers = own.filter((tab) => regionOf(tab) === 'browser')
     described.push({
       id: project.id,
       name: project.name,
       slug: project.slug,
       cwd: project.cwd,
       presets: mergePresets(project.presets, await readManifest(project.cwd)),
-      // The saved choice when its session came back, else this project's first.
-      activeTabId: own.find((tab) => tab.id === project.activeTabId)?.id ?? own[0]?.id ?? null,
+      // The saved choice when its session came back, else this project's
+      // first terminal. Never a browser: `own[0]` would be one whenever a
+      // project's first pane happens to be a browser tab, and a terminal
+      // region pointed at a browser draws nothing at all.
+      activeTabId:
+        terminals.find((tab) => tab.id === project.activeTabId)?.id ?? terminals[0]?.id ?? null,
+      // Same rule, mirrored for the browser region.
+      activeBrowserTabId:
+        browsers.find((tab) => tab.id === project.activeBrowserTabId)?.id ??
+        browsers[0]?.id ??
+        null,
       available: await isDirectory(project.cwd),
     })
   }
