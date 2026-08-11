@@ -1137,9 +1137,13 @@ export function App() {
   }, [ready, currentTabId])
 
   const currentBrowserTabId = activeTabId(state, 'browser')
+  // Gated like setActive above, for the same pairing: before restore
+  // resolves, this region's answer is null, which is a statement about a
+  // state the renderer does not know yet, not a considered "no selection".
   useEffect(() => {
+    if (!ready) return
     window.pterm.setActiveBrowser(currentBrowserTabId)
-  }, [currentBrowserTabId])
+  }, [ready, currentBrowserTabId])
 
   useEffect(() => {
     if (!ready) return
