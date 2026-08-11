@@ -172,6 +172,24 @@ export function canHaveSession(pane: { type: TabType }): boolean {
   return !SESSIONLESS.includes(pane.type)
 }
 
+export type Region = 'terminal' | 'browser'
+
+/**
+ * Which column of the workspace a pane belongs to.
+ *
+ * Here rather than in `workspace.ts`, for the same reason `canHaveSession`
+ * sits above it: main will need to ask the same question, deciding which
+ * tab id counts as a project's active browser tab, and two spellings of "is
+ * this a browser" is how the two sides come to disagree.
+ *
+ * Written as a predicate on `type` rather than on `canHaveSession`, because
+ * `editor` and `diff` are sessionless too and stay in the terminal region;
+ * `browser` is the only kind this design moves.
+ */
+export function regionOf(pane: { type: TabType }): Region {
+  return pane.type === 'browser' ? 'browser' : 'terminal'
+}
+
 /** A notification rule, exactly as it is stored. */
 export interface Rule {
   /** Absent matches every state. */
@@ -660,6 +678,17 @@ export interface ProjectDescriptor {
   cwd: string
   presets: ResolvedPreset[]
   activeTabId: string | null
+  /**
+   * The project's active tab in the browser region, mirroring `activeTabId`
+   * for the terminal region.
+   *
+   * Optional, unlike `activeTabId`: 40 files under `tests/` build a
+   * `ProjectDescriptor` or `ProjectRecord` literal (grep -rln "activeTabId:"
+   * tests/, 2026-08-11), and a required field would fail `tsc` in every one
+   * of them for no behaviour change. Every reader spells the absence as
+   * `?? null`.
+   */
+  activeBrowserTabId?: string | null
   /** False when `cwd` is no longer a directory — renamed or deleted. */
   available: boolean
 }
