@@ -28,6 +28,17 @@ import type { TabDescriptor } from '../../shared/ipc'
  * (`/tmp/demo/` names the tab `demo`), so only a bare `/` yields nothing;
  * that case falls through to the same label a terminal gets rather than to
  * a blank tab.
+ *
+ * A browser pane is named for its host, INCLUDING the port: `hostOf` uses
+ * `URL#host` rather than `#hostname` because two dev servers on localhost
+ * are the common case, and a label of `localhost` twice over identifies
+ * neither. `about:blank` has an empty host, so a pane with no page yet
+ * falls through to the same slug-and-id label a terminal gets, which is
+ * correct: there is no page to name it after. Unlike the editor case above,
+ * this parses with the web `URL` global rather than by hand: `nodeIntegration`
+ * being off is what rules out `node:path` there, and `URL` is a web platform
+ * global rather than a node builtin, so that constraint has nothing to say
+ * about it.
  */
 export function tabLabel(tab: TabDescriptor): string {
   if (tab.title) return tab.title
@@ -35,5 +46,18 @@ export function tabLabel(tab: TabDescriptor): string {
     const name = tab.filePath.split('/').filter(Boolean).pop()
     if (name) return name
   }
+  if (tab.type === 'browser' && tab.url) {
+    const host = hostOf(tab.url)
+    if (host) return host
+  }
   return `${tab.projectSlug} · ${tab.id.slice(0, 6)}`
+}
+
+/** `URL#host` of a string that may not parse as one, `undefined` if it does not. */
+function hostOf(url: string): string | undefined {
+  try {
+    return new URL(url).host || undefined
+  } catch {
+    return undefined
+  }
 }

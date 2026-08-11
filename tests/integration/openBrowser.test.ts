@@ -9,14 +9,19 @@ import type { ProjectRecord } from '../../src/main/state/store'
 // the main process. Capturing the handlers here is the same pattern
 // history.test.ts and persistence.test.ts use to drive channels without a
 // real Electron host.
+//
+// `listeners` is separate from `handlers`: `setPaneUrl` is registered with
+// `.on`, not `.handle` (see `register.ts`), and persistence.test.ts's mock is
+// where this split first appears. `openBrowser` alone never needed it.
 const ipc = vi.hoisted(() => ({
   handlers: new Map<string, (...args: never[]) => unknown>(),
+  listeners: new Map<string, (...args: never[]) => unknown>(),
 }))
 
 vi.mock('electron', () => ({
   ipcMain: {
     handle: (channel: string, fn: (...args: never[]) => unknown) => ipc.handlers.set(channel, fn),
-    on: () => undefined,
+    on: (channel: string, fn: (...args: never[]) => unknown) => ipc.listeners.set(channel, fn),
   },
   dialog: { showOpenDialog: () => Promise.resolve({ canceled: true, filePaths: [] }) },
 }))
@@ -41,6 +46,20 @@ function openBrowser(projectId: string, url?: string): Promise<TabDescriptor | n
   return invoke<TabDescriptor | null>(CHANNELS.openBrowser, projectId, url)
 }
 
+// `setPaneUrl` is `.on`, fire-and-forget, so there is no promise to await:
+// the write it triggers runs inside `serialise`'s queue, off the same tick
+// this call returns on. `settle` gives that queued write a turn to finish
+// before a test reads the config back, the same wait persistence.test.ts
+// uses after driving `CHANNELS.setLayout` the same way.
+const settle = (ms = 50): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+async function setPaneUrl(paneId: string, url: string): Promise<void> {
+  const listener = ipc.listeners.get(CHANNELS.setPaneUrl)
+  if (!listener) throw new Error(`no listener registered for ${CHANNELS.setPaneUrl}`)
+  listener(null as never, paneId as never, url as never)
+  await settle()
+}
+
 let configDir: string
 let store: Store
 
@@ -56,6 +75,7 @@ beforeEach(async () => {
   await store.write({ ...empty, projects: [project()] })
 
   ipc.handlers.clear()
+  ipc.listeners.clear()
   const manager = new SessionManager(new TmuxAdapter({ socket: 'pterm-openBrowser-test' }))
   const registry = new StatusRegistry()
   const fakeWindow = {
@@ -127,5 +147,41 @@ describe('CHANNELS.openBrowser', () => {
 
     expect(merged.panes.find((row) => row.id === pane?.id)?.url).toBe('https://example.com')
     expect(merged.tabs.find((row) => row.id === pane?.id)).toBeDefined()
+  })
+})
+
+describe('CHANNELS.setPaneUrl', () => {
+  it('moves the saved url and leaves other panes alone', async () => {
+    const pane = await openBrowser('p1', 'https://example.com')
+    await setPaneUrl(pane!.id, 'https://example.com/deep')
+
+    const config = await store.read()
+    expect(config.panes.find((row) => row.id === pane!.id)?.url).toBe('https://example.com/deep')
+  })
+
+  // The kind check in the handler, pinned directly: a terminal row has no
+  // business gaining a `url` field, even though `normalisePane` would keep
+  // one if a stray call ever wrote it.
+  it('refuses a pane that is not a browser', async () => {
+    const config = await store.read()
+    const terminalPaneId = 't1'
+    await store.write({
+      ...config,
+      panes: [
+        ...config.panes,
+        {
+          id: terminalPaneId,
+          projectSlug: 'demo',
+          cwd: configDir,
+          type: 'shell',
+          tmuxSession: `pterm-demo-${terminalPaneId}`,
+        },
+      ],
+    })
+
+    const before = await store.read()
+    await setPaneUrl(terminalPaneId, 'https://example.com')
+    const after = await store.read()
+    expect(after.panes).toEqual(before.panes)
   })
 })

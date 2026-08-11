@@ -2164,4 +2164,26 @@ export function registerIpc(
         return pane
       }),
   )
+
+  // `.on`, not `.handle`, for the same reason `setLayout` above is: nothing
+  // awaits this, and the renderer already shows where it navigated to
+  // before the write lands. Debounced on the renderer side, so this fires
+  // far less often than `did-navigate` does.
+  ipcMain.on(CHANNELS.setPaneUrl, (_event, paneId: string, url: string) => {
+    void serialise(async () => {
+      const config = await store.read()
+      const pane = config.panes.find((row) => row.id === paneId)
+      // Not defensive noise: the kind check is what stops a stray call from
+      // writing a `url` onto a terminal row. `normalisePane` keeps any
+      // `url` field it finds regardless of kind, and nothing ever reads it
+      // back off a row that is not `browser`, so a wrong write would sit
+      // there silently rather than fail loudly.
+      if (!pane || pane.type !== 'browser') return
+      if (pane.url === url) return
+      await store.write({
+        ...config,
+        panes: config.panes.map((row) => (row.id === paneId ? { ...row, url } : row)),
+      })
+    })
+  })
 }

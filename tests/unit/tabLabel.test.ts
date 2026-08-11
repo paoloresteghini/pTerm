@@ -65,3 +65,27 @@ describe('tabLabel, for an editor pane', () => {
     expect(tabLabel(editor({ filePath: '/' }))).toBe('demo · abcdef')
   })
 })
+
+describe('tabLabel, for a browser pane', () => {
+  it('names a browser tab by its host', () => {
+    expect(
+      tabLabel({ id: 'b1', projectSlug: 'demo', cwd: '/tmp/demo', type: 'browser', url: 'https://example.com/a/b' }),
+    ).toBe('example.com')
+  })
+
+  it('names a browser tab on localhost by host and port, which is what tells two dev servers apart', () => {
+    expect(
+      tabLabel({ id: 'b1', projectSlug: 'demo', cwd: '/tmp/demo', type: 'browser', url: 'http://localhost:5173/' }),
+    ).toBe('localhost:5173')
+  })
+
+  it('falls back for a browser tab with no url', () => {
+    expect(tabLabel({ id: 'b1', projectSlug: 'demo', cwd: '/tmp/demo', type: 'browser' })).toBe('demo · b1')
+  })
+
+  it('prefers a user title over the host', () => {
+    expect(
+      tabLabel({ id: 'b1', projectSlug: 'demo', cwd: '/tmp/demo', type: 'browser', title: 'Docs', url: 'https://example.com' }),
+    ).toBe('Docs')
+  })
+})

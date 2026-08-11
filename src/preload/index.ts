@@ -93,6 +93,7 @@ const api: PTermApi = {
   installShellHistory: () => ipcRenderer.invoke(CHANNELS.installShellHistory),
   uninstallShellHistory: () => ipcRenderer.invoke(CHANNELS.uninstallShellHistory),
   setLayout: (tabId, shares) => ipcRenderer.send(CHANNELS.setLayout, tabId, shares),
+  setPaneUrl: (paneId, url) => ipcRenderer.send(CHANNELS.setPaneUrl, paneId, url),
   skills: (projectCwd) => ipcRenderer.invoke(CHANNELS.skills, projectCwd),
   todosList: (): Promise<TodoRecord[]> => ipcRenderer.invoke(CHANNELS.todosList),
   todosCreate: (draft: TodoDraft): Promise<TodoRecord[]> =>

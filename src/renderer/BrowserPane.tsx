@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { DidNavigateEvent, DidNavigateInPageEvent } from 'electron'
+import type { DidNavigateEvent, DidNavigateInPageEvent, PageTitleUpdatedEvent } from 'electron'
 import { Button } from './ui/Button'
 import { normaliseUrl } from '../shared/browserUrl'
 import { UNSORTED_ID } from '../shared/ipc'
@@ -76,9 +76,11 @@ export function partitionFor(projectId: string): string {
  * back, forward, reload, a typed address or a link clicked inside the page,
  * goes through the element's own imperative API rather than through React
  * state, because writing `src` again would hand the page a fresh navigation
- * to whatever it already happens to be showing. Nothing in this task saves
- * where the user navigates to; that is a later task, so a relaunch reopens
- * this pane at `url` exactly as it was left.
+ * to whatever it already happens to be showing. Where the user navigates to
+ * IS saved, just not through `address`: the effect below reports it to main
+ * off `did-navigate`/`did-navigate-in-page`, debounced, so a relaunch
+ * reopens this pane wherever navigation last settled rather than at the
+ * `url` it was originally opened with.
  */
 export function BrowserPane({
   paneId,
@@ -97,11 +99,27 @@ export function BrowserPane({
   const [typed, setTyped] = useState(address)
   const [canGoBack, setCanGoBack] = useState(false)
   const [canGoForward, setCanGoForward] = useState(false)
+  // The page's own title, live while the pane is open. Kept in memory only:
+  // `page-title-updated` fires far more often than a navigation settles (a
+  // single-page app can retitle itself on every route change), and none of
+  // that is worth a round trip to main, let alone a write. `about:blank` and
+  // a page that has not set one yet leave this undefined.
+  const [pageTitle, setPageTitle] = useState<string | undefined>()
+  // Holds the debounce timer between `did-navigate` events, so a burst of
+  // them (a page redirecting several times on one load) resets one timer
+  // instead of scheduling several writes that would land in whatever order
+  // their timeouts happen to fire.
+  const pendingUrlWrite = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   /**
    * Keeps the back/forward buttons and the address bar in step with the
    * webview's own history, including navigation this pane's own buttons had
-   * no part in: a link clicked inside the page, or a redirect.
+   * no part in: a link clicked inside the page, or a redirect. Also the only
+   * place this pane's current page reaches main: debounced, so a page that
+   * redirects several times on one navigation (an auth bounce, a dev
+   * server's reconnect) writes `config.json` once, on settle, rather than
+   * once per hop for no benefit, the same way `setLayout` commits a drag on
+   * pointer-up rather than on every frame.
    *
    * Registered once, on mount, rather than depending on anything: the
    * `<webview>` element itself is never replaced for the life of this pane
@@ -116,6 +134,11 @@ export function BrowserPane({
       setCanGoBack(node.canGoBack())
       setCanGoForward(node.canGoForward())
       setTyped(nextUrl)
+      if (pendingUrlWrite.current !== null) clearTimeout(pendingUrlWrite.current)
+      pendingUrlWrite.current = setTimeout(() => {
+        pendingUrlWrite.current = null
+        window.pterm.setPaneUrl(paneId, nextUrl)
+      }, 500)
     }
     const onNavigate = (event: Event) => sync((event as DidNavigateEvent).url)
     // `did-navigate-in-page` also fires for a subframe's own in-page
@@ -131,13 +154,37 @@ export function BrowserPane({
     return () => {
       node.removeEventListener('did-navigate', onNavigate)
       node.removeEventListener('did-navigate-in-page', onNavigateInPage)
+      // Without this, a pane closed while a debounce is pending would still
+      // fire its write after unmount: nothing here awaits it, and the timer
+      // does not know its pane is gone.
+      if (pendingUrlWrite.current !== null) clearTimeout(pendingUrlWrite.current)
     }
+  }, [])
+
+  // Its own effect rather than folded into the one above: this listener
+  // updates nothing the sync effect already coordinates (no back/forward
+  // state, no address bar, no write to main), so there is no reason to
+  // register or tear it down alongside those.
+  useEffect(() => {
+    const node = view.current
+    if (!node) return
+    const onTitleUpdated = (event: Event) => setPageTitle((event as PageTitleUpdatedEvent).title)
+    node.addEventListener('page-title-updated', onTitleUpdated)
+    return () => node.removeEventListener('page-title-updated', onTitleUpdated)
   }, [])
 
   return (
     <div
       className="flex h-full flex-col"
       data-testid={`browserpane-${paneId}`}
+      // The live page title as a native tooltip: this pane has no visible
+      // title bar of its own (the chrome strip below is buttons and an
+      // address, and `splits.spec.ts` pins its whole pixel budget, so
+      // nothing here adds a new element to it), and the tab bar this pane
+      // sits under is drawn from the persisted `TabDescriptor` rather than
+      // from this component. Hovering the pane is the only place this
+      // pane's own copy of `pageTitle` currently surfaces.
+      title={pageTitle}
       // `var(--color-bg)` for an uncoloured pane rather than a literal, the
       // same fallback and the same reasoning `DiffView.tsx` uses: the canvas
       // has to move with the theme rather than pin to one palette's hex.

@@ -46,6 +46,7 @@ export const CHANNELS = {
   uninstallShellHistory: 'pterm:uninstallShellHistory',
   menuCommand: 'pterm:menuCommand',
   setLayout: 'pterm:setLayout',
+  setPaneUrl: 'pterm:setPaneUrl',
   skills: 'pterm:skills',
   notesRead: 'pterm:notesRead',
   notesWrite: 'pterm:notesWrite',
@@ -1111,6 +1112,16 @@ export interface PTermApi {
    * shared with restore and the exit handler.
    */
   setLayout(tabId: string, shares: Record<string, number>): void
+  /**
+   * Persist a browser pane's current page, fire-and-forget, mirroring
+   * `setLayout` above: the renderer already shows the address it navigated
+   * to, and a failed write costs a relaunch, not this session.
+   *
+   * Sent debounced from `BrowserPane`, not once per navigation event: a
+   * page that redirects several times on one load would otherwise thrash
+   * `config.json` for a URL only the last hop is worth remembering.
+   */
+  setPaneUrl(paneId: string, url: string): void
   /**
    * One directory of one project, directories first then files.
    *
