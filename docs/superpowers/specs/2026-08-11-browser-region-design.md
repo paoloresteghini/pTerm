@@ -112,7 +112,8 @@ The tab strip reuses `TabBar` rather than forking a second bar that can drift
 from the first. It gains two props:
 
 - `testIdPrefix`, so browser tabs render as `browsertab-<id>` and not
-  `tab-<id>`. This is load bearing: more than 27 e2e locators count terminal
+  `tab-<id>`. This is load bearing: 69 e2e locators across 12 spec files
+  (measured 2026-08-11) count terminal
   tabs with `[data-testid^="tab-"]`, and a second bar under that prefix would
   inflate every one of them.
 - Capability flags that switch off restart, dismiss and join. A browser pane has

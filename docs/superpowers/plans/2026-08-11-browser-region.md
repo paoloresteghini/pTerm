@@ -112,14 +112,10 @@ Write its doc comment yourself. What it needs to say, and what the reviewer will
 In `ProjectDescriptor`:
 
 ```ts
-  /**
-   * The browser region's selection for this project. Optional, unlike
-   * `activeTabId` beside it: 42 test files build a `ProjectDescriptor` and a
-   * required field would fail `tsc` in every one of them for no behaviour.
-   * Every read spells the absence as `?? null`.
-   */
   activeBrowserTabId?: string | null
 ```
+
+Optional, unlike `activeTabId` beside it, and the comment you write should say why: a large number of test files build these literals and a required field fails `tsc` in every one of them for no behaviour change. If you want to state the number, measure it first (`grep -rln "activeTabId:" tests/ | wc -l` reported 40 files on 2026-08-11, spanning both `ProjectDescriptor` and `ProjectRecord`) and say what you counted. Every read spells the absence as `?? null`.
 
 - [ ] **Step 5: Run the test and the typecheck**
 
@@ -690,16 +686,11 @@ git commit -m "Add the browser column slot, hidden by default on every existing 
   testIdPrefix = 'tab',
   capabilities,
   ...
-  /**
-   * What each tab's testid is built from, and the bar's own. Two bars exist
-   * now and only one of them may answer to `tab-`: more than 27 e2e locators
-   * count terminal tabs with `[data-testid^="tab-"]`, and a second bar under
-   * that prefix inflates every one of them.
-   */
   testIdPrefix?: string
-  /** Off for the browser region: a sessionless pane cannot die, restart or join. */
   capabilities?: { restart?: boolean; dismiss?: boolean; join?: boolean }
 ```
+
+Document both props. What `testIdPrefix` needs to say, in whatever words are true when you write it: two bars exist now and only one may answer to `tab-`, because the e2e suite counts terminal tabs with `[data-testid^="tab-"]` and a second bar under that prefix inflates every one of those counts. Measured on 2026-08-11: 69 such locators across 12 spec files. Re-run `grep -rn 'data-testid\^="tab-"' tests/e2e/ | wc -l` before quoting a number, and quote what you measured. `capabilities` is off for the browser region because a sessionless pane cannot die, restart, or join.
 
 Then: `data-testid={`${testIdPrefix}bar`}` on the bar, `` data-testid={`${testIdPrefix}-${tab.id}`} `` on each tab. Leave `elapsed-` and `tabinput-` alone: both are keyed by a pane id, which is unique across both bars, so neither can collide and neither is counted by a prefix locator.
 
