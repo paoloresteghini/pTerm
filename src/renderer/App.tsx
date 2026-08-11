@@ -34,6 +34,7 @@ import { StatusBar } from './StatusBar'
 import { Welcome } from './Welcome'
 import { CommandPalette, type PaletteSession } from './CommandPalette'
 import { FileView, saveEditorPane } from './FileView'
+import { BrowserPane } from './BrowserPane'
 import { clearTerminal, selectionOf } from './Terminal'
 import { DiffView } from './DiffView'
 import { cn } from './lib/cn'
@@ -545,6 +546,36 @@ export function App() {
     },
     [project, fail],
   )
+
+  /**
+   * Open a fresh browser pane for the active project, in a new tab of its
+   * own.
+   *
+   * Mirrors `openFile` above: `opened` both adds the pane and selects it,
+   * which is enough here for the same reason it is enough there — a browser
+   * pane founds its own tab, so the id it selects by is the tab's id.
+   *
+   * `window.pterm.openBrowser` is called with no `url`, unlike `openFile`
+   * with its `relPath`: a browser pane starts with nothing to show, and main
+   * (Task 3) always stores `about:blank` for that case rather than treating
+   * an absent URL as a reason to refuse. So the only refusal left to handle
+   * is `!project`, not a null reply — `openBrowser` answers null only for an
+   * unknown project id, and `project` is already resolved from the active
+   * one before this ever calls it.
+   */
+  const openBrowserPane = useCallback(() => {
+    if (!project) return
+    window.pterm
+      .openBrowser(project.id)
+      .then((tab) => {
+        if (tab) {
+          dispatch({ type: 'opened', tab })
+          return
+        }
+        fail('Could not open a browser pane')
+      })
+      .catch(fail)
+  }, [project, fail])
 
   /**
    * Open a read-only diff pane for one path of the active project's
@@ -1653,9 +1684,10 @@ export function App() {
                 style={{ ...box.style, background: box.pane.color ?? 'var(--color-bg)' }}
               >
                 {/* The pane's contents, by kind. Every pane was a terminal
-                    until this slice; an editor or diff pane has no session
-                    to attach and mounting one for it would create the very
-                    tmux session the kind exists to do without. */}
+                    until the editor slice; an editor, diff or browser pane
+                    has no session to attach and mounting one for it would
+                    create the very tmux session the kind exists to do
+                    without. */}
                 {box.pane.type === 'diff' ? (
                   <DiffView
                     projectId={projectIdForTab(state.projects, box.pane)}
@@ -1677,6 +1709,13 @@ export function App() {
                     theme={theme}
                     paneId={box.pane.id}
                     onDirtyChange={onDirtyChange}
+                  />
+                ) : box.pane.type === 'browser' ? (
+                  <BrowserPane
+                    paneId={box.pane.id}
+                    projectId={projectIdForTab(state.projects, box.pane)}
+                    url={box.pane.url}
+                    paneColor={box.pane.color}
                   />
                 ) : (
                   <Terminal
@@ -2247,6 +2286,7 @@ export function App() {
                 setCreatingTodo(true)
               },
             },
+            { name: 'New browser pane', run: openBrowserPane },
           ]}
           onOpenFile={openFile}
           onSelectSession={(id) => {

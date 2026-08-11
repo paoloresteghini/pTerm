@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, Notification } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, session } from 'electron'
 import type { MenuItemConstructorOptions } from 'electron'
 import { execFile } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
@@ -491,6 +491,11 @@ function createWindow(): void {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // `BrowserPane.tsx` (Task 4) renders a `<webview>` for a project's
+      // browser pane. The hardening below ships in the same commit as this
+      // flag: `will-attach-webview` is what keeps a widened attack surface
+      // from becoming an insecure default.
+      webviewTag: true,
       /*
        * `PTERM_WEBGL_LIMIT` handed to the preload as an argument rather than
        * read there.
@@ -511,6 +516,45 @@ function createWindow(): void {
         `--pterm-theme=${storedTheme}`,
       ],
     },
+  })
+
+  // A `<webview>` is arbitrary web content with no window chrome around it:
+  // nowhere to render a permission prompt, and no reason to run with a
+  // preload or node access of its own. `will-attach-webview` fires once per
+  // `<webview>` element this window's renderer creates, before Electron
+  // builds the guest page's `webContents`, which is the point Electron's own
+  // docs name for enforcing this rather than trusting whatever the tag (or a
+  // compromised renderer) asked for.
+  mainWindow.webContents.on('will-attach-webview', (_event, webPreferences, params) => {
+    // Force isolation regardless of what was requested. A `preload` here, or
+    // node integration, would reach into this process the way the main
+    // window's own renderer is deliberately kept from doing; `allowpopups`
+    // would let a page spawn its own unmanaged `BrowserWindow`.
+    delete webPreferences.preload
+    webPreferences.nodeIntegration = false
+    webPreferences.contextIsolation = true
+    delete params.nodeintegration
+    delete params.allowpopups
+
+    // Denies every permission request, but only for THIS webview's own
+    // partition, never the app's default session. `session.fromPartition`
+    // keys purely off the string passed to it, so the guard is the
+    // `persist:proj-` prefix every browser pane's partition carries
+    // (`BrowserPane.tsx`). That is what keeps this from also reaching the
+    // main window's own renderer — a `will-attach-webview` listener never
+    // fires for that session at all, but a broader `app.on('session-created',
+    // ...)` handler, which the alternative here would have been, fires for
+    // every session including it — or any later feature that opens a
+    // `session.fromPartition` of its own under a different prefix. A camera
+    // or clipboard prompt has nowhere sensible to render inside a pane with
+    // no window chrome, so M1 denies every one outright rather than building
+    // UI for it.
+    const partition = webPreferences.partition ?? params.partition
+    if (partition?.startsWith('persist:proj-')) {
+      session
+        .fromPartition(partition)
+        .setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
+    }
   })
 
   // No dock icon and no app switcher entry either: hundreds of launches
