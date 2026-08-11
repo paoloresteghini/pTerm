@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, session } from 'electron'
-import type { MenuItemConstructorOptions } from 'electron'
+import type { MenuItemConstructorOptions, WebPreferences } from 'electron'
 import { execFile } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
@@ -465,6 +465,56 @@ app.on('second-instance', () => {
   mainWindow.focus()
 })
 
+// A `target=_blank` link or a `window.open()` call inside a browser pane.
+// `will-attach-webview` (inside `createWindow`, below) forces `allowpopups`
+// on so the request reaches here instead of being refused before any
+// handler runs; without that, a click already does nothing, which reads as
+// broken rather than blocked. Fixed here rather than on the `<webview>`
+// element itself: `WebviewTag` has no `new-window` event and no
+// `setWindowOpenHandler` of its own (checked against
+// `node_modules/electron/electron.d.ts`, both live on `WebContents`), and
+// `web-contents-created` is what hands this process the guest's own
+// `WebContents` to call it on.
+//
+// Registered once here, at module scope, rather than inside `createWindow`:
+// `web-contents-created` fires on `app`, a single object that outlives any
+// one window, unlike `will-attach-webview` above which fires on a
+// particular `mainWindow.webContents` and is naturally cleaned up when that
+// window closes. `createWindow` runs again whenever the app reactivates
+// with no window open (see `app.on('activate')` below), and registering an
+// `app`-level listener there would add another one on every such reopen,
+// for the life of the process, none of which would ever be removed.
+//
+// This fires once for every `WebContents` this app ever creates, including
+// the main window's own; `getType() === 'webview'` is what narrows to a
+// browser pane's guest.
+app.on('web-contents-created', (_event, contents) => {
+  if (contents.getType() !== 'webview') return
+  contents.setWindowOpenHandler(({ url }) => {
+    // `disposition` (`foreground-tab`, `background-tab`, `new-window`, ...)
+    // is how a tabbed browser would route the request differently; a
+    // browser pane has exactly one surface for the guest's content
+    // regardless of which one Chromium reports, so every disposition is
+    // handled the same way here.
+    //
+    // Guarded to `http:`/`https:` rather than handed to `loadURL` unchecked:
+    // `loadURL` requires a URL with its protocol prefix already on it and
+    // rejects otherwise, and a scheme this pane was never going to render
+    // (`mailto:`, `tel:`) would otherwise reach it and surface as an
+    // ordinary failed-load card for no benefit. An unparseable `url` has
+    // nothing to load either way.
+    try {
+      const parsed = new URL(url)
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        void contents.loadURL(url)
+      }
+    } catch {
+      // Unparseable: nothing to navigate to.
+    }
+    return { action: 'deny' }
+  })
+})
+
 function createWindow(): void {
   // A full e2e run launches this app hundreds of times, and each launch
   // otherwise opens in the middle of the developer's screen and takes key
@@ -528,13 +578,33 @@ function createWindow(): void {
   mainWindow.webContents.on('will-attach-webview', (event, webPreferences, params) => {
     // Force isolation regardless of what was requested. A `preload` here, or
     // node integration, would reach into this process the way the main
-    // window's own renderer is deliberately kept from doing; `allowpopups`
-    // would let a page spawn its own unmanaged `BrowserWindow`.
+    // window's own renderer is deliberately kept from doing.
     delete webPreferences.preload
     webPreferences.nodeIntegration = false
     webPreferences.contextIsolation = true
     delete params.nodeintegration
-    delete params.allowpopups
+    // Forced ON, not merely permitted: `allowpopups` is off by default, and
+    // `BrowserPane.tsx`'s `<webview>` never sets the attribute itself, so
+    // without either line below a guest's `window.open()` or `target=_blank`
+    // is refused before Electron ever builds the request to hand to a
+    // handler. `setWindowOpenHandler`, registered once below on every
+    // `webview` `WebContents` this app creates, is what actually denies the
+    // window now: this pair just clears the path to that handler, neither
+    // one by itself lets anything through.
+    //
+    // Both fields, not just one, measured rather than assumed: `params`
+    // carries the raw `<webview>` attributes and `webPreferences` carries
+    // Electron's already-computed guest preferences, and disabling popups
+    // logged as `webPreferences.disablePopups: true` here even with
+    // `params.allowpopups` set — Electron had already derived it from the
+    // attribute (absent, since the tag never sets it) before this handler
+    // ran. Flipping `disablePopups` off directly is what actually let a
+    // `target=_blank` click reach `setWindowOpenHandler` below; `.allowpopups`
+    // is set alongside it in case something downstream still reads `params`
+    // instead. `disablePopups` is not in `electron.d.ts` (checked against
+    // `node_modules/electron/electron.d.ts`), hence the cast.
+    params.allowpopups = 'true'
+    ;(webPreferences as WebPreferences & { disablePopups?: boolean }).disablePopups = false
 
     // Every browser pane this app creates (`BrowserPane.tsx`) attaches under
     // a `persist:proj-` partition, so an attach without one is either a bug
@@ -570,43 +640,6 @@ function createWindow(): void {
     session
       .fromPartition(partition)
       .setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
-  })
-
-  // A `target=_blank` link or a `window.open()` call inside a browser
-  // pane: `allowpopups` is stripped above, so without this the click
-  // already does nothing, which reads as broken rather than blocked. Fixed
-  // here rather than on the `<webview>` element itself: `WebviewTag` has no
-  // `new-window` event and no `setWindowOpenHandler` of its own (checked
-  // against `node_modules/electron/electron.d.ts`, both live on
-  // `WebContents`), and `web-contents-created` is what hands this process
-  // the guest's own `WebContents` to call it on. That event fires once for
-  // every `WebContents` this app ever creates, including the main window's;
-  // `getType() === 'webview'` is what narrows to a browser pane's guest.
-  app.on('web-contents-created', (_event, contents) => {
-    if (contents.getType() !== 'webview') return
-    contents.setWindowOpenHandler(({ url }) => {
-      // `disposition` (`foreground-tab`, `background-tab`, `new-window`,
-      // ...) is how a tabbed browser would route the request differently; a
-      // browser pane has exactly one surface for the guest's content
-      // regardless of which one Chromium reports, so every disposition is
-      // handled the same way here.
-      //
-      // Guarded to `http:`/`https:` rather than handed to `loadURL`
-      // unchecked: `loadURL` requires a URL with its protocol prefix
-      // already on it and rejects otherwise, and a scheme this pane was
-      // never going to render (`mailto:`, `tel:`) would otherwise reach it
-      // and surface as an ordinary failed-load card for no benefit. An
-      // unparseable `url` has nothing to load either way.
-      try {
-        const parsed = new URL(url)
-        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-          void contents.loadURL(url)
-        }
-      } catch {
-        // Unparseable: nothing to navigate to.
-      }
-      return { action: 'deny' }
-    })
   })
 
   // No dock icon and no app switcher entry either: hundreds of launches
