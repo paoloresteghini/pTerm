@@ -572,6 +572,43 @@ function createWindow(): void {
       .setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
   })
 
+  // A `target=_blank` link or a `window.open()` call inside a browser
+  // pane: `allowpopups` is stripped above, so without this the click
+  // already does nothing, which reads as broken rather than blocked. Fixed
+  // here rather than on the `<webview>` element itself: `WebviewTag` has no
+  // `new-window` event and no `setWindowOpenHandler` of its own (checked
+  // against `node_modules/electron/electron.d.ts`, both live on
+  // `WebContents`), and `web-contents-created` is what hands this process
+  // the guest's own `WebContents` to call it on. That event fires once for
+  // every `WebContents` this app ever creates, including the main window's;
+  // `getType() === 'webview'` is what narrows to a browser pane's guest.
+  app.on('web-contents-created', (_event, contents) => {
+    if (contents.getType() !== 'webview') return
+    contents.setWindowOpenHandler(({ url }) => {
+      // `disposition` (`foreground-tab`, `background-tab`, `new-window`,
+      // ...) is how a tabbed browser would route the request differently; a
+      // browser pane has exactly one surface for the guest's content
+      // regardless of which one Chromium reports, so every disposition is
+      // handled the same way here.
+      //
+      // Guarded to `http:`/`https:` rather than handed to `loadURL`
+      // unchecked: `loadURL` requires a URL with its protocol prefix
+      // already on it and rejects otherwise, and a scheme this pane was
+      // never going to render (`mailto:`, `tel:`) would otherwise reach it
+      // and surface as an ordinary failed-load card for no benefit. An
+      // unparseable `url` has nothing to load either way.
+      try {
+        const parsed = new URL(url)
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+          void contents.loadURL(url)
+        }
+      } catch {
+        // Unparseable: nothing to navigate to.
+      }
+      return { action: 'deny' }
+    })
+  })
+
   // No dock icon and no app switcher entry either: hundreds of launches
   // bouncing in the dock is the other half of what makes a run unusable.
   if (backgroundWindow) app.dock?.hide()

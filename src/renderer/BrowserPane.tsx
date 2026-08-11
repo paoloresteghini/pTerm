@@ -48,6 +48,9 @@ declare global {
     loadURL(url: string): Promise<void>
     canGoBack(): boolean
     canGoForward(): boolean
+    openDevTools(): void
+    closeDevTools(): void
+    isDevToolsOpened(): boolean
   }
 }
 
@@ -126,6 +129,15 @@ export function BrowserPane({
   const [typed, setTyped] = useState(address)
   const [canGoBack, setCanGoBack] = useState(false)
   const [canGoForward, setCanGoForward] = useState(false)
+  // Mirrors `isDevToolsOpened()`, kept in step by the `devtools-opened`/
+  // `devtools-closed` listeners below rather than read fresh on every
+  // render: those fire whether the DevTools window closed through this
+  // pane's own button or the user closing it directly, so this stays
+  // accurate either way. The button's click handler still asks
+  // `isDevToolsOpened()` directly rather than trusting this state, so a
+  // toggle can never fire in the wrong direction on the one render where
+  // the two might disagree.
+  const [devToolsOpen, setDevToolsOpen] = useState(false)
   // The two failure states this pane shows: `did-fail-load` (when
   // `isRealLoadFailure` says so) and `render-process-gone`. Both render a
   // card over the webview rather than closing the pane or its tab: a
@@ -221,17 +233,23 @@ export function BrowserPane({
       setLoadFailure(null)
       setCrashed(null)
     }
+    const onDevToolsOpened = () => setDevToolsOpen(true)
+    const onDevToolsClosed = () => setDevToolsOpen(false)
     node.addEventListener('did-navigate', onNavigate)
     node.addEventListener('did-navigate-in-page', onNavigateInPage)
     node.addEventListener('did-fail-load', onFailLoad)
     node.addEventListener('render-process-gone', onRenderProcessGone)
     node.addEventListener('did-start-loading', onStartLoading)
+    node.addEventListener('devtools-opened', onDevToolsOpened)
+    node.addEventListener('devtools-closed', onDevToolsClosed)
     return () => {
       node.removeEventListener('did-navigate', onNavigate)
       node.removeEventListener('did-navigate-in-page', onNavigateInPage)
       node.removeEventListener('did-fail-load', onFailLoad)
       node.removeEventListener('render-process-gone', onRenderProcessGone)
       node.removeEventListener('did-start-loading', onStartLoading)
+      node.removeEventListener('devtools-opened', onDevToolsOpened)
+      node.removeEventListener('devtools-closed', onDevToolsClosed)
       // Without this, a pane closed while a debounce is pending would still
       // fire its write after unmount: nothing here awaits it, and `urlSync`
       // does not know its pane is gone.
@@ -296,6 +314,30 @@ export function BrowserPane({
           spellCheck={false}
           className="min-w-0 flex-1 border border-border bg-raised px-1 text-fg outline-none"
         />
+        <Button
+          data-testid={`browserdevtools-${paneId}`}
+          aria-label="Toggle DevTools"
+          aria-pressed={devToolsOpen}
+          size="icon"
+          // `default` rather than `ghost` while open: the same on/off
+          // distinction `Button.tsx`'s two variants already draw, reused
+          // here as the toggle's only visual state rather than adding a
+          // third variant this is the sole caller of.
+          variant={devToolsOpen ? 'default' : 'ghost'}
+          onClick={() => {
+            const node = view.current
+            if (!node) return
+            // Asks the webview directly rather than trusting `devToolsOpen`:
+            // that state updates off the `devtools-opened`/`devtools-closed`
+            // listeners above, which is accurate a moment after either one
+            // fires but is one render behind `isDevToolsOpened()` on the
+            // render where the click itself happens.
+            if (node.isDevToolsOpened()) node.closeDevTools()
+            else node.openDevTools()
+          }}
+        >
+          🛠
+        </Button>
       </div>
       {/* `relative` so the failure cards below can cover the webview without
           taking any layout space of their own, the same reasoning
