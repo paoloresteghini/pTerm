@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import type { DidNavigateEvent, DidNavigateInPageEvent } from 'electron'
+import type {
+  DidFailLoadEvent,
+  DidNavigateEvent,
+  DidNavigateInPageEvent,
+  RenderProcessGoneEvent,
+} from 'electron'
 import { Button } from './ui/Button'
 import { normaliseUrl } from '../shared/browserUrl'
 import { UNSORTED_ID } from '../shared/ipc'
@@ -65,6 +70,27 @@ export function partitionFor(projectId: string): string {
 }
 
 /**
+ * Whether a `did-fail-load` errorCode names a page that actually failed, as
+ * opposed to Chromium's -3 (ABORTED), which fires on an ordinary redirect
+ * and on a load a newer navigation cancelled before it finished. A naive
+ * handler that treats every `did-fail-load` as a failure flashes an error
+ * card over a perfectly healthy page every time either of those happens.
+ *
+ * -3 is the only code excluded here, on purpose: it is the single exclusion
+ * this pane's brief names, and a wider guess at "probably also benign"
+ * codes would risk swallowing a real failure that happens to share -3's
+ * shape without sharing its cause.
+ *
+ * Exported so this one rule is testable without mounting a `<webview>`:
+ * `tests/unit/browserFailure.test.ts` drives it directly, since
+ * `vitest.config.mts` runs with no DOM to mount one against (see the
+ * comment atop `urlSync.ts`).
+ */
+export function isRealLoadFailure(errorCode: number): boolean {
+  return errorCode !== -3
+}
+
+/**
  * One page, in a hardened `<webview>`.
  *
  * The chrome strip above it (back, forward, reload, a typed address) lives
@@ -100,6 +126,25 @@ export function BrowserPane({
   const [typed, setTyped] = useState(address)
   const [canGoBack, setCanGoBack] = useState(false)
   const [canGoForward, setCanGoForward] = useState(false)
+  // Two of the three failure states Task 7 covers: `did-fail-load` (when
+  // `isRealLoadFailure` says so) and `render-process-gone`. Both render a
+  // card over the webview rather than closing the pane or its tab: a
+  // browser pane cannot die the way a terminal can, and `canHaveSession` is
+  // false for it, so the `DeadPane` path this app uses for a crashed
+  // terminal does not apply here. Mutually exclusive in practice (a crashed
+  // renderer does not also fail a load), but kept as two separate booleans
+  // rather than one enum: nothing here needs to distinguish a third state
+  // from "neither", and an enum would need that name.
+  const [loadFailure, setLoadFailure] = useState<{
+    errorCode: number
+    errorDescription: string
+  } | null>(null)
+  // Electron's `reason` ('crashed', 'killed', 'oom', ...), or null when the
+  // renderer has not gone. Carrying the reason rather than a plain boolean
+  // is what lets the card say what happened instead of just that something
+  // did, the same distinction `loadFailure` draws by carrying the error
+  // code and description rather than a bare flag.
+  const [crashed, setCrashed] = useState<string | null>(null)
   // One instance for the pane's lifetime, the same way `NotesPanel` holds
   // its `noteSaver`: `urlSync.ts` owns the debounce, so this component only
   // schedules and cancels. `window.pterm.setPaneUrl` already matches
@@ -140,11 +185,52 @@ export function BrowserPane({
       const withFrame = event as DidNavigateInPageEvent
       if (withFrame.isMainFrame) sync(withFrame.url)
     }
+    // A subframe (an ad, an embed) can fail to load on an otherwise healthy
+    // page; `isMainFrame` is what keeps that from covering the whole pane in
+    // a card over content that rendered fine. `isRealLoadFailure` is the
+    // other half of the gate: without it, this would also fire on -3
+    // (ABORTED), which an ordinary redirect or a newer navigation produces
+    // on a page nothing is wrong with.
+    const onFailLoad = (event: Event) => {
+      const withDetail = event as DidFailLoadEvent
+      if (!withDetail.isMainFrame) return
+      if (!isRealLoadFailure(withDetail.errorCode)) return
+      setCrashed(null)
+      setLoadFailure({
+        errorCode: withDetail.errorCode,
+        errorDescription: withDetail.errorDescription,
+      })
+    }
+    // The renderer behind this `<webview>` is gone (crashed, killed, ran out
+    // of memory); the pane and its tab survive regardless of `reason`; the
+    // card just names it.
+    const onRenderProcessGone = (event: Event) => {
+      const withDetails = event as RenderProcessGoneEvent
+      setLoadFailure(null)
+      setCrashed(withDetails.details.reason)
+    }
+    // Fires at the start of every navigation, including the one a Retry or
+    // Reload button triggers, and including one the user starts some other
+    // way (back, forward, a typed address) after a failure. Either way, a
+    // card describing the LAST attempt has no business surviving into this
+    // one: clearing here, rather than only on success, means a second
+    // failure of a different kind replaces the card instead of leaving the
+    // first one's text under it.
+    const onStartLoading = () => {
+      setLoadFailure(null)
+      setCrashed(null)
+    }
     node.addEventListener('did-navigate', onNavigate)
     node.addEventListener('did-navigate-in-page', onNavigateInPage)
+    node.addEventListener('did-fail-load', onFailLoad)
+    node.addEventListener('render-process-gone', onRenderProcessGone)
+    node.addEventListener('did-start-loading', onStartLoading)
     return () => {
       node.removeEventListener('did-navigate', onNavigate)
       node.removeEventListener('did-navigate-in-page', onNavigateInPage)
+      node.removeEventListener('did-fail-load', onFailLoad)
+      node.removeEventListener('render-process-gone', onRenderProcessGone)
+      node.removeEventListener('did-start-loading', onStartLoading)
       // Without this, a pane closed while a debounce is pending would still
       // fire its write after unmount: nothing here awaits it, and `urlSync`
       // does not know its pane is gone.
@@ -210,13 +296,47 @@ export function BrowserPane({
           className="min-w-0 flex-1 border border-border bg-raised px-1 text-fg outline-none"
         />
       </div>
-      <webview
-        ref={view}
-        src={address}
-        partition={partitionFor(projectId)}
-        className="min-h-0 flex-1"
-        data-testid={`browserview-${paneId}`}
-      />
+      {/* `relative` so the failure cards below can cover the webview without
+          taking any layout space of their own, the same reasoning
+          `DeadPane.tsx` gives for its own absolute strip. */}
+      <div className="relative min-h-0 flex-1">
+        <webview
+          ref={view}
+          src={address}
+          partition={partitionFor(projectId)}
+          className="h-full w-full"
+          data-testid={`browserview-${paneId}`}
+        />
+        {loadFailure && (
+          <div
+            data-testid={`browsererror-${paneId}`}
+            className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-surface p-4 text-center font-mono text-[11px] text-fg"
+          >
+            <div className="text-muted">Failed to load ({loadFailure.errorCode})</div>
+            <div>{loadFailure.errorDescription}</div>
+            <Button
+              data-testid={`browsererrorretry-${paneId}`}
+              onClick={() => view.current?.reload()}
+            >
+              Retry
+            </Button>
+          </div>
+        )}
+        {crashed !== null && (
+          <div
+            data-testid={`browsercrashed-${paneId}`}
+            className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-surface p-4 text-center font-mono text-[11px] text-fg"
+          >
+            <div className="text-muted">This page crashed ({crashed})</div>
+            <Button
+              data-testid={`browsercrashedreload-${paneId}`}
+              onClick={() => view.current?.reload()}
+            >
+              Reload
+            </Button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

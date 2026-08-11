@@ -1,5 +1,7 @@
-// Mutation check (measured 2026-08-11, against this file's four tests as
-// written below): deleted the debounce from `createUrlSync.schedule`, making
+// Mutation check (measured 2026-08-11, against the four debounce-behaviour
+// tests below; the fifth, pinning the default delay, was added afterward and
+// played no part in this check): deleted the debounce from
+// `createUrlSync.schedule`, making
 // it call `send` immediately instead of through `setTimeout`. Ran
 // `npx vitest run tests/unit/urlSync.test.ts` against that mutant. Before
 // guessing, the expectation was that two tests would catch it; the actual
@@ -75,5 +77,21 @@ describe('createUrlSync', () => {
     expect(send).toHaveBeenCalledTimes(2)
     expect(send).toHaveBeenNthCalledWith(1, 'p1', 'https://example.com/a')
     expect(send).toHaveBeenNthCalledWith(2, 'p1', 'https://example.com/b')
+  })
+
+  // Every other case above passes `500` explicitly, which pins nothing about
+  // the default: `BrowserPane.tsx` calls `createUrlSync(window.pterm.setPaneUrl)`
+  // with no second argument at all, relying on `delayMs = 500`. Widening that
+  // default to, say, 5000 would leave the four cases above green while
+  // production's debounce drifted tenfold, so this constructs the same way
+  // production does and pins the actual wait.
+  it('defaults the delay to 500ms when none is passed', () => {
+    const send = vi.fn()
+    const sync = createUrlSync(send)
+    sync.schedule('p1', 'https://example.com')
+    vi.advanceTimersByTime(499)
+    expect(send).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
+    expect(send).toHaveBeenCalledTimes(1)
   })
 })

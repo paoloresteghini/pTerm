@@ -548,6 +548,12 @@ function createWindow(): void {
     // stronger than merely leaving it unprotected.
     const partition = webPreferences.partition ?? params.partition
     if (!partition?.startsWith('persist:proj-')) {
+      // Without this, a refused attach presents as a webview that never
+      // loads and never says why, indistinguishable from one still loading:
+      // a call site that forgot the `partition` prop (Tasks 8 and 9 both
+      // still touch this pane) would produce a blank pane with nothing in
+      // the console pointing at the cause.
+      console.error('pTerm: refused to attach a webview with partition', partition)
       event.preventDefault()
       return
     }
