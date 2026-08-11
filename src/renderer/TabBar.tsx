@@ -29,6 +29,7 @@ export function TabBar({
   canOpen,
   testIdPrefix = 'tab',
   capabilities,
+  newLabel = 'New terminal',
 }: {
   tabs: TabGroupEntry[]
   activeId: string | null
@@ -54,8 +55,8 @@ export function TabBar({
   /**
    * Distinguishes one bar's testids from another's when a second `TabBar`
    * is on screen. Defaults to `'tab'`, which reproduces today's ids
-   * (`tabbar`, `tab-${id}`) exactly. The e2e suite counts terminal tabs
-   * with `[data-testid^="tab-"]`: 69 such locators across 12 spec files,
+   * (`tabbar`, `tab-${id}`, `new-tab`) exactly. The e2e suite counts terminal
+   * tabs with `[data-testid^="tab-"]`: 69 such locators across 12 spec files,
    * measured 2026-08-11 with `grep -rn 'data-testid\^="tab-"' tests/e2e/ |
    * wc -l`. A second bar rendered under the same prefix would inflate
    * every one of those counts, so a caller adding a second bar must pass
@@ -71,6 +72,11 @@ export function TabBar({
    * be restarted or dismissed, and has nothing for another tab to join.
    */
   capabilities?: { restart?: boolean; dismiss?: boolean; join?: boolean }
+  /**
+   * The accessible name of the `+` button, which is the one label on this bar
+   * that names what a new tab of it would be. Defaults to the terminal bar's.
+   */
+  newLabel?: string
 }) {
   // The open menu, with the viewport coordinates it is drawn at.
   //
@@ -233,6 +239,13 @@ export function TabBar({
                   .join(', ') || undefined,
             }}
             {...drag.propsFor(tab.id)}
+            // After the spread, deliberately. `propsFor` hands back a fixed
+            // `draggable: true`, and joining is the only thing a dragged tab
+            // can do: `application/x-pterm-pane` has no other reader in the
+            // renderer, and the Sidebar takes no drop at all. So on a bar
+            // with join off, the drag could only ever end where it started,
+            // after showing a ghost that says otherwise.
+            draggable={joinAllowed}
             className={cn(
               'flex cursor-default items-center gap-1.5 whitespace-nowrap px-2.5',
               // Kept on the group's LAST member and on every ungrouped tab, so
@@ -397,8 +410,14 @@ export function TabBar({
         )
       })}
       <button
-        data-testid="new-tab"
-        aria-label="New terminal"
+        // `new-${prefix}`, so the default prefix still spells `new-tab` and
+        // every e2e locator on that id keeps pointing at this bar's button.
+        // Measured 2026-08-11: `grep -rn "getByTestId('new-tab')" tests/e2e/`
+        // reports 72 uses across 16 spec files. Derived from the prefix rather
+        // than left fixed because two bars on screen under one testid is a
+        // strict-mode violation in every one of them.
+        data-testid={`new-${testIdPrefix}`}
+        aria-label={newLabel}
         onClick={onNew}
         disabled={!canOpen}
         className="cursor-default border-none bg-transparent px-3 text-sm text-faint disabled:opacity-40 enabled:hover:text-muted"

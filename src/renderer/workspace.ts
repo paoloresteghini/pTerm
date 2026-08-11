@@ -623,13 +623,27 @@ function percent(share: number): string {
  * mounting two xterms against one tmux pane, each fitting the session to its
  * own container, and in the same-row case handing both boxes one React key.
  * One pane, one box, however many times it is named.
+ *
+ * A kid outside `region` is dropped here as well, and its share renormalised
+ * away with the absent kids'. The row is the unit main and restore write, and
+ * nothing stops one naming panes of both regions: `tabs` is keyed by tab, and
+ * region is a property of each pane in it. Without this test such a row would
+ * put every one of its kids in both columns, which is the two-boxes-per-pane
+ * case the paragraph above rules out within a single call and cannot see
+ * across the two calls `App` makes.
  */
-function boxesOfRow(state: WorkspaceState, row: TabRow, claimed: Set<string>): PaneBox[] {
+function boxesOfRow(
+  state: WorkspaceState,
+  row: TabRow,
+  claimed: Set<string>,
+  region: Region,
+): PaneBox[] {
   const byId = new Map(state.panes.map((pane) => [pane.id, pane]))
   const boxed = new Set(claimed)
   const kept = row.layout.kids
     .map((id, index) => {
-      const pane = boxed.has(id) ? undefined : byId.get(id)
+      const found = boxed.has(id) ? undefined : byId.get(id)
+      const pane = found && regionOf(found) === region ? found : undefined
       if (pane) boxed.add(id)
       return { pane, share: row.layout.ratio[index] ?? 0 }
     })
@@ -744,7 +758,7 @@ export function paneGroups(state: WorkspaceState, region: Region = 'terminal'): 
     // row and sent it down the other branch; and a stray that has been here
     // once has its own id in `seen`, which is what was just checked.
     const panes = row
-      ? boxesOfRow(state, row, claimed)
+      ? boxesOfRow(state, row, claimed, region)
       : [{ pane, share: 1, style: { flexBasis: '100%' }, dead: isDead(state, pane) }]
     // Only reachable from the same double-naming this guards: a row whose
     // kids were all boxed by rows processed before it has nothing left to

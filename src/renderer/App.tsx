@@ -24,6 +24,7 @@ import { GitPanel } from './GitPanel'
 import { IssuesPanel } from './IssuesPanel'
 import { TodosPanel } from './TodosPanel'
 import { NotesPanel } from './NotesPanel'
+import { BrowserColumn } from './BrowserColumn'
 import { AddProjectDialog } from './AddProjectDialog'
 import { ConfirmClosePane } from './ConfirmClosePane'
 import { SettingsPane } from './settings/SettingsPane'
@@ -34,7 +35,6 @@ import { StatusBar } from './StatusBar'
 import { Welcome } from './Welcome'
 import { CommandPalette, type PaletteSession } from './CommandPalette'
 import { FileView, saveEditorPane } from './FileView'
-import { BrowserPane } from './BrowserPane'
 import { clearTerminal, selectionOf } from './Terminal'
 import { DiffView } from './DiffView'
 import { cn } from './lib/cn'
@@ -176,11 +176,12 @@ export function App() {
   const [todosCollapsed, setTodosCollapsed] = useState(() => storedCollapsed(TODOS_KEY, true))
   const [notesCollapsed, setNotesCollapsed] = useState(() => storedCollapsed(NOTES_KEY, true))
   const [tabsCollapsed, setTabsCollapsed] = useState(() => storedCollapsed(TABS_KEY, true))
-  // No heading or strip drives this yet: the browser column renders nothing
-  // until Task 7, so nothing ever calls `toggleColumnCollapsed('browser')`.
-  // Declared now because `setColumn`, `COLUMN_KEY` and `collapsedColumns`
-  // below are keyed by every `ColumnId`, `browser` included.
-  const [browserCollapsed, setBrowserCollapsed] = useState(() => storedCollapsed(BROWSER_KEY, true))
+  // Open, where every other column defaults to collapsed. The browser column
+  // is in the row only while a browser pane exists (see `renderSlot`), so it
+  // appears because the user has just asked for the pane it holds, and a
+  // 24px strip is not what they asked for. The stored value still wins once
+  // there is one, so collapsing it is remembered like any other column's.
+  const [browserCollapsed, setBrowserCollapsed] = useState(() => storedCollapsed(BROWSER_KEY, false))
   // Whether the Todos column's create dialog is open. Held here rather than
   // inside `TodosPanel` so something outside that column can open it.
   const [creatingTodo, setCreatingTodo] = useState(false)
@@ -196,6 +197,11 @@ export function App() {
     issues: storedCollapsed(HIDDEN_KEYS.issues, true),
     todos: storedCollapsed(HIDDEN_KEYS.todos, true),
     notes: storedCollapsed(HIDDEN_KEYS.notes, true),
+    // Read and remembered with the rest, by `hideAllColumns` and the `restore`
+    // beside it. Not by `renderSlot`'s `'browser'` case, which decides on
+    // whether there is a browser pane to draw: no View menu item and no
+    // shortcut reaches this entry, so hide-all is the only thing that writes
+    // it, and the column does not answer to it yet.
     browser: storedCollapsed(HIDDEN_KEYS.browser, true),
   }))
   // The row's left-to-right order. Restored from whatever the last drag
@@ -489,6 +495,14 @@ export function App() {
   // earlier row emits no group at all (`workspace.ts:667`).
   const groups = paneGroups(state)
   const showWelcome = !groups.some((group) => group.visible)
+  // The other region's two lists, derived exactly as the terminal region's
+  // are above. `paneGroups` reads every pane, so a browser pane belonging to
+  // another project keeps its box (and its page) here while the bar, which is
+  // per project, does not list it.
+  const browserGroups = paneGroups(state, 'browser')
+  const browserTabEntries = state.activeProjectId
+    ? groupedTabs(tabsOfProject(state, state.activeProjectId, 'browser'), state.tabs)
+    : []
   // Whether a project is active, is not Unsorted, and its cwd is on disk:
   // see `canOpenSession` in workspace.ts, which `welcomeHint` also reads so
   // the two cannot silently disagree.
@@ -1704,10 +1718,11 @@ export function App() {
                 style={{ ...box.style, background: box.pane.color ?? 'var(--color-bg)' }}
               >
                 {/* The pane's contents, by kind. Every pane was a terminal
-                    until the editor slice; an editor, diff or browser pane
-                    has no session to attach and mounting one for it would
-                    create the very tmux session the kind exists to do
-                    without. */}
+                    until the editor slice; an editor or diff pane has no
+                    session to attach and mounting one for it would create the
+                    very tmux session the kind exists to do without.
+                    A browser pane never reaches here: it belongs to the other
+                    region, and `paneGroups` is asked for this one's panes. */}
                 {box.pane.type === 'diff' ? (
                   <DiffView
                     projectId={projectIdForTab(state.projects, box.pane)}
@@ -1729,13 +1744,6 @@ export function App() {
                     theme={theme}
                     paneId={box.pane.id}
                     onDirtyChange={onDirtyChange}
-                  />
-                ) : box.pane.type === 'browser' ? (
-                  <BrowserPane
-                    paneId={box.pane.id}
-                    projectId={projectIdForTab(state.projects, box.pane)}
-                    url={box.pane.url}
-                    paneColor={box.pane.color}
                   />
                 ) : (
                   <Terminal
@@ -1866,9 +1874,27 @@ export function App() {
       case 'terminal':
         return terminalColumn
       case 'browser':
-        // The slot exists so the column has a place in `columnOrder`, but
-        // nothing fills it yet: Task 7 gives it a component to render.
-        return null
+        // Drawn only where there is a browser pane to draw. A column that was
+        // always in the row would put a strip on every window that has never
+        // opened one, and take the width for it out of the terminal.
+        return browserGroups.length === 0 ? null : (
+          <BrowserColumn
+            groups={browserGroups}
+            tabs={browserTabEntries}
+            activeId={currentBrowserTabId}
+            projects={state.projects}
+            collapsed={browserCollapsed}
+            onToggle={() => toggleColumnCollapsed('browser')}
+            onDragStart={() => setDragging('browser')}
+            onActivate={(id) => dispatch({ type: 'activatedTab', id })}
+            onClose={requestClosePane}
+            onNew={openBrowserPane}
+            onRename={renameTab}
+            onRecolor={recolorPane}
+            canOpen={canOpen}
+            side={resizerSideFor(columnOrder, 'browser')}
+          />
+        )
       case 'projects':
         // Never derived: Projects does not move, so its side is a fact about
         // the column rather than something read off `columnOrder`.

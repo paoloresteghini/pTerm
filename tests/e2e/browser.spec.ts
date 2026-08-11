@@ -142,8 +142,13 @@ async function savedUrl(id: string): Promise<string | undefined> {
  * Opens a fresh browser pane through the real palette command, and returns
  * its pane id (read off the tab the palette's `choose()` selects, the same
  * way `paletteFiles.spec.ts` reads a just-opened editor's tab id: there is
- * only ever one tab in this file's project when this is called, so the last
- * `tab-` testid on screen is unambiguous).
+ * only ever one browser tab in this file's project when this is called, so
+ * the last `browsertab-` testid on screen is unambiguous).
+ *
+ * `browsertab-`, not `tab-`: a browser pane is listed in the browser region's
+ * own bar, and the terminal bar this used to read never gains a row for one.
+ * `browserRegion.spec.ts` is where that is the assertion rather than the
+ * mechanism.
  */
 async function openBrowserPane(page: Page): Promise<string> {
   await page.keyboard.press('Meta+k')
@@ -151,8 +156,9 @@ async function openBrowserPane(page: Page): Promise<string> {
   await page.getByTestId('palette-input').fill('New browser pane')
   await page.getByTestId('palette-command-New browser pane').click()
   await expect(page.getByTestId('command-palette')).toHaveCount(0)
-  const testId = (await page.locator('[data-testid^="tab-"]').last().getAttribute('data-testid')) ?? ''
-  const id = testId.replace('tab-', '')
+  const testId =
+    (await page.locator('[data-testid^="browsertab-"]').last().getAttribute('data-testid')) ?? ''
+  const id = testId.replace('browsertab-', '')
   // A real state change (nothing named this id existed before the click),
   // not an already-true assertion.
   await expect(page.getByTestId(`browserpane-${id}`)).toBeVisible({ timeout: 20_000 })
@@ -348,15 +354,24 @@ test('the URL survives app.close() and a relaunch', async () => {
 })
 
 /**
- * A browser pane and a terminal, laid out side by side in one tab.
+ * A browser pane named in a terminal tab's `kids`, and where it is drawn.
  *
  * See this file's own header for why the terminal is made by the app itself
  * (`new-tab`, a real tmux session) and the browser pane is added to its tab
  * row by hand, between two launches, rather than driven through the UI or
  * IPC: neither route exists for a browser pane to end up as a split's new
  * member or its origin.
+ *
+ * This test asserted the seeded 0.5/0.5 split until the browser region gave
+ * browser panes a column of their own. A row can still name panes of both
+ * regions, since a row is keyed by tab and the region is a property of each
+ * pane in it, so the case is still worth a test: what changed is the answer.
+ * `boxesOfRow` now drops a kid outside the region it is asked for, so this
+ * row's terminal stays in the terminal column at its full width and its
+ * browser pane is drawn in the browser column beside it, at the column's
+ * width rather than at half of the tab's. The seeded ratio governs neither.
  */
-test('a browser pane and a terminal split one tab and both are laid out', async () => {
+test('a browser pane seeded into a terminal tab is drawn in the browser region', async () => {
   const first = await launch()
   const opened = await first.firstWindow()
   await expect(opened.getByTestId('titlebar')).toBeVisible({ timeout: 20_000 })
@@ -400,15 +415,18 @@ test('a browser pane and a terminal split one tab and both are laid out', async 
   const browserBox = await reopened.getByTestId('pane-b1').boundingBox()
   expect(termBox).not.toBeNull()
   expect(browserBox).not.toBeNull()
-  // Both boxes hold real width, not a sliver either the split refused or the
-  // layout collapsed to nothing.
+  // Both boxes hold real width, not a sliver either region collapsed to
+  // nothing while resolving a row it half owns.
   expect(termBox!.width).toBeGreaterThan(100)
   expect(browserBox!.width).toBeGreaterThan(100)
-  // Roughly the 0.5/0.5 ratio seeded above, not pinned to an exact pixel
-  // count: this tab's width is whatever is left of the window after the
-  // app's other chrome, which this test does not own.
-  expect(Math.abs(termBox!.width - browserBox!.width)).toBeLessThan(20)
-  // Side by side, in the seeded order, not stacked or overlapping.
+  // The browser pane is in the browser column and the terminal is not, which
+  // is the whole difference from the split this used to assert. Ancestry
+  // rather than a pixel comparison: the two widths are set by different
+  // things now (a column's stored width, and whatever is left of the window),
+  // so any number relating them would be about this window's size.
+  await expect(reopened.getByTestId('browser-column').getByTestId('pane-b1')).toBeVisible()
+  await expect(reopened.getByTestId('browser-column').getByTestId(`pane-${termId}`)).toHaveCount(0)
+  // Side by side, browser to the right, not stacked or overlapping.
   expect(browserBox!.x).toBeGreaterThanOrEqual(termBox!.x + termBox!.width - 2)
 
   await second.close()

@@ -94,6 +94,36 @@ describe('region-aware derivations', () => {
     expect(terminal.some((group) => group.visible)).toBe(true)
     expect(browser.some((group) => group.visible)).toBe(true)
   })
+
+  // The panes above have no row between them, so the filter that answers them
+  // is the one at the top of `paneGroups`'s loop. A row naming panes of both
+  // regions goes down the other branch, through `boxesOfRow`, and that branch
+  // needs its own test: each region draws the row's own kids, and only those.
+  // Nothing in the product makes such a row (a browser pane cannot be a
+  // split's origin or its new member, which `browser.spec.ts`'s header
+  // measures at both layers), but a row is keyed by tab and the region is a
+  // property of each pane in it, so nothing in the shape forbids one either.
+  it('draws each region only its own kids of a row that names both', () => {
+    const state = stateWith({
+      projects: [project({ activeTabId: 't1', activeBrowserTabId: 'b1' })],
+      tabs: [
+        {
+          id: 't1',
+          groupId: 't1',
+          activePaneId: 't1',
+          layout: { dir: 'row', ratio: [0.5, 0.5], kids: ['t1', 'b1'] },
+        },
+      ],
+    })
+    const terminal = paneGroups(state, 'terminal')
+    const browser = paneGroups(state, 'browser')
+    expect(terminal.flatMap((group) => group.panes.map((box) => box.pane.id))).toEqual(['t1'])
+    expect(browser.flatMap((group) => group.panes.map((box) => box.pane.id))).toEqual(['b1'])
+    // The kid that is left takes the whole axis: the other's share is dropped
+    // and what remains renormalised, the same way an absent kid's is.
+    expect(terminal[0]?.panes[0]?.share).toBe(1)
+    expect(browser[0]?.panes[0]?.share).toBe(1)
+  })
 })
 
 describe('reducer routing by region', () => {
