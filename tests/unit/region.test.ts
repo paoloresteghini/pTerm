@@ -5,6 +5,7 @@ import {
   activeTabId,
   paneGroups,
   tabsOfProject,
+  workspaceReducer,
   type WorkspaceState,
 } from '../../src/renderer/workspace'
 
@@ -90,5 +91,74 @@ describe('region-aware derivations', () => {
     // could only make one of them visible.
     expect(terminal.some((group) => group.visible)).toBe(true)
     expect(browser.some((group) => group.visible)).toBe(true)
+  })
+})
+
+describe('reducer routing by region', () => {
+  it('opening a browser pane does not move the terminal selection', () => {
+    const state = stateWith({
+      projects: [project({ activeTabId: 't1' })],
+      panes: [paneOf('t1', 'shell')],
+    })
+    const next = workspaceReducer(state, { type: 'opened', tab: paneOf('b1', 'browser') })
+    expect(next.projects[0]?.activeTabId).toBe('t1')
+    expect(next.projects[0]?.activeBrowserTabId).toBe('b1')
+  })
+
+  it('activating a terminal does not move the browser selection', () => {
+    const state = stateWith({
+      projects: [project({ activeTabId: 't1', activeBrowserTabId: 'b1' })],
+      panes: [paneOf('t1', 'shell'), paneOf('t2', 'shell'), paneOf('b1', 'browser')],
+    })
+    const next = workspaceReducer(state, { type: 'activatedTab', id: 't2' })
+    expect(next.projects[0]?.activeTabId).toBe('t2')
+    expect(next.projects[0]?.activeBrowserTabId).toBe('b1')
+  })
+
+  // The selection rule that matters on close: the replacement comes from the
+  // same region. Handing the browser region a terminal id would leave the
+  // region drawing a pane it does not own, and the terminal region drawing
+  // nothing.
+  it('closing a browser pane selects the neighbouring browser, not a terminal', () => {
+    const state = stateWith({
+      projects: [project({ activeTabId: 't1', activeBrowserTabId: 'b1' })],
+      panes: [paneOf('t1', 'shell'), paneOf('b1', 'browser'), paneOf('b2', 'browser')],
+    })
+    const next = workspaceReducer(state, {
+      type: 'closedPane',
+      paneId: 'b1',
+      shape: { panes: [], tabs: [] },
+    })
+    expect(next.projects[0]?.activeBrowserTabId).toBe('b2')
+    expect(next.projects[0]?.activeTabId).toBe('t1')
+  })
+
+  it('closing the last browser pane clears the browser selection only', () => {
+    const state = stateWith({
+      projects: [project({ activeTabId: 't1', activeBrowserTabId: 'b1' })],
+      panes: [paneOf('t1', 'shell'), paneOf('b1', 'browser')],
+    })
+    const next = workspaceReducer(state, {
+      type: 'closedPane',
+      paneId: 'b1',
+      shape: { panes: [], tabs: [] },
+    })
+    expect(next.projects[0]?.activeBrowserTabId).toBeNull()
+    expect(next.projects[0]?.activeTabId).toBe('t1')
+  })
+
+  // `removeTab` is `dismissed`'s path, not `closedPane`'s, but it walks the
+  // same unfiltered sibling list `neighbourOf` reads by position. A browser
+  // pane sitting between two terminal panes in `state.panes` would otherwise
+  // become the terminal region's next selection when the first is dismissed.
+  it('dismissing a dead terminal pane selects the neighbouring terminal, not a browser pane', () => {
+    const state = stateWith({
+      projects: [project({ activeTabId: 't1', activeBrowserTabId: 'b1' })],
+      panes: [paneOf('t1', 'shell'), paneOf('b1', 'browser'), paneOf('t2', 'shell')],
+      dead: { t1: 1 },
+    })
+    const next = workspaceReducer(state, { type: 'dismissed', id: 't1' })
+    expect(next.projects[0]?.activeTabId).toBe('t2')
+    expect(next.projects[0]?.activeBrowserTabId).toBe('b1')
   })
 })

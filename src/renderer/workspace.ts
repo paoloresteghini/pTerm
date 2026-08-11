@@ -978,11 +978,16 @@ function setActiveTab(
   state: WorkspaceState,
   projectId: string,
   activeTabId: string | null,
+  region: Region = 'terminal',
 ): WorkspaceState {
   return {
     ...state,
     projects: state.projects.map((project) =>
-      project.id === projectId ? { ...project, activeTabId } : project,
+      project.id !== projectId
+        ? project
+        : region === 'browser'
+          ? { ...project, activeBrowserTabId: activeTabId }
+          : { ...project, activeTabId },
     ),
   }
 }
@@ -996,20 +1001,26 @@ function removeTab(state: WorkspaceState, id: string): WorkspaceState {
   const tab = state.panes.find((candidate) => candidate.id === id)
   if (!tab) return state
   const owner = projectIdForTab(state.projects, tab)
+  const region = regionOf(tab)
   // Only the owning project's selection moves; every other project keeps
   // whichever tab it was on.
   //
   // Grouped, not the raw `tabsOfProject` filter: `neighbourOf` picks by
   // position, and a split's sibling sits elsewhere in `state.panes` than it
-  // does in the bar (see `neighbourOf`'s own doc comment).
-  const siblings = groupedTabs(tabsOfProject(state, owner), state.tabs).map((entry) => entry.pane)
+  // does in the bar (see `neighbourOf`'s own doc comment). Scoped to `id`'s
+  // own region, same as `closedPane`: an unfiltered list can hand a
+  // dismissed terminal's neighbour to a browser pane.
+  const siblings = groupedTabs(tabsOfProject(state, owner, region), state.tabs).map(
+    (entry) => entry.pane,
+  )
   const project = state.projects.find((candidate) => candidate.id === owner)
-  const nextActive =
-    project?.activeTabId === id ? neighbourOf(siblings, id) : (project?.activeTabId ?? null)
+  const selected = region === 'browser' ? project?.activeBrowserTabId : project?.activeTabId
+  const nextActive = selected === id ? neighbourOf(siblings, id) : (selected ?? null)
   return setActiveTab(
     { ...state, panes: state.panes.filter((candidate) => candidate.id !== id) },
     owner,
     nextActive,
+    region,
   )
 }
 
@@ -1136,13 +1147,14 @@ export function workspaceReducer(
         },
         owner,
         action.tab.id,
+        regionOf(action.tab),
       )
     }
 
     case 'activatedTab': {
       const tab = state.panes.find((candidate) => candidate.id === action.id)
       if (!tab) return state
-      return setActiveTab(state, projectIdForTab(state.projects, tab), action.id)
+      return setActiveTab(state, projectIdForTab(state.projects, tab), action.id, regionOf(tab))
     }
 
     case 'activatedProject': {
@@ -1284,27 +1296,33 @@ export function workspaceReducer(
       // shows no terminal at all — as well as leaving the keyboard acting on a
       // pane that is not there.
       //
-      // Only the project that owned the closed pane moves, exactly as
-      // `removeTab` does it: every other project keeps whatever it was on.
+      // Only the closed pane's own region moves, in the project that owned
+      // it, exactly as `removeTab` does it: every other project keeps
+      // whatever it was on, and this project's other region keeps its own
+      // selection too.
       if (!closed) return next
+      const region = regionOf(closed)
       const owner = projectIdForTab(state.projects, closed)
       const project = state.projects.find((candidate) => candidate.id === owner)
-      if (project?.activeTabId !== action.paneId) return next
+      const selected = region === 'browser' ? project?.activeBrowserTabId : project?.activeTabId
+      if ((selected ?? null) !== action.paneId) return next
       // Main's own answer first — `closePane` names the survivor that takes
       // over in the row it hands back — and the tab bar's neighbour rule when
       // there is no row left to name one, which is a tab that has closed
       // entirely. `neighbourOf` is asked over the GROUPED panes from BEFORE
-      // the close — the bar's own order, same as `groupedTabs` produces for
-      // `TabBar` — since it finds the neighbour by the closed pane's own
-      // on-screen position, not its position in raw `state.panes`.
+      // the close, scoped to the closed pane's own region: for the terminal
+      // region this is the same order `TabBar` draws from (`App.tsx`'s
+      // `tabEntries`), since it finds the neighbour by the closed pane's own
+      // place in that order, not its position in raw `state.panes`.
       return setActiveTab(
         next,
         owner,
         nextRow?.activePaneId ??
           neighbourOf(
-            groupedTabs(tabsOfProject(state, owner), state.tabs).map((entry) => entry.pane),
+            groupedTabs(tabsOfProject(state, owner, region), state.tabs).map((entry) => entry.pane),
             action.paneId,
           ),
+        region,
       )
     }
 
