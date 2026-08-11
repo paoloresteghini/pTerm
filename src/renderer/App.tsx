@@ -552,14 +552,14 @@ export function App() {
    * own.
    *
    * Mirrors `openFile` above: `opened` both adds the pane and selects it,
-   * which is enough here for the same reason it is enough there — a browser
+   * which is enough here for the same reason it is enough there: a browser
    * pane founds its own tab, so the id it selects by is the tab's id.
    *
    * `window.pterm.openBrowser` is called with no `url`, unlike `openFile`
    * with its `relPath`: a browser pane starts with nothing to show, and main
    * (Task 3) always stores `about:blank` for that case rather than treating
    * an absent URL as a reason to refuse. So the only refusal left to handle
-   * is `!project`, not a null reply — `openBrowser` answers null only for an
+   * is `!project`, not a null reply. `openBrowser` answers null only for an
    * unknown project id, and `project` is already resolved from the active
    * one before this ever calls it.
    */

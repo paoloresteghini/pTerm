@@ -525,7 +525,7 @@ function createWindow(): void {
   // builds the guest page's `webContents`, which is the point Electron's own
   // docs name for enforcing this rather than trusting whatever the tag (or a
   // compromised renderer) asked for.
-  mainWindow.webContents.on('will-attach-webview', (_event, webPreferences, params) => {
+  mainWindow.webContents.on('will-attach-webview', (event, webPreferences, params) => {
     // Force isolation regardless of what was requested. A `preload` here, or
     // node integration, would reach into this process the way the main
     // window's own renderer is deliberately kept from doing; `allowpopups`
@@ -536,25 +536,34 @@ function createWindow(): void {
     delete params.nodeintegration
     delete params.allowpopups
 
-    // Denies every permission request, but only for THIS webview's own
-    // partition, never the app's default session. `session.fromPartition`
-    // keys purely off the string passed to it, so the guard is the
-    // `persist:proj-` prefix every browser pane's partition carries
-    // (`BrowserPane.tsx`). That is what keeps this from also reaching the
-    // main window's own renderer — a `will-attach-webview` listener never
-    // fires for that session at all, but a broader `app.on('session-created',
-    // ...)` handler, which the alternative here would have been, fires for
-    // every session including it — or any later feature that opens a
-    // `session.fromPartition` of its own under a different prefix. A camera
-    // or clipboard prompt has nowhere sensible to render inside a pane with
-    // no window chrome, so M1 denies every one outright rather than building
-    // UI for it.
+    // Every browser pane this app creates (`BrowserPane.tsx`) attaches under
+    // a `persist:proj-` partition, so an attach without one is either a bug
+    // or a compromised renderer, and neither gets a page: `preventDefault`
+    // refuses the attach outright rather than letting it through onto
+    // `session.defaultSession`. That session is the main window's own, with
+    // no permission handler of its own anywhere in this process, so a
+    // webview that slipped through unpartitioned would have every
+    // permission request silently approved by Electron's default. Refusing
+    // the attach removes the webview from consideration entirely, which is
+    // stronger than merely leaving it unprotected.
     const partition = webPreferences.partition ?? params.partition
-    if (partition?.startsWith('persist:proj-')) {
-      session
-        .fromPartition(partition)
-        .setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
+    if (!partition?.startsWith('persist:proj-')) {
+      event.preventDefault()
+      return
     }
+
+    // Denies every permission request for this webview's own partition,
+    // never the app's default session: `session.fromPartition` keys purely
+    // off the string passed to it, and the prefix check above is what keeps
+    // this from ever resolving to `session.defaultSession`, the main
+    // window's own. A blanket `app.on('session-created', ...)` handler
+    // would have reached that session too, since it fires for every
+    // session in the app, not only this one. A camera or clipboard prompt
+    // has nowhere sensible to render inside a pane with no window chrome,
+    // so M1 denies every one outright rather than building UI for it.
+    session
+      .fromPartition(partition)
+      .setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
   })
 
   // No dock icon and no app switcher entry either: hundreds of launches

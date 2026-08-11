@@ -7,8 +7,8 @@ import type { PaneColor } from '../shared/paneColors'
 
 /**
  * `@types/react` already declares `<webview>` as a JSX intrinsic element, but
- * its ref type, `HTMLWebViewElement`, is an EMPTY interface — the definition
- * dates from Chrome Apps, not Electron, so it carries none of `goBack`,
+ * its ref type, `HTMLWebViewElement`, is an EMPTY interface (the definition
+ * dates from Chrome Apps, not Electron), so it carries none of `goBack`,
  * `loadURL`, `canGoForward` or anything else this pane calls.
  *
  * Declaration-merging Electron's whole `WebviewTag` in does not work here:
@@ -46,37 +46,37 @@ declare global {
 }
 
 /**
- * The `partition` a browser pane's `<webview>` loads under — the boundary
+ * The `partition` a browser pane's `<webview>` loads under: the boundary
  * that keeps one project's cookies and storage away from another's, and away
  * from the app's own default session, which is what an unpartitioned webview
  * would otherwise share.
  *
  * `projectIdForTab` (`App.tsx`) answers `UNSORTED_ID` for a pane whose owning
- * project no longer resolves — a project that was removed while one of its
- * browser panes was still open. That id is synthetic, backed by no project
+ * project no longer resolves (a project that was removed while one of its
+ * browser panes was still open). That id is synthetic, backed by no project
  * row, so folding it into `persist:proj-${projectId}` unchanged would name a
  * session after a project that does not exist. This names that case
  * explicitly instead: one fixed partition every such pane shares, the same
  * way two panes of one real project already share theirs.
  */
-function partitionFor(projectId: string): string {
+export function partitionFor(projectId: string): string {
   return projectId === UNSORTED_ID ? 'persist:proj-unsorted' : `persist:proj-${projectId}`
 }
 
 /**
  * One page, in a hardened `<webview>`.
  *
- * The chrome strip above it — back, forward, reload, a typed address — lives
+ * The chrome strip above it (back, forward, reload, a typed address) lives
  * INSIDE this pane's own box, not beside it: `tests/e2e/splits.spec.ts`
  * encodes the flex row's whole pixel budget, and nothing here is meant to be
  * always-on chrome the way the tab bar or the title bar is.
  *
  * `url` is read only once, into `address`, which becomes the `<webview>`'s
- * initial `src` and nothing else. Every navigation after that — back,
- * forward, reload, a typed address, a link clicked inside the page — goes
- * through the element's own imperative API rather than through React state,
- * because writing `src` again would hand the page a fresh navigation to
- * whatever it already happens to be showing. Nothing in this task saves
+ * initial `src` and nothing else. Every navigation after that, whether it is
+ * back, forward, reload, a typed address or a link clicked inside the page,
+ * goes through the element's own imperative API rather than through React
+ * state, because writing `src` again would hand the page a fresh navigation
+ * to whatever it already happens to be showing. Nothing in this task saves
  * where the user navigates to; that is a later task, so a relaunch reopens
  * this pane at `url` exactly as it was left.
  */
@@ -101,7 +101,7 @@ export function BrowserPane({
   /**
    * Keeps the back/forward buttons and the address bar in step with the
    * webview's own history, including navigation this pane's own buttons had
-   * no part in — a link clicked inside the page, or a redirect.
+   * no part in: a link clicked inside the page, or a redirect.
    *
    * Registered once, on mount, rather than depending on anything: the
    * `<webview>` element itself is never replaced for the life of this pane
