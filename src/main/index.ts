@@ -602,7 +602,14 @@ function createWindow(): void {
     // `target=_blank` click reach `setWindowOpenHandler` below; `.allowpopups`
     // is set alongside it in case something downstream still reads `params`
     // instead. `disablePopups` is not in `electron.d.ts` (checked against
-    // `node_modules/electron/electron.d.ts`), hence the cast.
+    // `node_modules/electron/electron.d.ts`), hence the cast. That also
+    // carries a forward risk a documented field would not: a future Electron
+    // could rename or drop it silently, with the cast swallowing the loss and
+    // no type error to catch it. `tests/e2e/browser.spec.ts`'s
+    // "a target=_blank click loads in place and opens no window" test is what
+    // would catch that, since it exercises the field's real effect (a popup
+    // loading in the same guest, with no second window) rather than its mere
+    // presence.
     params.allowpopups = 'true'
     ;(webPreferences as WebPreferences & { disablePopups?: boolean }).disablePopups = false
 
