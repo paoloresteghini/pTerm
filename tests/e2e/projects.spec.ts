@@ -278,6 +278,57 @@ test('⌘1 and ⌘2 switch project; ⌥⌘1 and ⌥⌘2 switch tab', async () =>
   await app.close()
 })
 
+// The sidebar groups the projects you have sessions in above the ones you do
+// not, so a working set of two does not sit scattered through nine. The
+// grouping is display-only: `⌘n` still indexes `state.projects`, so the number
+// beside a row has to keep saying which digit reaches it even after the row
+// has moved. That coupling is the whole risk in the feature, so it is asserted
+// here rather than left to the eye.
+test('projects with sessions group above the ones without, and ⌘n still follows the number', async () => {
+  const alpha = await candidate('alpha')
+  const beta = await candidate('beta')
+  await seed(
+    [
+      { id: 'id-alpha', name: 'Alpha', slug: 'alpha', cwd: alpha, presets: [], activeTabId: null },
+      { id: 'id-beta', name: 'Beta', slug: 'beta', cwd: beta, presets: [], activeTabId: null },
+    ],
+    'id-alpha',
+  )
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  const rows = window.locator('[data-testid^="project-"]')
+  // `evaluateAll` does not retry, so the order is only worth reading once the
+  // rows exist: against an unpainted sidebar it returns `[]` and passes
+  // nothing. `toHaveCount` is the wait.
+  await expect(rows).toHaveCount(2)
+  const order = (): Promise<(string | undefined)[]> =>
+    rows.evaluateAll((nodes) => nodes.map((node) => (node as HTMLElement).dataset.testid))
+
+  // Nothing is running, so there is nothing to divide.
+  await expect(window.getByTestId('inactive-heading')).toHaveCount(0)
+  expect(await order()).toEqual(['project-id-alpha', 'project-id-beta'])
+
+  // A session in Beta only, which is the second project in config order.
+  await window.getByTestId('project-id-beta').click()
+  await window.getByTestId('new-tab').click()
+  await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
+
+  await expect(window.getByTestId('inactive-heading')).toBeVisible()
+  expect(await order()).toEqual(['project-id-beta', 'project-id-alpha'])
+
+  // Beta moved to the top but is still ⌘2: the number it draws is its place in
+  // `state.projects`, not its place on screen.
+  await expect(window.getByTestId('project-id-alpha')).toContainText('1')
+  await expect(window.getByTestId('project-id-beta')).toContainText('2')
+  await window.keyboard.press('Meta+Digit1')
+  await expect(window.getByTestId('project-id-alpha')).toHaveAttribute('data-active', 'true')
+  await window.keyboard.press('Meta+Digit2')
+  await expect(window.getByTestId('project-id-beta')).toHaveAttribute('data-active', 'true')
+
+  await app.close()
+})
+
 test('a preset declared by the repository launches its command', async () => {
   const alpha = await candidate('alpha', {
     presets: [{ label: 'marker', command: 'echo preset-ran; sleep 600' }],

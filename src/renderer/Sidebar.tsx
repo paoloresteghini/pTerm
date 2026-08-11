@@ -86,6 +86,11 @@ export function Sidebar({
   // what Escape discarded.
   const editing = useRef<string | null>(null)
 
+  /** A project plus its position in `projects`, so grouping can reorder the
+   *  rows without the number moving: ⌘1–9 resolves against that array
+   *  (`state.projects[index]` in App.tsx), not against what the eye sees. */
+  type Row = { project: ProjectDescriptor; index: number; tabs: TabDescriptor[] }
+
   const startRename = (project: ProjectDescriptor): void => {
     editing.current = project.id
     setDraft(project.name)
@@ -99,6 +104,22 @@ export function Sidebar({
     const name = draft.trim()
     if (commit && name) onRename(id, name)
   }
+
+  // Grouped, not sorted: the projects you have sessions open in sit together at
+  // the top, the dormant ones below a divider. Within each group the manual
+  // order from "Move up"/"Move down" is untouched, so the list a user arranged
+  // is still the list they get.
+  const rows: Row[] = projects.map((project, index) => ({
+    project,
+    index,
+    tabs: tabsOf(project.id),
+  }))
+  const live = rows.filter((row) => row.tabs.length > 0)
+  const dormant = rows.filter((row) => row.tabs.length === 0)
+  const orderedRows = [...live, ...dormant]
+  // The divider only earns its line when there is something on both sides of
+  // it. A heading over the whole list would be labelling nothing.
+  const firstDormant = live.length > 0 && dormant.length > 0 ? live.length : -1
 
   return (
     <div
@@ -124,13 +145,20 @@ export function Sidebar({
       </div>
 
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-        {projects.map((project, index) => {
+        {orderedRows.map(({ project, index, tabs }, position) => {
           const active = project.id === activeProjectId
           const synthetic = project.id === UNSORTED_ID
-          const tabs = tabsOf(project.id)
           const isMuted = muted(project.id)
           return (
             <div key={project.id}>
+              {position === firstDormant ? (
+                <div
+                  data-testid="inactive-heading"
+                  className="mt-2 border-t border-border px-2.5 pb-1 pt-2 text-[10px] uppercase tracking-wider text-label"
+                >
+                  Inactive
+                </div>
+              ) : null}
               <div
                 data-testid={`project-${project.id}`}
                 data-active={active ? 'true' : 'false'}
