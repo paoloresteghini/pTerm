@@ -685,7 +685,7 @@ export interface ProjectDescriptor {
    * Optional, unlike `activeTabId`: 40 files under `tests/` build a
    * `ProjectDescriptor` or `ProjectRecord` literal (grep -rln "activeTabId:"
    * tests/, 2026-08-11), and a required field would fail `tsc` in every one
-   * of them for no behaviour change. Every reader spells the absence as
+   * of them for no behaviour change. A reader must spell the absence as
    * `?? null`.
    */
   activeBrowserTabId?: string | null
