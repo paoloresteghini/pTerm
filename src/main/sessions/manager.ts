@@ -833,8 +833,12 @@ export class SessionManager {
    *
    * An ungrouped session reports an empty `session_group` (measured), which is
    * the ordinary state of every tab that has never been split — not an error.
-   * `new-session -t <name>` accepts a session name or a group name, so the
-   * founder's own name is the right thing to hand it either way.
+   *
+   * What comes back is for READING: `currentGroupId` takes the id half of it,
+   * and a test pins that the slug half goes stale after a move. It is not what
+   * a new member is joined through. `new-session -t` accepts a group name, but
+   * a group name is not unique against session names, and `addMember` has the
+   * collision that makes the difference.
    */
   async groupNameOf(paneId: string): Promise<string> {
     const record = this.entries.get(paneId)?.record
@@ -863,7 +867,6 @@ export class SessionManager {
     const sibling = this.entries.get(input.paneId)
     if (!sibling) throw new Error(`splitTab: no pane ${input.paneId}`)
 
-    const group = await this.groupNameOf(input.paneId)
     const id = newSessionId()
     const cwd = input.cwd ?? sibling.record.cwd
     const cols = input.cols ?? DEFAULT_COLS
@@ -928,7 +931,9 @@ export class SessionManager {
     // confirms a size rather than inventing one — which is the one thing the
     // I1 gate exists to stop.
     return this.addMember({
-      group,
+      // The sibling's own live session, which is both the window target and
+      // the group to join. See `addMember` for why a member name and never
+      // the group's own name.
       through: sibling.record.tmuxSession,
       record,
       cols,
@@ -938,8 +943,8 @@ export class SessionManager {
       // the one thing it certainly is not: a pane added to a tab is not its
       // founder.
       //
-      // Read off the entry rather than off `group`, and the two are not the
-      // same answer: a group's name is the founder's session name frozen at
+      // Read off the entry rather than off the tmux group, and the two are not
+      // the same answer: a group's name is the founder's session name frozen at
       // creation, so for a tab that has re-founded it decodes to the pane that
       // came back first, not to the tab. Taking the tab id from there would
       // hand this new pane a different tab from its own sibling's, and rows
@@ -965,23 +970,29 @@ export class SessionManager {
    * its one window leaves, so by the time a rollback ran there was nothing
    * left to move the window back into.
    *
-   * The staging session joins `group` through `newGroupMember` rather than
-   * founding anything of its own, so it starts life owning no window and no
-   * shell. There is nothing here for `newGroupMember`'s own leaked-shell
-   * comment to apply to.
+   * The staging session joins the target's group through `newGroupMember`
+   * rather than founding anything of its own, so it starts life owning no
+   * window and no shell. There is nothing here for `newGroupMember`'s own
+   * leaked-shell comment to apply to.
    *
    * Every tmux call below that changes which window a session shows names
    * `staging`, or `record.tmuxSession` once it has been renamed onto
-   * `staging`'s identity, never an existing member of `group` directly.
-   * Measured on a throwaway socket: joining a new session through a live one
-   * leaves the session joined THROUGH exactly where it was, and `move-window
-   * -t <name>` only ever re-points the session `-t` names. So no other
-   * member of `group` is read or written here at all, and none needs its
-   * window snapshotted beforehand or restored after. "Leaves every member
-   * of the target group on a window of its own" is what holds this, and it
-   * goes red the moment this method is changed to move a window into an
-   * existing member instead of into `staging` (checked by making exactly
-   * that change and watching the test fail).
+   * `staging`'s identity, never an existing member of the target's group
+   * directly. Measured on a throwaway socket: joining a new session through a
+   * live one leaves the session joined THROUGH exactly where it was, and
+   * `move-window -t <name>` only ever re-points the session `-t` names. So no
+   * other member of the target's group is read or written here at all, and
+   * none needs its window snapshotted beforehand or restored after. "Leaves
+   * every member of the target group on a window of its own" is what holds
+   * this, and it goes red the moment this method is changed to move a window
+   * into an existing member instead of into `staging` (checked by making
+   * exactly that change and watching the test fail).
+   *
+   * What a failure leaves behind is `unwindJoin`'s, and it is the reason the
+   * rollback this method's opening paragraph calls impossible is possible in
+   * one of the three shapes a failure has: the window can go back into the
+   * pane's own session whenever that session is still live, which is a
+   * different claim from recreating one that tmux has already destroyed.
    */
   async joinTab(input: {
     paneId: string
@@ -996,10 +1007,11 @@ export class SessionManager {
     }
 
     const targetTabId = target.tabId
-    const group = await this.groupNameOf(input.targetPaneId)
     const record = moving.record
-    // Read off the entry before `detach` below deletes it.
+    // Read off the entry before `detach` below deletes it, and needed after
+    // it: `sourceTabId` is where the pane goes back if this fails.
     const { cols, rows } = moving
+    const sourceTabId = moving.tabId
 
     const movedWindow = await this.adapter.windowIdOf(record.tmuxSession)
     if (!movedWindow) {
@@ -1026,8 +1038,28 @@ export class SessionManager {
       (row) => row.group === sourceGroup && row.name !== record.tmuxSession,
     )
 
-    const staging = `${record.tmuxSession}-joining`
-    await this.adapter.newGroupMember(group, staging, { PTERM_TAB_ID: record.id })
+    // An ordinary pterm name, not `<the pane's session>-joining`, and what is
+    // at stake is what this app can see if it dies mid-join.
+    // `decodeSessionName` takes exactly three dash-separated parts, so a
+    // four-part name is not an `isPTermSession` to anything:
+    // `listPTermSessions` never reports it, `findOrphans` never adopts it,
+    // restore never reconciles it, and no sweep in the app can reach it. A
+    // crash between the call below and the rename would leave the moved
+    // window's shell running under a name the product is blind to, and the
+    // pane simply gone from the UI after a relaunch. Under a decodable name
+    // the same crash leaves an ordinary orphan: `findOrphanTabs` reads its
+    // live `session_group`, so the pane comes back inside the TARGET tab, on
+    // the window holding its own shell.
+    //
+    // A fresh id rather than the pane's own: every other part of an encoded
+    // name is fixed, so reusing the id would produce the pane's own session
+    // name, which tmux refuses as a duplicate.
+    const staging = encodeSessionName({ projectSlug: record.projectSlug, id: newSessionId() })
+    // Joined through the target's own live session, never through its group's
+    // name. See `addMember` for the collision that makes the difference.
+    await this.adapter.newGroupMember(target.record.tmuxSession, staging, {
+      PTERM_TAB_ID: record.id,
+    })
 
     this.detach(input.paneId)
     try {
@@ -1043,13 +1075,12 @@ export class SessionManager {
       }
       await this.adapter.renameSession(staging, record.tmuxSession)
     } catch (error) {
-      // Nothing has moved if `newGroupMember` above is what threw, so there
-      // is nothing to undo there. If the move itself failed after staging
-      // was created, the moved window and its shell are wherever they were
-      // before this call ran; the one thing left over worth cleaning up is
-      // the empty staging session, before it becomes a session nothing in
-      // this app can reach again.
-      await this.adapter.killSession(staging).catch(() => undefined)
+      // Best-effort, and deliberately swallowing its own failures: whatever
+      // it can or cannot put back, the error the caller sees must be the one
+      // that failed the join, not one raised while cleaning up after it.
+      await this.unwindJoin({ record, staging, movedWindow, cols, rows, tabId: sourceTabId }).catch(
+        () => undefined,
+      )
       throw error
     }
 
@@ -1057,7 +1088,13 @@ export class SessionManager {
     const indexOf = new Map(windows.map((window) => [window.id, window.index]))
     const movedIndex = indexOf.get(movedWindow)
     if (!movedIndex) {
-      throw new Error(`joinTab: ${movedWindow} is not in ${group} after the move`)
+      // Past the rename, so tmux is fully merged and this pane's own session
+      // is a member of the target's group. Nothing is unwound here: the pane
+      // is durable where it is (restore rebuilds membership from live
+      // `session_group`), and attaching a client to a member that is not
+      // showing its own window is the one thing `selectWindow` below exists
+      // to prevent. The renderer surfaces the throw; see `joinPanes`.
+      throw new Error(`joinTab: ${movedWindow} is not in ${targetTabId}'s group after the move`)
     }
     await this.adapter.selectWindow(record.tmuxSession, movedIndex)
 
@@ -1075,6 +1112,91 @@ export class SessionManager {
       }),
       tabId: targetTabId,
     }
+  }
+
+  /**
+   * Undo what a failed `joinTab` had already done to tmux, as far as it can be
+   * undone without destroying a shell, and put the pane back in the app when
+   * it can be put back exactly where it was.
+   *
+   * Three states are reachable, and one question tells them apart: which
+   * window `staging` is showing. `move-window -t <name>` re-points the session
+   * it names onto the window it moved (measured, and what `joinTab`'s own
+   * "every call names staging" argument rests on), and nothing else here
+   * re-points staging, so staging showing `movedWindow` means the move landed
+   * and staging is now the only session naming the pane's window.
+   *
+   *   - The move never ran. Staging holds no window of its own (a member
+   *     joined through `newGroupMember` starts on a SIBLING's window,
+   *     measured, `@0` every time), the pane's own window and shell are
+   *     where they started, and attaching the pane again restores it whole.
+   *   - The move ran and the pane's own session is still live: the window
+   *     goes back into it, a plain `move-window` in the other direction
+   *     (measured: the window returns to the source group's list, the source
+   *     session re-points onto it, and its sibling is left where it was).
+   *     The pane is then attached again, whole.
+   *   - The move ran and the pane's own session is gone: there is nothing to
+   *     move the window back INTO. `move-window -t <name>` refuses a target
+   *     that is not a live session and never creates one (measured: "can't
+   *     find session", exit 1, nothing moved). Staging is left ALIVE holding
+   *     the window: it is the only session naming it, so killing it would
+   *     leave a live shell nothing in the app can reach, or destroy that
+   *     shell outright if staging is also the group's last live session.
+   *     Alive, it is an ordinary pterm session in the target's group, which
+   *     the next restore adopts as a pane of the target tab.
+   *
+   * The kill that does happen carries the guard `joinTab`'s kill of the source
+   * session carries, for the same reason: killing the last live session of a
+   * group destroys every window that group holds. Staging is a member of the
+   * TARGET's group, and the target's own sessions can have died since
+   * `newGroupMember` proved one of them was there.
+   *
+   * The re-attach is refused unless the pane's own session is showing the
+   * pane's own window. Anything else is a client landing on some other
+   * member's window, which is two xterms rendering and sizing one pane: the
+   * fault `addMember` orders its calls to avoid, not one to introduce here
+   * while recovering from something else.
+   */
+  private async unwindJoin(input: {
+    record: TerminalPaneRecord
+    staging: string
+    movedWindow: string
+    cols: number
+    rows: number
+    tabId: string
+  }): Promise<void> {
+    const { record, staging, movedWindow, cols, rows, tabId } = input
+
+    let stagingHoldsMovedWindow = (await this.adapter.windowIdOf(staging)) === movedWindow
+    if (stagingHoldsMovedWindow && (await this.adapter.hasSession(record.tmuxSession))) {
+      try {
+        await this.adapter.moveWindow(staging, record.tmuxSession)
+        stagingHoldsMovedWindow = false
+      } catch {
+        // Left where it is, and staging left alive naming it.
+      }
+    }
+
+    if (!stagingHoldsMovedWindow) {
+      const live = await this.adapter.listSessionsWithGroups()
+      const group = live.find((row) => row.name === staging)?.group
+      const hasOtherLiveMember =
+        !!group && live.some((row) => row.group === group && row.name !== staging)
+      if (hasOtherLiveMember) await this.adapter.killSession(staging).catch(() => undefined)
+    }
+
+    if ((await this.adapter.windowIdOf(record.tmuxSession)) !== movedWindow) return
+    this.open({
+      id: record.id,
+      projectSlug: record.projectSlug,
+      cwd: record.cwd,
+      command: record.command,
+      tmuxSession: record.tmuxSession,
+      type: record.type,
+      cols,
+      rows,
+      tabId,
+    })
   }
 
   /**
@@ -1149,7 +1271,9 @@ export class SessionManager {
     }
 
     const joined = await this.addMember({
-      group: rejoin.group,
+      // The live member itself, not `rejoin.group`: the group's own name can
+      // be a name tmux resolves to a session somewhere else. See `addMember`.
+      // Joining through the member reaches the same group unambiguously.
       through: rejoin.member,
       record,
       cols: geometry.cols,
@@ -1213,9 +1337,10 @@ export class SessionManager {
    *     fact `reopenInTab` starts from, read the other way round.
    *
    * Joining by that name is what re-forms the tab, not merely some group:
-   * `new-session -t <a session name>` creates a group named after that session
-   * — measured, and it is how this tab's group was named in the first place
-   * (`splitTab` hands `groupNameOf`'s fallback to `newGroupMember`). Through
+   * `new-session -t <a session name>` joins that session's group, and creates
+   * one named after it when it is in none (measured), and it is how this tab's
+   * group was named in the first place (`splitTab` joins the new pane through
+   * the sibling it is splitting). Through
    * the first two matches the tab regains the group name it had, whose id half
    * still decodes to `tabId`. Through the third it cannot: the session that
    * named the group is gone, and tmux has no way to name a group after a
@@ -1307,7 +1432,8 @@ export class SessionManager {
    *
    * Three tmux objects, in this order and no other:
    *   1. `new-window -e PTERM_TAB_ID=<id>` in the group — holds the process.
-   *   2. `new-session -t <group> -s <name>` — the view the xterm attaches to.
+   *   2. `new-session -t <a live member> -s <name>`, the view the xterm
+   *      attaches to, joined to that member's group.
    *   3. `select-window` binding 2 to 1, BEFORE any client attaches.
    *
    * Step 3 before the attach is not stylistic. A newly joined member's current
@@ -1321,8 +1447,20 @@ export class SessionManager {
    * record, which live member to work through, and whether anyone has measured
    * the geometry — and none of it changes the three objects or their order.
    *
-   * `through` is a LIVE member session, never the group name: `new-window`
-   * takes a window target, and a group name is not one.
+   * `through` is a LIVE member session, and it is what BOTH tmux objects are
+   * made against: the window and the member session. `new-window` takes a
+   * window target and a group name is not one, so that call never had a
+   * choice; `new-session -t` accepts either, and a member name is the only
+   * one of the two that is unambiguous. tmux resolves `-t` against SESSIONS
+   * before groups, and this app can hold a session whose name is another
+   * group's name: `joinTab` renames its staging session onto the moved pane's
+   * own name, so after a split tab's FOUNDER is dragged away, a session
+   * carrying the source group's name is sitting in the target's group.
+   * Handing that name to `new-session -t` puts the new member in the target's
+   * group (measured: `new-session -t A` joined group B, while the source
+   * group's surviving member was still in group A). A live member's own name
+   * cannot be read that way, since session names are unique, and it joins the
+   * same group either way.
    *
    * Everything here is guarded. The window is the first object this makes that
    * the app cannot see and tmux can: it goes into the tab's SHARED window list
@@ -1333,7 +1471,6 @@ export class SessionManager {
    * `rollbackSplit`.
    */
   private async addMember(input: {
-    group: string
     through: string
     record: TerminalPaneRecord
     cols: number
@@ -1342,11 +1479,11 @@ export class SessionManager {
     /** The tab this member joins — see `Entry.tabId`. Both callers know it. */
     tabId: string
   }): Promise<TerminalPaneRecord> {
-    const { group, record, cols, rows, sized, tabId } = input
+    const { through, record, cols, rows, sized, tabId } = input
     // Created EMPTY — the command follows at the end, once the window can
     // survive it.
     const window = await this.adapter.newWindow({
-      member: input.through,
+      member: through,
       cwd: record.cwd,
       env: { PTERM_TAB_ID: record.id },
     })
@@ -1377,7 +1514,7 @@ export class SessionManager {
       // on the new member reports nothing. `-e` on `new-session -t <group>`
       // does reach that table, which is where a reattach and any
       // `show-environment` caller both go looking, so both calls carry it.
-      await this.adapter.newGroupMember(group, record.tmuxSession, { PTERM_TAB_ID: record.id })
+      await this.adapter.newGroupMember(through, record.tmuxSession, { PTERM_TAB_ID: record.id })
       // By index, with the member named. See the adapter method's comment.
       await this.adapter.selectWindow(record.tmuxSession, window.index)
       return await this.finishSplit(record, window, cols, rows, sized, tabId)

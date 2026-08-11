@@ -442,8 +442,8 @@ export function registerIpc(
   /** This tab's panes, in the order its row lays them out. */
   const held = (panes: PaneRecord[], kids: string[]): PaneRecord[] => {
     const byId = new Map(panes.map((pane) => [pane.id, pane]))
-    // Filtered rather than mapped: both callers build `kids` from ids that are
-    // in `panes` by construction, so nothing is dropped here today — but a
+    // Filtered rather than mapped: every caller builds `kids` from ids that
+    // are in `panes` by construction, so nothing is dropped here today. A
     // `map` would answer a future mismatch with an `undefined` in the array
     // that type-checks as a `PaneRecord` and reaches the renderer as one.
     return kids.flatMap((kid) => {

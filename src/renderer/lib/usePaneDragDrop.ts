@@ -50,8 +50,13 @@ export function usePaneDragDrop(
     propsFor: (paneId: string) => ({
       draggable: true,
       onDragStart: (event: React.DragEvent) => {
-        // The tabs column heading is itself a drag source for column
-        // reordering; without this a row drag also starts a column drag.
+        // Defensive, and stopping nothing today. The only other drag sources
+        // in the renderer are the column handles (`Panel.tsx` sets
+        // `draggable` from `onDragStart`), and none of them is an ANCESTOR of
+        // a row or a tab: the tabs column's handle is its `PanelHeading`, a
+        // sibling of the rows container, and the tab bar sits inside no
+        // draggable at all. This is here so that a handle wrapped around
+        // either surface later cannot turn a row drag into a column drag.
         event.stopPropagation()
         event.dataTransfer.setData(MIME, paneId)
         event.dataTransfer.effectAllowed = 'move'

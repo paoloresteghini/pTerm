@@ -871,11 +871,15 @@ export function App() {
       void window.pterm
         .joinPane(paneId, targetPaneId)
         .then((shape) => dispatch({ type: 'joined', shape }))
-        .catch((error) => {
-          console.error('pTerm: could not join those tabs', error)
-        })
+        // Shown, not logged. A failed join is not a gesture that quietly did
+        // nothing: main detaches the pane before it touches tmux, and while
+        // it puts the pane back whenever tmux can be put back too, the paths
+        // it cannot undo leave a terminal on screen that is no longer wired
+        // to anything. A user who is told the drag failed knows to look;
+        // `console.error` reaches nobody outside devtools.
+        .catch(fail)
     },
-    [dispatch],
+    [dispatch, fail],
   )
 
   /**

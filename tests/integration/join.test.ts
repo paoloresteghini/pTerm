@@ -108,13 +108,14 @@ afterEach(async () => {
   manager.detachAll()
   // Not `killServer()`: that would take `holder` down with everything else
   // and the next test would start against a dead socket. Matched on the
-  // `pterm-` prefix directly rather than through `listPTermSessions`: that
-  // helper decodes each name and only reports the three-part
-  // `pterm-<slug>-<hex>` shape, so it never sees the `-joining` staging name
-  // `joinTab` mints mid-move, which has a fourth dash-separated part and does
-  // not decode. A staging session left behind by a failing test would
-  // survive this sweep under that helper and go on holding its group's
-  // windows alive into every later test in the file.
+  // `pterm-` prefix directly rather than through `listPTermSessions`, which
+  // decodes each name and reports only the three-part `pterm-<slug>-<hex>`
+  // shape: a sweep that has to reach EVERY session a failed test can leave
+  // behind should not depend on each one being well formed. `joinTab`'s
+  // staging session is well formed today and deliberately so (see its own
+  // comment), and the tests below check that; this stays the coarser rule so
+  // that a name which stops decoding is caught by a red test rather than by
+  // sessions accumulating across the file.
   for (const name of await adapter.listSessions()) {
     if (name.startsWith('pterm-')) await adapter.killSession(name).catch(() => undefined)
   }
@@ -201,6 +202,39 @@ describe('SessionManager.joinTab', () => {
     expect(await panePid(survivor.tmuxSession)).toBe(survivorPid)
   })
 
+  it('keeps a later split of the source tab in the source tab', async () => {
+    const aaa = freshId()
+    const ccc = freshId()
+    manager.open({ id: aaa, projectSlug: 'demo', cwd })
+    const target = manager.open({ id: ccc, projectSlug: 'demo', cwd })
+    await settle()
+    const survivor = await manager.splitTab({ paneId: aaa, cols: 80, rows: 24 })
+
+    // The founder of tab `aaa` leaves. Its group keeps the name it was
+    // founded with (a group name never follows a rename), and the moved
+    // pane's session ends up carrying that same name inside the TARGET's
+    // group, because that is what `joinTab` renames staging back to. From
+    // here on `new-session -t <the source group's name>` resolves to that
+    // SESSION, in the wrong group: tmux resolves `-t` against sessions before
+    // groups.
+    await manager.joinTab({ paneId: aaa, targetPaneId: ccc })
+    const added = await manager.splitTab({ paneId: survivor.id, cols: 80, rows: 24 })
+
+    const rows = await adapter.listSessionsWithGroups()
+    const groupOf = (name: string): string | undefined =>
+      rows.find((row) => row.name === name)?.group
+    expect(groupOf(added.tmuxSession)).toBeTruthy()
+    expect(groupOf(added.tmuxSession)).toBe(groupOf(survivor.tmuxSession))
+    expect(groupOf(added.tmuxSession)).not.toBe(groupOf(target.tmuxSession))
+    // The window holding the new pane's shell always goes in through the
+    // sibling, so a member session in the wrong group is also a window in the
+    // source group that no session of that group shows. Read through the
+    // survivor rather than through `added`: the two agree only when the
+    // session and its window ended up in the same place.
+    const shared = await adapter.windowsOf(survivor.tmuxSession)
+    expect(shared.map((window) => window.id)).toContain(await adapter.windowIdOf(added.tmuxSession))
+  })
+
   it('refuses to join a pane to its own tab', async () => {
     const aaa = freshId()
     manager.open({ id: aaa, projectSlug: 'demo', cwd })
@@ -232,16 +266,94 @@ describe('SessionManager.joinTab', () => {
   it('cleans up the staging session when the move fails', async () => {
     const aaa = freshId()
     const bbb = freshId()
-    manager.open({ id: aaa, projectSlug: 'demo', cwd })
+    const target = manager.open({ id: aaa, projectSlug: 'demo', cwd })
     const moved = manager.open({ id: bbb, projectSlug: 'demo', cwd })
     await settle()
     vi.spyOn(adapter, 'moveWindow').mockRejectedValueOnce(new Error('nope'))
 
     await expect(manager.joinTab({ paneId: bbb, targetPaneId: aaa })).rejects.toThrow('nope')
 
-    const names = (await adapter.listSessionsWithGroups()).map((row) => row.name)
-    expect(names.filter((name) => name.includes('-joining'))).toEqual([])
+    // By elimination rather than by name. The staging session is named like
+    // any other pane's (see `joinTab` on why), so nothing in the name marks
+    // it: anything left here besides these two panes is it.
+    const names = (await adapter.listSessions()).filter((name) => name.startsWith('pterm-'))
+    expect(names.sort()).toEqual([target.tmuxSession, moved.tmuxSession].sort())
     expect(await adapter.hasSession(moved.tmuxSession)).toBe(true)
+  })
+
+  it('puts the pane back in the tab it came from when the join fails', async () => {
+    const aaa = freshId()
+    const bbb = freshId()
+    manager.open({ id: aaa, projectSlug: 'demo', cwd })
+    const moved = manager.open({ id: bbb, projectSlug: 'demo', cwd })
+    await settle()
+    const before = await panePid(moved.tmuxSession)
+    vi.spyOn(adapter, 'moveWindow').mockRejectedValueOnce(new Error('nope'))
+
+    await expect(manager.joinTab({ paneId: bbb, targetPaneId: aaa })).rejects.toThrow('nope')
+
+    // `joinTab` detaches the pane before it touches tmux, and a failure after
+    // that used to leave the manager with no entry for a pane tmux was still
+    // running: the renderer keeps drawing an xterm that will never receive
+    // another byte, and only a relaunch fixes it. The shell is untouched
+    // either way; what this pins is that the app still has the pane, in its
+    // own tab.
+    expect(manager.tabIdOf(bbb)).toBe(bbb)
+    expect(manager.list().map((record) => record.id)).toContain(bbb)
+    expect(await panePid(moved.tmuxSession)).toBe(before)
+  })
+
+  it('leaves the staging session alone when killing it would take the target group down', async () => {
+    const aaa = freshId()
+    const bbb = freshId()
+    const target = manager.open({ id: aaa, projectSlug: 'demo', cwd })
+    manager.open({ id: bbb, projectSlug: 'demo', cwd })
+    await settle()
+    const targetWindow = await adapter.windowIdOf(target.tmuxSession)
+    const targetPid = await panePid(target.tmuxSession)
+
+    // The target's own session dies mid-join, after `newGroupMember` has
+    // already proved a live member was there, which leaves staging the only
+    // live session of that group. Killing it then destroys every window the
+    // group holds, including the one running the target tab's own shell.
+    // This is the rule the source-session kill in `joinTab` follows, asked of
+    // the other kill in the same method.
+    vi.spyOn(adapter, 'moveWindow').mockImplementationOnce(async () => {
+      manager.detach(aaa)
+      await adapter.killSession(target.tmuxSession)
+      throw new Error('nope')
+    })
+
+    await expect(manager.joinTab({ paneId: bbb, targetPaneId: aaa })).rejects.toThrow('nope')
+
+    expect(await windowPid(targetWindow)).toBe(targetPid)
+    expect(isRunning(targetPid)).toBe(true)
+  })
+
+  it('leaves a shell stranded by a failed rename where the app can still find it', async () => {
+    const aaa = freshId()
+    const bbb = freshId()
+    manager.open({ id: aaa, projectSlug: 'demo', cwd })
+    const moved = manager.open({ id: bbb, projectSlug: 'demo', cwd })
+    await settle()
+    const before = await panePid(moved.tmuxSession)
+    vi.spyOn(adapter, 'renameSession').mockRejectedValueOnce(new Error('nope'))
+
+    await expect(manager.joinTab({ paneId: bbb, targetPaneId: aaa })).rejects.toThrow('nope')
+
+    // The move landed and the rename did not, so the moved window is in the
+    // target's group and staging is the only session naming it. Killing
+    // staging would strand the shell where nothing could reach it, so it is
+    // left alive, and because its name decodes the app is not blind to it:
+    // `findOrphanTabs` puts it in the target's tab, which is where a relaunch
+    // brings the pane back. The moving pane's own session is gone here (a
+    // standalone session dies the instant its one window leaves), so it is
+    // this session or nothing.
+    expect(isRunning(before)).toBe(true)
+    const orphans = (await manager.findOrphanTabs()).find((tab) => tab.tabId === aaa)
+    expect(orphans).toBeDefined()
+    expect(orphans?.panes).toHaveLength(1)
+    expect(await panePid(orphans?.panes[0]?.tmuxSession ?? '')).toBe(before)
   })
 
   it('does not kill the source session when doing so would destroy a window nothing else holds', async () => {

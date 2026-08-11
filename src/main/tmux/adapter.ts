@@ -453,15 +453,24 @@ export class TmuxAdapter {
   }
 
   /**
-   * Join `name` to `group` as a new view onto its shared window list.
+   * Join `name` to the group `through` is in, as a new view onto its shared
+   * window list.
+   *
+   * `through` is a LIVE MEMBER SESSION's name, not the group's own. tmux takes
+   * either, and every caller in this app passes a member, because the two are
+   * not equally safe: `-t` is resolved against SESSIONS before groups, and a
+   * session can be sitting under another group's name (`joinTab`'s rename
+   * produces exactly that). A group name can therefore resolve into a group
+   * that is not the one it names (measured), while a session name cannot:
+   * session names are unique, and joining one always lands in its group.
    *
    * `env` lands in `name`'s own session-environment table — `show-environment
    * -t =name` reports it — because this call reuses `new-session`'s `-e`, not
    * `new-window`'s: measured, `new-window -e` reaches the spawned pane's
    * process but never that table.
    */
-  async newGroupMember(group: string, name: string, env?: Record<string, string>): Promise<void> {
-    const args = ['new-session', '-d', '-t', group, '-s', name]
+  async newGroupMember(through: string, name: string, env?: Record<string, string>): Promise<void> {
+    const args = ['new-session', '-d', '-t', through, '-s', name]
     for (const [key, value] of Object.entries(env ?? {})) {
       args.push('-e', `${key}=${value}`)
     }
@@ -471,11 +480,12 @@ export class TmuxAdapter {
      * Whether it actually JOINED, checked rather than assumed, and checked on
      * the group's SIZE rather than its name.
      *
-     * **Measured 2026-08-08.** Given a `-t` naming a group that does not
-     * exist, tmux exits 0. It does not error and it does not refuse — it
-     * founds a brand new group of ONE, named after the target that was
-     * missing, holding a brand new session with a brand new window whose pane
-     * runs the login shell.
+     * **Measured 2026-08-08.** Given a `-t` naming nothing tmux has, tmux
+     * exits 0. It does not error and it does not refuse: it founds a brand
+     * new group of ONE, named after the target that was missing, holding a
+     * brand new session with a brand new window whose pane runs the login
+     * shell. A dead member session reaches this the same way a vanished group
+     * does.
      *
      * That makes the obvious checks all agree with the disaster: the session
      * exists, `#{session_group}` is exactly the name that was asked for, and
@@ -510,9 +520,9 @@ export class TmuxAdapter {
     if (!Number.isFinite(size) || size < 2) {
       await this.killSession(name)
       throw new Error(
-        `tmux did not join ${name} to group ${group}: the group was gone, so tmux ` +
-          'founded a new one holding only this session. It has been destroyed rather ' +
-          'than left running a shell nothing is attached to.',
+        `tmux did not join ${name} to ${through}'s group: there was nothing there to ` +
+          'join, so tmux founded a new group holding only this session. It has been ' +
+          'destroyed rather than left running a shell nothing is attached to.',
       )
     }
   }
