@@ -27,6 +27,8 @@ export function TabBar({
   onJoin,
   canJoin,
   canOpen,
+  testIdPrefix = 'tab',
+  capabilities,
 }: {
   tabs: TabGroupEntry[]
   activeId: string | null
@@ -49,6 +51,26 @@ export function TabBar({
   /** Whether dragging `paneId` onto `targetPaneId` would do anything. Matches `TabsPanel`'s prop of the same name. */
   canJoin: (paneId: string, targetPaneId: string) => boolean
   canOpen: boolean
+  /**
+   * Distinguishes one bar's testids from another's when a second `TabBar`
+   * is on screen. Defaults to `'tab'`, which reproduces today's ids
+   * (`tabbar`, `tab-${id}`) exactly. The e2e suite counts terminal tabs
+   * with `[data-testid^="tab-"]`: 69 such locators across 12 spec files,
+   * measured 2026-08-11 with `grep -rn 'data-testid\^="tab-"' tests/e2e/ |
+   * wc -l`. A second bar rendered under the same prefix would inflate
+   * every one of those counts, so a caller adding a second bar must pass
+   * a different prefix. `elapsed-` and `tabinput-` are keyed by pane id
+   * instead, which is already unique across any number of bars, so they
+   * take no prefix and cannot collide.
+   */
+  testIdPrefix?: string
+  /**
+   * Which of restart, dismiss and join this bar offers. Omitted (or any
+   * key omitted) means on, matching today's only caller. Exists for a
+   * sessionless pane, such as a browser tab, which cannot die, so cannot
+   * be restarted or dismissed, and has nothing for another tab to join.
+   */
+  capabilities?: { restart?: boolean; dismiss?: boolean; join?: boolean }
 }) {
   // The open menu, with the viewport coordinates it is drawn at.
   //
@@ -87,7 +109,12 @@ export function TabBar({
   // committing what Escape discarded. Mirrors Sidebar's project rename.
   const editing = useRef<string | null>(null)
 
-  const drag = usePaneDragDrop(canJoin, onJoin)
+  // Disabling join means no pane here is ever a valid drop target: passing a
+  // `canJoin` that always refuses leaves `over` permanently null, so neither
+  // the drop highlight nor the drop itself can fire, without touching
+  // `usePaneDragDrop` itself.
+  const joinAllowed = capabilities?.join !== false
+  const drag = usePaneDragDrop(joinAllowed ? canJoin : () => false, onJoin)
 
   const startRename = (tab: TabDescriptor): void => {
     editing.current = tab.id
@@ -120,7 +147,7 @@ export function TabBar({
 
   return (
     <div
-      data-testid="tabbar"
+      data-testid={`${testIdPrefix}bar`}
       className="flex h-8 select-none items-stretch overflow-x-auto border-b border-border bg-surface font-mono text-[11px]"
     >
       {tabs.map((entry) => {
@@ -165,12 +192,13 @@ export function TabBar({
         return (
           <div
             key={tab.id}
-            data-testid={`tab-${tab.id}`}
+            data-testid={`${testIdPrefix}-${tab.id}`}
             data-active={active ? 'true' : 'false'}
             // The whole grouping signal, carried on the div that is already
             // here rather than a nested element: the e2e suite counts tabs
-            // with `[data-testid^="tab-"]`, so a second element per tab under
-            // that prefix would inflate every one of those counts.
+            // with `[data-testid^="tab-"]`, so a second element per tab
+            // under that prefix (or a second bar defaulting `testIdPrefix`
+            // to `'tab'`) would inflate every one of those counts.
             //
             // Gated on `pos`, not just `entry.groupId`: `restore.ts` files
             // every pane under a row after a relaunch, including one-pane
@@ -317,29 +345,37 @@ export function TabBar({
               <>
                 {/* A dead tab keeps its scrollback and offers the two things
                     worth doing with it. Restart recreates the session under
-                    the same id, cwd, command and type. */}
-                <button
-                  data-testid={`restart-${tab.id}`}
-                  aria-label={`Restart ${tabLabel(tab)}`}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    onRestart(tab)
-                  }}
-                  className="cursor-default border-none bg-transparent p-0 text-[10px] text-muted hover:text-fg"
-                >
-                  ↻
-                </button>
-                <button
-                  data-testid={`dismiss-${tab.id}`}
-                  aria-label={`Dismiss ${tabLabel(tab)}`}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    onDismiss(tab.id)
-                  }}
-                  className="cursor-default border-none bg-transparent p-0 text-xs leading-none text-muted hover:text-fg"
-                >
-                  ×
-                </button>
+                    the same id, cwd, command and type. Both gated on
+                    `capabilities`, off for a sessionless pane that cannot
+                    die and so never reaches `tombstoned` in the first
+                    place: this is a second, explicit refusal rather than
+                    reliance on that coincidence. */}
+                {capabilities?.restart !== false ? (
+                  <button
+                    data-testid={`restart-${tab.id}`}
+                    aria-label={`Restart ${tabLabel(tab)}`}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onRestart(tab)
+                    }}
+                    className="cursor-default border-none bg-transparent p-0 text-[10px] text-muted hover:text-fg"
+                  >
+                    ↻
+                  </button>
+                ) : null}
+                {capabilities?.dismiss !== false ? (
+                  <button
+                    data-testid={`dismiss-${tab.id}`}
+                    aria-label={`Dismiss ${tabLabel(tab)}`}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onDismiss(tab.id)
+                    }}
+                    className="cursor-default border-none bg-transparent p-0 text-xs leading-none text-muted hover:text-fg"
+                  >
+                    ×
+                  </button>
+                ) : null}
               </>
             ) : (
               // The close button stays exactly as it was for a live tab —
