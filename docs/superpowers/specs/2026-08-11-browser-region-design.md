@@ -45,8 +45,8 @@ Decisions taken during brainstorming:
   long lived and want to sit beside a terminal, while editor and diff are
   transient and opened from the Files and Git columns, and moving them multiplies
   the e2e blast radius on tests that count tabs.
-- **Keys follow focus.** ⌘1-9, ⌘W and next/prev tab act on whichever region has
-  focus.
+- **Keys follow focus.** ⌥1-9 (select tab) and ⌘W (close pane) act on whichever
+  region has focus.
 
 ## Architecture
 
@@ -56,12 +56,18 @@ No new arrays. Browser panes stay in `state.panes` and `state.tabs`. Region
 membership is derived from the pane's kind, never stored:
 
 ```ts
-type Region = 'terminal' | 'browser'
-const regionOf = (pane: TabDescriptor): Region =>
-  pane.kind === 'browser' ? 'browser' : 'terminal'
+export type Region = 'terminal' | 'browser'
+export function regionOf(pane: { type: TabType }): Region {
+  return pane.type === 'browser' ? 'browser' : 'terminal'
+}
 ```
 
-A stored `region` field would be a second answer to a question `kind` already
+It lives in `src/shared/ipc.ts` beside `canHaveSession`, and for the reason
+that predicate gives for living there: main has the same question to answer
+(the activated write-back in `register.ts` picks which field to store by it),
+and two spellings of "is this a browser" is how the two sides come to disagree.
+
+A stored `region` field would be a second answer to a question `type` already
 answers, free to disagree with it. The predicate above is also the single place
 `editor` and `diff` would join later.
 
@@ -118,7 +124,7 @@ do not move between regions.
 
 ### Visibility
 
-- Opening a pane with `kind === 'browser'` unhides the column.
+- Opening a pane with `type === 'browser'` unhides the column.
 - Closing the project's last browser pane hides it.
 - A manual hide sticks until the next browser opens.
 - **Visibility is a global column preference; membership is per project.** The
@@ -131,8 +137,18 @@ do not move between regions.
 
 `activeRegion` lives in `App.tsx` state and is not persisted. It is set on
 `focusin` within a region wrapper, and on a tab click or a browser opening. It is
-forced back to `'terminal'` whenever the region is hidden or empty. ⌘1-9, ⌘W and
-next/prev tab read it.
+forced back to `'terminal'` whenever the region is hidden or empty.
+
+The bindings, as they actually exist in `App.tsx`'s keydown handler:
+
+| Key | Today | After |
+| --- | --- | --- |
+| ⌥1-9 | selects the nth entry of `tabEntries` | selects the nth entry of the focused region's strip |
+| ⌘W | closes `activePaneId` | closes the focused region's active pane |
+| ⌘1-9 | selects the nth project | unchanged |
+| ⌘T | opens a terminal | unchanged, always the terminal region |
+| ⌘D / ⇧⌘D | splits the active pane | unchanged, and a no-op while the browser region has focus, since the region has no splits |
+| ⌘⌥ arrows | moves pane focus inside a tab | unchanged, terminal region only |
 
 **One thing to measure before code depends on it:** a click on page content
 inside a `<webview>` does not bubble into the host document. Whether the host
@@ -153,9 +169,24 @@ One new field, and every place that must name it:
 | `src/main/state/store.ts` read path | validate and default it, as `activeTabId` is |
 | `src/main/projects/projects.ts` | default it to `null` on a new project |
 | `src/main/ipc/restore.ts` | resolve it against the project's live browser panes, falling back to the first browser pane, then `null` |
-| `src/main/ipc/register.ts` (activated write-back) | pick the field by the pane's kind |
+| `src/main/ipc/register.ts` | a new `setActiveBrowser` channel writing the new field |
 
 Column width, visibility and order need no new keys.
+
+**Why a second channel rather than widening `setActive`.** `CHANNELS.setActive`
+does two jobs: it persists `ProjectRecord.activeTabId`, and it calls
+`onActiveTabChanged`, which is what the status router reads to decide whether a
+pane is attended, and therefore whether a notification fires. Routing browser
+selections through it would tell the router that no terminal is attended
+whenever the user clicks the browser, which would fire notifications for a
+terminal sitting in plain sight beside the page. So `setActive` keeps its exact
+present meaning (terminal attendance) and the browser region's selection is
+persisted by its own channel, which touches config and nothing else.
+
+`describeProjects` in `restore.ts` resolves both fields, and its existing
+fallback needs narrowing: `activeTabId` today falls back to `own[0]`, which
+after this change could be a browser pane. It must fall back to the project's
+first non-browser pane, and `activeBrowserTabId` to its first browser pane.
 
 ## Edge cases
 
