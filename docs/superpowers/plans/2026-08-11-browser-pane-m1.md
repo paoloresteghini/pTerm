@@ -750,7 +750,9 @@ git commit -m "Measure how a Playwright spec can reach inside a webview"
 
 Fire and forget over `ipcRenderer.send`, mirroring `setLayout` (`ipc.ts:48`, preload `:95`), and **debounced in the renderer**. A page redirects several times on a single navigation, and a config write per redirect thrashes `config.json` for no gain. Commit on settle, the way `setLayout` commits on pointer-up rather than during the drag.
 
-Persist `url` only, never the title. On relaunch the tab shows the hostname until the page loads and the live title replaces it. One saved field, and no stale title to invalidate.
+Persist `url` only. The tab is named for the page's host including its port, and the live page title is not used.
+
+**Revised 2026-08-11 during implementation.** This step originally said `page-title-updated` drove the label and that the live title replaced the host once the page loaded. That was a plan defect: this task's file list is `BrowserPane.tsx` and `tabLabel.ts`, while every `tabLabel` call site is in `App.tsx`, `TabBar.tsx`, `Sidebar.tsx`, `TabsPanel.tsx` and `DeadPane.tsx`, so a live title could not reach the tab bar from here at all. Put to the user, who chose host only, on the grounds that two Vite dev servers are both titled "Vite + React + TS" while their ports tell them apart. Do not add a `page-title-updated` listener.
 
 - [ ] **Step 1: Write the failing `tabLabel` tests**
 
@@ -844,7 +846,7 @@ setPaneUrl: (paneId, url) => ipcRenderer.send(CHANNELS.setPaneUrl, paneId, url),
 
 In `BrowserPane`, on `did-navigate` and `did-navigate-in-page`: update local address state and the URL bar immediately, and call `window.pterm.setPaneUrl` through a debounce of about 500ms. Clear the pending timer on unmount so a pane closed mid-navigation does not write after it is gone.
 
-Also handle `page-title-updated` into local state for the tab label to use live. Do not send the title to main.
+Do not listen for `page-title-updated` at all. See the revision note above: the live title was cut from M1, and the label comes from the persisted `url`'s host.
 
 - [ ] **Step 6: Add the persistence test**
 
@@ -1077,7 +1079,7 @@ git commit -m "Record M1 acceptance results"
 
 ## Self-Review
 
-**Spec coverage.** Every M1 requirement maps to a task: type and `SESSIONLESS` (1), `url` on both records and its three validation sites (1), `savedFields` (1), `stateForOpen` (1), `openBrowser` with its no-dedupe difference (3), the mandatory tab row (3), per-project partition (4), `webviewTag` plus all three hardening measures (4), URL normalising (2), navigation persistence debounced (6), title-drives-label and url-only-persisted (6), the `-3` exclusion and all three failure states (7), DevTools (8), popup handling (8), the `file://` fixture (5), the Playwright spike with both branches (5, 9), and the acceptance list (10).
+**Spec coverage.** Every M1 requirement maps to a task: type and `SESSIONLESS` (1), `url` on both records and its three validation sites (1), `savedFields` (1), `stateForOpen` (1), `openBrowser` with its no-dedupe difference (3), the mandatory tab row (3), per-project partition (4), `webviewTag` plus all three hardening measures (4), URL normalising (2), navigation persistence debounced (6), host-drives-label and url-only-persisted (6), the `-3` exclusion and all three failure states (7), DevTools (8), popup handling (8), the `file://` fixture (5), the Playwright spike with both branches (5, 9), and the acceptance list (10).
 
 **Placeholders.** The one deliberate under-specification is Task 9's assertion mechanism, which is a measured input from Task 5 rather than a gap. Task 4 leaves button labels and styling to the implementer, which is a matching-the-codebase judgement, not a missing decision.
 

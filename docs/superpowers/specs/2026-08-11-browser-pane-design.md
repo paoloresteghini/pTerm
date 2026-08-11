@@ -157,10 +157,26 @@ debounced fire-and-forget `setPaneUrl` informs main, mirroring how `setLayout`
 is committed on pointer-up rather than during the drag. Writing config on
 every navigation event would thrash `config.json` on every redirect.
 
-`page-title-updated` drives the tab label via a new case in
-`src/renderer/lib/tabLabel.ts:34`. Only `url` is persisted, never the title. On
-relaunch the tab shows the hostname until the page loads and the live title
-replaces it. One saved field, and no stale title to invalidate.
+The tab is named for the page's **host, including the port**, via a new case in
+`src/renderer/lib/tabLabel.ts:34`. Only `url` is persisted, and the live page
+title is not used at all.
+
+Revised 2026-08-11, during implementation. This section originally said
+`page-title-updated` drove the label and that the live title replaced the host
+once the page loaded. Two things came out of building it. First, the plan
+allocated only `BrowserPane.tsx` and `tabLabel.ts`, while every `tabLabel` call
+site lives in `App.tsx`, `TabBar.tsx`, `Sidebar.tsx`, `TabsPanel.tsx` and
+`DeadPane.tsx`, so a live title could not reach the tab bar without lifting
+per-pane state the way `dirtyPanes.ts` does for the dirty indicator. Second, and
+the reason the answer is not simply "do that work": the page title is worse than
+the host for this app's purpose. Two Vite dev servers are both titled "Vite +
+React + TS", so two projects would get identical tabs, while `localhost:5173`
+and `localhost:3000` identify them exactly. The port is the whole point.
+
+`about:blank` has an empty host and falls through to the terminal-style
+`slug · id` label, which is correct: a pane showing nothing has no page to be
+named after. A title the USER sets by renaming the tab still wins over the host,
+as it does for every other pane kind.
 
 Chrome for the pane: back, forward, reload, hard-reload-ignoring-cache, an
 editable URL bar, and a DevTools toggle.
@@ -251,7 +267,7 @@ answer.
 - Two projects on the same localhost port do not share cookies or
   `localStorage`.
 - Typing `localhost:3000` reaches the dev server over http.
-- The URL survives a relaunch; the tab shows the hostname, then the title.
+- The URL survives a relaunch, and the tab is named for the page's host and port.
 - A failed load, a crashed renderer and a hung page each show a recoverable
   card, and the pane survives all three.
 - DevTools opens against the page.
