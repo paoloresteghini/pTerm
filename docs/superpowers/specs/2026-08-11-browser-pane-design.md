@@ -231,7 +231,7 @@ adopt or replace.
 
 `webviewTag: true` widens the main window's webPreferences, which is currently
 `contextIsolation: true, nodeIntegration: false`
-(`src/main/index.ts:490-493`). The mitigations belong in M1, not in a
+(`src/main/index.ts:542-548`). The mitigations belong in M1, not in a
 follow-up:
 
 - A `will-attach-webview` handler in main that strips any `preload` and
@@ -239,10 +239,40 @@ follow-up:
   values regardless of what the `<webview>` requested. This is the
   documented hardening step and the reason the widened surface is
   acceptable.
-- `allowpopups` off, and a `setWindowOpenHandler` that denies OS windows so
-  `target=_blank` navigates in place.
-- A permission handler on each partition's session denying camera, microphone,
-  geolocation and notifications by default.
+- `allowpopups` forced ON, and a `setWindowOpenHandler` that denies every
+  window request, navigating the pane in place instead.
+
+  **Reversed 2026-08-11 during implementation, deliberately and measured.**
+  This originally read "`allowpopups` off". Stripping the attribute did block
+  OS windows, but it blocked them so early that `setWindowOpenHandler` was
+  never consulted at all: a `target=_blank` click did nothing, silently, and
+  the handler written to navigate in place was dead code. Measured by
+  replacing the handler with a recording probe, which logged zero invocations
+  for both a link click and an explicit `window.open`. Electron also derives
+  `webPreferences.disablePopups` from the DOM attribute before
+  `will-attach-webview` runs, so `params.allowpopups` alone does not reach it
+  and `disablePopups` is forced off beside it through a cast.
+
+  The no-OS-window guarantee therefore lives in the handler, which returns
+  `{ action: 'deny' }` on every path including an unparseable URL, a
+  non-http scheme, and a throwing `loadURL`. That is stronger than the
+  attribute it replaced: the guarantee is now typed, documented code rather
+  than an attribute, and if a future Electron drops the undocumented
+  `disablePopups` field the failure mode is popups going dead again, not a
+  window escaping. `tests/e2e/browser.spec.ts` guards it.
+- Both permission handlers on each partition's session, denying by default:
+  `setPermissionRequestHandler` for access requests (camera, microphone,
+  geolocation, notifications) and `setPermissionCheckHandler` for the
+  synchronous check path.
+
+  The check handler is the broader of the two and was added after the
+  whole-branch review. Electron's default check behaviour is permissive for
+  some permissions, so denying it also affects things no one asked about:
+  `navigator.permissions.query` results, media device labels, and most
+  likely `navigator.clipboard.writeText()` for pages inside a pane. That
+  follows this section's stated intent of denying everything outright, and
+  it was NOT measured. If a page inside a browser pane cannot write to the
+  clipboard, this is why, and it is a choice rather than an accident.
 
 The webview itself runs with node integration off and context isolation on,
 and M1 installs no preload into it.
