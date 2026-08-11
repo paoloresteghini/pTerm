@@ -276,7 +276,20 @@ answer.
 
 - A browser pane opens from `⌘K` and from the tab-bar `+` menu, into the
   active project.
-- It splits, resizes, and drag-to-splits like any other pane.
+- It lives in a split and is laid out exactly as a terminal or editor pane is,
+  sharing the same flex box, ratios and dividers.
+
+  **Corrected 2026-08-11 during implementation.** This line originally read
+  "it splits, resizes, and drag-to-splits like any other pane", which
+  over-claimed. A split cannot be INITIATED from a browser pane: `splitActive`
+  in `App.tsx` requires `paneGrid(activePaneId)`, and `paneGrid` is exported
+  from `Terminal.tsx`, so only a mounted xterm ever registers one.
+  `CHANNELS.splitPane` likewise throws for a pane `SessionManager` never
+  registered. That is not a browser-pane defect and not a regression: editor
+  and diff panes have always behaved the same way, for the same reason, and
+  drag-to-split was already scoped to terminal panes with tmux groups. A
+  browser pane inherits the sessionless kinds' constraints exactly as intended,
+  which is the point of making it the third one.
 - Switching projects hides it and switching back reveals it, with the page
   still loaded.
 - Two projects on the same localhost port do not share cookies or
