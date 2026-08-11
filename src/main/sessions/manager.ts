@@ -17,8 +17,9 @@ export interface PaneRecord {
   cwd: string
   command?: string
   /**
-   * Absent on an editor pane, which has no tmux session at all. Present on
-   * every terminal pane, which is what `isPane` still enforces per kind.
+   * Absent on an editor, diff or browser pane, none of which has a tmux
+   * session at all. Present on every terminal pane, which is what `isPane`
+   * still enforces per kind.
    */
   tmuxSession?: string
   type: TabType
@@ -60,6 +61,16 @@ export interface PaneRecord {
    * exists alongside `filePath` rather than being re-derived from it.
    */
   diffRelPath?: string
+  /**
+   * The page a `browser` pane is showing, absolute and normalised: never what
+   * the user typed. Absent on every other kind, and on a browser pane that
+   * has not navigated anywhere yet.
+   *
+   * Display data only, and here for the same reason `filePath` is: config
+   * persists it and nothing in this file reads it, since this file deals in
+   * tmux and a browser pane has none.
+   */
+  url?: string
 }
 
 /**

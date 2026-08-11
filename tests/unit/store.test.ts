@@ -775,6 +775,35 @@ describe('ConfigStore migration, v7 to v8', () => {
     expect(config.panes[0]?.tmuxSession).toBe('pterm-demo-p1')
     expect(config.panes[0]?.filePath).toBeUndefined()
   })
+
+  it('keeps a browser row that has no tmux session', async () => {
+    const store = await storeWith({
+      ...sampleConfig,
+      panes: [
+        {
+          id: 'b1',
+          projectSlug: 'demo',
+          cwd: '/tmp/demo',
+          type: 'browser',
+          url: 'http://localhost:3000/',
+        },
+      ],
+    })
+    const config = await store.read()
+    expect(config.panes).toEqual([
+      { id: 'b1', projectSlug: 'demo', cwd: '/tmp/demo', type: 'browser', url: 'http://localhost:3000/' },
+    ])
+  })
+
+  it('keeps a browser row but drops a non-string url', async () => {
+    const store = await storeWith({
+      ...sampleConfig,
+      panes: [{ id: 'b2', projectSlug: 'demo', cwd: '/tmp/demo', type: 'browser', url: 42 }],
+    })
+    const config = await store.read()
+    expect(config.panes[0]?.type).toBe('browser')
+    expect(config.panes[0]?.url).toBeUndefined()
+  })
 })
 
 describe('ConfigStore migration, v4 to v5', () => {

@@ -114,4 +114,8 @@ describe('stateForOpen', () => {
   it('gives an editor pane no state at all, since it has no session to be waiting about', () => {
     expect(stateForOpen('editor')).toBeNull()
   })
+
+  it('gives a browser pane no state, having no session to be waiting about', () => {
+    expect(stateForOpen('browser')).toBeNull()
+  })
 })

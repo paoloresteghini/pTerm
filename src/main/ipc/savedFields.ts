@@ -4,7 +4,8 @@ import type { PaneRecord } from '../sessions/manager'
 /**
  * Put the fields only config knows about back onto records built from live
  * tmux: the pane's title, its colour, the file an editor or diff pane is
- * showing, and a diff pane's side and repo-relative path.
+ * showing, a diff pane's side and repo-relative path, and the page a browser
+ * pane is showing.
  *
  * `SessionManager` knows nothing about any of them and should not: a pane's
  * session is named `pterm-${slug}-${id}`, and that name is what restore matches
@@ -88,6 +89,7 @@ export function attachSavedFields(panes: TabDescriptor[], records: PaneRecord[])
     if (row.filePath) next.filePath = row.filePath
     if (row.diffSide) next.diffSide = row.diffSide
     if (row.diffRelPath) next.diffRelPath = row.diffRelPath
+    if (row.url) next.url = row.url
     return next
   })
 }

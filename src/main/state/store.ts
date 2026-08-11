@@ -116,18 +116,23 @@ function isPane(value: unknown): value is PaneRecord {
   if (typeof t.id !== 'string') return false
   if (typeof t.projectSlug !== 'string') return false
   if (typeof t.cwd !== 'string') return false
-  // Per kind, not per row. An editor or diff pane has no tmux session and
-  // never will, so requiring one of every row would drop it. But a TERMINAL
-  // row with no session is the malformed row this function has always
-  // rejected, and a blanket `typeof t.tmuxSession === 'string' || true` would
-  // lose that.
+  // Per kind, not per row. An editor, diff or browser pane has no tmux
+  // session and never will, so requiring one of every row would drop it. But
+  // a TERMINAL row with no session is the malformed row this function has
+  // always rejected, and a blanket `typeof t.tmuxSession === 'string' ||
+  // true` would lose that.
   //
   // A row with no `type` predates the field, and every version before this
   // one held terminals only, so it is a terminal here and needs a session.
-  return t.type === 'editor' || t.type === 'diff' || typeof t.tmuxSession === 'string'
+  return (
+    t.type === 'editor' ||
+    t.type === 'diff' ||
+    t.type === 'browser' ||
+    typeof t.tmuxSession === 'string'
+  )
 }
 
-const TAB_TYPES: readonly TabType[] = ['claude', 'preset', 'shell', 'editor', 'diff']
+const TAB_TYPES: readonly TabType[] = ['claude', 'preset', 'shell', 'editor', 'diff', 'browser']
 
 function normalisePane(pane: PaneRecord): PaneRecord {
   // Before the `type` shortcut below, which returns early: a row can have a
@@ -153,10 +158,13 @@ function normalisePane(pane: PaneRecord): PaneRecord {
       : { ...filed, diffSide: undefined }
   const related =
     typeof sided.diffRelPath === 'string' ? sided : { ...sided, diffRelPath: undefined }
-  if (TAB_TYPES.includes(related.type)) return related
+  // Beside `diffRelPath`, and for the same reason: config is a text file. An
+  // edited `"url": 42` would otherwise reach a webview's `src` attribute.
+  const urled = typeof related.url === 'string' ? related : { ...related, url: undefined }
+  if (TAB_TYPES.includes(urled.type)) return urled
   // A v3 row cannot say whether it was running Claude, and does not need to —
   // hooks decide that. Only the launch command is knowable from the record.
-  return { ...related, type: related.command === undefined ? 'shell' : 'preset' }
+  return { ...urled, type: urled.command === undefined ? 'shell' : 'preset' }
 }
 
 /**

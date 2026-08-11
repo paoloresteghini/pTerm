@@ -104,7 +104,8 @@ export function stateForOpen(type: TabType): TabState | null {
       return null
     case 'editor':
     case 'diff':
-      // Neither has a session to be waiting or crashed about.
+    case 'browser':
+      // None of the three has a session to be waiting or crashed about.
       return null
   }
 }

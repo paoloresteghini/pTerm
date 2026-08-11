@@ -50,4 +50,15 @@ describe('attachSavedFields', () => {
 
     expect(attachSavedFields(built, saved)[0]?.diffSide).toBe('staged')
   })
+
+  it('carries url onto a record that does not carry one', () => {
+    const built: TabDescriptor[] = [
+      { id: 'b1', projectSlug: 'demo', cwd: '/tmp/demo', type: 'browser' },
+    ]
+    const saved: PaneRecord[] = [
+      { id: 'b1', projectSlug: 'demo', cwd: '/tmp/demo', type: 'browser', url: 'https://example.com/' },
+    ]
+
+    expect(attachSavedFields(built, saved)[0]?.url).toBe('https://example.com/')
+  })
 })

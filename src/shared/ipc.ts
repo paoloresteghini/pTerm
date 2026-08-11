@@ -138,10 +138,11 @@ export type MenuCommand =
  * A declaration of intent, not a gate on status: it decides the launch command
  * and whether an expecting-hooks dot is drawn before any event has arrived.
  * Every tab carries PTERM_TAB_ID regardless, so a `claude` typed by hand into
- * a shell tab gets full status the moment its first hook lands. `editor` and
- * `diff` are the exceptions: neither has a launch command at all.
+ * a shell tab gets full status the moment its first hook lands. `editor`,
+ * `diff` and `browser` are the exceptions: none of them has a launch command
+ * at all.
  */
-export type TabType = 'claude' | 'preset' | 'shell' | 'editor' | 'diff'
+export type TabType = 'claude' | 'preset' | 'shell' | 'editor' | 'diff' | 'browser'
 
 /**
  * Whether a pane of this kind has a tmux session behind it.
@@ -160,10 +161,10 @@ export type TabType = 'claude' | 'preset' | 'shell' | 'editor' | 'diff'
  * "is this a terminal" is how a pane comes to be killable on one side of the
  * IPC boundary and not the other.
  *
- * Two sessionless kinds now: `editor` and `diff`. Neither ever had a tmux
- * session to attach, restart, or kill.
+ * Three sessionless kinds now: `editor`, `diff` and `browser`. None of them
+ * ever had a tmux session to attach, restart, or kill.
  */
-const SESSIONLESS: readonly TabType[] = ['editor', 'diff']
+const SESSIONLESS: readonly TabType[] = ['editor', 'diff', 'browser']
 
 export function canHaveSession(pane: { type: TabType }): boolean {
   return !SESSIONLESS.includes(pane.type)
@@ -286,8 +287,9 @@ export interface TabDescriptor {
   cwd: string
   command?: string
   /**
-   * Absent on an editor pane, which has no tmux session at all. Present on
-   * every terminal pane, which is what `isPane` still enforces per kind.
+   * Absent on an editor, diff or browser pane, none of which has a tmux
+   * session at all. Present on every terminal pane, which is what `isPane`
+   * still enforces per kind.
    */
   tmuxSession?: string
   type: TabType
@@ -325,6 +327,13 @@ export interface TabDescriptor {
    * field, where `App.tsx` falls back to `editorRelPath`.
    */
   diffRelPath?: string
+  /**
+   * The page a `browser` pane is showing. Absent on every other kind, and on
+   * a browser pane that has not navigated anywhere yet. Always the
+   * normalised, absolute form: never what the user typed into the address
+   * bar.
+   */
+  url?: string
 }
 
 export interface TabLayout {
