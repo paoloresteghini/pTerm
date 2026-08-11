@@ -3,24 +3,26 @@
  *
  * The core papercut: loopback services are always HTTP (a dev server running
  * locally), but public domains default to HTTPS. Get it backwards and every
- * bare hostname you type fails on TLS. The two orderings below prevent the
+ * bare hostname you type fails on TLS. The test order below prevents that
  * confusion.
  *
  * The LOOPBACK test runs first because it needs to distinguish loopback names
  * like `localhost` and `localhost:3000` before the SCHEME test sees them. If
- * a scheme test runs first (matching "letters followed by a colon"), it would
- * treat `localhost:3000` as if `localhost` were a scheme and return it
- * unchanged, which is wrong.
+ * a scheme test were written as a general "letters followed by colon" pattern,
+ * it would incorrectly match `localhost:3000` as if `localhost` were a scheme.
  *
  * The SCHEME pattern is an explicit allowlist of known schemes like
  * `https?|file|about` instead of a general regex like `[a-z][a-z0-9+.-]*:`.
  * The general form would incorrectly match `example.com:8080` as a scheme and
- * leave it unchanged, when it should be prefixed with `https://`. The
- * allowlist is the only way to exclude numeric ports from scheme detection.
+ * leave it unchanged, when it should be prefixed with `https://`. An allowlist
+ * avoids this false positive more naturally than a negative lookahead would.
  */
 
 const SCHEME = /^(https?|file|about|data|chrome|devtools|view-source):/i
 
+// Matches loopback addresses and localhost. Private LAN ranges like 192.168.x.x
+// are deliberately out of scope and will default to https, which is acceptable
+// for them (a home network doesn't need special-casing for dev servers).
 const LOOPBACK = /^(localhost|127(\.\d{1,3}){3}|0\.0\.0\.0|\[::1\])(:\d+)?([/?#]|$)/i
 
 export function normaliseUrl(input: string): string | null {

@@ -1,12 +1,16 @@
 /**
- * Mutation check result: Swapping the LOOPBACK and SCHEME tests did not cause
- * failures. All 16 tests passed because the SCHEME regex uses an explicit
- * allowlist of known schemes (https?, file, about, etc.) rather than a general
- * "letters + colon" pattern. This explicit allowlist prevents the regex from
- * matching loopback names like `localhost:3000` or host:port combinations like
- * `example.com:8080`, even if the tests ran in the wrong order. The ordering
- * requirement in the source code exists to prevent future bugs if the regex is
- * simplified incorrectly.
+ * Discrimination evidence: When the SCHEME regex is replaced with a general
+ * form /^[a-z][a-z0-9+.-]*:/i, one test fails: turns "example.com:8080" into
+ * "https://example.com:8080". With the general pattern, the regex matches
+ * `example.com` as a scheme name, returns it unchanged, and breaks the
+ * expected https:// prefix. The allowlist regex prevents this regression.
+ *
+ * Ordering analysis: Swapping the LOOPBACK and SCHEME test order causes no
+ * failures with the current regex pair, because the allowlist never overlaps
+ * loopback patterns. The ordering requirement in the source code does not
+ * protect against an inverted test order, but it protects against a future
+ * reader simplifying the scheme regex and accidentally breaking it. Document
+ * this ordering as a defense against that specific refactoring hazard.
  */
 
 import { describe, it, expect } from 'vitest'
