@@ -235,8 +235,10 @@ adopt or replace.
 follow-up:
 
 - A `will-attach-webview` handler in main that strips any `preload` and
-  rejects unexpected webPreferences. This is the documented hardening step and
-  the reason the widened surface is acceptable.
+  forces `nodeIntegration`, `contextIsolation` and `webSecurity` to safe
+  values regardless of what the `<webview>` requested. This is the
+  documented hardening step and the reason the widened surface is
+  acceptable.
 - `allowpopups` off, and a `setWindowOpenHandler` that denies OS windows so
   `target=_blank` navigates in place.
 - A permission handler on each partition's session denying camera, microphone,

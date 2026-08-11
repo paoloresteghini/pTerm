@@ -45,6 +45,7 @@ declare global {
     goBack(): void
     goForward(): void
     reload(): void
+    reloadIgnoringCache(): void
     loadURL(url: string): Promise<void>
     canGoBack(): boolean
     canGoForward(): boolean
@@ -62,11 +63,15 @@ declare global {
  *
  * `projectIdForTab` (`App.tsx`) answers `UNSORTED_ID` for a pane whose owning
  * project no longer resolves (a project that was removed while one of its
- * browser panes was still open). That id is synthetic, backed by no project
- * row, so folding it into `persist:proj-${projectId}` unchanged would name a
- * session after a project that does not exist. This names that case
- * explicitly instead: one fixed partition every such pane shares, the same
- * way two panes of one real project already share theirs.
+ * browser panes was still open). `UNSORTED_ID` is currently the string
+ * `'unsorted'` (`shared/ipc.ts`), so this branch and the plain template
+ * literal below it produce byte-identical output today: it discriminates
+ * nothing a fold into `persist:proj-${projectId}` wouldn't already produce.
+ * What it pins is the partition NAME rather than the id: if `UNSORTED_ID`'s
+ * underlying value ever changes, an unsorted pane's partition stays
+ * `persist:proj-unsorted` instead of silently renaming with it, which would
+ * otherwise strand every such pane's existing cookies and storage under a
+ * partition name nothing loads anymore.
  */
 export function partitionFor(projectId: string): string {
   return projectId === UNSORTED_ID ? 'persist:proj-unsorted' : `persist:proj-${projectId}`
@@ -295,6 +300,15 @@ export function BrowserPane({
           onClick={() => view.current?.reload()}
         >
           ↻
+        </Button>
+        <Button
+          data-testid={`browserhardreload-${paneId}`}
+          aria-label="Hard reload, ignoring cache"
+          size="icon"
+          variant="ghost"
+          onClick={() => view.current?.reloadIgnoringCache()}
+        >
+          ⟳
         </Button>
         <input
           data-testid={`browserurl-${paneId}`}

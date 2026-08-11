@@ -450,11 +450,14 @@ test('navigating to an unsafe port shows the failure card with a working Retry b
  * in Electron's own `.d.ts`. A cast like that swallows a rename or a removal
  * silently: nothing in `tsc --noEmit` would catch a future Electron dropping
  * or renaming it, and the app would keep compiling while every popup in every
- * browser pane started silently doing nothing (or, worse, opening a real
- * window this app has no chrome for). This test is the one thing that would
- * catch that: it exercises the real effect of the field working, not the
- * field's presence, so it fails the same way whether the field disappears,
- * gets renamed, or Electron changes what it does.
+ * browser pane started silently doing nothing. Not opening a real window
+ * this app has no chrome for: `setWindowOpenHandler` (`src/main/index.ts`)
+ * returns `{ action: 'deny' }` unconditionally and does not depend on this
+ * cast, so a `disablePopups` failure is fail-safe, a dead feature rather
+ * than an uncontrolled window. This test is the one thing that would catch
+ * that dead feature: it exercises the real effect of the field working, not
+ * the field's presence, so it fails the same way whether the field
+ * disappears, gets renamed, or Electron changes what it does.
  */
 test('a target=_blank click loads in place and opens no window', async () => {
   const app = await launch()

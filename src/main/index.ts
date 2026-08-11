@@ -478,7 +478,7 @@ app.on('second-instance', () => {
 //
 // Registered once here, at module scope, rather than inside `createWindow`:
 // `web-contents-created` fires on `app`, a single object that outlives any
-// one window, unlike `will-attach-webview` above which fires on a
+// one window, unlike `will-attach-webview` below which fires on a
 // particular `mainWindow.webContents` and is naturally cleaned up when that
 // window closes. `createWindow` runs again whenever the app reactivates
 // with no window open (see `app.on('activate')` below), and registering an
@@ -578,16 +578,29 @@ function createWindow(): void {
   mainWindow.webContents.on('will-attach-webview', (event, webPreferences, params) => {
     // Force isolation regardless of what was requested. A `preload` here, or
     // node integration, would reach into this process the way the main
-    // window's own renderer is deliberately kept from doing.
+    // window's own renderer is deliberately kept from doing. `webSecurity`
+    // is forced for the same reason: this handler's own `disablePopups`
+    // trace below measured that Electron computes `webPreferences` from the
+    // `<webview>`'s own `webpreferences` DOM attribute BEFORE this handler
+    // runs, so a guest carrying `webpreferences="webSecurity=no"` (with an
+    // otherwise-valid `persist:proj-` partition) would attach with web
+    // security off if this field were left alone the way everything but
+    // these four still is. `params.webpreferences` is deleted alongside it,
+    // the same belt-and-suspenders pattern `params.nodeintegration` already
+    // gets below: the raw attribute string cleared too, in case something
+    // downstream reads `params` instead of the already-forced
+    // `webPreferences`.
     delete webPreferences.preload
     webPreferences.nodeIntegration = false
     webPreferences.contextIsolation = true
+    webPreferences.webSecurity = true
     delete params.nodeintegration
+    delete params.webpreferences
     // Forced ON, not merely permitted: `allowpopups` is off by default, and
     // `BrowserPane.tsx`'s `<webview>` never sets the attribute itself, so
     // without either line below a guest's `window.open()` or `target=_blank`
     // is refused before Electron ever builds the request to hand to a
-    // handler. `setWindowOpenHandler`, registered once below on every
+    // handler. `setWindowOpenHandler`, registered once above on every
     // `webview` `WebContents` this app creates, is what actually denies the
     // window now: this pair just clears the path to that handler, neither
     // one by itself lets anything through.
@@ -599,7 +612,7 @@ function createWindow(): void {
     // `params.allowpopups` set: Electron had already derived it from the
     // attribute (absent, since the tag never sets it) before this handler
     // ran. Flipping `disablePopups` off directly is what actually let a
-    // `target=_blank` click reach `setWindowOpenHandler` below; `.allowpopups`
+    // `target=_blank` click reach `setWindowOpenHandler` above; `.allowpopups`
     // is set alongside it in case something downstream still reads `params`
     // instead. `disablePopups` is not in `electron.d.ts` (checked against
     // `node_modules/electron/electron.d.ts`), hence the cast. That also
@@ -635,18 +648,23 @@ function createWindow(): void {
       return
     }
 
-    // Denies every permission request for this webview's own partition,
-    // never the app's default session: `session.fromPartition` keys purely
-    // off the string passed to it, and the prefix check above is what keeps
-    // this from ever resolving to `session.defaultSession`, the main
-    // window's own. A blanket `app.on('session-created', ...)` handler
-    // would have reached that session too, since it fires for every
-    // session in the app, not only this one. A camera or clipboard prompt
-    // has nowhere sensible to render inside a pane with no window chrome,
-    // so M1 denies every one outright rather than building UI for it.
-    session
-      .fromPartition(partition)
-      .setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
+    // Denies every permission request AND permission check for this
+    // webview's own partition, never the app's default session:
+    // `session.fromPartition` keys purely off the string passed to it, and
+    // the prefix check above is what keeps this from ever resolving to
+    // `session.defaultSession`, the main window's own. A blanket
+    // `app.on('session-created', ...)` handler would have reached that
+    // session too, since it fires for every session in the app, not only
+    // this one. A camera or clipboard prompt has nowhere sensible to render
+    // inside a pane with no window chrome, so M1 denies every one outright
+    // rather than building UI for it. Both handlers, not just the request
+    // one: `navigator.permissions.query` and other synchronous checks (device
+    // label enumeration among them) go through `setPermissionCheckHandler`
+    // instead, which Electron's own docs say is needed alongside
+    // `setPermissionRequestHandler` for complete coverage.
+    const paneSession = session.fromPartition(partition)
+    paneSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
+    paneSession.setPermissionCheckHandler(() => false)
   })
 
   // No dock icon and no app switcher entry either: hundreds of launches
