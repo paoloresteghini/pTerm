@@ -2,10 +2,13 @@
  * The drag-a-tab-onto-another gesture, end to end, on the `pterm-e2e-dragsplit`
  * socket.
  *
- * Three tests: dragging one row onto another brackets them as one split, two
+ * Four tests: dragging one row onto another brackets them as one split, two
  * tmux sessions and all, without closing and respawning either pane; a row
- * dropped on itself is refused before anything is dropped; and a pane dragged
- * onto its own sibling, already in the same split, is refused the same way.
+ * dropped on itself is refused before anything is dropped; a pane dragged
+ * onto its own sibling, already in the same split, is refused the same way;
+ * and the identical merge again, driven through the tab BAR rather than the
+ * column, which is the surface a user actually meets first (the column
+ * starts hidden and needs the View menu to reach at all).
  *
  * Playwright's own `dragTo` drives pointer events, and Electron does not
  * synthesise those into HTML5 drag events, so every gesture here is a direct
@@ -36,25 +39,26 @@
  * `data-over` assertion and not on anything after it: `a tab dropped on
  * itself is refused` reads `data-over="true"` on the pane it hovered over
  * itself, and `a pane is refused as a drop target inside its own tab` reads
- * the same on the sibling's target row. The happy-path test stays green,
- * since it already wanted `canJoin` to accept that pair. 2 failed, 1 passed.
+ * the same on the sibling's target row. Both happy-path tests, the column's
+ * and the bar's, stay green, since they already wanted `canJoin` to accept
+ * that pair. 2 failed, 2 passed.
  *
  * **Measured the same day**, `canJoin` forced to `return false`
- * unconditionally: the happy-path test fails at its own `data-over` read,
+ * unconditionally: both happy-path tests fail at their own `data-over` read,
  * before the drop is ever sent, and both refusal tests stay green: they
- * wanted a refusal and got one, for the wrong reason but the right shape. 1
+ * wanted a refusal and got one, for the wrong reason but the right shape. 2
  * failed, 2 passed. Between the two mutations every test in this file goes
  * red at least once, and none goes red at the same assertion `canJoin`
  * returning its correct, unmutated value would also fail.
  *
  * **What this file does NOT see:**
  *
- * - **the tab BAR's own drag surface.** `TabBar` takes the same `onJoin` and
- *   `canJoin` props `TabsPanel` does, from the same `usePaneDragDrop` hook
- *   call in `App.tsx`, but nothing here drives a pointer into the bar itself.
- *   The column is what every gesture here uses, because it is the one surface
- *   `columnPaneIds` can name rows on without first working out which tabs the
- *   bar collapsed into one strip;
+ * - **a refusal driven through the bar.** The fourth test only drives the
+ *   bar's happy path; the two refusal shapes (self, same-tab sibling) are
+ *   only exercised on the column. Both surfaces call the same `canJoin`, so a
+ *   refusal bug would show up on the column regardless of which surface a
+ *   user actually dragged on, which is the reasoning for not doubling every
+ *   case across both surfaces;
  * - **a three-or-more-pane tab as either end of the drag.** Every join here
  *   starts from a single pane or a two-pane split; nothing drags a third pane
  *   onto an existing pair, so `carveRatio`'s share arithmetic for that case is
@@ -62,10 +66,10 @@
  * - **cross-project refusal.** `canJoin`'s `fromPane.projectSlug !==
  *   toPane.projectSlug` branch needs two projects, and every test here seeds
  *   one;
- * - **the visual ring** (`ring-1 ring-inset ring-accent` in `TabsPanel.tsx`),
- *   as distinct from the `data-over` attribute driving it. The tests read the
- *   attribute a screenshot would have to be eyeballed to confirm draws the
- *   ring at all;
+ * - **the visual highlight itself**, as distinct from the `data-over`
+ *   attribute driving it (a Tailwind ring class on the column, an inset
+ *   `boxShadow` on the bar). The tests read the attribute; a screenshot would
+ *   have to be eyeballed to confirm either one actually paints;
  * - **what the moved pane's tmux window looks like mid-move**, or any of
  *   `joinTab`'s own tmux sequence: that is `SessionManager.joinTab`'s own
  *   test in `tests/integration/`, not this file. What this file can see is the
@@ -156,16 +160,36 @@ async function ensureTabsColumnOpen(app: ElectronApplication, window: Page): Pro
   await expect(window.getByTestId('tabs-panel')).toBeVisible({ timeout: 20_000 })
 }
 
+/** The tabs column's own row prefix (`TabsPanel.tsx`): `vpane-<paneId>`. */
+const COLUMN_PREFIX = 'vpane-'
+
+/**
+ * The tab BAR's own row prefix (`TabBar.tsx`): `tab-<paneId>`. Not a new
+ * testid, this is the one 27-plus other e2e specs already count tabs with
+ * (`[data-testid^="tab-"]`, see `tabs.spec.ts:129` for one), read here rather
+ * than added.
+ */
+const BAR_PREFIX = 'tab-'
+
 /**
  * The pane ids of the tabs column, in the order the column draws them.
  * The column names every row `vpane-<paneId>` (`TabsPanel.tsx`).
  */
 async function columnPaneIds(window: Page): Promise<string[]> {
-  const rows = window.locator('[data-testid^="vpane-"]')
+  const rows = window.locator(`[data-testid^="${COLUMN_PREFIX}"]`)
   await expect(rows.first()).toBeVisible()
   return (
     await rows.evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.testid ?? ''))
-  ).map((id) => id.replace('vpane-', ''))
+  ).map((id) => id.replace(COLUMN_PREFIX, ''))
+}
+
+/** The pane ids of the tab BAR, in the order the bar draws them. */
+async function barTabIds(window: Page): Promise<string[]> {
+  const rows = window.locator(`[data-testid^="${BAR_PREFIX}"]`)
+  await expect(rows.first()).toBeVisible()
+  return (
+    await rows.evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.testid ?? ''))
+  ).map((id) => id.replace(BAR_PREFIX, ''))
 }
 
 /**
@@ -195,51 +219,63 @@ async function columnPaneIds(window: Page): Promise<string[]> {
  * `onDrop`'s own guard does not depend on this state at all: `dataTransfer`
  * carries the id there, read straight off the DOM API, not out of a
  * component's closure.
+ *
+ * `prefix` picks the surface: `COLUMN_PREFIX` (the default) for the tabs
+ * column's `vpane-` rows, `BAR_PREFIX` for the tab bar's `tab-` rows.
+ * `TabsPanel.tsx` and `TabBar.tsx` each call `usePaneDragDrop(canJoin,
+ * onJoin)` themselves, but with the SAME `canJoin` and `joinPanes` App.tsx
+ * passes both of them, and both surfaces read the hook's `over` back onto
+ * their own row as the identical `data-over={drag.over === id || undefined}`
+ * attribute, so the same dispatch and the same `data-over` read work
+ * unchanged on either.
  */
-async function beginDrag(window: Page, from: string, to: string): Promise<void> {
-  await window.evaluate((fromId) => {
-    const source = document.querySelector(`[data-testid="vpane-${fromId}"]`) as
-      | (HTMLElement & { __ptermDrag?: DataTransfer })
-      | null
-    if (!source) throw new Error(`missing row: ${fromId}`)
-    const dataTransfer = new DataTransfer()
-    source.__ptermDrag = dataTransfer
-    source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer }))
-  }, from)
-
+async function beginDrag(window: Page, from: string, to: string, prefix = COLUMN_PREFIX): Promise<void> {
   await window.evaluate(
-    ([fromId, toId]) => {
-      const source = document.querySelector(`[data-testid="vpane-${fromId}"]`) as
+    ([fromId, testidPrefix]) => {
+      const source = document.querySelector(`[data-testid="${testidPrefix}${fromId}"]`) as
         | (HTMLElement & { __ptermDrag?: DataTransfer })
         | null
-      const target = document.querySelector(`[data-testid="vpane-${toId}"]`)
+      if (!source) throw new Error(`missing row: ${testidPrefix}${fromId}`)
+      const dataTransfer = new DataTransfer()
+      source.__ptermDrag = dataTransfer
+      source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer }))
+    },
+    [from, prefix],
+  )
+
+  await window.evaluate(
+    ([fromId, toId, testidPrefix]) => {
+      const source = document.querySelector(`[data-testid="${testidPrefix}${fromId}"]`) as
+        | (HTMLElement & { __ptermDrag?: DataTransfer })
+        | null
+      const target = document.querySelector(`[data-testid="${testidPrefix}${toId}"]`)
       const dataTransfer = source?.__ptermDrag
       if (!source || !target || !dataTransfer) {
-        throw new Error(`drag not started: ${fromId} -> ${toId}`)
+        throw new Error(`drag not started: ${testidPrefix}${fromId} -> ${testidPrefix}${toId}`)
       }
       target.dispatchEvent(new DragEvent('dragover', { bubbles: true, dataTransfer }))
     },
-    [from, to],
+    [from, to, prefix],
   )
 }
 
 /** Finishes a drag `beginDrag` started: `drop` on `to`, `dragend` on `from`. */
-async function dropOn(window: Page, from: string, to: string): Promise<void> {
+async function dropOn(window: Page, from: string, to: string, prefix = COLUMN_PREFIX): Promise<void> {
   await window.evaluate(
-    ([fromId, toId]) => {
-      const source = document.querySelector(`[data-testid="vpane-${fromId}"]`) as
+    ([fromId, toId, testidPrefix]) => {
+      const source = document.querySelector(`[data-testid="${testidPrefix}${fromId}"]`) as
         | (HTMLElement & { __ptermDrag?: DataTransfer })
         | null
-      const target = document.querySelector(`[data-testid="vpane-${toId}"]`)
+      const target = document.querySelector(`[data-testid="${testidPrefix}${toId}"]`)
       const dataTransfer = source?.__ptermDrag
       if (!source || !target || !dataTransfer) {
-        throw new Error(`drag not started: ${fromId} -> ${toId}`)
+        throw new Error(`drag not started: ${testidPrefix}${fromId} -> ${testidPrefix}${toId}`)
       }
       target.dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer }))
       source.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer }))
       delete source.__ptermDrag
     },
-    [from, to],
+    [from, to, prefix],
   )
 }
 
@@ -337,6 +373,50 @@ test('a pane is refused as a drop target inside its own tab', async () => {
   // Unchanged from what the split already drew: still the last row of the
   // same two-pane bracket, not folded into a new one of its own.
   await expect(window.getByTestId(`vpane-${sibling}`)).toHaveAttribute('data-bracket', 'last')
+  expect((await sessionNames(SOCKET)).length).toBe(2)
+
+  await app.close()
+})
+
+/**
+ * The same merge, driven through the tab BAR rather than the column.
+ *
+ * `hiddenColumns.tabs` starts `true` (`App.tsx:182`), so the bar, not the
+ * column, is the surface most users meet: reaching the column at all needs a
+ * trip through the View menu the other three tests in this file make and this
+ * one does not. `TabBar.tsx` calls its own `usePaneDragDrop(canJoin, onJoin)`
+ * rather than sharing the column's hook instance, so nothing already in this
+ * file proves the bar's wiring, as opposed to the hook itself, actually works.
+ *
+ * The hover instrument carries over unchanged: `TabBar.tsx` sets the same
+ * `data-over={drag.over === tab.id || undefined}` the column sets, from the
+ * same hook. Only the CSS the attribute drives differs (an inset `boxShadow`
+ * ring here, `TabsPanel.tsx`'s Tailwind ring class on the column), which is
+ * a styling choice downstream of the same signal, not a second mechanism, so
+ * the identical `data-over` read is what is asserted here too. The grouping
+ * readout differs in name only: the bar has no `data-bracket`, but
+ * `data-group-pos` carries the same three values (`TabTreeNode.pos`,
+ * `lib/tabGroups.ts:35`).
+ */
+test('dragging a tab bar row onto another merges them through the bar itself', async () => {
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  await window.getByTestId('new-tab').click()
+  await expect(window.getByTestId('terminal-active')).toBeVisible()
+  await window.getByTestId('new-tab').click()
+  await expect.poll(async () => (await sessionNames(SOCKET)).length, { timeout: 20_000 }).toBe(2)
+  const [first, second] = await barTabIds(window)
+
+  await beginDrag(window, second, first, BAR_PREFIX)
+  await expect(window.getByTestId(`tab-${first}`)).toHaveAttribute('data-over', 'true')
+  await dropOn(window, second, first, BAR_PREFIX)
+
+  await expect(window.getByTestId(`tab-${first}`)).toHaveAttribute('data-group-pos', 'first')
+  await expect(window.getByTestId(`tab-${second}`)).toHaveAttribute('data-group-pos', 'last')
+  // Same load-bearing check as the column's happy path: two sessions before
+  // this drag, two after, so the bar moved a pane rather than closing one
+  // and spawning a replacement.
   expect((await sessionNames(SOCKET)).length).toBe(2)
 
   await app.close()
