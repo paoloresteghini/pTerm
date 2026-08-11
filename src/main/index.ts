@@ -596,7 +596,7 @@ function createWindow(): void {
     // carries the raw `<webview>` attributes and `webPreferences` carries
     // Electron's already-computed guest preferences, and disabling popups
     // logged as `webPreferences.disablePopups: true` here even with
-    // `params.allowpopups` set — Electron had already derived it from the
+    // `params.allowpopups` set: Electron had already derived it from the
     // attribute (absent, since the tag never sets it) before this handler
     // ran. Flipping `disablePopups` off directly is what actually let a
     // `target=_blank` click reach `setWindowOpenHandler` below; `.allowpopups`
