@@ -30,7 +30,7 @@ Design spec: `docs/superpowers/specs/2026-08-11-browser-pane-design.md`. This pl
 | File | Responsibility |
 |---|---|
 | `src/shared/browserUrl.ts` | One pure function turning what a human typed into a loadable URL. Shared because both the renderer's URL bar and main's `openBrowser` normalise. |
-| `src/renderer/BrowserPane.tsx` | The pane component: chrome (URL bar, nav buttons, DevTools toggle), the `<webview>`, and the three failure cards. |
+| `src/renderer/BrowserPane.tsx` | The pane component: chrome (URL bar, nav buttons, DevTools toggle), the `<webview>`, and the failure cards (two, not three: see Task 7 for the one that was cut). |
 | `tests/unit/browserUrl.test.ts` | The normaliser's table. |
 | `tests/integration/openBrowser.test.ts` | The handler writes both records. |
 | `tests/e2e/browser.spec.ts` | The pane end to end. |
@@ -937,7 +937,7 @@ Export the predicate, then render:
 
 - `did-fail-load` where `isRealLoadFailure(errorCode)`: a card with the code, the description and a Retry button that calls `reload()`.
 - `render-process-gone`: a crashed card with a Reload button. The pane and its tab survive.
-- `unresponsive` / `responsive`: a banner that appears and clears. No automatic kill.
+- ~~`unresponsive` / `responsive`: a banner that appears and clears.~~ **Cut 2026-08-11 during implementation, deferred to M2.** `<webview>` does not emit these: its 35 `addEventListener` overloads in `electron.d.ts` include neither, and they exist on `WebContents` only. A listener would compile with a cast and never fire. Do not add one, do not cast, and do not leave a commented-out stub; the spec's Failure states section carries the full reasoning. `render-process-gone` was checked at the same time and IS on the tag, so the crash state is real.
 
 Give each card a `data-testid` for Task 9, none beginning with `tab-`.
 
@@ -1059,7 +1059,7 @@ Run: `npm start`, and check each line of the spec's "M1 acceptance" section by h
 - Two projects on one localhost port do not share cookies or `localStorage`.
 - `localhost:3000` reaches the dev server over http.
 - The URL survives relaunch; the tab shows the host.
-- A failed load, a crashed renderer and a hung page each show a recoverable card.
+- A failed load and a crashed renderer each show a recoverable card. The hung-page banner was cut on 2026-08-11 and deferred to M2; see Task 7.
 - DevTools opens against the page.
 
 Report exactly which passed and which did not. Do not report a line as passing that you did not perform.
@@ -1079,7 +1079,7 @@ git commit -m "Record M1 acceptance results"
 
 ## Self-Review
 
-**Spec coverage.** Every M1 requirement maps to a task: type and `SESSIONLESS` (1), `url` on both records and its three validation sites (1), `savedFields` (1), `stateForOpen` (1), `openBrowser` with its no-dedupe difference (3), the mandatory tab row (3), per-project partition (4), `webviewTag` plus all three hardening measures (4), URL normalising (2), navigation persistence debounced (6), host-drives-label and url-only-persisted (6), the `-3` exclusion and all three failure states (7), DevTools (8), popup handling (8), the `file://` fixture (5), the Playwright spike with both branches (5, 9), and the acceptance list (10).
+**Spec coverage.** Every M1 requirement maps to a task: type and `SESSIONLESS` (1), `url` on both records and its three validation sites (1), `savedFields` (1), `stateForOpen` (1), `openBrowser` with its no-dedupe difference (3), the mandatory tab row (3), per-project partition (4), `webviewTag` plus all three hardening measures (4), URL normalising (2), navigation persistence debounced (6), host-drives-label and url-only-persisted (6), the `-3` exclusion and the two buildable failure states (7; the third was cut, see Task 7), DevTools (8), popup handling (8), the `file://` fixture (5), the Playwright spike with both branches (5, 9), and the acceptance list (10).
 
 **Placeholders.** The one deliberate under-specification is Task 9's assertion mechanism, which is a measured input from Task 5 rather than a gap. Task 4 leaves button labels and styling to the implementer, which is a matching-the-codebase judgement, not a missing decision.
 

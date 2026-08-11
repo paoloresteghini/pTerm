@@ -206,7 +206,22 @@ All shown inside the pane. None of them close the pane or the tab.
   ordinary redirects and cancelled loads, so treating it as a failure flashes
   an error card on healthy pages.
 - `render-process-gone`: a crashed card with Reload. The pane and tab survive.
-- `unresponsive`: a banner. No automatic kill.
+A hung page was originally a third state here, a banner driven by
+`unresponsive` and `responsive`. **Cut from M1 on 2026-08-11 during
+implementation, and deferred to M2.** Measured, not assumed: extracting every
+`addEventListener` overload from `WebviewTag` in `electron.d.ts` yields 35
+events and neither `unresponsive` nor `responsive` is among them. They exist
+on `WebContents` and `BrowserWindow` only. `render-process-gone` IS on the tag,
+so the crash state above is real; `crashed` is absent, so there is no legacy
+fallback.
+
+Reaching those events from a pane therefore needs a cross-process bridge:
+`getWebContentsId()` in the renderer, main listening on
+`webContents.fromId(id)`, forwarding over a channel keyed to the pane, with
+cleanup when the pane closes. M2 builds main-side `webContents` access anyway
+so Claude can drive the pane over CDP, and the hung-page bridge falls out of
+that work. Building it here would mean bespoke plumbing that M2 then has to
+adopt or replace.
 
 ## Security
 
@@ -268,8 +283,9 @@ answer.
   `localStorage`.
 - Typing `localhost:3000` reaches the dev server over http.
 - The URL survives a relaunch, and the tab is named for the page's host and port.
-- A failed load, a crashed renderer and a hung page each show a recoverable
-  card, and the pane survives all three.
+- A failed load and a crashed renderer each show a recoverable card, and the
+  pane survives both. A hung page is not covered: see Failure states, it is
+  deferred to M2.
 - DevTools opens against the page.
 
 # M2: Claude control (sketch, not yet designed)
