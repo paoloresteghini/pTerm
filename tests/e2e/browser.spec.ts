@@ -253,6 +253,7 @@ test('the palette command opens a browser pane, and the pane chrome is present',
   await expect(page.getByTestId(`browserback-${id}`)).toBeVisible()
   await expect(page.getByTestId(`browserforward-${id}`)).toBeVisible()
   await expect(page.getByTestId(`browserreload-${id}`)).toBeVisible()
+  await expect(page.getByTestId(`browserhardreload-${id}`)).toBeVisible()
   await expect(page.getByTestId(`browserdevtools-${id}`)).toBeVisible()
   await expect(page.getByTestId(`browserview-${id}`)).toBeVisible()
 
