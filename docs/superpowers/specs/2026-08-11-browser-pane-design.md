@@ -132,8 +132,12 @@ returns the existing pane when one already shows that file. Two browser panes
 on the same URL is a legitimate thing to want (two viewport widths, two routes
 of the same app), so `openBrowser` always creates.
 
-Entry points: a `⌘K` command and an item in the tab-bar `+` menu, both
-carrying the active `projectId`.
+Entry point: a `⌘K` command carrying the active `projectId`.
+
+This originally also named "an item in the tab-bar `+` menu". No such menu
+exists: `+` is a single button (`TabBar.tsx:364-371`) whose click creates a
+terminal. See the M1 acceptance section for why M1 ships the palette command
+alone.
 
 The four coordinated IPC edits follow the existing pattern: a `CHANNELS` entry
 (`ipc.ts:7-97`), a method on `PTermApi` (`:913`), the `ipcMain.handle` wrapped
@@ -274,8 +278,15 @@ answer.
 
 ## M1 acceptance
 
-- A browser pane opens from `⌘K` and from the tab-bar `+` menu, into the
-  active project.
+- A browser pane opens from the `⌘K` palette command "New browser pane", into
+  the active project.
+
+  **Corrected 2026-08-11 during implementation.** This originally also promised
+  the tab-bar `+` menu. There is no such menu: `+` is a single button
+  (`TabBar.tsx:364-371`, `onClick={onNew}`, `aria-label="New terminal"`) that
+  creates a terminal directly. Turning it into a menu would change a one-click
+  action every existing user relies on, which is a UX decision rather than part
+  of adding a pane type, so M1 ships the palette command alone.
 - It lives in a split and is laid out exactly as a terminal or editor pane is,
   sharing the same flex box, ratios and dividers.
 
