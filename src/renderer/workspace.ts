@@ -682,8 +682,8 @@ function visibleGroupId(state: WorkspaceState, region: Region): string | null {
 }
 
 /**
- * Every pane, arranged: one group per tab, in the order the tabs' first panes
- * appear in `state.panes`.
+ * Every pane in `region`, arranged: one group per tab, in the order the
+ * tabs' first panes appear in `state.panes`.
  *
  * **At most one box per pane is enforced here**, by `claimed` across rows and
  * by `boxed` within one — no input can make this mount two xterms on one tmux
