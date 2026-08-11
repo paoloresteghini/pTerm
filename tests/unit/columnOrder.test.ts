@@ -34,8 +34,8 @@ import {
 describe('COLUMN_ORDER_DEFAULT', () => {
   it('is the row as it stands before anyone drags anything', () => {
     expect(COLUMN_ORDER_DEFAULT).toEqual([
-      'files', 'projects', 'tabs', 'terminal', 'skills', 'presets', 'prompts', 'git', 'issues', 'notes',
-      'todos',
+      'files', 'projects', 'tabs', 'terminal', 'browser', 'skills', 'presets', 'prompts', 'git', 'issues',
+      'notes', 'todos',
     ])
   })
 
@@ -44,6 +44,18 @@ describe('COLUMN_ORDER_DEFAULT', () => {
     const issues = COLUMN_ORDER_DEFAULT.indexOf('issues')
     expect(issues).toBeGreaterThan(-1)
     expect(Math.abs(issues - git)).toBe(1)
+  })
+
+  it('puts the browser region straight after the terminal by default', () => {
+    const order = [...COLUMN_ORDER_DEFAULT]
+    expect(order[order.indexOf('terminal') + 1]).toBe('browser')
+  })
+
+  // The upgrade path. Every profile on disk was written before this column
+  // existed, and `orderFromStored` appends what a stored list never mentions.
+  it('gains the browser slot from an order written before it existed', () => {
+    const stored = JSON.stringify(COLUMN_ORDER_DEFAULT.filter((slot) => slot !== 'browser'))
+    expect(orderFromStored(stored)).toContain('browser')
   })
 })
 
@@ -63,8 +75,8 @@ describe('orderFromStored', () => {
 
   it('keeps a stored order the app fully recognises', () => {
     const stored: ColumnSlot[] = [
-      'notes', 'files', 'projects', 'tabs', 'terminal', 'skills', 'presets', 'prompts', 'git', 'issues',
-      'todos',
+      'notes', 'files', 'projects', 'tabs', 'terminal', 'browser', 'skills', 'presets', 'prompts', 'git',
+      'issues', 'todos',
     ]
     expect(orderFromStored(JSON.stringify(stored))).toEqual(stored)
   })
@@ -80,13 +92,13 @@ describe('orderFromStored', () => {
     // COLUMN_ORDER_DEFAULT's order and not in some incidental one.
     const stored: ColumnSlot[] = ['notes', 'projects', 'terminal']
     expect(orderFromStored(JSON.stringify(stored))).toEqual([
-      'notes', 'projects', 'terminal', 'files', 'tabs', 'skills', 'presets', 'prompts', 'git', 'issues',
-      'todos',
+      'notes', 'projects', 'terminal', 'files', 'tabs', 'browser', 'skills', 'presets', 'prompts', 'git',
+      'issues', 'todos',
     ])
   })
 
   it('appends todos for a profile written before the column existed', () => {
-    const stored = JSON.stringify(['files', 'projects', 'tabs', 'terminal', 'skills', 'presets', 'prompts', 'git', 'issues', 'notes'])
+    const stored = JSON.stringify(['files', 'projects', 'tabs', 'terminal', 'browser', 'skills', 'presets', 'prompts', 'git', 'issues', 'notes'])
     expect(orderFromStored(stored)).toEqual([...COLUMN_ORDER_DEFAULT])
   })
 

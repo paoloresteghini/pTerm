@@ -30,6 +30,7 @@ describe('columnIsCollapsed', () => {
       git: false,
       issues: true,
       todos: true,
+      browser: true,
     }
     expect(columnIsCollapsed(collapsed, 'git')).toBe(false)
   })
@@ -45,6 +46,7 @@ describe('columnIsCollapsed', () => {
       git: true,
       issues: true,
       todos: true,
+      browser: true,
     }
     expect(columnIsCollapsed(collapsed, 'git')).toBe(true)
   })

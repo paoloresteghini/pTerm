@@ -8,6 +8,7 @@ import {
   type ColumnId,
   type ColumnVisibility,
 } from '../../src/renderer/lib/columnVisibility'
+import { columnIsCollapsed } from '../../src/shared/ipc'
 
 /** Every column collapsed, which is what a fresh profile looks like. */
 const ALL_SHUT: ColumnVisibility = {
@@ -20,6 +21,7 @@ const ALL_SHUT: ColumnVisibility = {
   git: true,
   issues: true,
   todos: true,
+  browser: true,
 }
 
 const withOpen = (...open: Array<keyof ColumnVisibility>): ColumnVisibility => {
@@ -29,12 +31,23 @@ const withOpen = (...open: Array<keyof ColumnVisibility>): ColumnVisibility => {
 }
 
 describe('COLUMN_IDS', () => {
-  it('lists the nine columns in on-screen order', () => {
+  it('lists the ten columns in on-screen order', () => {
     // `tabs` leads because the column sits leftmost, immediately right of the
     // projects sidebar, and this array is documented as on-screen order.
     expect(COLUMN_IDS).toEqual([
-      'tabs', 'files', 'skills', 'presets', 'prompts', 'git', 'issues', 'notes', 'todos',
+      'tabs', 'files', 'browser', 'skills', 'presets', 'prompts', 'git', 'issues', 'notes', 'todos',
     ])
+  })
+
+  it('lists the browser column', () => {
+    expect(COLUMN_IDS).toContain('browser')
+  })
+
+  // A profile written before this column existed has no key for it, and
+  // `columnIsCollapsed` reads a missing key as collapsed. That is what makes
+  // "hidden until the first browser opens" free rather than a migration.
+  it('reads a profile with no browser key as collapsed', () => {
+    expect(columnIsCollapsed({} as ColumnVisibility, 'browser')).toBe(true)
   })
 })
 
@@ -70,6 +83,7 @@ describe('hideAll', () => {
       tabs: true,
       issues: true,
       todos: true,
+      browser: true,
     }
     expect(hideAll(opened).remembered).toEqual(['files', 'git'])
   })
@@ -112,11 +126,11 @@ describe('the round trip', () => {
 describe('showsTabBar', () => {
   const allCollapsed: ColumnVisibility = {
     tabs: true, files: true, skills: true, presets: true, prompts: true, git: true, issues: true, notes: true,
-    todos: true,
+    todos: true, browser: true,
   }
   const noneHidden: Record<ColumnId, boolean> = {
     tabs: false, files: false, skills: false, presets: false, prompts: false, git: false, issues: false, notes: false,
-    todos: false,
+    todos: false, browser: false,
   }
 
   it('shows the bar when the tabs column is collapsed to its strip', () => {
@@ -141,7 +155,7 @@ describe('showsTabBar', () => {
     // test could not tell them apart.
     const alsoOpen: ColumnVisibility = {
       tabs: false, files: false, skills: false, presets: false,
-      prompts: false, git: false, issues: false, notes: false, todos: false,
+      prompts: false, git: false, issues: false, notes: false, todos: false, browser: false,
     }
     expect(showsTabBar(alsoOpen, noneHidden)).toBe(false)
   })

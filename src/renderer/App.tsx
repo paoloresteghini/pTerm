@@ -125,6 +125,7 @@ const ISSUES_KEY = 'pterm:issuesCollapsed'
 const TODOS_KEY = 'pterm:todosCollapsed'
 const NOTES_KEY = 'pterm:notesCollapsed'
 const TABS_KEY = 'pterm:tabsCollapsed'
+const BROWSER_KEY = 'pterm:browserCollapsed'
 
 /** Where the row's left-to-right order is kept, once a drag has changed it. */
 const ORDER_KEY = 'pterm:columnOrder'
@@ -151,6 +152,7 @@ const HIDDEN_KEYS: Record<ColumnId, string> = {
   issues: 'pterm:issuesHidden',
   todos: 'pterm:todosHidden',
   notes: 'pterm:notesHidden',
+  browser: 'pterm:browserHidden',
 }
 
 /** Reads one of those keys, with the default applied when nothing is stored. */
@@ -174,6 +176,11 @@ export function App() {
   const [todosCollapsed, setTodosCollapsed] = useState(() => storedCollapsed(TODOS_KEY, true))
   const [notesCollapsed, setNotesCollapsed] = useState(() => storedCollapsed(NOTES_KEY, true))
   const [tabsCollapsed, setTabsCollapsed] = useState(() => storedCollapsed(TABS_KEY, true))
+  // No heading or strip drives this yet: the browser column renders nothing
+  // until Task 7, so nothing ever calls `toggleColumnCollapsed('browser')`.
+  // Declared now because `setColumn`, `COLUMN_KEY` and `collapsedColumns`
+  // below are keyed by every `ColumnId`, `browser` included.
+  const [browserCollapsed, setBrowserCollapsed] = useState(() => storedCollapsed(BROWSER_KEY, true))
   // Whether the Todos column's create dialog is open. Held here rather than
   // inside `TodosPanel` so something outside that column can open it.
   const [creatingTodo, setCreatingTodo] = useState(false)
@@ -189,6 +196,7 @@ export function App() {
     issues: storedCollapsed(HIDDEN_KEYS.issues, true),
     todos: storedCollapsed(HIDDEN_KEYS.todos, true),
     notes: storedCollapsed(HIDDEN_KEYS.notes, true),
+    browser: storedCollapsed(HIDDEN_KEYS.browser, true),
   }))
   // The row's left-to-right order. Restored from whatever the last drag
   // wrote, or the shipped order on a fresh profile: see `orderFromStored`
@@ -408,6 +416,7 @@ export function App() {
     git: setGitCollapsed,
     issues: setIssuesCollapsed,
     todos: setTodosCollapsed,
+    browser: setBrowserCollapsed,
   }
 
   const COLUMN_KEY: Record<ColumnId, string> = {
@@ -420,6 +429,7 @@ export function App() {
     git: GIT_KEY,
     issues: ISSUES_KEY,
     todos: TODOS_KEY,
+    browser: BROWSER_KEY,
   }
 
   /**
@@ -461,6 +471,7 @@ export function App() {
     issues: issuesCollapsed,
     todos: todosCollapsed,
     notes: notesCollapsed,
+    browser: browserCollapsed,
   }
 
   const project = activeProject(state)
@@ -1854,6 +1865,10 @@ export function App() {
     switch (slot) {
       case 'terminal':
         return terminalColumn
+      case 'browser':
+        // The slot exists so the column has a place in `columnOrder`, but
+        // nothing fills it yet: Task 7 gives it a component to render.
+        return null
       case 'projects':
         // Never derived: Projects does not move, so its side is a fact about
         // the column rather than something read off `columnOrder`.

@@ -21,10 +21,19 @@ import type { ColumnId, ColumnVisibility } from '../../shared/ipc'
 
 export type { ColumnId, ColumnVisibility }
 
-/** Left to right as they appear on screen, which is the order the menu lists. */
+/**
+ * Left to right as they appear on screen, which is the order the menu lists.
+ *
+ * `browser` sits where `COLUMN_ORDER_DEFAULT` puts it, right after the
+ * terminal, ahead of every column that stands to its right. It has no View
+ * menu item yet (there is nothing to toggle: the column renders nothing
+ * until Task 7 fills it in), so it is a member of this list without yet
+ * being one of the things the comment above says the menu lists.
+ */
 export const COLUMN_IDS: readonly ColumnId[] = [
   'tabs',
   'files',
+  'browser',
   'skills',
   'presets',
   'prompts',

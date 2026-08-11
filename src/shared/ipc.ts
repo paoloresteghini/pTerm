@@ -1476,6 +1476,7 @@ export type ColumnId =
   | 'git'
   | 'issues'
   | 'todos'
+  | 'browser'
 
 export type ColumnVisibility = Record<ColumnId, boolean>
 

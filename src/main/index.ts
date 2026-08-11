@@ -219,6 +219,10 @@ function showColumns(collapsed: ColumnVisibility): void {
     git: 'toggle-git',
     issues: 'toggle-issues',
     todos: 'toggle-todos',
+    // No such menu item yet: the browser column has nothing to toggle until
+    // a later task gives it one. `getMenuItemById` below returns null for
+    // it and the `if (item)` guard already handles that.
+    browser: 'toggle-browser',
   }
   let open = false
   for (const [column, itemId] of Object.entries(ids) as [ColumnId, string][]) {

@@ -28,6 +28,7 @@ export const COLUMN_ORDER_DEFAULT: readonly ColumnSlot[] = [
   'projects',
   'tabs',
   'terminal',
+  'browser',
   'skills',
   'presets',
   'prompts',
