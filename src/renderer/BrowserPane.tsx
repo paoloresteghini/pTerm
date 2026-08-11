@@ -4,6 +4,7 @@ import { Button } from './ui/Button'
 import { normaliseUrl } from '../shared/browserUrl'
 import { UNSORTED_ID } from '../shared/ipc'
 import type { PaneColor } from '../shared/paneColors'
+import { createUrlSync } from './lib/urlSync'
 
 /**
  * `@types/react` already declares `<webview>` as a JSX intrinsic element, but
@@ -99,21 +100,21 @@ export function BrowserPane({
   const [typed, setTyped] = useState(address)
   const [canGoBack, setCanGoBack] = useState(false)
   const [canGoForward, setCanGoForward] = useState(false)
-  // Holds the debounce timer between `did-navigate` events, so a burst of
-  // them (a page redirecting several times on one load) resets one timer
-  // instead of scheduling several writes that would land in whatever order
-  // their timeouts happen to fire.
-  const pendingUrlWrite = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // One instance for the pane's lifetime, the same way `NotesPanel` holds
+  // its `noteSaver`: `urlSync.ts` owns the debounce, so this component only
+  // schedules and cancels. `window.pterm.setPaneUrl` already matches
+  // `createUrlSync`'s `send` signature, so no wrapper closure is needed.
+  const urlSync = useRef(createUrlSync(window.pterm.setPaneUrl)).current
 
   /**
    * Keeps the back/forward buttons and the address bar in step with the
    * webview's own history, including navigation this pane's own buttons had
    * no part in: a link clicked inside the page, or a redirect. Also the only
-   * place this pane's current page reaches main: debounced, so a page that
-   * redirects several times on one navigation (an auth bounce, a dev
-   * server's reconnect) writes `config.json` once, on settle, rather than
-   * once per hop for no benefit, the same way `setLayout` commits a drag on
-   * pointer-up rather than on every frame.
+   * place this pane's current page reaches main: `urlSync.schedule` debounces,
+   * so a page that redirects several times on one navigation (an auth bounce,
+   * a dev server's reconnect) writes `config.json` once, on settle, rather
+   * than once per hop for no benefit, the same way `setLayout` commits a
+   * drag on pointer-up rather than on every frame.
    *
    * Registered once, on mount, rather than depending on anything: the
    * `<webview>` element itself is never replaced for the life of this pane
@@ -128,11 +129,7 @@ export function BrowserPane({
       setCanGoBack(node.canGoBack())
       setCanGoForward(node.canGoForward())
       setTyped(nextUrl)
-      if (pendingUrlWrite.current !== null) clearTimeout(pendingUrlWrite.current)
-      pendingUrlWrite.current = setTimeout(() => {
-        pendingUrlWrite.current = null
-        window.pterm.setPaneUrl(paneId, nextUrl)
-      }, 500)
+      urlSync.schedule(paneId, nextUrl)
     }
     const onNavigate = (event: Event) => sync((event as DidNavigateEvent).url)
     // `did-navigate-in-page` also fires for a subframe's own in-page
@@ -149,9 +146,9 @@ export function BrowserPane({
       node.removeEventListener('did-navigate', onNavigate)
       node.removeEventListener('did-navigate-in-page', onNavigateInPage)
       // Without this, a pane closed while a debounce is pending would still
-      // fire its write after unmount: nothing here awaits it, and the timer
+      // fire its write after unmount: nothing here awaits it, and `urlSync`
       // does not know its pane is gone.
-      if (pendingUrlWrite.current !== null) clearTimeout(pendingUrlWrite.current)
+      urlSync.cancel()
     }
   }, [])
 

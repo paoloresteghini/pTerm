@@ -153,10 +153,16 @@ describe('CHANNELS.openBrowser', () => {
 describe('CHANNELS.setPaneUrl', () => {
   it('moves the saved url and leaves other panes alone', async () => {
     const pane = await openBrowser('p1', 'https://example.com')
+    // A second pane the write must not touch: the handler's write is a
+    // `config.panes.map(...)` over every row, and a predicate that matched
+    // too broadly would silently move this pane's url along with the
+    // targeted one.
+    const other = await openBrowser('p1', 'https://example.org')
     await setPaneUrl(pane!.id, 'https://example.com/deep')
 
     const config = await store.read()
     expect(config.panes.find((row) => row.id === pane!.id)?.url).toBe('https://example.com/deep')
+    expect(config.panes.find((row) => row.id === other!.id)?.url).toBe('https://example.org')
   })
 
   // The kind check in the handler, pinned directly: a terminal row has no
