@@ -130,6 +130,7 @@ const api: PTermApi = {
   clipboardRead: () => ipcRenderer.invoke(CHANNELS.clipboardRead),
   clipboardWrite: (text) => ipcRenderer.invoke(CHANNELS.clipboardWrite, text),
   openEditor: (projectId, relPath) => ipcRenderer.invoke(CHANNELS.openEditor, projectId, relPath),
+  openBrowser: (projectId, url) => ipcRenderer.invoke(CHANNELS.openBrowser, projectId, url),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke(CHANNELS.openExternal, url),
   /*
    * The absolute path of a dropped file.

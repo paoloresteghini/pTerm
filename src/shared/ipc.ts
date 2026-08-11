@@ -65,6 +65,7 @@ export const CHANNELS = {
   clipboardRead: 'pterm:clipboardRead',
   clipboardWrite: 'pterm:clipboardWrite',
   openEditor: 'pterm:openEditor',
+  openBrowser: 'pterm:openBrowser',
   openExternal: 'pterm:openExternal',
   updateAvailable: 'pterm:updateAvailable',
   checkForUpdate: 'pterm:checkForUpdate',
@@ -1218,6 +1219,16 @@ export interface PTermApi {
    * the renderer select the new tab by the pane it was handed.
    */
   openEditor(projectId: string, relPath: string): Promise<TabDescriptor | null>
+  /**
+   * Open a browser pane on `url`, or on `about:blank` when `url` is absent.
+   *
+   * `url` is whatever the caller typed, main runs it through `normaliseUrl`,
+   * and the pane this answers with always carries the normalised result, never
+   * the raw string. Unlike `openEditor`, this never returns an existing pane:
+   * two browser panes open on the same page is a normal thing to want, so
+   * every call mints a fresh one.
+   */
+  openBrowser(projectId: string, url?: string): Promise<TabDescriptor | null>
   /**
    * Hand a URL to the default browser.
    *

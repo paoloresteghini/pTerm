@@ -28,6 +28,7 @@ import {
   type TodoPatch,
 } from '../../shared/ipc'
 import type { ExitReason, SessionManager, PaneRecord, TerminalPaneRecord } from '../sessions/manager'
+import { normaliseUrl } from '../../shared/browserUrl'
 import { ConfigStore, type PTermConfig } from '../state/store'
 import { StatusRegistry } from '../status/registry'
 import {
@@ -2113,6 +2114,48 @@ export function registerIpc(
           activePaneId: id,
           layout: { dir: 'row', ratio: [1], kids: [id] },
         }
+        await store.write({
+          ...config,
+          panes: [...config.panes, pane],
+          tabs: withTabRow(config.tabs, id, row),
+        })
+        return pane
+      }),
+  )
+
+  // Clones `openEditor` too, with two differences instead of `openDiff`'s
+  // three: no dedupe, and no path resolution or containment guard. A URL is
+  // not a path, so there is nothing to resolve against the project cwd and
+  // nothing to keep inside it. And two browser panes open on the same URL is
+  // a normal thing to want (two routes of one app, two viewport widths),
+  // unlike a file, so this always mints a fresh pane rather than handing back
+  // one that already shows the page.
+  ipcMain.handle(
+    CHANNELS.openBrowser,
+    (_event, projectId: string, url?: string): Promise<TabDescriptor | null> =>
+      serialise(async () => {
+        const config = await store.read()
+        const project = config.projects.find((row) => row.id === projectId)
+        if (!project) return null
+
+        const id = newSessionId()
+        // Always the normalised form, even when normalisation fails: an empty
+        // or blank `url` and a missing one both mean "no page yet", so both
+        // land on the same `about:blank` a fresh pane opens to.
+        const pane: PaneRecord = {
+          id,
+          projectSlug: project.slug,
+          cwd: project.cwd,
+          type: 'browser',
+          url: (url === undefined ? null : normaliseUrl(url)) ?? 'about:blank',
+        }
+        const row: TabRow = {
+          id,
+          groupId: id,
+          activePaneId: id,
+          layout: { dir: 'row', ratio: [1], kids: [id] },
+        }
+
         await store.write({
           ...config,
           panes: [...config.panes, pane],
