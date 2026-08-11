@@ -63,8 +63,11 @@ export interface PaneRecord {
   diffRelPath?: string
   /**
    * The page a `browser` pane is showing, absolute and normalised: never what
-   * the user typed. Absent on every other kind, and on a browser pane that
-   * has not navigated anywhere yet.
+   * the user typed. `openBrowser` is the only producer and always assigns a
+   * string, `about:blank` included, so absent never happens through it. Still
+   * typed optional because `normalisePane` (`store.ts`) accepts and keeps a
+   * browser row whose `url` a hand edit removed or left the wrong type.
+   * Absent on every other kind.
    *
    * Display data only, and here for the same reason `filePath` is: config
    * persists it and nothing in this file reads it, since this file deals in

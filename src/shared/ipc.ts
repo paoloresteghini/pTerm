@@ -329,10 +329,14 @@ export interface TabDescriptor {
    */
   diffRelPath?: string
   /**
-   * The page a `browser` pane is showing. Absent on every other kind, and on
-   * a browser pane that has not navigated anywhere yet. Always the
-   * normalised, absolute form: never what the user typed into the address
-   * bar.
+   * The page a `browser` pane is showing. Always the normalised, absolute
+   * form: never what the user typed into the address bar. `openBrowser` is
+   * this field's only producer and always assigns a string, `about:blank`
+   * included when the caller names no URL, so absent never happens through
+   * it. Still typed optional because `normalisePane` (`store.ts`) accepts
+   * and keeps a browser row whose `url` a hand edit removed or left the wrong
+   * type: config is a text file, not something only `openBrowser` writes.
+   * Absent on every other kind.
    */
   url?: string
 }

@@ -105,6 +105,15 @@ describe('CHANNELS.openBrowser', () => {
     expect(pane?.url).toBe('about:blank')
   })
 
+  // A distinct input from omitting the argument: this one takes
+  // `normaliseUrl`'s null branch (blank after trimming) rather than the
+  // handler's own `url === undefined` branch. Both land on the same default,
+  // and that agreement is what this pins.
+  it('opens about:blank for a whitespace-only url too', async () => {
+    const pane = await openBrowser('p1', '   ')
+    expect(pane?.url).toBe('about:blank')
+  })
+
   it('survives a restore that live tmux knows nothing about', async () => {
     const pane = await openBrowser('p1', 'https://example.com')
     const config = await store.read()
