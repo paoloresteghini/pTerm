@@ -1,8 +1,10 @@
 import {
   UNSORTED_ID,
   canHaveSession,
+  regionOf,
   type JoinShape,
   type ProjectDescriptor,
+  type Region,
   type TabDescriptor,
   type TabRow,
   type TabShape,
@@ -142,17 +144,38 @@ export function projectIdForTab(projects: ProjectDescriptor[], tab: TabDescripto
   return projects.find((project) => project.slug === tab.projectSlug)?.id ?? UNSORTED_ID
 }
 
-export function tabsOfProject(state: WorkspaceState, projectId: string): TabDescriptor[] {
-  return state.panes.filter((tab) => projectIdForTab(state.projects, tab) === projectId)
+/**
+ * `region` filters to one column; omitted, every pane of the project comes
+ * back regardless of column, which is the behaviour before regions existed
+ * and is what keeps a call site that has not been updated working.
+ */
+export function tabsOfProject(
+  state: WorkspaceState,
+  projectId: string,
+  region?: Region,
+): TabDescriptor[] {
+  return state.panes.filter(
+    (tab) =>
+      projectIdForTab(state.projects, tab) === projectId &&
+      (region === undefined || regionOf(tab) === region),
+  )
 }
 
 export function activeProject(state: WorkspaceState): ProjectDescriptor | undefined {
   return state.projects.find((project) => project.id === state.activeProjectId)
 }
 
-/** The active tab is a property of the active project, not of the workspace. */
-export function activeTabId(state: WorkspaceState): string | null {
-  return activeProject(state)?.activeTabId ?? null
+/**
+ * The active tab is a property of the active project, not of the workspace.
+ *
+ * Defaults to `'terminal'`, the region this returned before `region` existed,
+ * so a call site that has not been updated keeps reading the terminal
+ * column's selection exactly as before.
+ */
+export function activeTabId(state: WorkspaceState, region: Region = 'terminal'): string | null {
+  const project = activeProject(state)
+  if (!project) return null
+  return (region === 'browser' ? project.activeBrowserTabId : project.activeTabId) ?? null
 }
 
 /**
@@ -652,8 +675,8 @@ function isDead(state: WorkspaceState, pane: TabDescriptor): boolean {
  * pane of a split sets an id no row is keyed by. Showing that pane's tab is
  * what the user asked for; matching group ids alone would show nothing.
  */
-function visibleGroupId(state: WorkspaceState): string | null {
-  const id = activeTabId(state)
+function visibleGroupId(state: WorkspaceState, region: Region): string | null {
+  const id = activeTabId(state, region)
   if (id === null) return null
   return tabOfPane(state, id)?.id ?? id
 }
@@ -686,9 +709,9 @@ function visibleGroupId(state: WorkspaceState): string | null {
  * is a guarantee and where the other half comes from.
  *
  * Driven by `state.panes` rather than by `state.tabs` for two reasons. Every
- * pane gets a group whether or not a row names it — nothing here can drop a
- * terminal — and a pane's position among the groups does not move when a row
- * arrives for it, so nothing is reordered in the DOM either.
+ * pane in `region` gets a group whether or not a row names it — nothing here
+ * can drop a terminal — and a pane's position among the groups does not move
+ * when a row arrives for it, so nothing is reordered in the DOM either.
  *
  * **A dead pane is boxed like any other**, keeping its slot and its share, and
  * carries `dead` so the renderer can offer Restart and Dismiss over it. That is
@@ -703,12 +726,13 @@ function visibleGroupId(state: WorkspaceState): string | null {
  * away at the exact moment it is wanted — the same mistake that once made
  * `crashed` a state nothing could render (see the `died` case below).
  */
-export function paneGroups(state: WorkspaceState): PaneGroup[] {
-  const visibleId = visibleGroupId(state)
+export function paneGroups(state: WorkspaceState, region: Region = 'terminal'): PaneGroup[] {
+  const visibleId = visibleGroupId(state, region)
   const groups: PaneGroup[] = []
   const seen = new Set<string>()
   const claimed = new Set<string>()
   for (const pane of state.panes) {
+    if (regionOf(pane) !== region) continue
     const row = tabOfPane(state, pane.id)
     const id = row?.id ?? pane.id
     if (seen.has(id)) continue

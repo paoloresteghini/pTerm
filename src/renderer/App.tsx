@@ -470,7 +470,7 @@ export function App() {
   // `TabBar` that sorted privately would leave `⌥3` selecting something other
   // than the third tab on screen, and no unit test could see the disagreement.
   const tabEntries = state.activeProjectId
-    ? groupedTabs(tabsOfProject(state, state.activeProjectId), state.tabs)
+    ? groupedTabs(tabsOfProject(state, state.activeProjectId, 'terminal'), state.tabs)
     : []
   // Hoisted out of the JSX below because the welcome page's condition is read
   // off it. "No visible group" is the literal statement of an empty pane area,
@@ -1856,7 +1856,9 @@ export function App() {
             // Grouped, same as the bar: the sidebar draws the same panes in the
             // same window, and a split reading contiguous in one list and torn
             // apart in the other is the kind of thing a user notices at once.
-            tabsOf={(id) => groupedTabs(tabsOfProject(state, id), state.tabs).map((entry) => entry.pane)}
+            tabsOf={(id) =>
+              groupedTabs(tabsOfProject(state, id, 'terminal'), state.tabs).map((entry) => entry.pane)
+            }
             activeTabId={currentTabId}
             status={state.status}
             since={state.since}
