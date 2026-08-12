@@ -189,7 +189,14 @@ export function BrowserColumn({
       // about the panel, not about a strip or an empty box wearing its name.
       data-testid={putAway ? undefined : 'browser-column'}
       className={cn(
-        'relative flex shrink-0 flex-col',
+        'relative flex shrink-0',
+        // A COLUMN stacks its heading, bar and panes, so open is `flex-col`.
+        // Collapsed must not be: the strip is this box's only laid-out child,
+        // and in a column its height is its own content, which left it a 45px
+        // button over 600-odd pixels of bare canvas. In a row it is a flex
+        // item on the cross axis and stretches, which is what it did when it
+        // WAS the row's item, before this wrapper existed.
+        collapsed ? '' : 'flex-col',
         hidden
           ? // Nothing drawn and no width taken: what is left is a zero-width
             // box holding the pane box, which is `absolute` and so costs the

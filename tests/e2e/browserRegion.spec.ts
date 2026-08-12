@@ -186,6 +186,11 @@ test('the region appears on the first browser and goes away with the last', asyn
   await page.getByTestId(`close-${id}`).click()
   await expect(page.getByTestId('browser-column')).toBeHidden()
   await expect(page.getByTestId('browser-toggle')).toBeHidden()
+  // GONE, not put away, which is the distinction `toBeHidden` alone cannot
+  // draw: it is satisfied by an element that is merely not painted. Closing
+  // the last browser pane in the workspace is the one case that really does
+  // unmount, because there is nothing left to keep alive.
+  await expect(page.getByTestId(`browserpane-${id}`)).toHaveCount(0)
 
   await app.close()
 })
@@ -279,7 +284,7 @@ test('the region belongs to the project whose browser panes it holds', async () 
   const page = await app.firstWindow()
   await expect(page.getByTestId('titlebar')).toBeVisible({ timeout: 20_000 })
 
-  await openBrowserPaneViaPalette(page)
+  const id = await openBrowserPaneViaPalette(page)
   await expect(page.getByTestId('browser-column')).toBeVisible({ timeout: 20_000 })
 
   // The pane still exists, and belongs to `p1`. What the row shows is a
@@ -288,6 +293,12 @@ test('the region belongs to the project whose browser panes it holds', async () 
   await page.getByTestId('project-p2').click()
   await expect(page.getByTestId('browser-column')).toBeHidden()
   await expect(page.getByTestId('browser-toggle')).toBeHidden()
+  // Put away, not gone, which takes both assertions: `toBeHidden` alone is
+  // satisfied by an element that is not there, and a count alone says
+  // nothing about paint. Together they are the host-side statement of
+  // "mounted and not drawn".
+  await expect(page.getByTestId(`browserpane-${id}`)).toHaveCount(1)
+  await expect(page.getByTestId(`browserpane-${id}`)).toBeHidden()
 
   await page.getByTestId('project-p1').click()
   await expect(page.getByTestId('browser-column')).toBeVisible()
@@ -347,6 +358,42 @@ test('a page in a browser pane survives a trip through a project that has none',
   await app.close()
 })
 
+/**
+ * The stored visibility flag is global, so nothing may write it from a
+ * question about one project.
+ *
+ * The sequence is the reviewer's, verbatim. Before the auto-hide condition was
+ * made global, the close in `p2` took the count for THAT project from one to
+ * zero and hid the column for the whole window, so coming back to `p1`, which
+ * still had a browser pane and whose user had hidden nothing, found the column
+ * gone with no menu item or shortcut to bring it back.
+ */
+test('closing the last browser in one project does not hide another project s column', async () => {
+  const app = await launch()
+  const page = await app.firstWindow()
+  await expect(page.getByTestId('titlebar')).toBeVisible({ timeout: 20_000 })
+
+  const first = await openBrowserPaneViaPalette(page)
+  await expect(page.getByTestId('browser-column')).toBeVisible({ timeout: 20_000 })
+
+  await page.getByTestId('project-p2').click()
+  await expect(page.getByTestId('browser-column')).toBeHidden()
+  const second = await openBrowserPaneViaPalette(page)
+  await expect(page.getByTestId('browser-column')).toBeVisible()
+  await page.getByTestId(`close-${second}`).click()
+  // p2 is back to having none of its own, so the column is off screen here.
+  // That is the draw gate, and it must not have written anything down.
+  await expect(page.getByTestId('browser-column')).toBeHidden()
+
+  await page.getByTestId('project-p1').click()
+  await expect(page.getByTestId('browser-column')).toBeVisible()
+  await expect(page.getByTestId('browser-toggle')).toBeVisible()
+  await expect(page.locator('[data-testid^="browsertab-"]')).toHaveCount(1)
+  await expect(page.getByTestId(`browserpane-${first}`)).toBeVisible()
+
+  await app.close()
+})
+
 test('a column that is nowhere on screen costs the row no width', async () => {
   const app = await launch()
   const page = await app.firstWindow()
@@ -380,6 +427,12 @@ test('a column that is nowhere on screen costs the row no width', async () => {
   const collapsed = await page.getByTestId('terminal-column').boundingBox()
   expect(strip!.width).toBeLessThan(40)
   expect(collapsed!.width).toBe(empty!.width - strip!.width)
+  // Full height, like every other column's strip. Both are items of the same
+  // row and both stretch, so the terminal's height is what this one has to
+  // match. Measured when this was missed: a 45px button with 668px of bare
+  // canvas under it, because the strip had become a `flex-col` child, where
+  // height is the main axis and comes from the content.
+  expect(strip!.height).toBe(collapsed!.height)
 
   await page.getByTestId('project-p2').click()
   await expect(page.getByTestId('browser-column')).toBeHidden()
@@ -470,6 +523,9 @@ test('hide all takes the browser column with it, keeps the page, and puts it bac
   await clickHideAll()
   await expect(page.getByTestId('browser-column')).toBeHidden()
   await expect(page.getByTestId('browser-toggle')).toBeHidden()
+  // Mounted and not drawn, the same pair the project-switch test takes.
+  await expect(page.getByTestId(`browserpane-${id}`)).toHaveCount(1)
+  await expect(page.getByTestId(`browserpane-${id}`)).toBeHidden()
   await expect.poll(labelOf, { timeout: 10_000 }).toBe('Show All Columns')
   // Hidden by the same route as a project switch, and it keeps the page for
   // the same reason.

@@ -79,6 +79,7 @@ import { applyTheme, bootTheme } from './theme'
 import { ColorSwatches } from './ColorSwatches'
 import {
   UNSORTED_ID,
+  regionOf,
   type DiffSide,
   type HistoryEntry,
   type HistoryScope,
@@ -178,11 +179,12 @@ export function App() {
   const [notesCollapsed, setNotesCollapsed] = useState(() => storedCollapsed(NOTES_KEY, true))
   const [tabsCollapsed, setTabsCollapsed] = useState(() => storedCollapsed(TABS_KEY, true))
   // Open, where every other column defaults to collapsed. The browser column
-  // is in the row only while the active project has a browser pane (see
-  // `renderSlot`), so it appears because the user has just asked for the pane
-  // it holds, and a 24px strip is not what they asked for. The stored value
-  // still wins once there is one, so collapsing it is remembered like any
-  // other column's.
+  // is DRAWN only while the active project has a browser pane (`renderSlot`
+  // mounts it whenever the workspace has one anywhere, and hides it where the
+  // active project has none), so when it does appear it is because the user
+  // has just asked for the pane it holds, and a 24px strip is not what they
+  // asked for. The stored value still wins once there is one, so collapsing
+  // it is remembered like any other column's.
   const [browserCollapsed, setBrowserCollapsed] = useState(() => storedCollapsed(BROWSER_KEY, false))
   // Whether the Todos column's create dialog is open. Held here rather than
   // inside `TodosPanel` so something outside that column can open it.
@@ -549,40 +551,56 @@ export function App() {
   // the two cannot silently disagree.
   const canOpen = canOpenSession(state)
 
-  // How many browser panes the active project had the last time the effect
-  // below ran, and which project that was. A ref rather than state: nothing
-  // renders from it, and a second render on every open would be a render
-  // scheduled to record something already on screen.
-  const browserPaneCount = useRef<{ projectId: string | null; count: number }>({
-    projectId: null,
-    count: 0,
-  })
+  /**
+   * Every browser pane in the workspace, not the active project's.
+   *
+   * The effect below drives ONE stored flag, and that flag is global: there
+   * is a single `pterm:hidden:browser`, read by a single `hiddenColumns`
+   * entry, hidden and restored by a single hide-all. A rule of the form
+   * "this project's count fell to zero, so hide" writes a global answer from
+   * a local question, and is then wrong for every other project: measured,
+   * opening and closing a browser in project B hid a column project A still
+   * had a pane for, with no menu item or shortcut to bring it back. So the
+   * count this watches has the same scope the flag does.
+   *
+   * What stays per project is which panes are DRAWN, which is `renderSlot`'s
+   * business and does not touch the stored flag at all.
+   */
+  const browserPaneTotal = state.panes.filter((pane) => regionOf(pane) === 'browser').length
+
+  // The total as of the last run of the effect below, or null before the
+  // workspace has arrived. A ref rather than state: nothing renders from it,
+  // and a second render on every open would be a render scheduled to record
+  // something already on screen.
+  const browserPaneCount = useRef<number | null>(null)
 
   /**
-   * The browser column follows the active project's browser panes: opening
-   * one brings the column on screen, closing the last takes it away.
+   * The browser column follows the browser panes: opening one brings the
+   * column on screen, closing the last one anywhere takes it away.
    *
    * Unhiding is what any open does, not only the first: `setColumnHidden`
    * also un-collapses, so the pane a user asks for while the column is a
    * strip arrives on a column they can see. That is the whole of "a manual
    * hide sticks until the next browser opens".
    *
-   * A project switch is neither an open nor a close. It changes the count
-   * without anything having happened to a pane, so the run that sees a
-   * different project id records the new count and returns, which is what
-   * leaves the stored preference standing when a user comes back to a
-   * project whose column they had put away. The first run after launch takes
-   * that same branch, since the ref starts on no project at all, so a
-   * restored profile opens on the visibility it was left with.
+   * A project switch is neither an open nor a close, and needs no guard here
+   * to be treated as neither: it does not change how many browser panes the
+   * workspace holds, so this effect does not run for one.
+   *
+   * `ready` is what separates a restore from an open. The panes arrive in one
+   * dispatch alongside it, and the run that first sees them is the restored
+   * state rather than something the user just did, so it records the total
+   * and leaves the stored flag alone. That is what lets a hide survive a
+   * relaunch.
    */
   useEffect(() => {
+    if (!ready) return
     const was = browserPaneCount.current
-    const count = browserPanes.length
-    browserPaneCount.current = { projectId: state.activeProjectId, count }
-    if (was.projectId !== state.activeProjectId) return
-    if (count > was.count) setColumnHidden('browser', false)
-    else if (count === 0 && was.count > 0) setColumnHidden('browser', true)
-  }, [state.activeProjectId, browserPanes.length, setColumnHidden])
+    browserPaneCount.current = browserPaneTotal
+    if (was === null) return
+    if (browserPaneTotal > was) setColumnHidden('browser', false)
+    else if (browserPaneTotal === 0 && was > 0) setColumnHidden('browser', true)
+  }, [ready, browserPaneTotal, setColumnHidden])
 
   // `type` is a declaration of intent recorded on the tab, not inferred from
   // `command` — it decides the launch state a fresh dot starts in

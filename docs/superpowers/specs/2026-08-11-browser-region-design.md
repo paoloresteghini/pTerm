@@ -126,7 +126,14 @@ do not move between regions.
 ### Visibility
 
 - Opening a pane with `type === 'browser'` unhides the column.
-- Closing the project's last browser pane hides it.
+- Closing the last browser pane hides it. **The last one in the WORKSPACE, not
+  in the project (corrected 2026-08-11, during Task 8).** The stored flag is
+  one global preference, so a rule that writes it from one project's count is
+  wrong for every other project: measured, opening and closing a browser in
+  project B hid a column project A still had a pane for, with no menu item or
+  shortcut to bring it back. Closing a project's last browser pane still takes
+  the column off screen for that project, but that is the per-project draw
+  gate below, and it writes nothing down.
 - A manual hide sticks until the next browser opens.
 - **Visibility is a global column preference; membership is per project.** The
   region draws only when the active project has at least one browser pane, so
