@@ -359,6 +359,16 @@ export interface TabDescriptor {
    * Absent on every other kind.
    */
   url?: string
+  /**
+   * The pane id of the Claude session that owns this browser pane, present
+   * only on a browser pane an agent's MCP tool call created. Absent on a
+   * browser pane the user opened by hand, which `browserPaneFor`
+   * (`main/mcp/route.ts`) relies on: the decision from brainstorming is
+   * that an agent drives its own browser pane, never the user's, and this
+   * field is what that decision is keyed on. Absent on every other pane
+   * kind too.
+   */
+  agentSessionId?: string
 }
 
 export interface TabLayout {
