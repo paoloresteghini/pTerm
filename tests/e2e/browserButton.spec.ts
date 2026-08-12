@@ -35,10 +35,23 @@
  * The announced URL is on `127.0.0.1` rather than the `localhost` a real Vite
  * banner prints, for the reason `browser.spec.ts` serves from that address
  * too: the throwaway server below binds one address, and `localhost` can
- * resolve to `::1` first. The ANSI wrapping around the URL is Vite's shape,
- * which is the half of the line this feature had to be built around; that the
- * host is spelled numerically changes nothing about what the scanner does with
- * it (`isLoopbackUrl` accepts both, `src/shared/localOrigin.ts`).
+ * resolve to `::1` first. That the host is spelled numerically changes nothing
+ * about what the scanner does with it (`isLoopbackUrl` accepts both,
+ * `src/shared/localOrigin.ts`).
+ *
+ * **The printf bolds the PORT, inside the URL, because that is the half of
+ * Vite's line the scanner had to be built around.** An earlier version of this
+ * file wrapped colour codes around the URL and left the port plain, and a
+ * defect that made every real dev server undetectable passed it: tmux re-emits
+ * an end-of-attribute as terminfo's `sgr0`, `\E(B\E[m` for `xterm-256color`,
+ * so bolding the port puts a non-CSI `\x1b(B` between the port digits and the
+ * trailing slash, and a strip that handles CSI alone leaves it there. Nothing
+ * in this file writes that byte: the format string below asks for `\033[1m`
+ * and `\033[22m` exactly as Vite does, and tmux substitutes the `sgr0` on the
+ * way out. Measured through a `node-pty` tmux client: this printf comes back
+ * as `\x1b[36mhttp://127.0.0.1:\x1b[1m51234\x1b(B\x1b[m\x1b[36m/\x1b[39m`,
+ * the same shape as a captured real Vite banner (see the fixture header in
+ * `tests/unit/devServerScan.test.ts`).
  */
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { createServer, type Server } from 'node:http'
@@ -89,6 +102,8 @@ let claudeHome: string
 let zdotdir: string
 let server: Server
 let devUrl: string
+/** The port `devUrl` names, announced separately so the printf can bold it. */
+let devPort: number
 
 const launch = (): Promise<ElectronApplication> =>
   launchApp({
@@ -108,7 +123,7 @@ const launch = (): Promise<ElectronApplication> =>
  * both aimed at the announced URL and loaded it, and a dead port would leave
  * the browser's own error page behind while `getURL()` still reported the URL.
  */
-function startServer(): Promise<{ server: Server; url: string }> {
+function startServer(): Promise<{ server: Server; url: string; port: number }> {
   return new Promise((resolve, reject) => {
     const created = createServer((_req, res) => {
       res.setHeader('Content-Type', 'text/html')
@@ -121,7 +136,11 @@ function startServer(): Promise<{ server: Server; url: string }> {
         reject(new Error('startServer: no port assigned'))
         return
       }
-      resolve({ server: created, url: `http://127.0.0.1:${address.port}/` })
+      resolve({
+        server: created,
+        url: `http://127.0.0.1:${address.port}/`,
+        port: address.port,
+      })
     })
   })
 }
@@ -192,6 +211,7 @@ test.beforeEach(async () => {
   const started = await startServer()
   server = started.server
   devUrl = started.url
+  devPort = started.port
 })
 
 test.afterEach(async () => {
@@ -321,13 +341,22 @@ test('pressing it after a pane announced a URL opens a pane on that URL', async 
     .poll(() => capturePane(SOCKET, session), { timeout: 20_000 })
     .toContain(PANE_PROMPT)
 
-  // Vite's shape: the URL wrapped in colour codes, which the shell emits as
-  // real escape bytes because they are in printf's format string. The URL is
-  // the ARGUMENT rather than part of the format, so the copy zsh echoes back
-  // as it is typed is the same string as the copy printf writes, and the two
-  // cannot disagree about which URL was announced.
+  // Vite's shape, port included: colour around the line, bold around the port
+  // and nothing else, which is what makes tmux plant an `\x1b(B` between the
+  // digits and the slash. The shell emits real escape bytes because they are
+  // in printf's format string.
+  //
+  // Host and port are ARGUMENTS, so the only place either number is written
+  // is `devUrl`'s own server. The scheme stays in the format string on
+  // purpose, so that the line zsh echoes as it is typed holds no URL the
+  // scanner can accept: `http://%s...` does not parse (`new URL` throws on
+  // the `%s` host), whereas typing the origin as an argument left a bare
+  // `http://127.0.0.1:` in the echo, which parses as loopback and was filed
+  // as the answer when the real announcement went undetected. With the
+  // scheme in the format, printf's output is the only detectable URL in the
+  // whole stream, so the assertion below cannot be answered by the echo.
   await page.keyboard.type(
-    `printf '  \\033[32m->\\033[39m  \\033[1mLocal\\033[22m:   \\033[36m%s\\033[39m\\n' ${devUrl}`,
+    `printf '  \\033[32m->\\033[39m  \\033[1mLocal\\033[22m:   \\033[36mhttp://%s\\033[1m%s\\033[22m/\\033[39m\\n' '127.0.0.1:' ${devPort}`,
   )
   await page.keyboard.press('Enter')
 
