@@ -135,12 +135,22 @@ export function BrowserColumn({
         canOpen={canOpen}
       />
       <div className="relative min-h-0 flex-1">
-        {/* Every browser pane stays mounted, whichever tab is on screen and
-            whichever project is active: this list is unconditional, and a
-            pane that unmounted would lose the page it is showing and the
-            history behind it. `paneGroups` decides the arrangement.
+        {/* While the column is open, every browser pane in it stays mounted,
+            whichever tab is on screen and whichever project is active: this
+            list is unconditional and nothing filters it down to what is
+            visible, so switching tabs or projects hides a pane rather than
+            unmounting it, and the page it is showing survives the switch.
+            `paneGroups` decides the arrangement.
 
-            Hidden with `visibility` rather than `display`, the same rule the
+            COLLAPSING the column is the exception, and it is not a small one.
+            The `collapsed` branch above returns the strip and nothing else, so
+            collapsing unmounts every `<webview>` here; expanding builds new
+            ones from each pane's saved URL (`BrowserPane` reads `url` once
+            into the element's `src`), with the history behind it gone. The
+            paragraph above is therefore a rule about tab and project
+            switches, not about this column's own two states. */}
+
+        {/* Hidden with `visibility` rather than `display`, the same rule the
             terminal groups follow: a pane that is off screen keeps its box
             instead of collapsing to nothing. */}
         {groups.map((group) => (

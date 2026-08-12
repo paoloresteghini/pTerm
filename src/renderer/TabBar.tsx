@@ -56,11 +56,15 @@ export function TabBar({
    * Distinguishes one bar's testids from another's when a second `TabBar`
    * is on screen. Defaults to `'tab'`, which reproduces today's ids
    * (`tabbar`, `tab-${id}`, `new-tab`) exactly. The e2e suite counts terminal
-   * tabs with `[data-testid^="tab-"]`: 69 such locators across 12 spec files,
-   * measured 2026-08-11 with `grep -rn 'data-testid\^="tab-"' tests/e2e/ |
-   * wc -l`. A second bar rendered under the same prefix would inflate
-   * every one of those counts, so a caller adding a second bar must pass
-   * a different prefix. `elapsed-` and `tabinput-` are keyed by pane id
+   * tabs with `[data-testid^="tab-"]` in dozens of places across most of its
+   * spec files, and a second bar rendered under the same prefix would inflate
+   * every one of those counts, so a caller adding a second bar must pass a
+   * different prefix. No exact number is written here on purpose: the count
+   * this comment used to carry (69, across 12 files) was falsified by the very
+   * commit that added the second bar, because the spec it added uses the
+   * locator too. Count them when you need to, with
+   * `grep -rn 'data-testid\^="tab-"' tests/e2e/ | wc -l`. `elapsed-` and
+   * `tabinput-` are keyed by pane id
    * instead, which is already unique across any number of bars, so they
    * take no prefix and cannot collide.
    */
@@ -412,10 +416,11 @@ export function TabBar({
       <button
         // `new-${prefix}`, so the default prefix still spells `new-tab` and
         // every e2e locator on that id keeps pointing at this bar's button.
-        // Measured 2026-08-11: `grep -rn "getByTestId('new-tab')" tests/e2e/`
-        // reports 72 uses across 16 spec files. Derived from the prefix rather
-        // than left fixed because two bars on screen under one testid is a
-        // strict-mode violation in every one of them.
+        // There are dozens, spread over most of the suite: count them with
+        // `grep -rn "getByTestId('new-tab')" tests/e2e/`, and see the note on
+        // `testIdPrefix` above for why the number is not written down. Derived
+        // from the prefix rather than left fixed because two bars on screen
+        // under one testid is a strict-mode violation in every one of them.
         data-testid={`new-${testIdPrefix}`}
         aria-label={newLabel}
         onClick={onNew}
