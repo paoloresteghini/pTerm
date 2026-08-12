@@ -32,15 +32,26 @@ describe('browserPaneFor', () => {
     expect(result).toEqual({ error: expect.stringContaining('no-such-pane') })
   })
 
-  it('asks the caller to create a browser pane when their project has none', () => {
+  it('asks the caller to create a browser pane when their project has none, using the project cwd not the caller pane cwd', () => {
     const config: RouteConfig = {
       projects: [project({ slug: 'demo', cwd: '/Users/paolo/demo' })],
-      panes: [pane({ id: 'caller-1', type: 'claude', projectSlug: 'demo' })],
+      panes: [pane({ id: 'caller-1', type: 'claude', projectSlug: 'demo', cwd: '/Users/paolo/demo/subdir' })],
     }
 
     const result = browserPaneFor(config, 'caller-1')
 
     expect(result).toEqual({ create: { projectSlug: 'demo', cwd: '/Users/paolo/demo' } })
+  })
+
+  it('errors when the caller pane names a project no longer in the live config, naming the missing slug', () => {
+    const config: RouteConfig = {
+      projects: [],
+      panes: [pane({ id: 'caller-1', type: 'claude', projectSlug: 'removed-project' })],
+    }
+
+    const result = browserPaneFor(config, 'caller-1')
+
+    expect(result).toEqual({ error: expect.stringContaining('removed-project') })
   })
 
   it("returns the session's existing browser pane", () => {
