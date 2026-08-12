@@ -110,9 +110,9 @@ export function bridgePaths(): { dir: string; script: string; socket: string } {
  *
  * Both paths are absolute and both can go stale: `PTERM_CONFIG_DIR` can move
  * the script, and a Homebrew upgrade or a switch of node manager can move the
- * runtime. `refreshMcpBridge` is what keeps the registration true, by
- * rebuilding this on every launch and rewriting the entry when it differs
- * from what is stored.
+ * runtime. `installMcpBridge` is what keeps the registration true, by
+ * rebuilding this on every launch (`src/main/index.ts:802`) and rewriting
+ * the entry when it differs from what is stored.
  *
  * No `ELECTRON_RUN_AS_NODE` here. See `nodeBin` for what was measured; a
  * variable that the shipped binary ignores would be a claim about this app
@@ -175,7 +175,7 @@ function assertRecognisedServers(config: ClaudeConfig): void {
  *
  * Compared field by field rather than by stringifying both, so that a
  * hand-reordered `env` or a differently ordered object does not read as a
- * difference. That matters more than it looks: `refreshMcpBridge` runs on
+ * difference. That matters more than it looks: `installMcpBridge` runs on
  * every launch, and a comparison that saw a difference where there is none
  * would rewrite a 191KB file every time the app started.
  */
@@ -359,6 +359,13 @@ export async function uninstallMcpBridge(): Promise<{ configPath: string; remove
  * can only live inside an `mcpServers` that is an object, so an unrecognised
  * one is never installed, and this returns without writing rather than
  * rewriting a shape it does not understand just because a path moved.
+ *
+ * As of this commit, nothing in `src/` calls this function: `installMcpBridge`
+ * runs unconditionally on every launch instead (see its own doc comment
+ * above and `src/main/index.ts:802`). No task in this plan reactivates or
+ * removes it, so this is not a temporary gap awaiting a scheduled fix; it
+ * stays dead-but-tested code, still covered by its own five tests in
+ * `tests/unit/mcpInstall.test.ts`, until that decision is made elsewhere.
  */
 export async function refreshMcpBridge(): Promise<{ changed: boolean }> {
   const configPath = mcpConfigPath()
