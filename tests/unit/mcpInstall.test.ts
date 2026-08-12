@@ -60,13 +60,24 @@ afterEach(async () => {
 })
 
 /**
- * Modelled on the real `~/.claude.json` read on 2026-08-12, not invented. The
- * four shapes taken from it are the ones a merge must not disturb: many
- * unrelated top-level keys, a large nested `projects` map, an `mcpServers`
- * map that already holds other servers, and entries in that map whose shape
- * is nothing like the one this module writes. Every server in the real file
- * is `{ type: 'sse', url }`, with no `command`, `args` or `env` at all.
+ * Modelled on the real `~/.claude.json`, re-measured on 2026-08-12, not
+ * invented. The four shapes taken from it are the ones a merge must not
+ * disturb: many unrelated top-level keys, a large nested `projects` map, an
+ * `mcpServers` map that already holds other servers, and those servers'
+ * shapes. The real map holds four servers: two are `{ type: 'sse', url }`
+ * (`obsidian`, `render`) and two are `{ type: 'stdio', command, args, env }`
+ * (`mailgun`, `sendgrid`), the same fields this module writes. `obsidian`
+ * below stands in for the sse pair and `mailgun` for the stdio pair, so this
+ * fixture keeps a sibling shaped exactly like ours under a different key, not
+ * only one shaped nothing like it.
  */
+const MAILGUN_ENTRY = {
+  type: 'stdio',
+  command: '/usr/local/bin/mailgun-mcp',
+  args: ['--config', '/etc/mailgun-mcp.json'],
+  env: { MAILGUN_API_KEY: 'sk-not-real' },
+}
+
 function realistic(): Record<string, unknown> {
   return {
     numStartups: 487,
@@ -83,7 +94,7 @@ function realistic(): Record<string, unknown> {
     },
     mcpServers: {
       obsidian: { type: 'sse', url: 'http://localhost:22360/sse' },
-      mailgun: { type: 'sse', url: 'https://mcp.mailgun.example/sse' },
+      mailgun: MAILGUN_ENTRY,
     },
   }
 }
@@ -201,13 +212,17 @@ describe('mergeMcpServer', () => {
     expect(Object.keys(next).sort()).toEqual(Object.keys(before).sort())
   })
 
-  it('keeps every other server, including ones shaped nothing like ours', () => {
+  it('keeps every other server, including one shaped exactly like ours', () => {
+    // mailgun has the same fields as our own entry (type/command/args/env)
+    // under a different key. If a merge ever matched an existing entry by
+    // shape instead of by MCP_SERVER_NAME, this is the case that would catch
+    // it: mailgun would be overwritten or merged into instead of left alone.
     const before = realistic()
     const { next } = mergeMcpServer(before, bridgeEntry())
     const servers = serversOf(next)
 
     expect(servers.obsidian).toEqual({ type: 'sse', url: 'http://localhost:22360/sse' })
-    expect(servers.mailgun).toEqual({ type: 'sse', url: 'https://mcp.mailgun.example/sse' })
+    expect(servers.mailgun).toEqual(MAILGUN_ENTRY)
     expect(Object.keys(servers).sort()).toEqual(['mailgun', MCP_SERVER_NAME, 'obsidian'].sort())
   })
 
@@ -287,8 +302,11 @@ describe('isMcpInstalled', () => {
     expect(isMcpInstalled(mergeMcpServer(realistic(), bridgeEntry()).next)).toBe(true)
   })
 
-  it('does not mistake another tool\'s server for ours', () => {
+  it('does not mistake another tool\'s server for ours, whatever its shape', () => {
     expect(isMcpInstalled({ mcpServers: { obsidian: { type: 'sse', url: 'x' } } })).toBe(false)
+    // mailgun here is shaped exactly like our own entry, just under a
+    // different key. It must not read as installed either.
+    expect(isMcpInstalled({ mcpServers: { mailgun: MAILGUN_ENTRY } })).toBe(false)
   })
 
   it('is total, so a shape merge would refuse answers false rather than throwing', () => {
