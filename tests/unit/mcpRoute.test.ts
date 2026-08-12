@@ -101,4 +101,29 @@ describe('browserPaneFor', () => {
 
     expect(result).toEqual({ create: { projectSlug: 'demo', cwd: '/Users/paolo/demo' } })
   })
+
+  // The project half of the match, which no test above isolates: every one of
+  // them has the caller and its browser pane in the same project, so deleting
+  // `pane.projectSlug === caller.projectSlug` from the filter passed all six.
+  //
+  // The two halves are not the same question. `agentSessionId` says which
+  // SESSION owns the pane; `projectSlug` says which PROJECT the pane is filed
+  // under, and it is the field every other pane lookup in `register.ts`
+  // scopes on. The pane rows come off disk while ownership is a runtime map
+  // keyed by pane id alone, so nothing in the type system keeps the two in
+  // step, and a routing rule that answered with a pane outside the caller's
+  // project would put an agent's page in another project's column.
+  it('does not return an owned browser pane filed under another project', () => {
+    const config: RouteConfig = {
+      projects: [project({ slug: 'demo', cwd: '/Users/paolo/demo' })],
+      panes: [
+        pane({ id: 'caller-1', type: 'claude', projectSlug: 'demo' }),
+        pane({ id: 'browser-1', type: 'browser', projectSlug: 'other', agentSessionId: 'caller-1' }),
+      ],
+    }
+
+    const result = browserPaneFor(config, 'caller-1')
+
+    expect(result).toEqual({ create: { projectSlug: 'demo', cwd: '/Users/paolo/demo' } })
+  })
 })

@@ -365,7 +365,7 @@ test('reattaches the same session after closing and reopening the window', async
 })
 
 // tests/unit/e2eSafety.test.ts checks that `harness.ts`'s source text sets all
-// five PTERM_* vars, and that no spec launches Electron around it — but a var
+// six PTERM_* vars, and that no spec launches Electron around it. But a var
 // pointing at the wrong path satisfies that check just as well as a var
 // pointing at the right one, and neither half of it can see what this file
 // passes to `launchApp`. Only a runtime read from inside the launched app can
@@ -391,6 +391,7 @@ test('runs against overridden paths, never the developer’s own', async () => {
     settings: process.env.PTERM_CLAUDE_SETTINGS,
     claudeHome: process.env.PTERM_CLAUDE_HOME,
     socket: process.env.PTERM_TMUX_SOCKET,
+    mcpConfig: process.env.PTERM_MCP_CONFIG,
   }))
   // Asserted as "is the temp path we made", not as "is set": an override
   // pointing at the wrong place is set, and is exactly as dangerous.
@@ -399,6 +400,12 @@ test('runs against overridden paths, never the developer’s own', async () => {
   expect(seen.settings).toBe(claudeSettingsPath)
   expect(seen.claudeHome).toBe(claudeHome)
   expect(seen.socket).toBe(SOCKET)
+  // The only one of the six the harness derives rather than taking as an
+  // option, and the only one guarding a file the app WRITES: `installMcpBridge`
+  // read-modify-writes it on every launch. Asserted as the exact derived path
+  // so that a harness which stopped deriving it from `configDir` fails here
+  // rather than pointing every launch in the suite at `~/.claude.json`.
+  expect(seen.mcpConfig).toBe(join(configDir, 'claude.json'))
   await app.close()
 })
 

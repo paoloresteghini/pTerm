@@ -63,8 +63,10 @@ export interface PaneRecord {
   diffRelPath?: string
   /**
    * The page a `browser` pane is showing, absolute and normalised: never what
-   * the user typed. `openBrowser` is the only producer and always assigns a
-   * string, `about:blank` included, so absent never happens through it. Still
+   * the user typed. Two handlers create a browser row, `openBrowser` and
+   * `openAgentBrowserPane` (both in `main/ipc/register.ts`), and each always
+   * assigns a string, `about:blank` included, so absent never happens
+   * through either. Still
    * typed optional because `normalisePane` (`store.ts`) accepts and keeps a
    * browser row whose `url` a hand edit removed or left the wrong type.
    * Absent on every other kind.

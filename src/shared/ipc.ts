@@ -353,12 +353,16 @@ export interface TabDescriptor {
   diffRelPath?: string
   /**
    * The page a `browser` pane is showing. Always the normalised, absolute
-   * form: never what the user typed into the address bar. `openBrowser` is
-   * this field's only producer and always assigns a string, `about:blank`
-   * included when the caller names no URL, so absent never happens through
-   * it. Still typed optional because `normalisePane` (`store.ts`) accepts
+   * form: never what the user typed into the address bar. Two handlers create
+   * a browser row and both always assign a string, so absent never happens
+   * through either: `openBrowser`, which writes `about:blank` when the caller
+   * names no URL, and `openAgentBrowserPane`, which always writes
+   * `about:blank` because the tool call navigates the pane after creating it
+   * (both in `main/ipc/register.ts`). `setPaneUrl`, the only other writer,
+   * takes a required string and so cannot remove one either.
+   * Still typed optional because `normalisePane` (`store.ts`) accepts
    * and keeps a browser row whose `url` a hand edit removed or left the wrong
-   * type: config is a text file, not something only `openBrowser` writes.
+   * type: config is a text file, not something only this app writes.
    * Absent on every other kind.
    */
   url?: string
@@ -1255,12 +1259,18 @@ export interface PTermApi {
    * lossy. The pane is created and mounted before the tool call that navigates
    * it can finish (see `openAgentBrowserPane` and `guestForPane` in
    * `main/ipc/register.ts`, which waits for the guest the mount attaches), so
-   * the first event cannot outrun the first strip. And nothing takes a strip
-   * off a pane that is still on screen: `BrowserColumn` hides panes rather than
-   * unmounting them, and a reply that is silent about `agentSessionId` is kept
-   * from clearing it by `panesMerged` (`renderer/workspace.ts`). That last one
-   * is not a hypothetical: it is where a rename anywhere in the app used to
-   * take the strip off every agent-owned pane.
+   * the first event cannot outrun the first strip. And a strip comes off a
+   * pane that is still on screen in exactly one case, which is not a case
+   * where an event can still arrive: `withAgentSessionsCleared`
+   * (`renderer/workspace.ts`) drops the flag when the OWNING SESSION's pane
+   * leaves `state.panes`, and the two live actions that do that
+   * (`'dismissed'` and `'closedPane'`) answer the two IPC calls main released
+   * ownership on first, so nothing is left to send. Short of that,
+   * `BrowserColumn` hides panes rather than unmounting
+   * them, and a reply that is silent about `agentSessionId` is kept from
+   * clearing it by `panesMerged` (`renderer/workspace.ts`). That last one is
+   * not a hypothetical: it is where a rename anywhere in the app used to take
+   * the strip off every agent-owned pane.
    *
    * One exception, stated rather than left to be found: a renderer reload (⌘R)
    * rebuilds the whole window, this strip and its pane's `<webview>` included.

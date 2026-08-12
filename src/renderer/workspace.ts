@@ -594,7 +594,9 @@ export interface PaneBox {
  *
  * A pane in `state.panes` that no row's `kids` names is not an error and not
  * something to drop — main is authoritative over membership and files it on
- * its own schedule, and `opened` (a new tab, or a restart) adds a pane here
+ * its own schedule, and `opened` (a new tab, a restart, or a browser pane an
+ * agent's tool call asked main for: see `onBrowserPaneOpened` in `App.tsx`)
+ * adds a pane here
  * with no row at all. Such a pane becomes a group of its own, keyed by its own
  * id. That key is what makes the arrangement safe: a row id is its founder
  * pane's id, so when a row does arrive for that pane — only a split of it can
@@ -1299,8 +1301,9 @@ export function workspaceReducer(
           // destroy it. Ownership is never ANNOUNCED by a reply either, so
           // there is no case where the incoming record is the authority and
           // this would be holding a stale flag: it is set by
-          // `browserPaneOpened` and cleared by `withAgentSessionsCleared` on
-          // the two paths where a pane leaves for good.
+          // `browserPaneOpened` and cleared by `withAgentSessionsCleared` in
+          // each of the three reducer cases that take a pane out of
+          // `state.panes` for good, which is the count its own doc gives.
           return incoming.agentSessionId === undefined && pane.agentSessionId !== undefined
             ? { ...incoming, agentSessionId: pane.agentSessionId }
             : incoming

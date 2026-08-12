@@ -25,6 +25,40 @@ const MAX_SOCKET_PATH_BYTES = 104
 const MAX_BUFFER_BYTES = MAX_LINE_BYTES * 128
 
 /**
+ * One `data` event's worth of framing: the complete lines it finished, and
+ * what is left held for the next one.
+ *
+ * Pure, and exported, because the ceiling above is otherwise invisible to a
+ * test. Over a real socket a runaway is indistinguishable from a bounded one:
+ * the newline that eventually arrives hands `take` a line that
+ * `parseRequestLine` and `recoverId` both refuse on `MAX_LINE_BYTES` whether
+ * or not anything dropped the buffer first, so the next request is answered
+ * identically either way and the only thing that differed was peak heap.
+ * Measured 2026-08-12: the integration test that used to make this claim
+ * passed byte-identically with the clear below deleted. Here the held string
+ * is the return value, so the bound is an assertion rather than an inference.
+ *
+ * The clear is deliberately all-or-nothing rather than a trim to the last
+ * `MAX_BUFFER_BYTES`: a buffer this size holds no line this protocol can
+ * accept, so there is nothing in it worth keeping, and 128 times
+ * `MAX_LINE_BYTES` of margin means a legitimate line can never reach it.
+ */
+export function takeLines(held: string, chunk: string): { lines: string[]; held: string } {
+  let buffer = held + chunk
+  const lines: string[] = []
+  let newline = buffer.indexOf('\n')
+  while (newline !== -1) {
+    lines.push(buffer.slice(0, newline))
+    buffer = buffer.slice(newline + 1)
+    newline = buffer.indexOf('\n')
+  }
+  // No newline in sight and already past the ceiling: this is not a line that
+  // is going to arrive. Drop what is held rather than keep growing.
+  if (Buffer.byteLength(buffer, 'utf8') > MAX_BUFFER_BYTES) buffer = ''
+  return { lines, held: buffer }
+}
+
+/**
  * Whether a live process is actually accepting connections on `path`.
  *
  * Carried over from `src/main/hooks/server.ts`: a unix socket file can exist
@@ -178,16 +212,9 @@ export class McpServer {
     }
 
     connection.on('data', (chunk: string) => {
-      buffer += chunk
-      let newline = buffer.indexOf('\n')
-      while (newline !== -1) {
-        take(buffer.slice(0, newline))
-        buffer = buffer.slice(newline + 1)
-        newline = buffer.indexOf('\n')
-      }
-      // No newline in sight and already past the ceiling: this is not a line
-      // that is going to arrive. Drop what is held rather than keep growing.
-      if (Buffer.byteLength(buffer, 'utf8') > MAX_BUFFER_BYTES) buffer = ''
+      const framed = takeLines(buffer, chunk)
+      for (const line of framed.lines) take(line)
+      buffer = framed.held
     })
 
     connection.on('close', () => {

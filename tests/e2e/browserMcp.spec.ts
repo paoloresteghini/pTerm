@@ -521,14 +521,30 @@ test('a link to a non-loopback origin does not navigate an agent-owned pane', as
   await app.close()
 })
 
+/**
+ * The permissive half of Task 7's confinement: the listeners are attached and
+ * a loopback link goes through them rather than around them.
+ *
+ * The strip assertion is what makes the other two mean anything. A pane the
+ * listeners never saw, and a pane no agent owns, both navigate to a local
+ * link and both write nothing to stderr, so on their own the two assertions
+ * below pass against a browser pane with no confinement on it at all: they
+ * would be a test of an ordinary browser pane wearing this test's name.
+ * `agentstrip-` is drawn only where `agentSessionId` is set, which is the
+ * same map `refusesNonLoopback` reads.
+ */
 test('a link to another local page still navigates an agent-owned pane', async () => {
   const { app, window, stderr } = await launch()
-  await agentOnStartPage(app, window)
+  const { paneId } = await agentOnStartPage(app, window)
+  await expect(window.getByTestId(`agentstrip-${paneId}`)).toBeVisible({ timeout: 20_000 })
 
   await clickInGuest(app, '#local')
 
   await expect.poll(() => guestUrl(app), { timeout: 10_000 }).toBe(`${baseUrl}next`)
   expect(stderr()).not.toContain('refused a non-loopback navigation')
+  // Still owned after the navigation it was allowed to make, so what went
+  // through was an agent-owned pane's navigation and not an unowned one's.
+  await expect(window.getByTestId(`agentstrip-${paneId}`)).toHaveCount(1)
 
   await app.close()
 })

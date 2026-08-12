@@ -314,11 +314,21 @@ async function writeConfig(path: string, config: ClaudeConfig): Promise<void> {
 }
 
 /**
- * Register the bridge, at the user's request.
+ * Register the bridge, or bring an existing registration up to date with the
+ * paths this launch resolved.
  *
- * Writes only when something actually changed, so pressing Install twice
- * leaves the file's mtime alone. Throws on a config that cannot be read or
- * whose `mcpServers` is unrecognised, rather than repairing either.
+ * **There is no Install gesture.** Nothing in `src/renderer/` or
+ * `src/preload/` mentions MCP at all; the only caller is `src/main/index.ts`,
+ * which calls this unconditionally on every launch. That is the rule the user
+ * ruled for after the plan was written (see that call site), and it is worth
+ * stating here rather than leaving to be discovered by someone asking whether
+ * this app can register an MCP server without being asked. It can, and does,
+ * the first time it opens.
+ *
+ * Writes only when something actually changed, so a second launch that
+ * resolves the same runtime and script leaves the file's mtime alone. Throws
+ * on a config that cannot be read or whose `mcpServers` is unrecognised,
+ * rather than repairing either.
  */
 export async function installMcpBridge(): Promise<{
   configPath: string
@@ -349,23 +359,23 @@ export async function uninstallMcpBridge(): Promise<{ configPath: string; remove
  * script. Nobody would notice by hand, because the symptom is a tool that is
  * simply never available.
  *
- * The consent rule, which is the same one `migrateLegacy` follows and the
- * reason this is not just `installMcpBridge` on every launch: a config with
- * no pTerm server in it belongs to someone who has never pressed Install, and
- * startup must not press it for them. This only ever updates an entry that is
- * already there.
+ * **Nothing in `src/` calls this, and what ships does the opposite of what it
+ * was written for.** It only ever updates a registration that is already
+ * there, on the rule that a config with no pTerm server in it belongs to
+ * someone who never asked for one. The app registers on every launch instead
+ * (`installMcpBridge`, from `src/main/index.ts`), so that rule is not this
+ * app's behaviour and this function is not the code path anyone is running.
+ * No task in this plan reactivates or removes it, so this is not a temporary
+ * gap awaiting a scheduled fix; it stays dead-but-tested code, still covered
+ * by its own five tests in `tests/unit/mcpInstall.test.ts`, until that
+ * decision is made elsewhere. Read those tests as a description of THIS
+ * function and of nothing that runs.
  *
- * That check is also what keeps the refusal ahead of the repair. Our entry
- * can only live inside an `mcpServers` that is an object, so an unrecognised
- * one is never installed, and this returns without writing rather than
- * rewriting a shape it does not understand just because a path moved.
- *
- * As of this commit, nothing in `src/` calls this function: `installMcpBridge`
- * runs unconditionally on every launch instead (see its own doc comment
- * above and `src/main/index.ts:802`). No task in this plan reactivates or
- * removes it, so this is not a temporary gap awaiting a scheduled fix; it
- * stays dead-but-tested code, still covered by its own five tests in
- * `tests/unit/mcpInstall.test.ts`, until that decision is made elsewhere.
+ * The `isMcpInstalled` check is also what keeps the refusal ahead of the
+ * repair. Our entry can only live inside an `mcpServers` that is an object,
+ * so an unrecognised one is never installed, and this returns without writing
+ * rather than rewriting a shape it does not understand just because a path
+ * moved.
  */
 export async function refreshMcpBridge(): Promise<{ changed: boolean }> {
   const configPath = mcpConfigPath()

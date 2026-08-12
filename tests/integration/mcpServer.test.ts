@@ -207,17 +207,18 @@ describe('McpServer', () => {
     }
   })
 
-  it('drops a runaway line with no newline instead of buffering it without limit', async () => {
-    const { socket } = await start(async (request) => ({ id: request.id }))
-    const c = client(socket)
-
-    // Far larger than MAX_LINE_BYTES, no newline: the shape that would grow
-    // the buffer forever if nothing bounded it.
-    c.send('y'.repeat(2_000_000))
-    c.send(`\n{"id":3,"paneId":"p","tool":"a","args":{}}\n`)
-
-    await c.waitFor(1)
-    expect(c.responses).toEqual([{ id: 3, ok: true, result: { id: 3 } }])
-    c.close()
-  })
+  // A test named `drops a runaway line with no newline instead of buffering
+  // it without limit` used to sit here, and it could not fail. Measured
+  // 2026-08-12: it passed byte-identically with `MAX_BUFFER_BYTES`
+  // enforcement deleted, because the runaway simply got buffered, the newline
+  // handed `take` one enormous line, and `parseRequestLine` and `recoverId`
+  // both refuse a line that size on `MAX_LINE_BYTES` whether or not anything
+  // dropped the buffer first. The only property that differed was peak heap,
+  // which it never measured.
+  //
+  // What it did assert, that a connection keeps serving after an unparseable
+  // line, is `drops a malformed line silently when no id can be recovered,
+  // and keeps serving the connection` above. The ceiling itself is now pinned
+  // where it can be seen, on the pure `takeLines`, in
+  // `tests/unit/mcpServerBuffer.test.ts`.
 })

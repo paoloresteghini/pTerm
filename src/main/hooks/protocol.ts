@@ -65,9 +65,11 @@ function isHookEvent(value: unknown): value is HookEvent {
 /**
  * Read one line from the socket or the spool, or return null.
  *
- * Never throws. This is the app's only untrusted input: the socket is
- * reachable by anything on the machine that can open it, and the spool is a
- * plain file anyone can append to. So this refuses everything it does not
+ * Never throws. This is one of the app's two untrusted inputs, the other
+ * being `parseRequestLine` (`src/main/mcp/protocol.ts`), which reads the MCP
+ * bridge's own socket on the same terms: the socket here is reachable by
+ * anything on the machine that can open it, and the spool is a plain file
+ * anyone can append to. So this refuses everything it does not
  * positively recognise rather than accepting everything it cannot disprove —
  * and a rejected line is dropped silently, because a malformed write is not
  * something the user did and not something they can act on.

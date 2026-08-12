@@ -365,6 +365,39 @@ export function releaseAgentSession(agentSessions: Map<string, string>, paneId: 
 }
 
 /**
+ * `panes`, with the runtime owner put back on every row an agent still holds.
+ *
+ * Pulled out of `registerIpc`'s closure for the same reason
+ * `releaseAgentSession` above it is: the closure's own `withAgentOwners`
+ * hands it the outer `agentSessions` map, and this shape can be exercised
+ * without an Electron host.
+ *
+ * **An owner that is not itself in `panes` is skipped**, which is the whole
+ * reason this is not a bare `map` over `agentSessions.get`. The map is
+ * released only when a pane is dismissed or closed, both user gestures; a
+ * Claude session that simply EXITS takes neither path, and its pane's config
+ * row is dropped by `forgetTab` instead. Without this check a ⌘R restore
+ * would hand the renderer a browser pane marked for a session that is no
+ * longer in the list, and so no longer in the tab bar and impossible to
+ * dismiss. This is the same rule `withAgentSessionsCleared`
+ * (`renderer/workspace.ts`) applies to the renderer's own mirror.
+ *
+ * It fixes the MARKING only. The map entry itself survives a death, so this
+ * process still treats that browser pane as confined until it is closed:
+ * more restrictive than the strip claims, never less.
+ */
+export function agentOwnersOf(
+  agentSessions: Map<string, string>,
+  panes: TabDescriptor[],
+): TabDescriptor[] {
+  const present = new Set(panes.map((pane) => pane.id))
+  return panes.map((pane) => {
+    const owner = agentSessions.get(pane.id)
+    return owner === undefined || !present.has(owner) ? pane : { ...pane, agentSessionId: owner }
+  })
+}
+
+/**
  * Every browser-pane guest this process has been told about, by the
  * `webContents` id `BrowserPane.tsx` reported (`browserGuestAttached`): which
  * pane it belongs to, whether an agent owns that pane right now, and how to
@@ -720,13 +753,23 @@ export function registerIpc(
    * browser pane an agent owned in a previous run comes back as an ordinary
    * one.
    *
-   * Released by `releaseAgentSession`, called below wherever a pane leaves
-   * the workspace for good: the same two call sites that already call
-   * `registry.forget` for the same reason. Cleared from both directions,
-   * since either half of an entry can be the pane that just left: closing or
-   * dismissing the session pane releases every browser pane it owned, and
-   * closing or dismissing an agent-owned browser pane directly releases just
-   * that one entry, leaving its (now former) owner's other entries alone.
+   * Released by `releaseAgentSession`, called below from the two user
+   * gestures that take a pane out of the workspace on purpose
+   * (`CHANNELS.dismissTab` and `CHANNELS.closePane`): the same two call sites
+   * that already call `registry.forget` for the same reason. Cleared from
+   * both directions, since either half of an entry can be the pane that just
+   * left: closing or dismissing the session pane releases every browser pane
+   * it owned, and closing or dismissing an agent-owned browser pane directly
+   * releases just that one entry, leaving its (now former) owner's other
+   * entries alone.
+   *
+   * A session that simply EXITS releases nothing here, and the plan's "the
+   * flag clears when the session's pane dies" was never what shipped. The
+   * exit path calls `forgetTab` alone, so the entry outlives the session and
+   * this process goes on confining that browser pane until it is closed.
+   * What the exit path does NOT do any more is mark the pane: `agentOwnersOf`
+   * skips an owner missing from the list it is mapping, so a ⌘R restore
+   * cannot draw a strip naming a session that has left the tab bar.
    *
    * Added to in exactly one place, `openAgentBrowserPane` below (the one
    * `agentSessions.set` in `src/`, counted 2026-08-12), and only ever with a
@@ -767,12 +810,13 @@ export function registerIpc(
    * which also covers any future reply of that shape. Restore is the one case
    * the renderer cannot cover, because after a reload it has no previous record
    * to keep anything from.
+   *
+   * An owner missing from the list being mapped is skipped rather than
+   * stamped: see `agentOwnersOf` at module scope, which is where the logic
+   * and the reason for that live.
    */
   const withAgentOwners = (panes: TabDescriptor[]): TabDescriptor[] =>
-    panes.map((pane) => {
-      const owner = agentSessions.get(pane.id)
-      return owner === undefined ? pane : { ...pane, agentSessionId: owner }
-    })
+    agentOwnersOf(agentSessions, panes)
 
   registry.onTransition(({ tabId, to }) => {
     // `sinceOf` read here rather than carried on the transition: the registry

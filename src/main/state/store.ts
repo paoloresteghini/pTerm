@@ -145,9 +145,11 @@ function normalisePane(pane: PaneRecord): PaneRecord {
   // drive this pane right now". Its only record is the runtime map in
   // `main/ipc/register.ts`, which is empty at every launch, and no
   // `PaneRecord` this app writes carries it. But `isPane` accepts extra
-  // properties and every step below copies by spread, so before this line a
-  // hand-edited row carrying the field came straight back out of `read()`,
-  // and `browserPaneFor` (`main/mcp/route.ts`) routes on exactly that field.
+  // properties and no step below drops one: each returns the row untouched
+  // when its own check passes and respreads it when it does not, and a spread
+  // carries unknown keys along either way. So before this line a hand-edited
+  // row carrying the field came straight back out of `read()`, and
+  // `browserPaneFor` (`main/mcp/route.ts`) routes on exactly that field.
   //
   // Which matters because of who can edit this file. The principal the
   // browser tool is scoped against is an agent with a shell, running in a

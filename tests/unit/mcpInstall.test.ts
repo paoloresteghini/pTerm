@@ -192,9 +192,16 @@ describe('bridgeEntry', () => {
     expect(bridgeEntry().env).not.toHaveProperty('ELECTRON_RUN_AS_NODE')
   })
 
-  it('does not register the running Electron binary as the runtime', () => {
-    expect(bridgeEntry().command).not.toBe(process.execPath)
-  })
+  // A test named `does not register the running Electron binary as the
+  // runtime` used to sit here, asserting `bridgeEntry().command` was not
+  // `process.execPath`. It could not fail: `beforeEach` sets PTERM_NODE_BIN
+  // to a fixture, so both sides of the comparison were fixtures and no change
+  // to the source could bring them together. The decision it was named for is
+  // covered twice over without it. `registers a resolved node, the bridge
+  // script and the socket` above pins `command` to what `nodeBin` returned,
+  // so a bridgeEntry rewritten to use `process.execPath` fails it; and no
+  // branch of `nodeBin` can return the Electron binary, which its own four
+  // tests enumerate.
 })
 
 describe('mergeMcpServer', () => {
@@ -310,8 +317,9 @@ describe('isMcpInstalled', () => {
   })
 
   it('is total, so a shape merge would refuse answers false rather than throwing', () => {
-    // The pane that renders install state must be able to ask this question of
-    // any file at all; refusing is install's job, not the read's.
+    // A predicate any caller can put to any file at all: `refreshMcpBridge`
+    // asks it of a config it has not vetted, and refusing an odd shape is the
+    // writer's job, not the read's.
     expect(() => isMcpInstalled({ mcpServers: 'a string' })).not.toThrow()
     expect(isMcpInstalled({ mcpServers: 'a string' })).toBe(false)
     expect(isMcpInstalled(null)).toBe(false)
@@ -523,11 +531,24 @@ describe('uninstallMcpBridge', () => {
   })
 })
 
+/**
+ * **`refreshMcpBridge` is not reachable in the shipped app, and none of these
+ * five tests describes what it does.** Nothing in `src/` calls it: the app
+ * calls `installMcpBridge` unconditionally on every launch instead, so a user
+ * who has never asked for anything DOES find an MCP server registered for
+ * them. Read every assertion below as a statement about this function alone.
+ *
+ * They are kept, rather than deleted with the function, because the decision
+ * to leave it in the tree was taken deliberately (see its doc comment in
+ * `src/main/mcp/install.ts`) and untested dead code is worse than tested dead
+ * code. What they must not be read as is an answer to "can this app register
+ * an MCP server behind my back?" That answer is in `installMcpBridge`'s own
+ * describe block above, and in `src/main/index.ts`.
+ */
 describe('refreshMcpBridge', () => {
   it('installs nothing into a config that never asked for it', async () => {
-    // The consent rule, and the reason this is not just installMcpBridge() on
-    // a timer: this runs unattended at startup, and a user who has never
-    // pressed Install must not find an MCP server registered for them.
+    // This function's own rule, and the reason it was written as something
+    // other than installMcpBridge() on a timer. It is not the app's rule.
     await writeConfig(realistic())
     const first = await stat(configFile)
 
@@ -568,13 +589,13 @@ describe('refreshMcpBridge', () => {
   })
 
   it('leaves an unrecognised mcpServers alone even when the runtime has moved', async () => {
-    // The refusal has to win over the self-heal: this is the one path that can
-    // write the user's config without anyone asking. It wins structurally
+    // The refusal has to win over the self-heal, and it wins structurally
     // rather than by ordering. Our entry can only live inside an mcpServers
     // that is an object, so a config carrying anything else there is never
-    // installed, and the consent check returns before the merge that would
-    // have to refuse it. Silence rather than a throw is deliberate here, since
-    // this runs unattended at launch; the attended path throws, one describe up.
+    // installed, and the isMcpInstalled check returns before the merge that
+    // would have to refuse it. Silence rather than a throw was chosen for a
+    // function meant to run unattended; installMcpBridge, which is the one
+    // that actually runs at launch, throws instead, one describe up.
     const before = '{\n  "mcpServers": "a string"\n}'
     await writeFile(configFile, before, 'utf8')
     process.env.PTERM_NODE_BIN = '/somewhere/else/node'
