@@ -25,14 +25,24 @@ export type NavigatePlan =
   | { create: { projectSlug: string; cwd: string }; url: string }
 
 /**
- * Whether a browser pane is somewhere an agent may be handed control of.
+ * Whether a browser pane showing `url` is somewhere an agent may be handed
+ * control of.
  *
  * `about:blank` is where every pane this app creates for an agent starts, and
  * a row with no `url` at all (a hand-edited config, see `TabDescriptor.url`)
- * renders as `about:blank` too, so both are as good as blank. Anything else
- * has to be loopback.
+ * renders as `about:blank` too, so both are as good as blank. The empty
+ * string is the third spelling of the same thing: it is what a guest's
+ * `getURL()` answers before it has loaded anything. Anything else has to be
+ * loopback.
+ *
+ * Two callers, deliberately, and they ask about different values.
+ * `planBrowserNavigate` below asks about the pane's REMEMBERED url, so a call
+ * is refused before anything is created or navigated; `registerIpc`'s handler
+ * asks about `guest.getURL()` once the guest is in hand, which is the
+ * authoritative answer, since the remembered one arrives by `did-navigate`
+ * and a debounced `setPaneUrl` and therefore lags the page.
  */
-function isSafeToDrive(url: string | undefined): boolean {
+export function isSafeToDrive(url: string | undefined): boolean {
   if (url === undefined || url === '' || url === 'about:blank') return true
   return isLoopbackUrl(url)
 }
@@ -56,7 +66,11 @@ function isSafeToDrive(url: string | undefined): boolean {
  *    typings say so of programmatic navigation), so every mechanism Task 7
  *    shipped is blind to a tool's argument. This check is the whole of the
  *    confinement for the one navigation an agent asks for by name.
- * 3. **Where the pane already is.** See `isSafeToDrive`.
+ * 3. **Where the pane already is.** See `isSafeToDrive`. Read off the pane
+ *    row, which is config's memory of where the page settled and lags it, so
+ *    the handler asks the guest itself the same question again before it
+ *    navigates. This one is here so that a refusal costs nothing and happens
+ *    before any side effect; that one is here because it is authoritative.
  *
  * The URL is normalised the way the address bar normalises what a user types
  * (`normaliseUrl`), so `localhost:5173` is http and a bare `example.com` is

@@ -137,9 +137,37 @@ function isPane(value: unknown): value is PaneRecord {
 const TAB_TYPES: readonly TabType[] = ['claude', 'preset', 'shell', 'editor', 'diff', 'browser']
 
 function normalisePane(pane: PaneRecord): PaneRecord {
+  // The one field in a pane row that grants a capability rather than
+  // describing a pane, and the only one this function removes outright
+  // instead of type-checking.
+  //
+  // `agentSessionId` (`TabDescriptor`, `shared/ipc.ts`) means "an agent may
+  // drive this pane right now". Its only record is the runtime map in
+  // `main/ipc/register.ts`, which is empty at every launch, and no
+  // `PaneRecord` this app writes carries it. But `isPane` accepts extra
+  // properties and every step below copies by spread, so before this line a
+  // hand-edited row carrying the field came straight back out of `read()`,
+  // and `browserPaneFor` (`main/mcp/route.ts`) routes on exactly that field.
+  //
+  // Which matters because of who can edit this file. The principal the
+  // browser tool is scoped against is an agent with a shell, running in a
+  // pane of the project this config belongs to: adding
+  // `"agentSessionId": "<its own pane id>"` to the user's hand-opened browser
+  // row would have made the next `browser_navigate` drive that pane, and
+  // `refusesNonLoopback` would not have confined it either, since that reads
+  // the runtime map rather than the row.
+  //
+  // Dropped here rather than at the one reader that routes on it, so that
+  // every reader of a pane row gets the same answer: `read()` is the only way
+  // into this process for a row on disk, so this is where "the file cannot
+  // vote" is enforceable once. The row itself survives: a forged field is not
+  // a reason to take the user's browser pane away.
+  const { agentSessionId: _forged, ...unclaimed } = pane as PaneRecord & {
+    agentSessionId?: unknown
+  }
   // Before the `type` shortcut below, which returns early: a row can have a
   // good type and a bad title at the same time.
-  const titled = typeof pane.title === 'string' ? pane : { ...pane, title: undefined }
+  const titled = typeof unclaimed.title === 'string' ? unclaimed : { ...unclaimed, title: undefined }
   // Validated rather than carried, and validated HERE rather than at the
   // picker. The picker can only offer the six, but a config file is a text
   // file: without this an edited `"color": "#ffffff"` reaches xterm's theme

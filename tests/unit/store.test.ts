@@ -251,6 +251,57 @@ describe('ConfigStore.read, hostile shapes', () => {
     await expect(store.read()).resolves.toMatchObject({ panes: [good] })
   })
 
+  /**
+   * The one field in this file that grants a capability rather than describing
+   * a pane.
+   *
+   * `agentSessionId` means "an agent may drive this pane right now"
+   * (`TabDescriptor` in `shared/ipc.ts`, `agentSessions` in
+   * `main/ipc/register.ts`). Nothing in this app writes it to disk, and until
+   * this test it survived a read anyway, because `isPane` accepts extra
+   * properties and `normalisePane` copies by spread. That is the difference
+   * between a field this app happens not to write and a field a file cannot
+   * assert.
+   *
+   * It matters because of who edits this file. The principal the browser tool
+   * is scoped against is an agent with a shell, running in a pane, in a
+   * project whose config this is: writing `"agentSessionId": "<its own pane
+   * id>"` onto the user's hand-opened browser row is one `Edit` away, and
+   * `browserPaneFor` (`main/mcp/route.ts`) routes on exactly that field. The
+   * pane would then be driven by the tool while `agentSessions` still says
+   * nobody owns it, so `refusesNonLoopback` would not confine it either.
+   *
+   * Stripped here rather than at the one reader that routes on it, so that
+   * every reader of a pane row gets the same answer: the runtime map is the
+   * record of ownership, and this file cannot vote.
+   */
+  it('drops an agentSessionId a hand edit put on a pane row', async () => {
+    const store = await storeWith({
+      version: 9,
+      projects: [],
+      activeProjectId: null,
+      panes: [
+        {
+          id: 'a'.repeat(16),
+          projectSlug: 'lumio',
+          cwd: '/tmp',
+          type: 'browser',
+          url: 'http://localhost:3000/',
+          agentSessionId: 'b'.repeat(16),
+        },
+      ],
+      tabs: [],
+    })
+
+    const config = await store.read()
+
+    // The row survives, and only the claim is gone: a forged field is not a
+    // reason to take the user's browser pane away from them.
+    expect(config.panes).toHaveLength(1)
+    expect(config.panes[0]).not.toHaveProperty('agentSessionId')
+    expect(config.panes[0].url).toBe('http://localhost:3000/')
+  })
+
   it('keeps one pane row per id when the file names the same pane twice', async () => {
     // Not a shape this app writes deliberately, and reachable anyway: nothing
     // between `store.write` and the file dedupes `panes`, and `read()`'s own

@@ -71,7 +71,7 @@ import { isDirectory } from '../fsutil'
 import { scanCandidates } from '../projects/discovery'
 import { hookPaths, installHooks, readHooksState, uninstallHooks } from '../hooks/install'
 import { drainSpool } from '../hooks/spool'
-import { planBrowserNavigate } from '../mcp/navigate'
+import { isSafeToDrive, planBrowserNavigate } from '../mcp/navigate'
 import { McpServer } from '../mcp/server'
 import { readHistory, selectHistory } from '../shell/history'
 import {
@@ -2559,11 +2559,11 @@ export function registerIpc(
    */
   const mcpServer = new McpServer(async (request) => {
     const config = await store.read()
-    // The runtime association put back onto the rows read off disk. Config
-    // never carries `agentSessionId` (see `agentSessions`), and it is the
-    // field `browserPaneFor` routes on, so a plain `config.panes` here would
-    // route every call as if no session owned anything and mint a new pane on
-    // every call.
+    // The runtime association put onto the rows read off disk, which arrive
+    // carrying none: `agentSessionId` is stripped by `normalisePane`
+    // (`state/store.ts`) precisely so that this map, and not a file an agent
+    // can edit, decides who owns a pane. Without this the rows would say
+    // nobody owns anything and every call would mint a new pane.
     const panes: TabDescriptor[] = config.panes.map((pane) => {
       const owner = agentSessions.get(pane.id)
       return owner === undefined ? pane : { ...pane, agentSessionId: owner }
@@ -2580,6 +2580,22 @@ export function registerIpc(
     // address bar and the saved URL follow anyway: the guest's `did-navigate`
     // is what feeds both.
     const guest = await guestForPane(paneId)
+    // Where the pane actually is, asked again and of the page itself. The
+    // check `planBrowserNavigate` already made was on the pane ROW, which
+    // config only learns from `did-navigate` through a debounced
+    // `setPaneUrl`, so it lags the guest by a moment and by any navigation
+    // that never settled. This is the value that decides whether a page the
+    // tool is about to replace was one an agent was entitled to touch: the
+    // window Task 7's confinement leaves open (a guest that has not yet been
+    // reported, which nothing refuses for) closes here, before a second call
+    // could use a strayed pane as a foothold.
+    const showing = guest.getURL()
+    if (!isSafeToDrive(showing)) {
+      throw new Error(
+        `refusing to drive browser pane ${paneId}: it is showing ${showing}, ` +
+          'which is not a loopback origin',
+      )
+    }
     await guest.loadURL(plan.url)
     return { paneId, url: plan.url }
   })
