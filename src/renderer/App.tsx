@@ -537,9 +537,11 @@ export function App() {
   const project = activeProject(state)
   const currentTabId = activeTabId(state)
   // Grouped ONCE, here, and read by two consumers: the bar draws it and
-  // `⌥1..9` indexes it (see the Digit branch of the keydown handler below). A
-  // `TabBar` that sorted privately would leave `⌥3` selecting something other
-  // than the third tab on screen, and no unit test could see the disagreement.
+  // `⌥⌘1..9` indexes it, though only while `keyRegion` is 'terminal' (see the
+  // Digit branch of the keydown handler below, which picks this list or
+  // `browserTabEntries`). A `TabBar` that sorted privately would leave `⌥⌘3`
+  // selecting something other than the third tab on screen, and no unit test
+  // could see the disagreement.
   const tabEntries = state.activeProjectId
     ? groupedTabs(tabsOfProject(state, state.activeProjectId, 'terminal'), state.tabs)
     : []
@@ -627,19 +629,35 @@ export function App() {
   const [activeRegion, setActiveRegion] = useState<Region>('terminal')
 
   /**
-   * Follow focus between the two regions.
+   * Follow the user between the two regions.
    *
-   * Both listeners read `document.activeElement` rather than the event's
-   * target, because of what was MEASURED here on 2026-08-11: driving a real
-   * click into a live `<webview>`'s page, with capture listeners on the host
-   * document for `focusin`, `focusout`, `mousedown`, `pointerdown` and
-   * `click`, the host saw no `focusin` at all. Three separate guest clicks
-   * produced only a `focusout` on whatever the host had focused and a `window`
-   * blur, after which `document.activeElement` was the `<webview>` element.
-   * So the `focusin` this task was planned around never fires for the one case
-   * it exists to catch, and `blur` is what carries it.
+   * Three listeners, and the split between them is measured rather than
+   * guessed. Deliberately three RULES about where a pointer or a focus landed,
+   * and not a setter on each control that should claim a region: most of this
+   * app's chrome focuses nothing when clicked, so a list would have to name
+   * every project row, heading, panel body and title bar, and would go stale
+   * the day one was added.
    *
-   * The same run attached `focus` and `blur` listeners to the guest's own
+   * `pointerdown` is the general case and carries every click on host chrome.
+   * It reads the EVENT TARGET, not `document.activeElement`: measured
+   * 2026-08-12, of five chrome clicks driven after focus was put in a guest
+   * page, four left `activeElement` at `BODY`, including a click on the
+   * browser column's own heading (the button takes focus and gives it back on
+   * the way out). Reading the focused element there answers 'terminal' for a
+   * click plainly inside the browser region. The target was right in all five,
+   * the title bar's drag region included, which does NOT swallow the event.
+   *
+   * `focusin` covers focus that arrives without a pointer: ⌘T's new terminal
+   * focuses its own xterm, and nothing clicked anything.
+   *
+   * `blur` is the one the whole task turned on. Measured 2026-08-11, driving a
+   * real click into a live `<webview>`'s page with capture listeners on the
+   * host document for `focusin`, `focusout`, `mousedown`, `pointerdown` and
+   * `click`: the host saw NONE of them. Three separate guest clicks produced
+   * only a `focusout` on whatever the host had focused and a `window` blur,
+   * after which `document.activeElement` was the `<webview>` element. So a
+   * click on a page is invisible to the two rules above, and this is what sees
+   * it. The same run attached `focus` and `blur` listeners to the guest's own
    * `WebContents` in main, across the same six clicks, and they fired zero
    * times: the main-side bridge named as the fallback would not have worked
    * either.
@@ -651,22 +669,28 @@ export function App() {
    * hand the keys back to the terminal every time the user switched apps.
    */
   useEffect(() => {
-    const follow = (): void => {
+    const pointed = (event: Event): void => {
+      const target = event.target
+      setActiveRegion(target instanceof Element && inBrowserRegion(target) ? 'browser' : 'terminal')
+    }
+    const focused = (): void => {
       setActiveRegion(inBrowserRegion(document.activeElement) ? 'browser' : 'terminal')
     }
     const claim = (): void => {
       if (inBrowserRegion(document.activeElement)) setActiveRegion('browser')
     }
-    document.addEventListener('focusin', follow, true)
+    document.addEventListener('pointerdown', pointed, true)
+    document.addEventListener('focusin', focused, true)
     window.addEventListener('blur', claim)
     return () => {
-      document.removeEventListener('focusin', follow, true)
+      document.removeEventListener('pointerdown', pointed, true)
+      document.removeEventListener('focusin', focused, true)
       window.removeEventListener('blur', claim)
     }
   }, [])
 
   /**
-   * The region ⌘W and ⌥1-9 act on.
+   * The region ⌘W and ⌥⌘1-9 act on.
    *
    * Derived rather than stored, which is the whole point: `activeRegion`
    * records where focus last went, and the column can leave the screen
@@ -772,10 +796,11 @@ export function App() {
       .then((tab) => {
         if (tab) {
           dispatch({ type: 'opened', tab })
+          // The palette reaches here from the keyboard, with no pointer in the
+          // browser column for the `pointerdown` rule to see, and nothing
+          // focuses a fresh `<webview>`, so no focus event says it either.
           // Inside the success branch, so a refusal leaves the keys where they
-          // were. Nothing focuses a fresh `<webview>`, so no focus event would
-          // otherwise say that the pane the user just asked for is the one
-          // they mean.
+          // were.
           setActiveRegion('browser')
           return
         }
@@ -1147,11 +1172,14 @@ export function App() {
   /** Make `paneId` the pane the keyboard talks to, and record it on its tab. */
   const selectPane = useCallback(
     (paneId: string) => {
-      // Above the early return, not below it. Clicking the pane that is
-      // already active is not a change of selection, but it IS the terminal
-      // region taking the keys back from the browser, and that is the case a
-      // user lands in every time they click a page and then click the
-      // terminal they were already working in.
+      // For the callers that reach here with no pointer and no focus event of
+      // their own, which the `pointerdown` rule above cannot see: ⌘⌥ + an
+      // arrow, and the palette's session list. A pane that focuses nothing
+      // when it mounts would otherwise leave the browser region holding the
+      // keys after the user had plainly moved off it.
+      //
+      // Above the early return rather than below, so selecting the pane that
+      // is already active still claims the region.
       setActiveRegion('terminal')
       if (paneId === activePaneId) return
       const row = tabOfPane(state, paneId)
@@ -1612,8 +1640,8 @@ export function App() {
         return
       }
       // Closes in whichever region has focus, which is the one thing this
-      // binding does differently from the two below it: ⌘S and ⌘T are the
-      // terminal region's whatever has focus, and ⌘W is not.
+      // binding does differently from its neighbours: ⌘T above and ⌘S below
+      // are the terminal region's whatever has focus, and ⌘W is not.
       if (event.code === 'KeyW' && !event.altKey) {
         const target = keyRegion === 'browser' ? currentBrowserTabId : activePaneId
         if (target) {
@@ -1639,8 +1667,9 @@ export function App() {
         // Terminal only. `splitActive` works off `activePaneId`, which is the
         // TERMINAL region's selection, so running it while the browser region
         // has focus would split a terminal pane the user is not looking at.
-        // `preventDefault` still runs either way, so the keystroke does not
-        // fall through to Chromium's own ⌘D.
+        // The `preventDefault` above is left unconditional, where it already
+        // was, so this branch consumes ⌘D the same way in both regions rather
+        // than letting the region decide what the event goes on to do.
         if (keyRegion === 'terminal') splitActive(event.shiftKey ? 'col' : 'row')
         return
       }
@@ -1710,7 +1739,7 @@ export function App() {
       const index = Number(digit[1]) - 1
       if (event.altKey) {
         // The focused region's own strip. Both are grouped by `groupedTabs`
-        // and both are what their bar draws, so ⌥3 is the third row on screen
+        // and both are what their bar draws, so ⌥⌘3 is the third row on screen
         // in whichever bar the user is working in. ⌘1-9 below is unaffected:
         // it selects a PROJECT, which both regions share.
         const strip = keyRegion === 'browser' ? browserTabEntries : tabEntries
@@ -1733,7 +1762,7 @@ export function App() {
     activePaneId,
     tabEntries,
     // The browser region's three inputs, beside the terminal's two above:
-    // which strip ⌥1-9 indexes, which pane ⌘W closes, and which of the two
+    // which strip ⌥⌘1-9 indexes, which pane ⌘W closes, and which of the two
     // regions both of those questions are about.
     browserTabEntries,
     currentBrowserTabId,
@@ -1812,15 +1841,7 @@ export function App() {
           now={now}
           dead={state.dead}
           dirty={dirty}
-          // Measured 2026-08-11: clicking a tab's label focuses nothing (the
-          // row is a `<span>`, and `document.activeElement` is left at
-          // `BODY`), so no focus event reaches the effect above and the claim
-          // has to be made here. The browser bar's own `onActivate` makes the
-          // mirror-image claim.
-          onActivate={(id) => {
-            setActiveRegion('terminal')
-            dispatch({ type: 'activatedTab', id })
-          }}
+          onActivate={(id) => dispatch({ type: 'activatedTab', id })}
           onClose={requestClosePane}
           onRestart={restartTab}
           onDismiss={dismissTab}
@@ -2122,13 +2143,7 @@ export function App() {
             collapsed={browserCollapsed}
             onToggle={() => toggleColumnCollapsed('browser')}
             onDragStart={() => setDragging('browser')}
-            // The mirror of the terminal bar's, and needed for the same
-            // measured reason: a tab row focuses nothing, so this is the only
-            // thing that says the browser region is the one the user means.
-            onActivate={(id) => {
-              setActiveRegion('browser')
-              dispatch({ type: 'activatedTab', id })
-            }}
+            onActivate={(id) => dispatch({ type: 'activatedTab', id })}
             onClose={requestClosePane}
             onNew={openBrowserPane}
             onRename={renameTab}

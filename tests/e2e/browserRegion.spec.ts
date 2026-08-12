@@ -577,8 +577,7 @@ test('a hide survives a relaunch, with the pane still there behind it', async ()
 })
 
 /**
- * Clicks the page INSIDE the browser column's live `<webview>`, which is the
- * case the region's focus rule was measured against.
+ * Clicks the page INSIDE the browser column's live `<webview>`.
  *
  * The centre of `browser-column` lands in the pane area, so this is a click on
  * guest content and not on the column's own chrome. What the host sees for it
@@ -587,9 +586,35 @@ test('a hide survives a relaunch, with the pane still there behind it', async ()
  * `click`, only a `focusout` on whatever it had focused and a `window` blur,
  * after which `document.activeElement` is the `<webview>` element. See the
  * `activeRegion` effect in `App.tsx` for the handler that reads that.
+ *
+ * NOTHING MAY PRESS A KEY WHILE THIS IS THE LAST THING THAT HAPPENED. Once the
+ * guest holds focus the host window is blurred, and a key press then reaches
+ * the guest rather than `App`'s window `keydown` listener. Measured 2026-08-12:
+ * of six runs of this file's tab-select test written that way, one passed. The
+ * failures were not a misrouted keystroke but no keystroke at all, with both
+ * bars' `data-active` unchanged. Use `focusBrowserRegion` below for a test that
+ * needs to press something.
  */
 async function clickGuestPage(page: Page): Promise<void> {
   await page.getByTestId('browser-column').click()
+}
+
+/**
+ * States, host-side, that the browser region is the one the user is working
+ * in: a click on one of its own tab rows rather than on guest content.
+ *
+ * Callers reach here having already opened a pane through the palette, which
+ * claims the region on its own, so this is a re-assertion and not the only
+ * thing standing between the test and its keystroke. It is here because the
+ * obvious way to write that line, a click on the guest page, cannot be
+ * followed by a key press at all (see `clickGuestPage`), and because a test
+ * whose setup depends on the palette's claim alone would not say so.
+ *
+ * Takes the row's index because it also SELECTS that row, which callers have
+ * to account for.
+ */
+async function focusBrowserRegion(page: Page, index: number): Promise<void> {
+  await page.locator('[data-testid^="browsertab-"]').nth(index).click()
 }
 
 /** Clicks the visible terminal pane, away from its edges. */
@@ -622,7 +647,10 @@ test('Cmd-W closes a pane in the region that has focus, and leaves the other alo
   expect(terminalTabs).toBe(2)
   expect(browserTabs).toBe(2)
 
-  await clickGuestPage(page)
+  // Row 1, which is already the selected one, so this changes the REGION and
+  // nothing else. It has to be a host-side click: see `clickGuestPage`'s note
+  // for why a key pressed straight after a guest click may never arrive.
+  await focusBrowserRegion(page, 1)
   await page.keyboard.press('Meta+w')
 
   await expect(page.locator('[data-testid^="browsertab-"]')).toHaveCount(browserTabs - 1)
@@ -659,12 +687,14 @@ test('the tab-select chord selects within the region that has focus', async () =
   const browser = page.locator('[data-testid^="browsertab-"]')
 
   // Opening selects, so the SECOND of each is active. That is what makes both
-  // halves below able to fail: ⌥1 asks for the first row either way, so a
+  // halves below able to fail: ⌥⌘1 asks for the first row either way, so a
   // keystroke that reached the wrong bar would be visible in it.
   await expect(terminal.nth(1)).toHaveAttribute('data-active', 'true')
   await expect(browser.nth(1)).toHaveAttribute('data-active', 'true')
 
-  await clickGuestPage(page)
+  // Row 1, the one already selected, so ⌥⌘1 below still has somewhere to move
+  // it to. Host-side for the reason `clickGuestPage` records.
+  await focusBrowserRegion(page, 1)
   await page.keyboard.press('Alt+Meta+1')
 
   await expect(browser.nth(0)).toHaveAttribute('data-active', 'true')
@@ -673,9 +703,9 @@ test('the tab-select chord selects within the region that has focus', async () =
   await expect(terminal.nth(0)).toHaveAttribute('data-active', 'false')
 
   // Put the browser's selection back on its second row, so the terminal half
-  // below is asking ⌥1 to move a selection that is somewhere else. Without
+  // below is asking ⌥⌘1 to move a selection that is somewhere else. Without
   // this the browser would already be on row one and "the browser did not
-  // move" would be satisfied by a ⌥1 that moved it there.
+  // move" would be satisfied by a ⌥⌘1 that moved it there.
   await browser.nth(1).click()
   await expect(browser.nth(1)).toHaveAttribute('data-active', 'true')
 
@@ -686,6 +716,48 @@ test('the tab-select chord selects within the region that has focus', async () =
   await expect(terminal.nth(1)).toHaveAttribute('data-active', 'false')
   await expect(browser.nth(1)).toHaveAttribute('data-active', 'true')
   await expect(browser.nth(0)).toHaveAttribute('data-active', 'false')
+
+  await app.close()
+})
+
+test('clicking terminal chrome that focuses nothing still takes the keys back', async () => {
+  const app = await launch()
+  const page = await app.firstWindow()
+  await expect(page.getByTestId('titlebar')).toBeVisible({ timeout: 20_000 })
+
+  // Two terminal tabs, so "the right one closed" is a count with somewhere to
+  // go rather than a drop to zero.
+  await page.getByTestId('new-tab').click()
+  await expect(page.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
+  await page.getByTestId('new-tab').click()
+  await expect(page.locator('[data-testid^="tab-"]')).toHaveCount(2)
+  await openBrowserPaneViaPalette(page)
+  await expect(page.getByTestId('browser-column')).toBeVisible({ timeout: 20_000 })
+
+  // The browser region takes the keys, in the one way that reaches the host
+  // through no host event at all.
+  await clickGuestPage(page)
+
+  // The title bar, chosen over the other chrome that focuses nothing because
+  // it is the case with no second mechanism to rescue it. Measured 2026-08-12,
+  // clicking it after a guest click fires NO `focusin` and NO `blur` and
+  // leaves `document.activeElement` at `BODY`; the only thing the host sees is
+  // `pointerdown DIV[titlebar]`, so the drag region does not swallow it. A
+  // project row reaches the same stale state, but a switch to a project
+  // holding a terminal pane focuses that pane and the `focusin` rule covers it,
+  // which would make this test pass for a reason that is not the one under
+  // test.
+  await page.getByTestId('titlebar').click({ position: { x: 300, y: 8 } })
+
+  const terminalTabs = await page.locator('[data-testid^="tab-"]').count()
+  const browserTabs = await page.locator('[data-testid^="browsertab-"]').count()
+  expect(terminalTabs).toBe(2)
+  expect(browserTabs).toBe(1)
+
+  await page.keyboard.press('Meta+w')
+
+  await expect(page.locator('[data-testid^="tab-"]')).toHaveCount(terminalTabs - 1)
+  await expect(page.locator('[data-testid^="browsertab-"]')).toHaveCount(browserTabs)
 
   await app.close()
 })
@@ -750,12 +822,13 @@ test('Cmd-D does nothing while the browser region has focus, and still splits th
     .locator(':scope > [data-testid^="pane-"]')
   await expect(terminalPanes).toHaveCount(1)
 
-  await clickGuestPage(page)
+  await focusBrowserRegion(page, 0)
   await page.keyboard.press('Meta+d')
   await page.keyboard.press('Meta+Shift+d')
 
   // The browser region gained nothing, which is a count these two keystrokes
-  // could have changed: ⌘D is the only binding in the handler that adds a pane.
+  // could have changed: ⌘D is the binding under test here, and a split is the
+  // only thing it can add. (⌘T also adds a pane, but nothing below presses it.)
   await expect(page.locator('[data-testid^="browsertab-"]')).toHaveCount(1)
   await expect(page.getByTestId(`browserpane-${id}`)).toHaveCount(1)
 
