@@ -18,9 +18,12 @@ import {
  * Sabotage-checked (2026-08-09), each mutation applied and reverted by hand:
  * 1. dropped the `id === 'projects'` guard in `moveColumn`: reddened "refuses
  *    to move projects", as expected.
- * 2. dropped the append loop in `orderFromStored`: reddened "appends a column
- *    the stored order never heard of" and both "puts X back" tests, as
- *    expected.
+ * 2. dropped the insertion loop in `orderFromStored`: reddened "inserts a
+ *    column the stored order never heard of beside its default neighbour" and
+ *    both "puts X back" tests, as expected. Re-run 2026-08-12, when that loop
+ *    stopped appending and started inserting: the same deletion now reddens
+ *    eight tests, every one of them about a slot the stored order does not
+ *    name, and leaves the other twenty green.
  * 3. dropped the `seen.has` skip in `orderFromStored`: reddened "collapses a
  *    duplicated slot", as expected.
  * 4. `resizerSideFor` hardcoded to `'right'`: reddened "says left for a
@@ -52,7 +55,8 @@ describe('COLUMN_ORDER_DEFAULT', () => {
   })
 
   // The upgrade path. Every profile on disk was written before this column
-  // existed, and `orderFromStored` appends what a stored list never mentions.
+  // existed, and `orderFromStored` puts back what a stored list never
+  // mentions, at the place this default order gives it.
   it('gains the browser slot from an order written before it existed', () => {
     const stored = JSON.stringify(COLUMN_ORDER_DEFAULT.filter((slot) => slot !== 'browser'))
     expect(orderFromStored(stored)).toContain('browser')
@@ -86,20 +90,59 @@ describe('orderFromStored', () => {
     expect(orderFromStored(JSON.stringify(stored))).not.toContain('wallpaper')
   })
 
-  it('appends a column the stored order never heard of, in default order', () => {
+  it('inserts a column the stored order never heard of beside its default neighbour', () => {
     // The upgrade case: a profile written before a column existed must pick it
-    // up rather than lose it. Two missing at once, to pin that they arrive in
-    // COLUMN_ORDER_DEFAULT's order and not in some incidental one.
+    // up rather than lose it, and pick it up where the default order says it
+    // belongs. Everything missing here lands right of whichever default-order
+    // neighbour the profile did store: `todos` follows `notes` to the front,
+    // and `browser` follows `terminal`, so neither ends up at the far right
+    // simply for being new.
     const stored: ColumnSlot[] = ['notes', 'projects', 'terminal']
     expect(orderFromStored(JSON.stringify(stored))).toEqual([
-      'notes', 'projects', 'terminal', 'files', 'tabs', 'browser', 'skills', 'presets', 'prompts', 'git',
-      'issues', 'todos',
+      'files', 'notes', 'todos', 'projects', 'tabs', 'terminal', 'browser', 'skills', 'presets', 'prompts',
+      'git', 'issues',
     ])
   })
 
-  it('appends todos for a profile written before the column existed', () => {
-    const stored = JSON.stringify(['files', 'projects', 'tabs', 'terminal', 'browser', 'skills', 'presets', 'prompts', 'git', 'issues', 'notes'])
-    expect(orderFromStored(stored)).toEqual([...COLUMN_ORDER_DEFAULT])
+  it('gives todos its default place, not the end, for a profile written before the column existed', () => {
+    // The same profile the previous rule shipped with, plus one drag. It is
+    // the drag that makes this test able to tell the rules apart: appending
+    // would put `todos` after `issues`, and its default place is beside
+    // `notes`, which this user moved to the front.
+    const stored = JSON.stringify(['notes', 'files', 'projects', 'tabs', 'terminal', 'browser', 'skills', 'presets', 'prompts', 'git', 'issues'])
+    expect(orderFromStored(stored)).toEqual([
+      'notes', 'todos', 'files', 'projects', 'tabs', 'terminal', 'browser', 'skills', 'presets', 'prompts',
+      'git', 'issues',
+    ])
+  })
+
+  it('gives the browser column the place beside the terminal on a profile that had dragged one', () => {
+    // Why the rule changed. This is every profile that ever dragged a column:
+    // it stored a complete order, and the column added since is the one thing
+    // it cannot name. Beside the terminal is the whole point of this column,
+    // and an append would have put it past `todos` at the far right.
+    const stored = ['notes', 'files', 'projects', 'tabs', 'terminal', 'skills', 'presets', 'prompts', 'git', 'issues', 'todos']
+    const order = orderFromStored(JSON.stringify(stored))
+    expect(order[order.indexOf('terminal') + 1]).toBe('browser')
+    expect(order[order.length - 1]).toBe('todos')
+  })
+
+  it('puts a missing leftmost slot at the front, the one case with nothing to its left to sit beside', () => {
+    // The insertion point is "right of the nearest default-order slot already
+    // present", and `files` leads `COLUMN_ORDER_DEFAULT`, so for it alone
+    // there is no such slot. The front is the answer, which is where the
+    // default order puts it anyway.
+    const stored: ColumnSlot[] = ['notes', 'projects']
+    expect(orderFromStored(JSON.stringify(stored))[0]).toBe('files')
+  })
+
+  it('keeps the relative order of the slots the profile did store', () => {
+    // Inserting the missing ones must not reshuffle the stored ones: `todos`
+    // stays ahead of `notes` here even though the default order disagrees.
+    const stored: ColumnSlot[] = ['todos', 'notes']
+    const order = orderFromStored(JSON.stringify(stored))
+    expect(order.indexOf('todos')).toBeLessThan(order.indexOf('notes'))
+    expect([...order].sort()).toEqual([...COLUMN_ORDER_DEFAULT].sort())
   })
 
   it('collapses a duplicated slot to its first appearance', () => {

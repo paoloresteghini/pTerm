@@ -52,9 +52,19 @@ export const COLUMN_ORDER_DEFAULT: readonly ColumnSlot[] = [
  *   a build with a column this one dropped) is dropped;
  * - a slot repeated in the stored list collapses to its first appearance;
  * - a slot the stored list never mentions (a newer column, or `projects` or
- *   `terminal` if an old write predates them) is appended at the end, in
- *   `COLUMN_ORDER_DEFAULT`'s order, so an upgrade adds the column instead of
- *   losing it.
+ *   `terminal` if an old write predates them) is put back where
+ *   `COLUMN_ORDER_DEFAULT` says it belongs, immediately right of whichever
+ *   slot precedes it there, so an upgrade adds the column beside the columns
+ *   it was designed to sit between instead of at the far right of the row.
+ *
+ * That last rule replaced a plain append (changed 2026-08-12). Appending was
+ * a fallback rather than a decision about where a new column belongs, and it
+ * only ever looked harmless because no shipped column had exercised it: the
+ * browser column ships next to the terminal, and every profile that had once
+ * dragged anything would have received it past notes and todos. The choice
+ * generalises, which is why the rule changed rather than this one slot: a
+ * column's default position is the one statement this app makes about where
+ * it belongs, and an upgrade is the moment to honour it.
  */
 export function orderFromStored(raw: string | null): ColumnSlot[] {
   if (raw === null) return [...COLUMN_ORDER_DEFAULT]
@@ -75,8 +85,19 @@ export function orderFromStored(raw: string | null): ColumnSlot[] {
     seen.add(entry as ColumnSlot)
     order.push(entry as ColumnSlot)
   }
-  for (const slot of COLUMN_ORDER_DEFAULT) {
-    if (!seen.has(slot)) order.push(slot)
+  // Walking `COLUMN_ORDER_DEFAULT` left to right is what makes the insertion
+  // point a single `indexOf`: by the time a missing slot comes up, the slot
+  // that precedes it in the default order is already in `order`, either
+  // because the profile stored it or because an earlier turn of this loop put
+  // it back. So "where it belongs relative to what is present" is always the
+  // place right after that one neighbour, and two missing slots that are
+  // neighbours by default stay neighbours here. The leftmost slot has no
+  // predecessor and goes to the front, which is also what the `-1` from an
+  // `indexOf` that somehow found nothing would produce.
+  for (const [index, slot] of COLUMN_ORDER_DEFAULT.entries()) {
+    if (seen.has(slot)) continue
+    const previous = index === 0 ? -1 : order.indexOf(COLUMN_ORDER_DEFAULT[index - 1])
+    order.splice(previous + 1, 0, slot)
   }
   return order
 }
