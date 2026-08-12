@@ -723,8 +723,8 @@ function visibleGroupId(state: WorkspaceState, region: Region): string | null {
  * is a guarantee and where the other half comes from.
  *
  * Driven by `state.panes` rather than by `state.tabs` for two reasons. Every
- * pane in `region` gets a group whether or not a row names it — nothing here
- * can drop a terminal — and a pane's position among the groups does not move
+ * pane in `region` gets a group whether or not a row names it (nothing here
+ * can drop a terminal), and a pane's position among the groups does not move
  * when a row arrives for it, so nothing is reordered in the DOM either.
  *
  * **A dead pane is boxed like any other**, keeping its slot and its share, and
