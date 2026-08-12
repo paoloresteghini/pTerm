@@ -876,15 +876,19 @@ export function registerIpc(
    * blunter reason than either: a port is only true while the server holding
    * it is running, so a URL read back off disk at the next launch would open a
    * dead page and read as this feature being broken. The class says the same
-   * at itself (`devserver/registry.ts`), which is where the not-persisting is
-   * actually enforced.
+   * at itself (`devserver/registry.ts`), which is where the state actually
+   * lives: two maps, and no writer that reaches a disk.
    */
   const devServers = new DevServerRegistry()
 
   manager.onData((id, data) => {
     // Learned from the chunk already on its way to the renderer, rather than
-    // from a second listener: this is the only `manager.onData` in `src/`
-    // (measured 2026-08-12), so it is the one place a pty chunk is handled.
+    // from a second listener: `manager.onData` has exactly one consumer in
+    // `src/` and this is it (measured 2026-08-12), so the chunk the renderer
+    // is sent and the chunk the registry reads are the same one on the same
+    // call. Not the first hand a chunk passes through, though: `PtySession`
+    // reads it off the pty (`pty/session.ts`) and `SessionManager` fans it out
+    // to its listeners (`sessions/manager.ts`), both upstream of here.
     //
     // The pane's record is what names the project. A chunk knows only which
     // pane it came from, and `projectSlug` is the only project name a pane
