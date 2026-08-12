@@ -28,6 +28,7 @@ export function TabBar({
   canJoin,
   canOpen,
   onOpenBrowser,
+  canOpenBrowser = true,
   testIdPrefix = 'tab',
   capabilities,
   newLabel = 'New terminal',
@@ -63,6 +64,13 @@ export function TabBar({
    * bar this draws.
    */
   onOpenBrowser?: () => void
+  /**
+   * Whether that button has anything to act on. Read only where
+   * `onOpenBrowser` is given, and defaulted to on the way `capabilities` below
+   * is: a caller that passes the handler and nothing else means the button to
+   * work.
+   */
+  canOpenBrowser?: boolean
   /**
    * Distinguishes one bar's testids from another's when a second `TabBar`
    * is on screen. Defaults to `'tab'`, which reproduces today's ids
@@ -455,10 +463,18 @@ export function TabBar({
           aria-label="Open the dev server in a browser pane"
           title="Open the dev server in a browser pane"
           onClick={onOpenBrowser}
-          // No `disabled`, unlike `+` beside it: a project with no announced
-          // server still opens a blank pane, so there is no state in which this
-          // button has nothing to do.
-          className="cursor-default border-none bg-transparent px-3 text-xs text-faint hover:text-muted"
+          // Off where there is no project for main to hang a pane on. Both of
+          // those states are reachable and neither is quiet if this is left
+          // live: with no project active at all the press does nothing
+          // whatever, and on a project main has no row for it comes back as an
+          // error banner from a control that looked ready. The caller decides
+          // which projects those are.
+          //
+          // What it is NOT disabled for is the absence of a dev server. That
+          // opens a blank pane on purpose: detection is a bonus here, never a
+          // precondition.
+          disabled={!canOpenBrowser}
+          className="cursor-default border-none bg-transparent px-3 text-xs text-faint disabled:opacity-40 enabled:hover:text-muted"
         >
           ↗
         </button>

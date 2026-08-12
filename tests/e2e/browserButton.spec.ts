@@ -21,8 +21,8 @@
  * **The announcement is driven through a real pty**, by typing a `printf` into
  * a terminal pane and running it. Pty output is what files a URL: main's
  * registry is written from one `manager.onData` forward and from nowhere else
- * (`grep -rn '\.observe(' src/`, one hit outside the registry itself,
- * `src/main/ipc/register.ts`). The shell produces the escape bytes from the
+ * (`grep -rn 'devServers\.observe(' src/`, one hit,
+ * `src/main/ipc/register.ts:899`). The shell produces the escape bytes from the
  * format string rather than the test typing an ESC byte, which a terminal
  * would echo back as a visible `^[` instead of acting on.
  *
@@ -61,6 +61,19 @@ const SOCKET = 'pterm-e2e-devserver'
  */
 const PROJECT_ID = 'proj-id-9f'
 const PROJECT_SLUG = 'demo_web'
+
+/**
+ * The one project row every test starts with. `cwd` is filled in per test,
+ * since it is a fresh temp directory each time.
+ */
+const PROJECT_ROW = (): Record<string, unknown> => ({
+  id: PROJECT_ID,
+  name: 'demo',
+  slug: PROJECT_SLUG,
+  cwd: projectCwd,
+  presets: [],
+  activeTabId: null,
+})
 
 /** The prompt every pane in this file draws, so a test can wait for READY. */
 const PANE_PROMPT = 'pTermE2E$'
@@ -139,6 +152,11 @@ async function guestText(app: ElectronApplication, selector: string): Promise<st
  * read off the last `browsertab-` row (this file opens at most one browser
  * pane per test, so the last row is unambiguous).
  */
+/** Overwrite the seeded config, for a test that needs a different workspace. */
+async function writeConfig(config: unknown): Promise<void> {
+  await writeFile(join(configDir, 'config.json'), JSON.stringify(config), 'utf8')
+}
+
 async function pressBrowserButton(page: Page): Promise<string> {
   await page.getByTestId('open-devserver').click()
   const testId =
@@ -163,26 +181,13 @@ test.beforeEach(async () => {
   projectCwd = join(projectsRoot, 'demo')
   await mkdir(projectCwd, { recursive: true })
 
-  await writeFile(
-    join(configDir, 'config.json'),
-    JSON.stringify({
-      version: 9,
-      projects: [
-        {
-          id: PROJECT_ID,
-          name: 'demo',
-          slug: PROJECT_SLUG,
-          cwd: projectCwd,
-          presets: [],
-          activeTabId: null,
-        },
-      ],
-      panes: [],
-      tabs: [],
-      activeProjectId: PROJECT_ID,
-    }),
-    'utf8',
-  )
+  await writeConfig({
+    version: 9,
+    projects: [PROJECT_ROW()],
+    panes: [],
+    tabs: [],
+    activeProjectId: PROJECT_ID,
+  })
 
   const started = await startServer()
   server = started.server
@@ -205,8 +210,9 @@ test('the terminal tab bar offers the browser button and the browser column does
   await expect(page.getByTestId('tabbar').getByTestId('open-devserver')).toHaveCount(1)
 
   // Opens the browser column, which is what gives the absence below something
-  // to be absent from: with no browser pane in the active project, that column
-  // renders nothing at all and the check would pass without a bar existing.
+  // to be absent from: with no browser pane anywhere in the workspace, which
+  // is what `App.tsx` gates that column on, it renders nothing at all and the
+  // check would pass without a bar existing.
   await pressBrowserButton(page)
   await expect(page.getByTestId('browsertabbar')).toHaveCount(1)
 
@@ -214,6 +220,71 @@ test('the terminal tab bar offers the browser button and the browser column does
   // The same fact counted from the whole window, so a button rendered in some
   // third place would fail here even if it were outside the browser bar.
   await expect(page.getByTestId('open-devserver')).toHaveCount(1)
+
+  await app.close()
+})
+
+/**
+ * The two states the button is disabled in, both of them a project main cannot
+ * open a pane for, and both reachable with the bar on screen: `showsTabBar`
+ * reads column visibility and nothing else, so the bar is there on the welcome
+ * page too.
+ *
+ * They are separate tests because they disable it through separate halves of
+ * one predicate, and a single test would pass on either.
+ */
+test('the button is disabled with no project to open a pane for', async () => {
+  await writeConfig({ version: 9, projects: [], panes: [], tabs: [], activeProjectId: null })
+  const app = await launch()
+  const page = await app.firstWindow()
+  await expect(page.getByTestId('titlebar')).toBeVisible({ timeout: 20_000 })
+
+  // Present but dead, rather than gone: the `+` beside it behaves the same
+  // way here, since `canOpenSession` is false with no project.
+  await expect(page.getByTestId('open-devserver')).toBeDisabled()
+
+  await app.close()
+})
+
+test('the button is disabled on Unsorted, which config has no project row for', async () => {
+  // A browser pane whose slug names no project is what puts Unsorted on
+  // screen (`withUnsorted`, `src/main/ipc/restore.ts`), and being sessionless
+  // it needs no pty to exist. The real project is left in the config on
+  // purpose: if `activeProjectId` did not stick, the app would fall back to it
+  // and the button would be enabled, so this test fails rather than passing
+  // for the wrong reason.
+  await writeConfig({
+    version: 9,
+    projects: [PROJECT_ROW()],
+    panes: [
+      {
+        id: 'straypane',
+        projectSlug: 'no_such_project',
+        cwd: projectCwd,
+        type: 'browser',
+        url: 'about:blank',
+      },
+    ],
+    tabs: [
+      {
+        id: 'straypane',
+        groupId: 'straypane',
+        activePaneId: 'straypane',
+        layout: { dir: 'row', ratio: [1], kids: ['straypane'] },
+      },
+    ],
+    activeProjectId: 'unsorted',
+  })
+  const app = await launch()
+  const page = await app.firstWindow()
+  await expect(page.getByTestId('titlebar')).toBeVisible({ timeout: 20_000 })
+
+  // The premise, pinned: Unsorted really is the active project, so the
+  // assertion below is about that half of the predicate and not about a
+  // project having gone missing.
+  await expect(page.getByTestId('project-unsorted')).toHaveAttribute('data-active', 'true')
+
+  await expect(page.getByTestId('open-devserver')).toBeDisabled()
 
   await app.close()
 })

@@ -822,11 +822,16 @@ export function App() {
    * The two calls take DIFFERENT names for the same project. `devServerUrl`
    * is asked by `project.slug`, because a pane carries only a slug and that is
    * what main files a URL under, while `openBrowser` is asked by
-   * `project.id`, which is what it looks a project row up by. Nothing
-   * in main converts between them for this feature (see both doc comments in
-   * `shared/ipc.ts`), so getting them the wrong way round is not a crash: the
-   * URL lookup answers null, which is exactly what "no server has announced
-   * itself" answers, and the button goes on opening blank panes.
+   * `project.id`, which is what it looks a project row up by.
+   *
+   * Nothing turns an id into a slug on the LOOKUP path: `devServerUrl`'s
+   * handler reads the registry by the string it is handed and consults no
+   * config at all (`ipc/register.ts`). `openBrowser` does read a slug off the
+   * row it found by id, but only to stamp the pane it writes, and that
+   * conversion is not shared with the other handler. So getting the two the
+   * wrong way round is not a crash: the URL lookup answers null, which is
+   * exactly what "no server has announced itself" answers, and the button goes
+   * on opening blank panes.
    *
    * `?? undefined` because null is not absent to a parameter that is
    * `url?: string`. Main writes `about:blank` for the absent case, which is
@@ -837,6 +842,30 @@ export function App() {
    * `onClick`, so a first parameter of any kind would arrive as a
    * `MouseEvent`.
    */
+  /**
+   * Whether the tab bar's browser button has a project to open a pane for.
+   *
+   * Not `canOpenSession`, which the `+` beside it reads: that asks whether a
+   * PTY can start here, and a browser pane starts none and never visits the
+   * cwd it records, so a project whose directory has been renamed can still
+   * have one. What `openBrowser` needs is a row in `config.projects` to look
+   * the id up in, and both states that fail that test are reachable from a
+   * bar that is on screen:
+   *
+   * - no project at all, since `showsTabBar` reads column visibility and
+   *   nothing else, so the bar renders on the welcome page too. The press
+   *   would hit the early return below and do nothing at all;
+   * - Unsorted, which the renderer holds as a project (`withUnsorted`, in
+   *   `ipc/restore.ts`) while config has no row for it. The press would reach
+   *   main, come back null and raise an error banner.
+   *
+   * Deliberately not the browser column's own `canOpen={project !== undefined}`
+   * either. That one admits Unsorted, which is the second case above, and its
+   * `+` puts that banner up today. Left as it is: it is one column over and
+   * not this button.
+   */
+  const canOpenDevServer = project !== undefined && project.id !== UNSORTED_ID
+
   const openDevServer = useCallback(() => {
     if (!project) return
     window.pterm
@@ -1942,6 +1971,7 @@ export function App() {
           canJoin={canJoin}
           canOpen={canOpen}
           onOpenBrowser={openDevServer}
+          canOpenBrowser={canOpenDevServer}
         />
       ) : null}
       {error ? (

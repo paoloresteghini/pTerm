@@ -1463,8 +1463,11 @@ export interface PTermApi {
    * a pane carries is `projectSlug` (`TabDescriptor`), so the slug is the only
    * name main ever files one under. A caller holding a `ProjectDescriptor` has
    * both fields and has to hand each of these two calls its own: `slug` here,
-   * `id` there. Nothing in main converts between them for this feature, so
-   * passing an id here answers null rather than the URL.
+   * `id` there. Nothing turns one name into the other on THIS call's path: the
+   * handler reads the registry by the string it is given and consults no
+   * config, so passing an id here answers null rather than the URL.
+   * `openBrowser` above does read a slug off the row it finds by id, to stamp
+   * the pane it writes, and that conversion is its own.
    *
    * Runtime only, and never persisted: a URL from a previous run is a lie the
    * moment that server is gone. It is dropped when the pane that announced it
