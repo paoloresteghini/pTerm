@@ -8,9 +8,9 @@
  * sits on the pane rather than on a tool's arguments.
  *
  * Every test here drives a navigation with NO tool argument in it: a link
- * clicked inside the page, and a redirect served by a page that was itself
- * loopback. Neither has a `url` parameter for a tool to check, which is the
- * argument the whole task rests on.
+ * clicked inside the page, a redirect served by a page that was itself
+ * loopback, and a subframe of a loopback page. None has a `url` parameter for
+ * a tool to check, which is the argument the whole task rests on.
  *
  * The pane is seeded into `config.json` rather than opened through the
  * palette, and ownership arrives through `PTERM_AGENT_BROWSER_PANE`
@@ -44,11 +44,27 @@ const PANE = 'b1'
 const OWNER = 'claude-1'
 
 /**
- * The origin a confined pane must not reach. Never actually loaded by the
- * confined tests: the point is that the navigation is refused before a
- * request is made, so no test here depends on the network.
+ * The origin a confined pane must not reach.
+ *
+ * The confined tests never load it, and that is their point: the navigation
+ * is refused before a request is made, and they assert on the refusal line
+ * and on the pane not having moved. The one test that does reach the network
+ * is the unowned control ("the same link navigates a browser pane the user
+ * opened by hand"), which has to: what it proves is that a pane no agent owns
+ * really does leave loopback, so a machine that cannot reach this origin is
+ * the whole question. It stays green offline anyway because it asserts on the
+ * origin the guest ends up at rather than on the page loading, and a load
+ * that fails commits an error page at the URL it failed on (measured
+ * 2026-08-12 against a host that cannot resolve: `ERR_NAME_NOT_RESOLVED`, and
+ * `getURL()` still answered with that URL).
  */
 const AWAY = 'https://example.com/'
+
+/**
+ * How that origin appears in a refusal line. `refusesNonLoopback` logs the
+ * origin rather than the full URL, so this is `AWAY` without its path.
+ */
+const AWAY_ORIGIN = 'https://example.com'
 
 let userDataDir: string
 let configDir: string
@@ -73,9 +89,10 @@ let baseUrl: string
 let running: ElectronApplication | null = null
 
 /**
- * A throwaway HTTP server on an OS-assigned loopback port, serving the three
- * pages these tests navigate between: the page the pane starts on, a second
- * local page, and a `/bounce` that answers 302 to a non-loopback origin.
+ * A throwaway HTTP server on an OS-assigned loopback port, serving the pages
+ * these tests navigate between: the page the pane starts on, a second local
+ * page, a `/bounce` that answers 302 to a non-loopback origin, and a
+ * `/framed` that puts that origin in an iframe.
  *
  * Local rather than a fixture `file://` URL, because a `file://` page is not
  * loopback (`isLoopbackUrl` refuses every non-http scheme) and would be
@@ -95,12 +112,26 @@ function startServer(): Promise<{ server: Server; baseUrl: string }> {
         res.end('<!doctype html><title>next</title><h1 id="marker">local-next-loaded</h1>')
         return
       }
+      // A loopback page that frames a remote origin: the page an agent with a
+      // shell can write and serve, and the reason the confinement cannot stop
+      // at the main frame. The iframe starts on `about:blank` and is pointed
+      // at `AWAY` from script, so the pane's own navigation to this page is
+      // finished and asserted before the subframe navigation begins.
+      if (req.url === '/framed') {
+        res.end(
+          '<!doctype html><title>framed</title><h1 id="marker">local-framed-loaded</h1>' +
+            '<iframe id="fr" src="about:blank"></iframe>' +
+            `<button id="frame-away" onclick="document.getElementById('fr').src='${AWAY}'">go</button>`,
+        )
+        return
+      }
       res.end(
         '<!doctype html><title>start</title><h1 id="marker">local-start-loaded</h1>' +
           `<a id="away" href="${AWAY}">away</a>` +
           `<a id="blank" href="${AWAY}" target="_blank">blank</a>` +
           '<a id="local" href="/next">local</a>' +
-          '<a id="bounce" href="/bounce">bounce</a>',
+          '<a id="bounce" href="/bounce">bounce</a>' +
+          '<a id="framed" href="/framed">framed</a>',
       )
     })
     created.once('error', reject)
@@ -228,29 +259,52 @@ async function clickInGuest(app: ElectronApplication, selector: string): Promise
 }
 
 /**
- * Waits until the start page's links are actually in the guest.
+ * The URLs of the one live guest's subframes, main frame excluded, or null
+ * while there is not exactly one guest. Read main-side through
+ * `mainFrame.frames` for the same measured reason as `guestUrl`.
+ */
+async function subframeUrls(app: ElectronApplication): Promise<string[] | null> {
+  return app.evaluate(({ webContents }) => {
+    const guests = webContents.getAllWebContents().filter((c) => c.getType() === 'webview')
+    if (guests.length !== 1) return null
+    return guests[0]!.mainFrame.frames.map((frame) => frame.url)
+  })
+}
+
+/**
+ * Waits until the guest is on `url` AND `selector` is actually in its
+ * document.
  *
  * The URL alone is not enough, and this cost a run to find: `getURL()` answers
- * with the start page as soon as the navigation commits, which is before the
+ * with the page as soon as the navigation commits, which is before the
  * document has been parsed. A click dispatched in that window finds no
  * element, does nothing, and the test then waits ten seconds for a refusal
- * that was never going to come. Asking for one of the links is asking the
- * question the click depends on.
+ * that was never going to come. Asking for the element is asking the question
+ * the click depends on.
  */
-async function waitForStartPage(app: ElectronApplication): Promise<void> {
+async function waitForGuestPage(
+  app: ElectronApplication,
+  url: string,
+  selector: string,
+): Promise<void> {
   await expect
     .poll(
       () =>
-        app.evaluate(({ webContents }) => {
+        app.evaluate(({ webContents }, sel) => {
           const guests = webContents.getAllWebContents().filter((c) => c.getType() === 'webview')
           if (guests.length !== 1) return 'no guest'
           return guests[0]!.executeJavaScript(
-            "location.href + (document.querySelector('#bounce') ? ' ready' : ' loading')",
+            `location.href + (document.querySelector('${sel}') ? ' ready' : ' loading')`,
           ) as Promise<string>
-        }),
+        }, selector),
       { timeout: 20_000 },
     )
-    .toBe(`${baseUrl} ready`)
+    .toBe(`${url} ready`)
+}
+
+/** The start page, ready to be clicked. */
+async function waitForStartPage(app: ElectronApplication): Promise<void> {
+  await waitForGuestPage(app, baseUrl, '#bounce')
 }
 
 test('a link to a non-loopback origin does not navigate an agent-owned pane', async () => {
@@ -262,7 +316,7 @@ test('a link to a non-loopback origin does not navigate an agent-owned pane', as
 
   // The refusal is the positive signal that the click was handled at all.
   await expect.poll(() => stderr(), { timeout: 10_000 }).toContain(
-    `refused a non-loopback navigation to ${AWAY} in agent-owned browser pane ${PANE}`,
+    `refused a non-loopback navigation to ${AWAY_ORIGIN} in agent-owned browser pane ${PANE}`,
   )
   // And the pane is still on the page it was on, rather than showing an error
   // card for a request that was made anyway.
@@ -295,7 +349,7 @@ test('a redirect off loopback does not move an agent-owned pane', async () => {
   await clickInGuest(app, '#bounce')
 
   await expect.poll(() => stderr(), { timeout: 10_000 }).toContain(
-    `refused a non-loopback navigation to ${AWAY} in agent-owned browser pane ${PANE}`,
+    `refused a non-loopback navigation to ${AWAY_ORIGIN} in agent-owned browser pane ${PANE}`,
   )
   expect(await guestUrl(app)).toBe(baseUrl)
 
@@ -324,6 +378,39 @@ test('the same link navigates a browser pane the user opened by hand', async () 
 })
 
 /**
+ * The fourth route out of a page, and the one an agent with a shell reaches
+ * most easily: it can author and serve a loopback page that frames any remote
+ * origin. `will-navigate` is main-frame only, so the confinement has to be on
+ * `will-frame-navigate` as well or the frame lands wherever it likes inside a
+ * confined pane and whatever reads the pane back reads that.
+ *
+ * The pane's own navigation (to the framing page) is loopback and is asserted
+ * to succeed first, so a refusal seen afterwards can only be the subframe's.
+ */
+test('an iframe to a non-loopback origin does not load in an agent-owned pane', async () => {
+  const { app, stderr } = await launch(true)
+  await expect((await app.firstWindow()).getByTestId('titlebar')).toBeVisible({ timeout: 20_000 })
+  await waitForStartPage(app)
+
+  await clickInGuest(app, '#framed')
+  await waitForGuestPage(app, `${baseUrl}framed`, '#frame-away')
+  expect(stderr()).not.toContain('refused a non-loopback navigation')
+
+  await clickInGuest(app, '#frame-away')
+
+  await expect.poll(() => stderr(), { timeout: 10_000 }).toContain(
+    `refused a non-loopback navigation to ${AWAY_ORIGIN} in agent-owned browser pane ${PANE}`,
+  )
+  // The frame never left where it started, rather than loading and being
+  // reported after the fact.
+  expect(await subframeUrls(app)).toEqual(['about:blank'])
+  // And the pane itself is still on the framing page.
+  expect(await guestUrl(app)).toBe(`${baseUrl}framed`)
+
+  await app.close()
+})
+
+/**
  * The third route out of a page, and the one that escaped this confinement
  * until it was measured: a `target=_blank` click is answered by
  * `setWindowOpenHandler` (`src/main/index.ts`) loading the page in the same
@@ -339,7 +426,7 @@ test('a target=_blank link to a non-loopback origin does not navigate an agent-o
   await clickInGuest(app, '#blank')
 
   await expect.poll(() => stderr(), { timeout: 10_000 }).toContain(
-    `refused a non-loopback navigation to ${AWAY} in agent-owned browser pane ${PANE}`,
+    `refused a non-loopback navigation to ${AWAY_ORIGIN} in agent-owned browser pane ${PANE}`,
   )
   expect(await guestUrl(app)).toBe(baseUrl)
 

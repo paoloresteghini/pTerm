@@ -393,14 +393,38 @@ const guests = new Map<number, { paneId: string; isOwned: () => boolean }>()
  */
 export function refusesNonLoopback(guestId: number, url: string): boolean {
   const guest = guests.get(guestId)
-  if (!guest || !guest.isOwned() || isLoopbackUrl(url)) return false
+  // Deliberately fail-open, and this is where the confinement is not yet on.
+  // A guest becomes known only when `BrowserPane.tsx` reports it on
+  // `did-attach`, over one fire-and-forget IPC, so a navigation that starts
+  // before that message arrives (the URL a restored pane is put back on, or a
+  // redirect off it) reaches no listener and is answered here with false.
+  // Nothing in this process compensates for that window: the report arriving
+  // is what turns the confinement on, and until it does an owned pane behaves
+  // like any other.
+  if (!guest) return false
+  if (!guest.isOwned() || isLoopbackUrl(url)) return false
   // How an attempt is reported today. The pane simply stays where it was,
   // which on its own is indistinguishable from a link that did nothing, so
   // the refusal says so where a developer running the app can see it. The
   // strip that puts this in front of the user is Task 9 of this plan, and
   // this is the point it will be fed from.
+  //
+  // By origin rather than by the whole URL: the full text carries the query
+  // string and can carry embedded credentials, and the page a confined pane
+  // sits on can write this line as often as it likes by looping
+  // `location.href`. `origin` is the string "null" for a URL with no host of
+  // its own (`mailto:`, `about:`, measured 2026-08-12), where the scheme is
+  // the only part worth naming. Collapsing repeats belongs to Task 9's strip,
+  // not here.
+  let where: string
+  try {
+    const parsed = new URL(url)
+    where = parsed.origin === 'null' ? parsed.protocol : parsed.origin
+  } catch {
+    where = 'an unparseable URL'
+  }
   console.warn(
-    `pTerm: refused a non-loopback navigation to ${url} in agent-owned browser pane ${guest.paneId}`,
+    `pTerm: refused a non-loopback navigation to ${where} in agent-owned browser pane ${guest.paneId}`,
   )
   return true
 }
@@ -637,9 +661,12 @@ export function registerIpc(
    * dismissing the session pane releases every browser pane it owned, and
    * closing or dismissing an agent-owned browser pane directly releases just
    * that one entry, leaving its (now former) owner's other entries alone.
-   * Nothing sets an entry yet: the tool call that creates an agent-owned
-   * browser pane is later work, and this map is the association it will
-   * populate.
+   * The tool call that claims a browser pane for an agent is later work in
+   * this plan, and this map is the association it will populate. Until it
+   * lands the map has exactly one writer, the `PTERM_AGENT_BROWSER_PANE`
+   * seam directly below: a knob no user sets, carried so the confinement can
+   * be tested at all. That is a temporary state, and what ends it is the
+   * claim call arriving, which is also when the seam goes.
    */
   const agentSessions = new Map<string, string>()
 
@@ -2388,7 +2415,16 @@ export function registerIpc(
    * These two events are not every route out of a page. The third,
    * `target=_blank`, is refused in `setWindowOpenHandler` (`main/index.ts`)
    * through the same `refusesNonLoopback` call, for the measured reason given
-   * there and on that function.
+   * there and on that function. The fourth is a subframe, refused by
+   * `will-frame-navigate` below.
+   *
+   * What this is worth, stated plainly for whoever reads it next: it is
+   * navigation-level confinement, a hardening rather than a seal. Every event
+   * here sees a navigation, so a page already loaded in a confined pane can
+   * still pull subresources from any origin (an `img`, a `fetch`, an XHR) and
+   * nothing refuses those. What is held to loopback is where the pane and its
+   * frames come to rest, which is what anything reading the pane's content
+   * back would otherwise see.
    */
   ipcMain.on(CHANNELS.browserGuestAttached, (_event, paneId: string, guestId: number) => {
     // A second report for a guest already known would otherwise stack a second
@@ -2407,5 +2443,19 @@ export function registerIpc(
 
     guest.on('will-navigate', refuse)
     guest.on('will-redirect', refuse)
+    // Subframes, which neither event above can see: `will-navigate` is
+    // main-frame only. Measured 2026-08-12 with this line removed, on an
+    // agent-owned pane: a loopback page that pointed an iframe at
+    // `https://example.com/` loaded it into the frame, with nothing logged.
+    // An agent has a shell, so authoring and serving that page is the
+    // cheapest way out of this boundary there is.
+    //
+    // No `isMainFrame` filter, which was measured rather than assumed:
+    // `will-frame-navigate` does fire for the main frame as well, where
+    // `will-navigate` already refuses, but a main-frame click at a refused
+    // origin still logs exactly one line with both listeners attached
+    // (measured 2026-08-12, counting the lines on stderr), so the overlap
+    // costs nothing to leave in.
+    guest.on('will-frame-navigate', refuse)
   })
 }

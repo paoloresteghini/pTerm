@@ -504,19 +504,6 @@ app.on('web-contents-created', (_event, contents) => {
     // regardless of which one Chromium reports, so every disposition is
     // handled the same way here.
     //
-    // The third route out of a page, and the one the pane's own
-    // `will-navigate`/`will-redirect` listeners (`registerIpc`) cannot see:
-    // this handler answers a `target=_blank` click by loading the page
-    // itself, and Electron emits no `will-navigate` for a navigation main
-    // starts through `loadURL`. Measured 2026-08-12 before this check
-    // existed: such a click in an agent-owned pane loaded
-    // `https://example.com/` in the pane, with nothing logged. Refused here
-    // through the same function the other two routes call, so a confined
-    // pane has one rule rather than two that could disagree; a pane no agent
-    // owns is unaffected and still loads its popup in place, which is what
-    // `browser.spec.ts`'s `target=_blank` test asserts.
-    if (refusesNonLoopback(contents.id, url)) return { action: 'deny' }
-
     // Guarded to `http:`/`https:` rather than handed to `loadURL` unchecked:
     // `loadURL` requires a URL with its protocol prefix already on it and
     // rejects otherwise, and a scheme this pane was never going to render
@@ -526,7 +513,26 @@ app.on('web-contents-created', (_event, contents) => {
     try {
       const parsed = new URL(url)
       if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-        void contents.loadURL(url)
+        // The third route out of a page, and the one the pane's own
+        // `will-navigate`/`will-redirect` listeners (`registerIpc`) cannot
+        // see: this handler answers a `target=_blank` click by loading the
+        // page itself, and Electron emits no `will-navigate` for a
+        // navigation main starts through `loadURL`. Measured 2026-08-12
+        // before this check existed: such a click in an agent-owned pane
+        // loaded `https://example.com/` in the pane, with nothing logged.
+        // Refused through the same function the other routes call, so a
+        // confined pane has one rule rather than several that could
+        // disagree; a pane no agent owns is unaffected and still loads its
+        // popup in place, which is what `browser.spec.ts`'s `target=_blank`
+        // test asserts.
+        //
+        // Below the scheme guard rather than above it so the line it logs is
+        // only ever about a page this pane would otherwise have loaded. A
+        // `mailto:` popup is not a navigation off loopback, and saying it
+        // was would be false at exactly the moment someone reads these lines
+        // to see what an agent tried. Such a popup is dropped either way,
+        // by the guard.
+        if (!refusesNonLoopback(contents.id, url)) void contents.loadURL(url)
       }
     } catch {
       // Unparseable: nothing to navigate to.
