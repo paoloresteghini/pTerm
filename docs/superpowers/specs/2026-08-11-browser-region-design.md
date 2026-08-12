@@ -88,7 +88,6 @@ Reducer changes in `workspaceReducer`:
 - `opened` and `activatedTab` route to the active-id field that matches the
   pane's kind.
 - `closedPane` picks the replacement selection from within the same region.
-- One new action, `activatedRegion`, for focus (below).
 
 ### Render and column plumbing
 
@@ -96,12 +95,27 @@ Reducer changes in `workspaceReducer`:
 `COLUMN_ORDER_DEFAULT` (`src/renderer/lib/columnOrder.ts`), placed immediately
 after `'terminal'`.
 
-Two consequences come free and are worth stating because they remove work:
+What an existing profile does on upgrade (both corrected 2026-08-12, during the
+final fix wave, where the shipped code disagreed with what this section
+originally claimed):
 
-- `columnIsCollapsed` reads a missing key as collapsed, so every profile written
-  before this change starts with the region hidden. No migration.
-- `orderFromStored` appends a slot the stored list never mentions, so an upgrade
-  gains the column rather than losing the user's order.
+- The stored flag defaults SHOWN, not hidden: `App.tsx` reads it as
+  `storedCollapsed(HIDDEN_KEYS.browser, false)`, alone among the columns. That
+  is deliberate, and the per-project draw gate is what makes it safe: a profile
+  with no browser panes still sees nothing. Defaulting hidden would strand a
+  profile that already has browser panes, since this column has no menu item
+  and no shortcut with which to bring it back. (`columnIsCollapsed`, which does
+  read a missing key as collapsed, has nothing to do with it: it is applied to
+  the `columnsVisible` IPC payload in `src/main/index.ts` and never to
+  localStorage.)
+- `orderFromStored` inserts a slot the stored list never mentions immediately
+  right of whichever default-order slot precedes it, rather than appending it.
+  Appending was a fallback rather than a decision, and it would have given the
+  browser column the far right of the row, past notes and todos, on every
+  profile that had ever dragged a column: only a profile that stored no order
+  at all would have got it beside the terminal. The rule changed for every
+  slot, not for this one: an old profile that never saw `todos` now gains it at
+  its default position too.
 
 The region is `BrowserColumn.tsx`: a `<Panel>` (so it inherits the resizer,
 `side={resizerSideFor(order, 'browser')}`) wrapping a tab strip and the region's
@@ -112,10 +126,13 @@ The tab strip reuses `TabBar` rather than forking a second bar that can drift
 from the first. It gains two props:
 
 - `testIdPrefix`, so browser tabs render as `browsertab-<id>` and not
-  `tab-<id>`. This is load bearing: 69 e2e locators across 12 spec files
-  (measured 2026-08-11) count terminal
-  tabs with `[data-testid^="tab-"]`, and a second bar under that prefix would
-  inflate every one of them.
+  `tab-<id>`. This is load bearing: the e2e suite counts terminal tabs with
+  `[data-testid^="tab-"]` in dozens of places, and a second bar under that
+  prefix would inflate every one of them. No number is written here on purpose,
+  the same decision `TabBar.tsx` records at the prop itself: the count this
+  paragraph used to carry was falsified by the commit that added the second
+  bar, whose own spec file uses the locator too. Count them when you need to,
+  with `grep -rn 'data-testid\^="tab-"' tests/e2e/ | wc -l`.
 - Capability flags that switch off restart, dismiss and join. A browser pane has
   no session, so it can never die, be restarted, or be joined.
 
@@ -140,6 +157,22 @@ do not move between regions.
   switching to a browserless project draws nothing, leaves no empty box, and
   touches no stored preference.
 - Restore honors the stored visibility, so a manual hide survives relaunch.
+- **The column is a full member of `COLUMN_IDS`, and that is the only route a
+  user has to hiding it by hand.** It has no View menu item and no shortcut of
+  its own, so hide-all (⌘⇧\) and its second press are what hide and show it.
+  Membership is also why `src/main/index.ts` maps it to a `toggle-browser` menu
+  id that does not exist: `getMenuItemById` returns null and the guard there
+  absorbs it, but the same loop folds every member into whether ANYTHING is
+  open, and the hide-all item's label has to answer for this column too.
+- **Hide-all writes the STORED flag, never the on-screen answer (fixed
+  2026-08-12).** The two differ for this column alone: `onScreenColumns.browser`
+  is the stored hide OR the active project having no browser pane. That derived
+  value decides the item's direction and its label, but writing it back would
+  store a hide nobody asked for, for every project, the moment hide-all was
+  pressed while looking at a browserless project, with no menu item and no
+  shortcut to undo it and nothing but opening a new browser pane to clear it.
+  Remembering off the stored flag is the same rule's other half: a hide taken
+  from a browserless project has to come back on the second press.
 
 **Drawing nothing does not mean unmounting (decided 2026-08-11, during Task
 8).** Every state that takes the region off screen, a collapse, a hide, and
@@ -282,8 +315,18 @@ first non-browser pane, and `activeBrowserTabId` to its first browser pane.
 
 ## Edge cases
 
-- Last browser closed: `activeBrowserTabId` becomes `null` and `activeRegion`
-  returns to `'terminal'`.
+- Last browser closed: the reducer sets `activeBrowserTabId` to `null`, and the
+  keys go back to the terminal region. Two details of what shipped are worth
+  having straight (recorded 2026-08-12):
+  - Config keeps the stale id. The renderer does send the `null` on, but
+    `setActiveBrowser` in `src/main/ipc/register.ts` early-returns on it, so the
+    last non-null id stays in the file. It is harmless because `describeProjects`
+    re-resolves that field against the project's browser tabs on restore and
+    answers `null` when there are none, but the file is not the truth here.
+  - It is `keyRegion`, not `activeRegion`, that goes back to the terminal.
+    `activeRegion` records where focus last went and nothing tells it the column
+    left the screen; `keyRegion` is derived from `onScreenColumns.browser` on
+    every render, which is exactly why it is derived rather than stored.
 - Status and dead maps never contain browser panes, so sidebar dots, `needsYou`
   and the tombstone flow are unaffected.
 - The command palette's pane list already maps every pane in `state.panes`.
