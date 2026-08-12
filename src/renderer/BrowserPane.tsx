@@ -49,6 +49,7 @@ declare global {
     loadURL(url: string): Promise<void>
     canGoBack(): boolean
     canGoForward(): boolean
+    getWebContentsId(): number
     openDevTools(): void
     closeDevTools(): void
     isDevToolsOpened(): boolean
@@ -240,6 +241,16 @@ export function BrowserPane({
     }
     const onDevToolsOpened = () => setDevToolsOpen(true)
     const onDevToolsClosed = () => setDevToolsOpen(false)
+    // Which guest this pane got, told to main, which is the only route by
+    // which main can tie the two together: see `browserGuestAttached` in
+    // `shared/ipc.ts` for why, and `register.ts`'s handler for what it is
+    // needed for (holding an agent-owned pane to loopback origins).
+    //
+    // On `did-attach` rather than here in the effect body: the guest does not
+    // exist yet at mount, and `getWebContentsId()` has nothing to answer with
+    // until it does.
+    const onAttach = () => window.pterm.browserGuestAttached(paneId, node.getWebContentsId())
+    node.addEventListener('did-attach', onAttach)
     node.addEventListener('did-navigate', onNavigate)
     node.addEventListener('did-navigate-in-page', onNavigateInPage)
     node.addEventListener('did-fail-load', onFailLoad)
@@ -248,6 +259,7 @@ export function BrowserPane({
     node.addEventListener('devtools-opened', onDevToolsOpened)
     node.addEventListener('devtools-closed', onDevToolsClosed)
     return () => {
+      node.removeEventListener('did-attach', onAttach)
       node.removeEventListener('did-navigate', onNavigate)
       node.removeEventListener('did-navigate-in-page', onNavigateInPage)
       node.removeEventListener('did-fail-load', onFailLoad)

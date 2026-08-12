@@ -6,7 +6,7 @@ import path from 'node:path'
 import { TmuxAdapter, TmuxNotInstalledError } from './tmux/adapter'
 import { resolveTmuxBin } from './tmux/resolve'
 import { SessionManager } from './sessions/manager'
-import { registerIpc } from './ipc/register'
+import { refusesNonLoopback, registerIpc } from './ipc/register'
 import { StatusRegistry } from './status/registry'
 import { createHookInbox } from './status/inbox'
 import { mergeTab, NotificationRouter } from './notify/router'
@@ -504,6 +504,19 @@ app.on('web-contents-created', (_event, contents) => {
     // regardless of which one Chromium reports, so every disposition is
     // handled the same way here.
     //
+    // The third route out of a page, and the one the pane's own
+    // `will-navigate`/`will-redirect` listeners (`registerIpc`) cannot see:
+    // this handler answers a `target=_blank` click by loading the page
+    // itself, and Electron emits no `will-navigate` for a navigation main
+    // starts through `loadURL`. Measured 2026-08-12 before this check
+    // existed: such a click in an agent-owned pane loaded
+    // `https://example.com/` in the pane, with nothing logged. Refused here
+    // through the same function the other two routes call, so a confined
+    // pane has one rule rather than two that could disagree; a pane no agent
+    // owns is unaffected and still loads its popup in place, which is what
+    // `browser.spec.ts`'s `target=_blank` test asserts.
+    if (refusesNonLoopback(contents.id, url)) return { action: 'deny' }
+
     // Guarded to `http:`/`https:` rather than handed to `loadURL` unchecked:
     // `loadURL` requires a URL with its protocol prefix already on it and
     // rejects otherwise, and a scheme this pane was never going to render

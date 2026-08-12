@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, shell, webContents } from 'electron'
 import { appendFile } from 'node:fs/promises'
 import {
   CHANNELS,
@@ -30,6 +30,7 @@ import {
 } from '../../shared/ipc'
 import type { ExitReason, SessionManager, PaneRecord, TerminalPaneRecord } from '../sessions/manager'
 import { normaliseUrl } from '../../shared/browserUrl'
+import { isLoopbackUrl } from '../../shared/localOrigin'
 import { ConfigStore, type PTermConfig } from '../state/store'
 import { StatusRegistry } from '../status/registry'
 import {
@@ -339,6 +340,59 @@ export function releaseAgentSession(agentSessions: Map<string, string>, sessionP
   }
 }
 
+/**
+ * Every browser-pane guest this process has been told about, by the
+ * `webContents` id `BrowserPane.tsx` reported (`browserGuestAttached`): which
+ * pane it belongs to, and whether an agent owns that pane right now.
+ *
+ * At module scope rather than inside `registerIpc` because two places have to
+ * ask, and only one of them is in that closure: the navigation events
+ * attached below, and `setWindowOpenHandler` in `main/index.ts`, which is
+ * where a `target=_blank` click ends up. `agentSessions` itself does not
+ * escape: what is stored here is one thunk per guest, which can answer
+ * "is this pane owned right now" without handing the map out.
+ *
+ * Entries are added when a guest attaches and dropped when it is destroyed,
+ * so this holds one entry per browser pane on screen rather than one per pane
+ * the process has ever seen.
+ */
+const guests = new Map<number, { paneId: string; isOwned: () => boolean }>()
+
+/**
+ * Whether a browser pane's guest must be kept off `url`, reporting the
+ * attempt when it must.
+ *
+ * The two callers differ only in how they then refuse: the navigation events
+ * in `registerIpc` call `preventDefault`, and `setWindowOpenHandler` in
+ * `main/index.ts` declines to load the page. The decision and the line that
+ * reports it live here so the two cannot drift apart, and so there is one
+ * string for `tests/e2e/browserMcp.spec.ts` to wait for.
+ *
+ * Both callers are needed, which was measured rather than assumed. With only
+ * the navigation events attached, a `target=_blank` link to
+ * `https://example.com/` clicked inside an agent-owned pane loaded that page
+ * in the pane (measured 2026-08-12, with nothing logged): the window-open
+ * handler answers such a click by calling `loadURL` itself, and Electron does
+ * not emit `will-navigate` for a navigation main starts that way.
+ *
+ * False for a guest nothing has reported, for a pane no agent owns (a pane
+ * the user opened by hand is never confined), and for a loopback URL, which
+ * is what the confinement exists to allow.
+ */
+export function refusesNonLoopback(guestId: number, url: string): boolean {
+  const guest = guests.get(guestId)
+  if (!guest || !guest.isOwned() || isLoopbackUrl(url)) return false
+  // How an attempt is reported today. The pane simply stays where it was,
+  // which on its own is indistinguishable from a link that did nothing, so
+  // the refusal says so where a developer running the app can see it. The
+  // strip that puts this in front of the user is Task 9 of this plan, and
+  // this is the point it will be fed from.
+  console.warn(
+    `pTerm: refused a non-loopback navigation to ${url} in agent-owned browser pane ${guest.paneId}`,
+  )
+  return true
+}
+
 export function registerIpc(
   manager: SessionManager,
   getWindow: () => BrowserWindow | null,
@@ -571,6 +625,31 @@ export function registerIpc(
    * this map is the association it will populate.
    */
   const agentSessions = new Map<string, string>()
+
+  /*
+   * The only writer that map has today, and it is here for the e2e suite
+   * rather than for a user: `PTERM_AGENT_BROWSER_PANE=browserPane:ownerPane`
+   * marks one browser pane as owned by one session for the life of a launch.
+   *
+   * Why it exists at all. The confinement below only ever applies to an
+   * agent-owned pane, and the tool call that claims one is later work in this
+   * plan (`docs/superpowers/plans/2026-08-12-browser-mcp-foundation.md`,
+   * Task 8). Without a way to reach the owned state, an e2e test of the rule
+   * could only watch an unowned pane navigate normally, which passes whether
+   * the rule is wired up or deleted. This is what makes
+   * `tests/e2e/browserMcp.spec.ts` able to fail.
+   *
+   * Unset in an ordinary launch and in every other spec, so a user's browser
+   * panes carry no owner and nothing here confines them.
+   * `PTERM_EXTERNAL_LOG` (the `openExternal` handler, below) is the same
+   * trade already made in this file: a knob no user sets, carried in
+   * production code because what it makes observable cannot be observed any
+   * other way.
+   */
+  const seededOwner = (process.env.PTERM_AGENT_BROWSER_PANE ?? '').split(':')
+  if (seededOwner.length === 2 && seededOwner[0] && seededOwner[1]) {
+    agentSessions.set(seededOwner[0], seededOwner[1])
+  }
 
   registry.onTransition(({ tabId, to }) => {
     // `sinceOf` read here rather than carried on the transition: the registry
@@ -2262,5 +2341,54 @@ export function registerIpc(
         panes: config.panes.map((row) => (row.id === paneId ? { ...row, url } : row)),
       })
     })
+  })
+
+  /*
+   * Where an agent-owned browser pane is held to loopback origins.
+   *
+   * On the PANE, not inside the tool that navigates it, and that is the whole
+   * point: a page navigates itself. The two routes these listeners see, both
+   * driven by `tests/e2e/browserMcp.spec.ts`, move a pane with no tool
+   * argument anywhere in the picture: a link clicked inside the guest, and a
+   * redirect served by a page that was itself loopback. A check on a navigate
+   * tool's `url` parameter cannot see either one, because neither has a `url`
+   * parameter. `will-navigate` and `will-redirect` do see them.
+   *
+   * Main-side rather than on the `<webview>` element, which emits a
+   * `will-navigate` of its own: on the element that event is a copy, and
+   * Electron's own typings say so in as many words ("Calling
+   * `event.preventDefault()` does **NOT** have any effect",
+   * `node_modules/electron/electron.d.ts`, the `WebviewTag` block). The
+   * renderer could watch a navigation leave; it could not stop one.
+   *
+   * Ownership is asked at the moment a navigation starts rather than captured
+   * when the guest attaches (see `guests` and `refusesNonLoopback` above): a
+   * browser pane the user opened by hand has no entry in `agentSessions` and
+   * is never confined, and a pane whose agent session has gone
+   * (`releaseAgentSession`) is back to that state from the next navigation
+   * onwards, with nothing to detach.
+   *
+   * These two events are not every route out of a page. The third,
+   * `target=_blank`, is refused in `setWindowOpenHandler` (`main/index.ts`)
+   * through the same `refusesNonLoopback` call, for the measured reason given
+   * there and on that function.
+   */
+  ipcMain.on(CHANNELS.browserGuestAttached, (_event, paneId: string, guestId: number) => {
+    // A second report for a guest already known would otherwise stack a second
+    // pair of listeners on it.
+    if (guests.has(guestId)) return
+    const guest = webContents.fromId(guestId)
+    // Gone already, or an id nothing answers to. Either way there is nothing
+    // to confine, and a pane that attaches another guest reports again.
+    if (!guest) return
+    guests.set(guestId, { paneId, isOwned: () => agentSessions.has(paneId) })
+    guest.once('destroyed', () => guests.delete(guestId))
+
+    const refuse = (details: { url: string; preventDefault: () => void }): void => {
+      if (refusesNonLoopback(guestId, details.url)) details.preventDefault()
+    }
+
+    guest.on('will-navigate', refuse)
+    guest.on('will-redirect', refuse)
   })
 }

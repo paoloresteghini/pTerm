@@ -170,6 +170,18 @@ export async function launchApp(opts: {
   ghStubLog?: string
   /** Diverts `shell.openExternal` to this file instead of the real browser. */
   externalLog?: string
+  /**
+   * Marks one browser pane as owned by one agent session for this launch,
+   * as `browserPaneId:ownerPaneId`.
+   *
+   * Only `browserMcp.spec.ts` sets it, and only because there is no other
+   * way into that state yet: the MCP tool call that claims a browser pane is
+   * later work in the same plan, so without this the confinement rule in
+   * `registerIpc` has no pane to apply to and a test of it could only watch
+   * an unconfined pane behave normally. See the env var's own comment in
+   * `src/main/ipc/register.ts`.
+   */
+  agentBrowserPane?: string
   ghStubDelayMs?: number
 }): Promise<ElectronApplication> {
   assertTestSocket(opts.socket)
@@ -264,6 +276,9 @@ export async function launchApp(opts: {
       ...(opts.ghStubFixture !== undefined ? { PTERM_GH_STUB_FIXTURE: opts.ghStubFixture } : {}),
       ...(opts.ghStubLog !== undefined ? { PTERM_GH_STUB_LOG: opts.ghStubLog } : {}),
       ...(opts.externalLog !== undefined ? { PTERM_EXTERNAL_LOG: opts.externalLog } : {}),
+      ...(opts.agentBrowserPane !== undefined
+        ? { PTERM_AGENT_BROWSER_PANE: opts.agentBrowserPane }
+        : {}),
       ...(opts.ghStubDelayMs !== undefined
         ? { PTERM_GH_STUB_DELAY_MS: String(opts.ghStubDelayMs) }
         : {}),

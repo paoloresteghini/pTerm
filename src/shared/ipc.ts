@@ -48,6 +48,7 @@ export const CHANNELS = {
   menuCommand: 'pterm:menuCommand',
   setLayout: 'pterm:setLayout',
   setPaneUrl: 'pterm:setPaneUrl',
+  browserGuestAttached: 'pterm:browserGuestAttached',
   skills: 'pterm:skills',
   notesRead: 'pterm:notesRead',
   notesWrite: 'pterm:notesWrite',
@@ -1179,6 +1180,24 @@ export interface PTermApi {
    * `config.json` for a URL only the last hop is worth remembering.
    */
   setPaneUrl(paneId: string, url: string): void
+  /**
+   * Say which guest `webContents` a browser pane's `<webview>` just attached,
+   * so main can hold that pane to loopback origins while an agent owns it.
+   *
+   * Main cannot work the association out on its own. A guest's `webContents`
+   * carries no pane id; `will-attach-webview` (`main/index.ts`) is handed the
+   * `<webview>`'s own attributes and Electron's computed preferences, and no
+   * pane id is among them; and `webContents.getAllWebContents()` answers with
+   * every guest in the app at once, which is not an answer about one pane.
+   * The renderer is the only side holding both halves, so it is the side that
+   * says so.
+   *
+   * Fire-and-forget, like `setLayout` and `setPaneUrl` above: nothing in the
+   * renderer waits on this, and a browser pane the user opened by hand sends
+   * it too. Ownership is main's question, asked at the moment a navigation
+   * starts, not something the renderer asserts here.
+   */
+  browserGuestAttached(paneId: string, guestId: number): void
   /**
    * One directory of one project, directories first then files.
    *
