@@ -24,6 +24,7 @@ const DEFAULT_ORDER = [
   'projects',
   'tabs',
   'terminal',
+  'browser',
   'skills',
   'presets',
   'prompts',
@@ -238,8 +239,8 @@ test('dragging a column rightward across the terminal lands where the gap indica
 
   const orderBefore = await columnOrderOf(page)
   expect(orderBefore).toEqual([
-    'notes', 'files', 'projects', 'tabs', 'terminal', 'skills', 'presets', 'prompts', 'git', 'issues',
-    'todos',
+    'notes', 'files', 'projects', 'tabs', 'terminal', 'browser', 'skills', 'presets', 'prompts', 'git',
+    'issues', 'todos',
   ])
 
   const panelBefore = await boxOf(page, 'files-panel')
@@ -253,14 +254,17 @@ test('dragging a column rightward across the terminal lands where the gap indica
   expect(bordersBefore.right).toBeGreaterThan(0)
   expect(bordersBefore.left).toBe(0)
 
-  // Drop on gap(6): the sliver between `skills` and `presets`, right of the
-  // terminal. Pre-removal that is index 6; post-removal (files taken out of
-  // index 1) it is index 5, one place left of what the highlight showed.
-  await dragColumnTo(page, 'files-toggle', 6)
+  // Drop on gap(7): the sliver between `skills` and `presets`, right of the
+  // terminal. With `browser` occupying index 4, `presets` sits at index 7
+  // in `orderBefore`, so gap(7) is what precedes it now, not gap(6) (that
+  // would land before `skills` instead). Pre-removal that is index 7;
+  // post-removal (files taken out of index 1) it is index 6, one place left
+  // of what the highlight showed.
+  await dragColumnTo(page, 'files-toggle', 7)
 
   const expectedOrder = [
-    'notes', 'projects', 'tabs', 'terminal', 'skills', 'files', 'presets', 'prompts', 'git', 'issues',
-    'todos',
+    'notes', 'projects', 'tabs', 'terminal', 'browser', 'skills', 'files', 'presets', 'prompts', 'git',
+    'issues', 'todos',
   ]
   await expect.poll(() => columnOrderOf(page)).toEqual(expectedOrder)
 
