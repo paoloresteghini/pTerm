@@ -499,15 +499,27 @@ export function App() {
   const hideAllColumns = useCallback(() => {
     // Reads and writes the HIDDEN flags, not the collapse ones: this item is
     // the menu's, and the menu's business is presence.
+    //
+    // The DIRECTION comes off `onScreenColumns`, so the item does what its
+    // label says (main computes that label from the same answer). What it
+    // hides, remembers and restores comes off the STORED flags, because
+    // `setColumnHidden` writes those to localStorage. The two differ for the
+    // browser column alone, and only there does it matter: on a project with
+    // no browser panes its on-screen answer is "not there" for a reason that
+    // is not a preference, so writing that back would store a hide the user
+    // never asked for, for every project, with no menu item and no shortcut
+    // to undo it. Remembering off the stored flag is the other half: a hide
+    // taken while looking at a browserless project has to put the column back
+    // on the second press.
     const next = anyOpen(onScreenColumns)
       ? (() => {
-          const closed = hideAll(onScreenColumns)
+          const closed = hideAll(hiddenColumns)
           rememberedColumns.current = closed.remembered
           return closed.next
         })()
-      : restore(onScreenColumns, rememberedColumns.current)
+      : restore(hiddenColumns, rememberedColumns.current)
     for (const id of COLUMN_IDS) setColumnHidden(id, next[id])
-  }, [onScreenColumns, setColumnHidden])
+  }, [onScreenColumns, hiddenColumns, setColumnHidden])
 
   // Main cannot read localStorage or React state, so the menu's checkmarks
   // would otherwise be a guess. Sent on mount too, not only on change: a
@@ -571,7 +583,7 @@ export function App() {
    * Every browser pane in the workspace, not the active project's.
    *
    * The effect below drives ONE stored flag, and that flag is global: there
-   * is a single `pterm:hidden:browser`, read by a single `hiddenColumns`
+   * is a single `pterm:browserHidden`, read by a single `hiddenColumns`
    * entry, hidden and restored by a single hide-all. A rule of the form
    * "this project's count fell to zero, so hide" writes a global answer from
    * a local question, and is then wrong for every other project: measured,
@@ -2129,7 +2141,11 @@ export function App() {
         // Membership is per project, visibility is a global column
         // preference, and the column is drawn only where both allow it:
         // `hiddenColumns.browser` false, and the ACTIVE project holding at
-        // least one browser pane. Neither takes the panes down.
+        // least one browser pane. Both are already spelled out once, in
+        // `onScreenColumns.browser` above, and `hidden` takes it from there
+        // rather than re-deriving it: `keyRegion` reads the same value, and a
+        // second copy of the expression could be edited on one side only.
+        // Neither condition takes the panes down.
         //
         // `hidden` rather than `null` is a deliberate trade, decided
         // 2026-08-11. `browserGroups` is EVERY project's browser panes, so
@@ -2152,7 +2168,7 @@ export function App() {
             tabs={browserTabEntries}
             activeId={currentBrowserTabId}
             projects={state.projects}
-            hidden={browserPanes.length === 0 || hiddenColumns.browser}
+            hidden={onScreenColumns.browser}
             collapsed={browserCollapsed}
             onToggle={() => toggleColumnCollapsed('browser')}
             onDragStart={() => setDragging('browser')}

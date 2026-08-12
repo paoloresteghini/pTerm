@@ -546,6 +546,59 @@ test('hide all takes the browser column with it, keeps the page, and puts it bac
   await app.close()
 })
 
+/**
+ * Hide-all pressed while looking at a project that has no browser panes.
+ *
+ * The test above covers hide-all with the column on screen, which is the
+ * working path. This is the other one, and it is where the column's second
+ * gate bites: on a browserless project the column is off screen for a reason
+ * that is not a stored preference, and hide-all must neither write that reason
+ * down nor forget the column when it remembers what to reopen. Both directions
+ * are pressed here because both used to write it: the restore branch takes it
+ * whenever nothing is open, which on a fresh profile is the very first press.
+ */
+test('hide all from a browserless project leaves another project its browser column', async () => {
+  const app = await launch()
+  const page = await app.firstWindow()
+  await expect(page.getByTestId('titlebar')).toBeVisible({ timeout: 20_000 })
+
+  const clickMenuItem = (itemId: string): Promise<void> =>
+    app.evaluate(({ Menu }, id) => {
+      Menu.getApplicationMenu()?.getMenuItemById(id)?.click()
+    }, itemId)
+
+  const id = await openBrowserPaneViaPalette(page)
+  await expect(page.getByTestId('browser-column')).toBeVisible({ timeout: 20_000 })
+
+  await page.getByTestId('project-p2').click()
+  await expect(page.getByTestId('browser-column')).toBeHidden()
+
+  // The restore direction: nothing is open on this project, so the item offers
+  // to show, and with nothing remembered it must change nothing whatsoever.
+  await page.keyboard.press('Meta+Shift+Backslash')
+  await page.getByTestId('project-p1').click()
+  await expect(page.getByTestId('browser-column')).toBeVisible()
+  await expect(page.getByTestId(`browserpane-${id}`)).toBeVisible()
+
+  // The hide direction, which needs something on screen to hide. Taken from
+  // p2, so the column being hidden is one this window is not drawing: it still
+  // has to come back on the second press, or the only route to hiding it is a
+  // route with no way back.
+  await page.getByTestId('project-p2').click()
+  await clickMenuItem('toggle-notes')
+  await expect(page.getByTestId('notes-panel')).toBeVisible()
+  await page.keyboard.press('Meta+Shift+Backslash')
+  await expect(page.getByTestId('notes-panel')).toHaveCount(0)
+  await page.keyboard.press('Meta+Shift+Backslash')
+  await expect(page.getByTestId('notes-panel')).toBeVisible()
+
+  await page.getByTestId('project-p1').click()
+  await expect(page.getByTestId('browser-column')).toBeVisible()
+  await expect(page.getByTestId(`browserpane-${id}`)).toBeVisible()
+
+  await app.close()
+})
+
 test('a hide survives a relaunch, with the pane still there behind it', async () => {
   const first = await launch()
   const page = await first.firstWindow()
