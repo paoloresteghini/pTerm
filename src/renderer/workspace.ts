@@ -1277,7 +1277,35 @@ export function workspaceReducer(
       // `renamedTab` one is two rules that can drift, which is the mistake
       // the tab label made before `tabLabel` was one function.
       const named = new Map(action.panes.map((pane) => [pane.id, pane]))
-      return { ...state, panes: state.panes.map((pane) => named.get(pane.id) ?? pane) }
+      return {
+        ...state,
+        panes: state.panes.map((pane) => {
+          const incoming = named.get(pane.id)
+          if (!incoming) return pane
+          // The one field a reply of this shape cannot carry, kept from the
+          // record it is replacing. Both callers answer with `config.panes`,
+          // and `normalisePane` (`main/state/store.ts`) strips
+          // `agentSessionId` off every row `store.read()` returns, so a reply
+          // built from disk says "owned by nobody" about every pane in the
+          // window. Replaced wholesale, that silence cleared the flag on every
+          // agent-owned browser pane in the app, and `BrowserPane` stopped
+          // drawing the strip over a pane that was still owned, still confined
+          // and still the agent's: renaming any tab anywhere was enough. See
+          // the regression test in `tests/e2e/browserMcp.spec.ts`, which failed
+          // exactly this way before this branch.
+          //
+          // This is the same rule the merge above it already follows, one level
+          // down: a reply that is silent about something does not get to
+          // destroy it. Ownership is never ANNOUNCED by a reply either, so
+          // there is no case where the incoming record is the authority and
+          // this would be holding a stale flag: it is set by
+          // `browserPaneOpened` and cleared by `withAgentSessionsCleared` on
+          // the two paths where a pane leaves for good.
+          return incoming.agentSessionId === undefined && pane.agentSessionId !== undefined
+            ? { ...incoming, agentSessionId: pane.agentSessionId }
+            : incoming
+        }),
+      }
     }
 
     case 'statusSnapshot':

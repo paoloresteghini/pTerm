@@ -1251,11 +1251,23 @@ export interface PTermApi {
    * knows which pane it is.
    *
    * Nothing replays. A strip that mounts after an event has been sent has
-   * missed it for good, which is sound here only because the pane is created
-   * and mounted before the tool call that navigates it can finish (see
-   * `openAgentBrowserPane` and `guestForPane` in `main/ipc/register.ts`, which
-   * waits for the guest the mount attaches). A strip is never unmounted while
-   * its pane lives: `BrowserColumn` hides panes rather than unmounting them.
+   * missed it for good, and two things are what make that sound rather than
+   * lossy. The pane is created and mounted before the tool call that navigates
+   * it can finish (see `openAgentBrowserPane` and `guestForPane` in
+   * `main/ipc/register.ts`, which waits for the guest the mount attaches), so
+   * the first event cannot outrun the first strip. And nothing takes a strip
+   * off a pane that is still on screen: `BrowserColumn` hides panes rather than
+   * unmounting them, and a reply that is silent about `agentSessionId` is kept
+   * from clearing it by `panesMerged` (`renderer/workspace.ts`). That last one
+   * is not a hypothetical: it is where a rename anywhere in the app used to
+   * take the strip off every agent-owned pane.
+   *
+   * One exception, stated rather than left to be found: a renderer reload (⌘R)
+   * rebuilds the whole window, this strip and its pane's `<webview>` included.
+   * Ownership survives it, because `CHANNELS.restore`'s reply carries the
+   * runtime owner (`withAgentOwners`), so the strip is drawn again; its line is
+   * empty until the next call or refusal, and whatever was on it before is
+   * gone. The stderr line in `refusesNonLoopback` is the record that keeps.
    */
   onBrowserAgentActivity(listener: (event: BrowserAgentActivity) => void): () => void
   /**

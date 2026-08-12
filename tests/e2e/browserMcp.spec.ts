@@ -641,6 +641,11 @@ test("the strip names the agent's last call, and a pane the user opened by hand 
 
   const strip = window.getByTestId(`agentstrip-${paneId}`)
   await expect(strip).toBeVisible({ timeout: 20_000 })
+  // The marker, which is the half of this strip that is always there: a pane
+  // is not the user's whether or not anything has happened in it yet. Asserted
+  // because it is a requirement in its own right, and deleting the span that
+  // draws it passed every other assertion in this file.
+  await expect(strip).toContainText('agent')
   // The call, not the pane's current page: the two agree here, and the strip
   // is fed by the tool rather than by `did-navigate`, which is the difference
   // that matters when a page moves itself afterwards.
@@ -651,6 +656,43 @@ test("the strip names the agent's last call, and a pane the user opened by hand 
   // one, and `BrowserColumn` hides a pane rather than unmounting it.
   await expect(window.getByTestId(`browserpane-${HAND_OPENED}`)).toHaveCount(1)
   await expect(window.getByTestId(`agentstrip-${HAND_OPENED}`)).toHaveCount(0)
+
+  await app.close()
+})
+
+/**
+ * The strip survives a reply that has nothing to say about ownership.
+ *
+ * `agentSessionId` is stripped off every row `store.read()` returns
+ * (`normalisePane`), so every reply main builds from config arrives without
+ * it, and the renderer's reducers replace a pane record wholesale with what
+ * the reply carries. Renaming ANY tab in the app therefore used to clear the
+ * flag on every agent-owned browser pane, and the strip went with it: the pane
+ * stayed owned, stayed confined and stayed the agent's, and only the telling
+ * stopped. Measured before the fix, exactly this test: `toHaveCount(0)` where 1
+ * was expected.
+ *
+ * The tab renamed here is the SESSION's terminal tab, not the browser pane,
+ * which is the point: the reply is a list of every pane on disk, so the blast
+ * radius is every agent-owned pane in the window rather than the one that was
+ * touched.
+ *
+ * The rename is asserted to have landed before the strip is counted. Without
+ * that, a rename that silently did nothing would leave this test passing for
+ * the one reason it must not.
+ */
+test("renaming a tab elsewhere leaves the strip on the agent's pane", async () => {
+  const { app, window } = await launch()
+  const { sessionId, paneId } = await agentOnStartPage(app, window)
+  await expect(window.getByTestId(`agentstrip-${paneId}`)).toBeVisible({ timeout: 20_000 })
+
+  await window.getByTestId(`tablabel-${sessionId}`).dblclick()
+  const field = window.getByTestId(`tabinput-${sessionId}`)
+  await field.fill('payments api')
+  await field.press('Enter')
+  await expect(window.getByTestId(`tab-${sessionId}`)).toContainText('payments api')
+
+  await expect(window.getByTestId(`agentstrip-${paneId}`)).toHaveCount(1)
 
   await app.close()
 })

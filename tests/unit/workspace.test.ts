@@ -2186,4 +2186,34 @@ describe('panesMerged', () => {
     expect(next.panes.find((pane) => pane.id === 'bbb')).toEqual(before.panes[1])
     expect(next.dead).toEqual({ bbb: 0 })
   })
+
+  // The same rule one level down, and the one that shipped a defect: both
+  // callers (rename, recolour) answer with `config.panes`, and `normalisePane`
+  // strips `agentSessionId` off every row that comes off disk, so the reply is
+  // silent about ownership for every pane in the window. Replaced wholesale,
+  // that silence used to clear the flag and take the agent strip off a pane
+  // that was still owned and still confined.
+  //
+  // The title on the incoming row is what keeps this honest: without it, a
+  // reducer that ignored the reply entirely would pass too.
+  it('keeps agentSessionId when the reply that renames a pane is silent about it', () => {
+    const owned = { ...tab('bbb', 'lumio'), type: 'browser' as const, agentSessionId: 'aaa' }
+    const before: WorkspaceState = {
+      ...INITIAL_WORKSPACE_STATE,
+      projects: [project('p1', 'lumio')],
+      panes: [tab('aaa', 'lumio'), owned],
+      tabs: [tabRow('aaa', ['aaa']), tabRow('bbb', ['bbb'])],
+      activeProjectId: 'p1',
+    }
+    const next = workspaceReducer(before, {
+      type: 'panesMerged',
+      panes: [
+        { ...tab('aaa', 'lumio'), title: 'payments api' },
+        // The agent's own pane, as it comes back off disk: no owner on it.
+        { ...tab('bbb', 'lumio'), type: 'browser' as const },
+      ],
+    })
+    expect(next.panes.find((pane) => pane.id === 'aaa')?.title).toBe('payments api')
+    expect(next.panes.find((pane) => pane.id === 'bbb')?.agentSessionId).toBe('aaa')
+  })
 })

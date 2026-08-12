@@ -465,9 +465,17 @@ export function refusesNonLoopback(guestId: number, url: string): boolean {
   // pane sits on can write this line as often as it likes by looping
   // `location.href`. `origin` is the string "null" for a URL with no host of
   // its own (`mailto:`, `about:`, measured 2026-08-12), where the scheme is
-  // the only part worth naming. Repeats are not collapsed anywhere: the strip
-  // shows the LAST thing that happened rather than a list, so an origin
-  // refused a thousand times reads the same as one refused once.
+  // the only part worth naming.
+  //
+  // Neither report is collapsed here, and a page inside a confined pane can
+  // provoke both as fast as it can loop `location.href`: this costs one line
+  // and one IPC message per attempt, indefinitely. What is bounded is what
+  // survives, not the rate. The strip keeps the last event rather than a list,
+  // and drops one identical to what it is already showing rather than
+  // re-rendering (`AgentStrip.tsx`). Deduping here instead would need main to
+  // track the navigate events too: a refusal repeated after a tool call has
+  // since replaced the line has to reach the strip again, and nothing on this
+  // side knows what the strip is currently showing.
   let where: string
   try {
     const parsed = new URL(url)
@@ -736,6 +744,36 @@ export function registerIpc(
    */
   const agentSessions = new Map<string, string>()
 
+  /**
+   * `panes`, with the runtime owner put back on every row an agent holds.
+   *
+   * Rows read off disk carry no `agentSessionId` at all: `normalisePane`
+   * (`state/store.ts`) strips it precisely so that a file an agent can edit
+   * cannot claim a pane. The map above is where the association actually
+   * lives, so any pane list built from `store.read()` has to be told about it
+   * here, or whoever receives it reads "owned by nobody".
+   *
+   * Two callers, for different reasons. The MCP handler ROUTES on the field
+   * (`browserPaneFor`), so without this every tool call would mint a new pane.
+   * `CHANNELS.restore` hands the list to the renderer, whose own mirror of this
+   * map is what draws the agent strip; a renderer reload (⌘R) re-runs restore
+   * against a main process whose map is NOT empty, and without this an
+   * agent-owned pane would come back owned, confined, and unmarked.
+   *
+   * The other two replies that carry rows from `store.read()`, `renameTab` and
+   * `setPaneColor`, are deliberately NOT routed through this. They answer with
+   * every pane on disk and are about a name and a colour; the renderer keeps
+   * the field it already has for them (`panesMerged` in `renderer/workspace.ts`),
+   * which also covers any future reply of that shape. Restore is the one case
+   * the renderer cannot cover, because after a reload it has no previous record
+   * to keep anything from.
+   */
+  const withAgentOwners = (panes: TabDescriptor[]): TabDescriptor[] =>
+    panes.map((pane) => {
+      const owner = agentSessions.get(pane.id)
+      return owner === undefined ? pane : { ...pane, agentSessionId: owner }
+    })
+
   registry.onTransition(({ tabId, to }) => {
     // `sinceOf` read here rather than carried on the transition: the registry
     // has already written it by the time listeners run, and reading it keeps
@@ -903,7 +941,10 @@ export function registerIpc(
     // renderer's `restored` case resets `status` to `{}`, so the direction
     // that loses blanks the board at every launch. One response has nothing
     // left to race against.
-    return { ...result, status: registry.snapshot() }
+    // `withAgentOwners` because a renderer reload comes through here too, into
+    // a main process that still owns whatever it owned a moment ago. See that
+    // function for the whole reason.
+    return { ...result, panes: withAgentOwners(result.panes), status: registry.snapshot() }
   })
 
   /**
@@ -2580,14 +2621,9 @@ export function registerIpc(
   const mcpServer = new McpServer(async (request) => {
     const config = await store.read()
     // The runtime association put onto the rows read off disk, which arrive
-    // carrying none: `agentSessionId` is stripped by `normalisePane`
-    // (`state/store.ts`) precisely so that this map, and not a file an agent
-    // can edit, decides who owns a pane. Without this the rows would say
-    // nobody owns anything and every call would mint a new pane.
-    const panes: TabDescriptor[] = config.panes.map((pane) => {
-      const owner = agentSessions.get(pane.id)
-      return owner === undefined ? pane : { ...pane, agentSessionId: owner }
-    })
+    // carrying none. Without it the rows would say nobody owns anything and
+    // every call would mint a new pane. See `withAgentOwners`.
+    const panes = withAgentOwners(config.panes)
     const projects = await describeProjects(config.projects, panes)
     const plan = planBrowserNavigate({ projects, panes }, request)
     if ('error' in plan) throw new Error(plan.error)

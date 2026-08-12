@@ -22,6 +22,18 @@ function activityLabel(activity: BrowserAgentActivity | null): string {
 }
 
 /**
+ * Whether two events would draw the same line.
+ *
+ * Compared through `activityLabel` rather than field by field, so the question
+ * asked is the one that matters (would anything on screen change) and so a
+ * `navigate` can never read as equal to a `blocked` that happens to name the
+ * same string: the label of the second carries a prefix the first does not.
+ */
+function sameLine(a: BrowserAgentActivity | null, b: BrowserAgentActivity): boolean {
+  return a !== null && activityLabel(a) === activityLabel(b)
+}
+
+/**
  * The line above an agent-owned browser pane: that an agent is driving it, and
  * the last thing the agent did to it.
  *
@@ -38,6 +50,14 @@ function activityLabel(activity: BrowserAgentActivity | null): string {
  * before the user looks is gone, and the stderr line in `refusesNonLoopback`
  * is the record that keeps.
  *
+ * Bounded state is not bounded traffic, and the difference is worth being
+ * exact about. Main sends one message per refused navigation and will go on
+ * doing so for as long as a page keeps trying (see `refusesNonLoopback`, whose
+ * `console.warn` on the same line has always cost the same). What this bounds
+ * is the work on this side: an event identical to the one already showing is
+ * dropped rather than stored, so a page looping at one origin re-renders this
+ * component exactly once however many times it tries.
+ *
  * Subscribed here rather than in `App`: a strip exists only for a pane where
  * these events can happen at all, and it already knows which pane it is. What
  * that rests on is that no event can arrive before this mounts: main creates
@@ -52,7 +72,11 @@ export function AgentStrip({ paneId }: { paneId: string }) {
       window.pterm.onBrowserAgentActivity((event) => {
         // Every pane's events come down one channel; this is the filter that
         // keeps one agent's pane from reporting another's.
-        if (event.paneId === paneId) setLast(event)
+        if (event.paneId !== paneId) return
+        // The same event again is not news. Answering the updater with the
+        // value it already holds is what makes React skip the re-render: a
+        // fresh object carrying identical text would repaint the same line.
+        setLast((previous) => (sameLine(previous, event) ? previous : event))
       }),
     [paneId],
   )
