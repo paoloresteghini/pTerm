@@ -1152,6 +1152,22 @@ export function App() {
       const toPane = state.panes.find((pane) => pane.id === to)
       if (!fromPane || !toPane) return false
       if (fromPane.projectSlug !== toPane.projectSlug) return false
+      // Kinds do not move between regions, so a drag that crosses the boundary
+      // is refused rather than converted. Here rather than in `TabBar`, for the
+      // reason above: one rule both surfaces read, not a second one derived per
+      // bar. `TabBar` could not express it anyway, since each bar is handed only
+      // its own region's tabs and cannot resolve a pane id from the other.
+      //
+      // Not the only thing standing in the way, and not redundant either.
+      // `BrowserColumn` passes `capabilities={{ join: false }}`, which makes
+      // every browser row non-draggable and makes the browser bar refuse every
+      // drop, so neither direction is reachable with a pointer today. What that
+      // flag does NOT cover is a `drop` whose `dataTransfer` already carries a
+      // browser pane id arriving on a TERMINAL row: that row asks THIS function,
+      // not the browser bar's, and before this line it answered yes and sent a
+      // `joinPane` main then rejected. `browserRegion.spec.ts`'s cross-region
+      // test dispatches exactly that and goes red without this line.
+      if (regionOf(fromPane) !== regionOf(toPane)) return false
       // Falls back to the pane's own id rather than null, because a pane no
       // row names is a tab of one that has never been split, and reading
       // that as "unknown, so refuse" would make the commonest case in the

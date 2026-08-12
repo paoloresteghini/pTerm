@@ -901,3 +901,177 @@ test('Cmd-D does nothing while the browser region has focus, and still splits th
 
   await app.close()
 })
+
+/**
+ * Starts one drag gesture between two testids: `dragstart` on the source,
+ * then `dragover` on the target. Copied from `dragSplit.spec.ts`'s helper of
+ * the same name, with the two ends named by FULL testid rather than by pane id
+ * under one shared prefix, because the whole point here is a source and a
+ * target that live in different bars and so carry different prefixes.
+ *
+ * Two things carry over from that file's header unchanged, and both are load
+ * bearing. Playwright's own `dragTo` drives POINTER events, and Electron does
+ * not synthesise those into HTML5 drag events, so `dragTo` would leave every
+ * handler in `usePaneDragDrop` unrun and every "nothing happened" assertion
+ * below passing for the wrong reason. And the two dispatches have to sit in
+ * separate `evaluate` calls: `usePaneDragDrop`'s `dragged` is React state, and
+ * a `dragover` fired in the same synchronous stretch as the `dragstart` reads
+ * it as `null`, which again refuses the hover without the rule under test
+ * being asked.
+ *
+ * The `DataTransfer` is stashed on the source element so `dropOn` can reuse
+ * the SAME object: only the one present at `dragstart` carries the MIME
+ * payload, and that payload is what makes the drop below reach `canJoin` at
+ * all.
+ */
+async function beginDrag(page: Page, fromTestId: string, toTestId: string): Promise<void> {
+  await page.evaluate((from) => {
+    const source = document.querySelector(`[data-testid="${from}"]`) as
+      | (HTMLElement & { __ptermDrag?: DataTransfer })
+      | null
+    if (!source) throw new Error(`missing row: ${from}`)
+    const dataTransfer = new DataTransfer()
+    source.__ptermDrag = dataTransfer
+    source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer }))
+  }, fromTestId)
+
+  await page.evaluate(
+    ([from, to]) => {
+      const source = document.querySelector(`[data-testid="${from}"]`) as
+        | (HTMLElement & { __ptermDrag?: DataTransfer })
+        | null
+      const target = document.querySelector(`[data-testid="${to}"]`)
+      const dataTransfer = source?.__ptermDrag
+      if (!source || !target || !dataTransfer) throw new Error(`drag not started: ${from} -> ${to}`)
+      target.dispatchEvent(new DragEvent('dragover', { bubbles: true, dataTransfer }))
+    },
+    [fromTestId, toTestId],
+  )
+}
+
+/** Finishes a drag `beginDrag` started: `drop` on the target, `dragend` on the source. */
+async function dropOn(page: Page, fromTestId: string, toTestId: string): Promise<void> {
+  await page.evaluate(
+    ([from, to]) => {
+      const source = document.querySelector(`[data-testid="${from}"]`) as
+        | (HTMLElement & { __ptermDrag?: DataTransfer })
+        | null
+      const target = document.querySelector(`[data-testid="${to}"]`)
+      const dataTransfer = source?.__ptermDrag
+      if (!source || !target || !dataTransfer) throw new Error(`drag not started: ${from} -> ${to}`)
+      target.dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer }))
+      source.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer }))
+      delete source.__ptermDrag
+    },
+    [fromTestId, toTestId],
+  )
+}
+
+/**
+ * The region boundary as a drop rule, both ways across it, with a working
+ * join in the same window as the control.
+ *
+ * A drag that is correctly refused changes nothing, so every assertion here
+ * would also hold if the gesture had never been delivered. The control at the
+ * end is what rules that out: the identical `beginDrag` and `dropOn` pair,
+ * between two TERMINAL rows of the same bar, DOES merge them, in this file's
+ * harness and not merely in `dragSplit.spec.ts`'s.
+ *
+ * The control is also the settle. `joinPanes` is a round trip through main,
+ * so a "no split appeared" assertion taken straight after the cross-region
+ * drop could pass simply by being early. The cross-region assertions are
+ * therefore taken AFTER the control's own join has landed on screen: the two
+ * drops go out on the same channel, the refused one first, so anything it had
+ * sent would have arrived by then.
+ *
+ * The two directions are not refused by the same mechanism, and only one of
+ * them can see the rule this test was written for:
+ *
+ * - **terminal onto the browser bar** never reaches `App.tsx`'s `canJoin` at
+ *   all, so nothing in this half can see the region rule. Its HOVER is refused
+ *   by neither rule but by hook separation: each bar calls
+ *   `usePaneDragDrop` itself, so the `dragged` id the terminal bar's
+ *   `dragstart` set is not the one the browser bar's `onDragOver` reads, and
+ *   `if (!dragged || ...)` short-circuits before any `canJoin` runs. Its DROP
+ *   is refused by `BrowserColumn`'s `capabilities={{ join: false }}`, which
+ *   hands the browser bar a `canJoin` that always returns false
+ *   (`TabBar.tsx`'s `joinAllowed`). This half is a regression guard on that
+ *   flag, not on the region rule;
+ * - **browser onto the terminal bar** is the half the region rule owns. The
+ *   browser rows are `draggable={false}` from the same flag, so no pointer can
+ *   start this gesture, but a dispatched `dragstart` runs the handler anyway
+ *   and writes the browser pane's id into the `DataTransfer`. The terminal
+ *   row's `onDrop` reads that id straight off the DOM API rather than out of
+ *   its own bar's state, and asks `App.tsx`'s `canJoin` about it. No hover is
+ *   asserted here, because hook separation refuses it the same way and would
+ *   hide whatever `canJoin` answered.
+ *
+ * **Measured 2026-08-12**, the `regionOf(fromPane) !== regionOf(toPane)` line
+ * in `canJoin` deleted and the app rebuilt: this test fails, and it fails on
+ * the `startup-error` assertion and on nothing else. The banner then reads
+ * `Error invoking remote method 'pterm:joinPane': Error: Cannot join: pane
+ * <id> is not open`, main's own `tabIdOf` refusing a pane it has no session
+ * for. Every count in the block below still read correctly under that
+ * mutation, which is why the banner is asserted at all: without it this test
+ * would be green with the guard gone.
+ */
+test('a tab dragged across the region boundary is refused, and one inside a region is not', async () => {
+  const app = await launch()
+  const page = await app.firstWindow()
+  await expect(page.getByTestId('titlebar')).toBeVisible({ timeout: 20_000 })
+
+  await page.getByTestId('new-tab').click()
+  await expect(page.getByTestId('terminal-active')).toBeVisible()
+  await page.getByTestId('new-tab').click()
+  await expect(page.locator('[data-testid^="tab-"]')).toHaveCount(2)
+  const [first, second] = (
+    await page
+      .locator('[data-testid^="tab-"]')
+      .evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.testid ?? ''))
+  ).map((id) => id.replace('tab-', ''))
+
+  const browserId = await openBrowserPaneViaPalette(page)
+  await expect(page.getByTestId('browser-column')).toBeVisible({ timeout: 20_000 })
+
+  // Terminal onto the browser bar. The hover is read as well as the drop: it
+  // is the one thing this direction shows before the drop, even though what
+  // refuses it is hook separation rather than either refusal rule.
+  await beginDrag(page, `tab-${first}`, `browsertab-${browserId}`)
+  await expect(page.getByTestId(`browsertab-${browserId}`)).not.toHaveAttribute('data-over', 'true')
+  await dropOn(page, `tab-${first}`, `browsertab-${browserId}`)
+
+  // Browser onto the terminal bar, carrying the browser pane's id in the
+  // `DataTransfer` the terminal row's `onDrop` reads.
+  await beginDrag(page, `browsertab-${browserId}`, `tab-${first}`)
+  await dropOn(page, `browsertab-${browserId}`, `tab-${first}`)
+
+  // The control, and the settle for both drops above: the same gesture between
+  // two rows of the one bar merges them.
+  await beginDrag(page, `tab-${second}`, `tab-${first}`)
+  await expect(page.getByTestId(`tab-${first}`)).toHaveAttribute('data-over', 'true')
+  await dropOn(page, `tab-${second}`, `tab-${first}`)
+  await expect(page.getByTestId(`tab-${first}`)).toHaveAttribute('data-group-pos', 'first')
+  await expect(page.getByTestId(`tab-${second}`)).toHaveAttribute('data-group-pos', 'last')
+
+  // Nothing crossed. The browser pane is still the browser bar's only row and
+  // has no row in the terminal bar; the terminal bar holds the two tabs it
+  // started with, now grouped by the control and by nothing else.
+  // No error either, which is the assertion that actually discriminates. Both
+  // drops above are refused ON SCREEN whether or not `canJoin` catches them:
+  // main refuses a join it is asked for anyway, and every count in this block
+  // reads the same in both cases. What differs is whether the IPC call was
+  // SENT: `joinPanes` reports a rejected `joinPane` through `fail`, so the
+  // refusal happening in the renderer and the refusal happening in main are
+  // told apart by whether this banner is on screen.
+  await expect(page.getByTestId('startup-error')).toHaveCount(0)
+  await expect(page.getByTestId(`tab-${browserId}`)).toHaveCount(0)
+  await expect(page.getByTestId(`browsertab-${first}`)).toHaveCount(0)
+  await expect(page.locator('[data-testid^="browsertab-"]')).toHaveCount(1)
+  await expect(page.locator('[data-testid^="tab-"]')).toHaveCount(2)
+  await expect(page.getByTestId('browser-column')).toBeVisible()
+  await expect(
+    page.getByTestId('browser-column').locator('[data-testid^="browserpane-"]'),
+  ).toHaveCount(1)
+
+  await app.close()
+})
