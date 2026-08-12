@@ -631,12 +631,12 @@ export function App() {
   /**
    * Follow the user between the two regions.
    *
-   * Three listeners, and the split between them is measured rather than
-   * guessed. Deliberately three RULES about where a pointer or a focus landed,
-   * and not a setter on each control that should claim a region: most of this
-   * app's chrome focuses nothing when clicked, so a list would have to name
-   * every project row, heading, panel body and title bar, and would go stale
-   * the day one was added.
+   * Two RULES about where a pointer or a focus landed, rather than a setter on
+   * each control that should claim a region: most of this app's chrome focuses
+   * nothing when clicked, so a list would have to name every project row,
+   * heading, panel body and title bar, and would go stale the day one was
+   * added. The two setters that remain (`selectPane` and `onSelectSession`)
+   * are the routes these rules cannot see at all, and each says which.
    *
    * `pointerdown` is the general case and carries every click on host chrome.
    * It reads the EVENT TARGET, not `document.activeElement`: measured
@@ -650,23 +650,22 @@ export function App() {
    * `focusin` covers focus that arrives without a pointer: ⌘T's new terminal
    * focuses its own xterm, and nothing clicked anything.
    *
-   * `blur` is the one the whole task turned on. Measured 2026-08-11, driving a
-   * real click into a live `<webview>`'s page with capture listeners on the
-   * host document for `focusin`, `focusout`, `mousedown`, `pointerdown` and
-   * `click`: the host saw NONE of them. Three separate guest clicks produced
-   * only a `focusout` on whatever the host had focused and a `window` blur,
-   * after which `document.activeElement` was the `<webview>` element. So a
-   * click on a page is invisible to the two rules above, and this is what sees
-   * it. The same run attached `focus` and `blur` listeners to the guest's own
-   * `WebContents` in main, across the same six clicks, and they fired zero
-   * times: the main-side bridge named as the fallback would not have worked
-   * either.
-   *
-   * `blur` only ever CLAIMS the region and never releases it. It also fires
-   * when the whole window loses focus to another application, where
-   * `document.activeElement` is simply whatever it already was and says
-   * nothing new about which region the user means; releasing on that would
-   * hand the keys back to the terminal every time the user switched apps.
+   * A click on GUEST CONTENT inside a `<webview>` is deliberately not handled,
+   * and this is the part worth knowing before adding a third listener for it.
+   * Measured 2026-08-11 with capture listeners on the host document for
+   * `focusin`, `focusout`, `mousedown`, `pointerdown` and `click`, the host saw
+   * NONE of them for three separate guest clicks: only a `focusout` on whatever
+   * it had focused and a `window` blur. `focus` and `blur` on the guest's own
+   * `WebContents` in main fired zero times across the same six clicks, so there
+   * is no main-side signal either. A `blur` listener claiming the region for
+   * the browser was written on that measurement and then removed: it could not
+   * change any outcome, because `activeRegion` is read only through
+   * `keyRegion` and only by the keydown handler, and while the guest holds
+   * focus the page owns the keyboard and this window receives no keystroke at
+   * all. Focus comes back out of a page by a click on host chrome, which
+   * `pointerdown` above decides on its own. See the browser region spec's note
+   * "⌘W does not reach the app from inside a focused page (accepted
+   * 2026-08-12)" for the product decision that settles it.
    */
   useEffect(() => {
     const pointed = (event: Event): void => {
@@ -676,16 +675,11 @@ export function App() {
     const focused = (): void => {
       setActiveRegion(inBrowserRegion(document.activeElement) ? 'browser' : 'terminal')
     }
-    const claim = (): void => {
-      if (inBrowserRegion(document.activeElement)) setActiveRegion('browser')
-    }
     document.addEventListener('pointerdown', pointed, true)
     document.addEventListener('focusin', focused, true)
-    window.addEventListener('blur', claim)
     return () => {
       document.removeEventListener('pointerdown', pointed, true)
       document.removeEventListener('focusin', focused, true)
-      window.removeEventListener('blur', claim)
     }
   }, [])
 
@@ -1172,11 +1166,14 @@ export function App() {
   /** Make `paneId` the pane the keyboard talks to, and record it on its tab. */
   const selectPane = useCallback(
     (paneId: string) => {
-      // For the callers that reach here with no pointer and no focus event of
-      // their own, which the `pointerdown` rule above cannot see: ⌘⌥ + an
-      // arrow, and the palette's session list. A pane that focuses nothing
-      // when it mounts would otherwise leave the browser region holding the
+      // For the one caller that reaches here with no pointer and no focus
+      // event of its own, which the `pointerdown` rule above cannot see:
+      // `focusPane`, which is ⌘⌥ + an arrow. A pane that focuses nothing when
+      // it is selected would otherwise leave the browser region holding the
       // keys after the user had plainly moved off it.
+      //
+      // The palette's session list is NOT among them: `onSelectSession` never
+      // calls this, and sets the region from its chosen pane itself.
       //
       // Above the early return rather than below, so selecting the pane that
       // is already active still claims the region.
@@ -2609,6 +2606,18 @@ export function App() {
           onSelectSession={(id) => {
             const tab = state.panes.find((candidate) => candidate.id === id)
             if (!tab) return
+            // The pane itself says which region it is in, because nothing else
+            // here can. `paletteSessions` above maps EVERY pane, browser panes
+            // included, and this list is reached from the keyboard over a
+            // dialog portaled outside the browser column: the `pointerdown`
+            // rule sees a target that is not in the column, and no focus
+            // lands there either. Without this, picking a browser pane here
+            // left ⌘W closing a terminal pane instead of the one just chosen.
+            //
+            // Not shared with `onSelectNeedy` below, which cannot reach this
+            // case: `needsYou` filters on `canHaveSession`, and a browser pane
+            // has no session, so that list is always the terminal region's.
+            setActiveRegion(regionOf(tab))
             // The same two dispatches `onSelectNeedy` runs, in the same order.
             dispatch({ type: 'activatedProject', id: projectIdForTab(state.projects, tab) })
             dispatch({ type: 'activatedTab', id: tab.id })

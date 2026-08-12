@@ -656,9 +656,13 @@ test('Cmd-W closes a pane in the region that has focus, and leaves the other alo
   await expect(page.locator('[data-testid^="browsertab-"]')).toHaveCount(browserTabs - 1)
   await expect(page.locator('[data-testid^="tab-"]')).toHaveCount(terminalTabs)
 
-  // And back. This click is on the terminal pane that is ALREADY active, so
-  // `selectPane` returns early and does not run: the region only comes back
-  // if focus itself is what moves it.
+  // And back, which is the half that would go unnoticed: a ⌘W that always
+  // closed a browser pane once the region had been claimed would satisfy the
+  // two assertions above. The click lands on the terminal pane that is
+  // ALREADY active, so `selectPane` claims the region and then returns
+  // without dispatching anything, and the `pointerdown` rule claims it too.
+  // Either one is enough; what is asserted is that the region moved, not
+  // which of them moved it.
   await clickTerminal(page)
   await page.keyboard.press('Meta+w')
 
@@ -762,6 +766,46 @@ test('clicking terminal chrome that focuses nothing still takes the keys back', 
   await app.close()
 })
 
+test('picking a browser pane from the palette gives it the keys', async () => {
+  const app = await launch()
+  const page = await app.firstWindow()
+  await expect(page.getByTestId('titlebar')).toBeVisible({ timeout: 20_000 })
+
+  await page.getByTestId('new-tab').click()
+  await expect(page.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
+  await page.getByTestId('new-tab').click()
+  await expect(page.locator('[data-testid^="tab-"]')).toHaveCount(2)
+  const id = await openBrowserPaneViaPalette(page)
+  await expect(page.getByTestId('browser-column')).toBeVisible({ timeout: 20_000 })
+
+  // Hand the keys to the TERMINAL first, so the palette has to take them back
+  // rather than finding them already where this test wants them. Without this
+  // the open above would have left the region on 'browser' and the assertions
+  // below would hold whether the palette claimed anything or not.
+  await clickTerminal(page)
+
+  // `paletteSessions` maps every pane, so the browser pane is listed here
+  // beside the terminals. The route is entirely keyboard and the dialog is
+  // portaled outside the browser column, so neither region rule can see which
+  // region the chosen pane belongs to: only the pane itself says.
+  await page.keyboard.press('Meta+k')
+  await expect(page.getByTestId('command-palette')).toBeVisible()
+  await page.getByTestId(`palette-session-${id}`).click()
+  await expect(page.getByTestId('command-palette')).toHaveCount(0)
+
+  const terminalTabs = await page.locator('[data-testid^="tab-"]').count()
+  const browserTabs = await page.locator('[data-testid^="browsertab-"]').count()
+  expect(terminalTabs).toBe(2)
+  expect(browserTabs).toBe(1)
+
+  await page.keyboard.press('Meta+w')
+
+  await expect(page.locator('[data-testid^="browsertab-"]')).toHaveCount(browserTabs - 1)
+  await expect(page.locator('[data-testid^="tab-"]')).toHaveCount(terminalTabs)
+
+  await app.close()
+})
+
 test('a browser region that leaves the screen hands the keys back to the terminal', async () => {
   const app = await launch()
   const page = await app.firstWindow()
@@ -778,7 +822,14 @@ test('a browser region that leaves the screen hands the keys back to the termina
   // event: hiding a column moves no focus, which is exactly why `keyRegion`
   // is derived from what is on screen rather than left as whatever focus
   // last said.
-  await clickGuestPage(page)
+  //
+  // Host-side, and this test used to click the guest page here instead. That
+  // put two keystrokes behind the delivery race `clickGuestPage` warns about:
+  // measured 8 passes in 8 that way, but the first run of a sabotage that
+  // could not affect focus at all still failed on the ⇧⌘\ below never
+  // arriving. A test does not get to keep a pattern its own helper documents
+  // as unreliable on the grounds that it has not bitten yet.
+  await focusBrowserRegion(page, 0)
   await page.keyboard.press('Meta+Shift+Backslash')
   await expect(page.getByTestId('browser-column')).toBeHidden()
   // Put away, not unmounted. That is what makes the assertions below able to
