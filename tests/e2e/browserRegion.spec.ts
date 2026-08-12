@@ -4,10 +4,15 @@
  * Set up like `tests/e2e/browser.spec.ts`, which this borrows its palette
  * route from: one app per test, its own tmux socket, and a fresh user data
  * directory so no stored column width or collapse flag leaks in from another
- * run. Everything asserted here is host-side chrome. Nothing reads inside a
- * browser pane's guest, which Playwright cannot reach: `page.frames()` reports
- * the guest as `about:blank` and `frameLocator` throws outright (see that
- * file's header for the measurement).
+ * run.
+ *
+ * Most of what is asserted here is host-side chrome. Where a test has to tell
+ * a page that SURVIVED from one that was rebuilt at the same URL, it reads the
+ * guest through `guestState` below, which goes main-side through
+ * `webContents.executeJavaScript`. That is the only mechanism that reaches
+ * inside a `<webview>` at all: Playwright cannot, `page.frames()` reports the
+ * guest as `about:blank` and `frameLocator` throws outright (see
+ * `browser.spec.ts`'s header for that measurement).
  */
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
@@ -190,7 +195,7 @@ test('collapsing the region leaves a strip, and the next browser opens the colum
   const page = await app.firstWindow()
   await expect(page.getByTestId('titlebar')).toBeVisible({ timeout: 20_000 })
 
-  await openBrowserPaneViaPalette(page)
+  const id = await openBrowserPaneViaPalette(page)
   await expect(page.getByTestId('browser-column')).toBeVisible({ timeout: 20_000 })
 
   // `browser-toggle` is the heading while the column is open and the strip
@@ -203,6 +208,11 @@ test('collapsing the region leaves a strip, and the next browser opens the colum
   await expect(page.getByTestId('browser-toggle')).toBeVisible()
   // Collapsed is not closed: the pane is still mounted behind the strip.
   await expect(page.locator('[data-testid^="browserpane-"]')).toHaveCount(1)
+  // And mounted is not the same as drawn. Worth its own assertion because
+  // `visibility` INHERITS but can be overridden: the active group carried a
+  // `visible` class for a while, which re-showed the pane straight through
+  // the box that was hiding it, with nothing counting elements able to tell.
+  await expect(page.getByTestId(`browserpane-${id}`)).toBeHidden()
 
   await openBrowserPaneViaPalette(page)
   await expect(page.getByTestId('browser-column')).toBeVisible()
@@ -286,6 +296,99 @@ test('the region belongs to the project whose browser panes it holds', async () 
   await app.close()
 })
 
+/**
+ * The other half of `the region belongs to the project whose browser panes it
+ * holds`: the column goes away, and the page inside it does not.
+ *
+ * This is the test that fails if the column ever goes back to unmounting. It
+ * asserts on the guest itself rather than on the column reappearing, because a
+ * column that reappears having rebuilt its `<webview>` looks identical from the
+ * host side. The evidence is `__nonce`, minted by the probe page's own script
+ * on every load: a rebuilt pane loads the URL its pane RECORD carries and mints
+ * a new one, and, since navigation is reported to main rather than written back
+ * into renderer state, it would not even be this URL. Same nonce and same URL
+ * is a page that was never rebuilt.
+ */
+test('a page in a browser pane survives a trip through a project that has none', async () => {
+  const app = await launch()
+  const page = await app.firstWindow()
+  await expect(page.getByTestId('titlebar')).toBeVisible({ timeout: 20_000 })
+  const id = await openBrowserPaneViaPalette(page)
+
+  const bar = page.getByTestId(`browserurl-${id}`)
+  await bar.fill(probeUrl)
+  await bar.press('Enter')
+  await expect.poll(async () => (await guestState(app)).url, { timeout: 15_000 }).toBe(probeUrl)
+  await app.evaluate(async ({ webContents }) => {
+    const guests = webContents.getAllWebContents().filter((c) => c.getType() === 'webview')
+    await guests[0]!.executeJavaScript('scrollTo(0, 1500)')
+  })
+  await expect.poll(async () => (await guestState(app)).scrollY, { timeout: 5_000 }).toBe(1500)
+  const before = await guestState(app)
+
+  await page.getByTestId('project-p2').click()
+  await expect(page.getByTestId('browser-column')).toBeHidden()
+  // Read while the column is nowhere on screen. One guest, still there: an
+  // unmounting column would report zero here, before any of the rest could
+  // even be asked.
+  const away = await guestState(app)
+  expect(away.guests).toBe(1)
+  expect(away.nonce).toBe(before.nonce)
+  expect(away.width).toBe(before.width)
+
+  await page.getByTestId('project-p1').click()
+  await expect(page.getByTestId('browser-column')).toBeVisible()
+  const back = await guestState(app)
+  expect(back.nonce).toBe(before.nonce)
+  expect(back.url).toBe(probeUrl)
+  expect(back.scrollY).toBe(1500)
+  expect(back.width).toBe(before.width)
+
+  await app.close()
+})
+
+test('a column that is nowhere on screen costs the row no width', async () => {
+  const app = await launch()
+  const page = await app.firstWindow()
+  await expect(page.getByTestId('titlebar')).toBeVisible({ timeout: 20_000 })
+
+  // `terminal-column` is the row's one `flex-1 min-w-0` item, so it absorbs
+  // whatever every other column does not take. Measured before any browser
+  // pane exists, which is the only state in which the column is not in the
+  // tree at all, and is therefore the baseline "costs nothing" has to match.
+  const empty = await page.getByTestId('terminal-column').boundingBox()
+  expect(empty).not.toBeNull()
+
+  await openBrowserPaneViaPalette(page)
+  await expect(page.getByTestId('browser-column')).toBeVisible({ timeout: 20_000 })
+  const open = await page.getByTestId('terminal-column').boundingBox()
+  // The column really is taking width while it is open, so the comparison
+  // below is between two different things rather than two of the same.
+  expect(open!.width).toBeLessThan(empty!.width)
+
+  // Collapsed next, which is the state the hidden pane box shares its
+  // positioning with. What the row loses must be the strip and nothing else:
+  // the box holding the panes is `absolute`, so it contributes no width even
+  // though it is 480 wide. Without that, this column would take its widest
+  // child's width and the strip would cost twenty times what it should.
+  // Compared against the strip's own measured box rather than against `w-6`
+  // written out as 24: the two disagree by a pixel on this window, and which
+  // one is right is not what this test is about.
+  await page.getByTestId('browser-toggle').click()
+  await expect(page.getByTestId('browser-column')).toBeHidden()
+  const strip = await page.getByTestId('browser-toggle').boundingBox()
+  const collapsed = await page.getByTestId('terminal-column').boundingBox()
+  expect(strip!.width).toBeLessThan(40)
+  expect(collapsed!.width).toBe(empty!.width - strip!.width)
+
+  await page.getByTestId('project-p2').click()
+  await expect(page.getByTestId('browser-column')).toBeHidden()
+  const away = await page.getByTestId('terminal-column').boundingBox()
+  expect(away!.width).toBe(empty!.width)
+
+  await app.close()
+})
+
 test('a hide survives a trip through another project, and the next browser undoes it', async () => {
   const app = await launch()
   const page = await app.firstWindow()
@@ -321,6 +424,68 @@ test('a hide survives a trip through another project, and the next browser undoe
   await openBrowserPaneViaPalette(page)
   await expect(page.getByTestId('browser-column')).toBeVisible()
   await expect(page.locator('[data-testid^="browsertab-"]')).toHaveCount(2)
+
+  await app.close()
+})
+
+/**
+ * Hide-all, end to end, with a browser column in the row.
+ *
+ * The item's label is read off the real menu through main, the way
+ * `menuColumns.spec.ts` reads it: Playwright cannot reach the macOS menu bar,
+ * and the label is computed in `showColumns` from what the renderer sends over
+ * `columnsVisible`, so reading it is the only way to see whether the two agree.
+ */
+test('hide all takes the browser column with it, keeps the page, and puts it back', async () => {
+  const app = await launch()
+  const page = await app.firstWindow()
+  await expect(page.getByTestId('titlebar')).toBeVisible({ timeout: 20_000 })
+
+  const labelOf = (): Promise<string | undefined> =>
+    app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('hide-all-columns')?.label)
+  // The item itself, not its ⌘⇧\ shortcut. This test types a URL into a
+  // browser pane's address bar first, and that field carries
+  // `data-shortcuts="off"`, so the keystroke would never reach `App`'s
+  // handler: measured, the column was still on screen after pressing it.
+  const clickHideAll = (): Promise<void> =>
+    app.evaluate(({ Menu }) => {
+      Menu.getApplicationMenu()?.getMenuItemById('hide-all-columns')?.click()
+    })
+
+  // Nothing is open on a fresh profile, and the browser column is not in the
+  // row either, so the item offers the only direction that would do anything.
+  await expect.poll(labelOf, { timeout: 10_000 }).toBe('Show All Columns')
+
+  const id = await openBrowserPaneViaPalette(page)
+  await expect(page.getByTestId('browser-column')).toBeVisible({ timeout: 20_000 })
+  const bar = page.getByTestId(`browserurl-${id}`)
+  await bar.fill(probeUrl)
+  await bar.press('Enter')
+  await expect.poll(async () => (await guestState(app)).url, { timeout: 15_000 }).toBe(probeUrl)
+  const before = await guestState(app)
+
+  // One column on screen, and it is this one: the item has to offer to hide.
+  await expect.poll(labelOf, { timeout: 10_000 }).toBe('Hide All Columns')
+
+  await clickHideAll()
+  await expect(page.getByTestId('browser-column')).toBeHidden()
+  await expect(page.getByTestId('browser-toggle')).toBeHidden()
+  await expect.poll(labelOf, { timeout: 10_000 }).toBe('Show All Columns')
+  // Hidden by the same route as a project switch, and it keeps the page for
+  // the same reason.
+  const hiddenState = await guestState(app)
+  expect(hiddenState.guests).toBe(1)
+  expect(hiddenState.nonce).toBe(before.nonce)
+
+  // The second press restores exactly what the first put away, this column
+  // included, which is what makes it a member of `COLUMN_IDS` rather than an
+  // exception to it.
+  await clickHideAll()
+  await expect(page.getByTestId('browser-column')).toBeVisible()
+  await expect.poll(labelOf, { timeout: 10_000 }).toBe('Hide All Columns')
+  const restored = await guestState(app)
+  expect(restored.nonce).toBe(before.nonce)
+  expect(restored.url).toBe(probeUrl)
 
   await app.close()
 })

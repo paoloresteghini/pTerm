@@ -536,10 +536,10 @@ export function App() {
   // The other region's two lists, derived exactly as the terminal region's
   // are above. `paneGroups` reads every pane, so a browser pane belonging to
   // another project keeps its box (and its page) here while the bar, which is
-  // per project, does not list it. That holds for as long as the column is
-  // drawn at all, which is a question about the ACTIVE project: see
-  // `renderSlot`'s `'browser'` case for what a switch onto a project with no
-  // browser panes costs.
+  // per project, does not list it. It keeps them for as long as the column is
+  // MOUNTED, which is not the same as drawn: see `renderSlot`'s `'browser'`
+  // case, where the column is put away rather than unmounted precisely so
+  // that this list's other projects survive a switch.
   const browserGroups = paneGroups(state, 'browser')
   // Grouped from `browserPanes` (derived above, beside its other reader), so
   // the bar lists the active project's browser panes and not every project's.
@@ -1951,21 +1951,32 @@ export function App() {
         return terminalColumn
       case 'browser':
         // Membership is per project, visibility is a global column
-        // preference, and both have to be true for the column to be in the
-        // row. Drawing nothing for a project with no browser panes keeps an
-        // empty box off the screen without touching the stored preference,
-        // so switching back to a project that has one finds the preference
-        // exactly as the user left it. The cost of drawing nothing is that
-        // nothing is mounted either: `browserGroups` below hands the column
-        // every project's browser panes, so a project switch onto a project
-        // with none takes every one of those `<webview>`s down with the
-        // column, and switching back rebuilds them from their saved URLs.
-        return browserPanes.length === 0 || hiddenColumns.browser ? null : (
+        // preference, and the column is drawn only where both allow it:
+        // `hiddenColumns.browser` false, and the ACTIVE project holding at
+        // least one browser pane. Neither takes the panes down.
+        //
+        // `hidden` rather than `null` is a deliberate trade, decided
+        // 2026-08-11. `browserGroups` is EVERY project's browser panes, so
+        // returning `null` here would destroy project A's `<webview>`s the
+        // moment the user looked at project B, and rebuild them from their
+        // saved URLs on the way back, losing scroll, history and any login.
+        // What it costs is the other side of that: a project with no browser
+        // panes of its own now keeps every other project's webviews alive
+        // behind it, with their timers and sockets running. That is real
+        // resource use, and it is accepted because those same webviews are
+        // already alive whenever ANY browser pane is in view, so the choice
+        // is not whether to run them but whether a project switch silently
+        // destroys them.
+        //
+        // The one case that still renders nothing is no browser pane
+        // anywhere in the workspace, where there is nothing to keep alive.
+        return browserGroups.length === 0 ? null : (
           <BrowserColumn
             groups={browserGroups}
             tabs={browserTabEntries}
             activeId={currentBrowserTabId}
             projects={state.projects}
+            hidden={browserPanes.length === 0 || hiddenColumns.browser}
             collapsed={browserCollapsed}
             onToggle={() => toggleColumnCollapsed('browser')}
             onDragStart={() => setDragging('browser')}

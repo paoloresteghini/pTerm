@@ -29,19 +29,22 @@ const noop = (): void => {}
  * The browser region: its own tab bar and its own pane area, in a column of
  * its own beside the terminal.
  *
- * The column's three states are every other column's, and come from the same
- * machinery: `App` decides whether to render it at all, `collapsed` chooses
- * between the strip and the panel, and `useColumnWidth` holds the width the
- * resizer drags. What is different is the body: one `TabBar` and the panes it
- * names, rather than a list. And what is different about the strip: it keeps
- * the panes mounted behind it, because a `<webview>` cannot be rebuilt where
- * it left off the way a list can.
+ * The column's three states are every other column's, and it holds all three
+ * itself rather than letting `App` render two of them and nothing for the
+ * third: HIDDEN draws nothing anywhere, COLLAPSED draws the strip, and open
+ * draws the panel. `useColumnWidth` holds the width the resizer drags.
+ *
+ * Two things are different from the list columns. The body is one `TabBar`
+ * and the panes it names, rather than a list. And neither of the two states
+ * that draw nothing unmounts anything: a `<webview>` cannot be rebuilt where
+ * it left off the way a list can, so both hide the panes where they stand.
  */
 export function BrowserColumn({
   groups,
   tabs,
   activeId,
   projects,
+  hidden,
   collapsed,
   onToggle,
   onDragStart,
@@ -60,6 +63,13 @@ export function BrowserColumn({
   activeId: string | null
   /** Resolves each pane's project id, as `App` does for a terminal pane. */
   projects: ProjectDescriptor[]
+  /**
+   * Off screen entirely: no strip, no panel, and no width in the row. The
+   * panes stay mounted regardless, which is the whole reason this is a prop
+   * rather than `App` rendering `null`. See `App`'s call site for the trade
+   * that buys.
+   */
+  hidden: boolean
   collapsed: boolean
   onToggle: () => void
   /** Grabs this column to move it. See `PanelHeading`'s doc comment. */
@@ -78,25 +88,30 @@ export function BrowserColumn({
   // so a stored width and this default live on the same scale.
   const { width, set, commit } = useColumnWidth('pterm:browserWidth', 480)
 
-  // The panes' box, and the one place `collapsed` is expressed as a style
-  // rather than as a different tree.
+  // Both states that draw nothing put the panes in the same box, so there is
+  // one thing to reason about rather than two.
+  const putAway = hidden || collapsed
+
+  // The panes' box, and the one place the two put-away states are expressed
+  // as a style rather than as a different tree.
   //
   // `visibility` rather than `display`, and an explicit width rather than
-  // whatever the strip leaves: measured 2026-08-11, reading a live guest
+  // whatever the column has left: measured 2026-08-11, reading a live guest
   // through `webContents.executeJavaScript`. Hidden this way, the guest
   // reports the same `innerWidth` and the same scroll position it had, and
   // fires no `resize` at all. Letting the same box shrink to the strip's
   // width instead reflowed the page to `innerWidth` 7, which is the state a
   // responsive page comes back from as its narrowest mobile layout.
-  const paneBox = collapsed
+  const paneBox = putAway
     ? cn(
-        // `absolute`, so the column beside it is exactly the 24px strip and
-        // the row pays nothing for a box this wide. `inset-y-0` gives it the
-        // column's full height, where the open column spends part of that
-        // height on the heading and the tab bar, so the guest IS resized
-        // vertically across a collapse and again across the expand. That is a
-        // reflow, not a reload: the page, its scroll position and its history
-        // all survive it, which is what a collapse has to leave alone.
+        // `absolute`, so the column beside it is the 24px strip or nothing at
+        // all, and the row pays nothing for a box this wide. `inset-y-0`
+        // gives it the column's full height, where the open column spends
+        // part of that height on the heading and the tab bar, so the guest IS
+        // resized vertically on the way in and again on the way out. That is
+        // a reflow, not a reload: the page, its scroll position and its
+        // history all survive it, which is the point of putting it away
+        // rather than unmounting it.
         'invisible pointer-events-none absolute inset-y-0 left-0',
         // The seam the open column draws, in the same place and the same
         // width, and transparent because the strip already draws a visible
@@ -110,10 +125,17 @@ export function BrowserColumn({
     : 'relative min-h-0 flex-1'
 
   const panes = (
-    <div className={paneBox} style={collapsed ? { width } : undefined}>
+    <div className={paneBox} style={putAway ? { width } : undefined}>
       {/* Hidden with `visibility` rather than `display`, the same rule the
           terminal groups follow: a pane that is off screen keeps its box
-          instead of collapsing to nothing. */}
+          instead of collapsing to nothing.
+
+          The group that IS on screen sets no visibility of its own, and that
+          is load-bearing rather than an omission. `visibility` inherits, but
+          a descendant can override it, so the `visible` this used to carry
+          would have re-shown the active pane straight through the box above
+          whenever the box was hiding it. `App`'s terminal groups do carry it
+          and are correct to: nothing ever hides the box around them. */}
       {groups.map((group) => (
         <div
           key={group.id}
@@ -124,7 +146,7 @@ export function BrowserColumn({
             // painting the `p-2` frame as well. Both copied from the
             // terminal groups, whose comment carries the arithmetic.
             'absolute inset-0 flex gap-px bg-border bg-clip-content p-2',
-            group.visible ? 'visible z-10' : 'invisible z-0 pointer-events-none',
+            group.visible ? 'z-10' : 'invisible z-0 pointer-events-none',
           )}
           style={group.style}
         >
@@ -151,42 +173,46 @@ export function BrowserColumn({
     </div>
   )
 
-  // ONE tree for both states, which is the whole reason this component is
-  // shaped the way it is. React reconciles children by position, so a
-  // collapsed branch that returned a different tree would take the `panes`
-  // element out of the position it held and remount every `<webview>` under
-  // it. Measured 2026-08-11, before this was one tree: a collapse and an
-  // expand left the pane showing `about:blank` (the URL the pane RECORD
-  // still carries, since navigation is written to main rather than back into
-  // renderer state), with the page that had been there gone. So `collapsed`
-  // only ever chooses between two siblings in a fixed slot, or between two
-  // sets of classes, and never between two shapes.
+  // ONE tree for all three states, which is the whole reason this component
+  // is shaped the way it is. React reconciles children by position, so a
+  // branch that returned a different tree would take the `panes` element out
+  // of the position it held and remount every `<webview>` under it. Measured
+  // 2026-08-11, before this was one tree: a collapse and an expand left the
+  // pane showing `about:blank` (the URL the pane RECORD still carries, since
+  // navigation is written to main rather than back into renderer state), with
+  // the page that had been there gone. So `hidden` and `collapsed` only ever
+  // choose what goes in a fixed slot, or between two sets of classes, and
+  // never between two shapes.
   return (
     <div
-      // Absent while collapsed, so a test asking for the panel by name is
-      // asking about the panel and not about a strip wearing its testid.
-      data-testid={collapsed ? undefined : 'browser-column'}
+      // Only on the panel. A test asking for the panel by name is asking
+      // about the panel, not about a strip or an empty box wearing its name.
+      data-testid={putAway ? undefined : 'browser-column'}
       className={cn(
         'relative flex shrink-0 flex-col',
-        collapsed
-          ? // The strip draws its own border and its own background, and the
-            // hidden pane box beside it is wider than this column:
-            // `overflow-hidden` keeps that width out of the window's own
-            // scrollable area.
-            'overflow-hidden'
-          : cn(
-              'border-border bg-surface select-none',
-              // The seam faces the terminal either way, the same rule
-              // `NotesPanel` and `PanelStrip` follow: a left column drawing
-              // `border-l` puts its only border against the window frame,
-              // where nothing can see it.
-              side === 'left' ? 'border-r' : 'border-l',
-            ),
+        hidden
+          ? // Nothing drawn and no width taken: what is left is a zero-width
+            // box holding the pane box, which is `absolute` and so costs the
+            // row nothing either. `overflow-hidden` keeps that box's width
+            // out of the window's own scrollable area.
+            'w-0 overflow-hidden'
+          : collapsed
+            ? // Same reasoning, except the strip gives this box its 24px.
+              // The strip draws its own border and background.
+              'overflow-hidden'
+            : cn(
+                'border-border bg-surface select-none',
+                // The seam faces the terminal either way, the same rule
+                // `NotesPanel` and `PanelStrip` follow: a left column drawing
+                // `border-l` puts its only border against the window frame,
+                // where nothing can see it.
+                side === 'left' ? 'border-r' : 'border-l',
+              ),
       )}
-      // Collapsed, the width is the strip's own `w-6` and nothing here.
-      style={collapsed ? undefined : { width }}
+      // Put away, the width is the strip's own `w-6` or the `w-0` above.
+      style={putAway ? undefined : { width }}
     >
-      {collapsed ? (
+      {hidden ? null : collapsed ? (
         <PanelStrip
           testid="browser-toggle"
           label="Browser"
@@ -202,7 +228,7 @@ export function BrowserColumn({
           onDragStart={onDragStart}
         />
       )}
-      {collapsed ? null : (
+      {putAway ? null : (
         <TabBar
           // Not the default `'tab'`: the e2e suite counts terminal tabs with a
           // `[data-testid^="tab-"]` prefix match, which a second bar under that
@@ -233,20 +259,17 @@ export function BrowserColumn({
         />
       )}
       {/* Every browser pane the column was handed stays mounted, whichever
-          tab is on screen, whichever project is active, and whether the
-          column is open or collapsed: `groups` is rendered whole and nothing
-          filters it down to what is visible, so any of those hides a pane
-          rather than unmounting it, and the page it is showing survives.
+          tab is on screen, whichever project is active, and whichever of the
+          three states this column is in: `groups` is rendered whole and
+          nothing filters it down to what is visible, so all of those hide a
+          pane rather than unmounting it, and the page it is showing survives.
           `paneGroups` decides the arrangement.
 
-          The column being taken off screen entirely is the exception. `App`
-          renders this component only while the ACTIVE project has a browser
-          pane and `hiddenColumns.browser` is false, so switching to a project
-          with none, or a hide, unmounts every `<webview>` here, and switching
-          back rebuilds each one from its saved URL (`BrowserPane` reads `url`
-          once into the element's `src`), with the history behind it gone. */}
+          The one thing that unmounts them is `App` rendering no column at
+          all, which it does only when there is no browser pane anywhere in
+          the workspace, so there is nothing to keep alive. */}
       {panes}
-      {collapsed ? null : (
+      {putAway ? null : (
         <ColumnResizer
           testid="resize-browser"
           side={side}

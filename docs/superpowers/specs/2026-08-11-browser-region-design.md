@@ -134,6 +134,31 @@ do not move between regions.
   touches no stored preference.
 - Restore honors the stored visibility, so a manual hide survives relaunch.
 
+**Drawing nothing does not mean unmounting (decided 2026-08-11, during Task
+8).** Every state that takes the region off screen, a collapse, a hide, and
+switching to a project with no browser panes of its own, keeps the panes
+mounted and hidden where they stand. The region is only ever unmounted when
+there is no browser pane anywhere in the workspace, where there is nothing to
+keep alive.
+
+The reason is that `paneGroups(state, 'browser')` spans every project, so the
+column holds every browser pane in the app, not the active project's. Rendering
+`null` for a browserless project would therefore destroy project A's pages
+whenever the user looked at project B, and rebuild them from their saved URLs
+on the way back, losing scroll, history and any login. The same panes are
+already alive whenever any browser pane is in view, so the choice is not
+whether to run them but whether a project switch silently destroys them.
+
+**The cost, stated rather than glossed:** a project with no browser panes of
+its own now keeps every other project's webviews alive behind it, with their
+timers and sockets running.
+
+One consequence worth writing down, because it is not obvious from the CSS:
+`visibility` inherits, but a descendant can override it. The visible pane group
+inside the region must NOT set `visibility: visible` of its own, or it re-shows
+itself straight through the box that is hiding it. The terminal region's groups
+do set it, correctly, because nothing ever hides the box around them.
+
 **A collapse must not unmount the panes (decided 2026-08-11, during Task 7).**
 Task 7 shipped the column with a collapsed branch that renders the strip and
 nothing else, which destroys every `<webview>`: expanding then reloads each
