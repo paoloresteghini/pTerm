@@ -201,9 +201,12 @@ the rebuilt pane read the URL the pane record still carried.
 
 ### Focus and keys
 
-`activeRegion` lives in `App.tsx` state and is not persisted. It is set on
-`focusin` within a region wrapper, and on a tab click or a browser opening. It is
-forced back to `'terminal'` whenever the region is hidden or empty.
+`activeRegion` lives in `App.tsx` state and is not persisted. It is set from a
+`pointerdown` capture listener reading the event's target, from `focusin` for
+the routes that have no pointer event, and explicitly on a tab click, a browser
+opening, and a palette selection. It is forced back to `'terminal'` whenever the
+region is hidden or empty. See the measurement below for why the event target
+rather than the focused element.
 
 The bindings, as they actually exist in `App.tsx`'s keydown handler:
 
@@ -227,13 +230,25 @@ Electron accelerators, so that route would ship covered by a hand-run alone,
 and it would take ⌘W away from any page that uses it. Clicking the column's tab
 strip returns the keys.
 
-**One thing to measure before code depends on it:** a click on page content
-inside a `<webview>` does not bubble into the host document. Whether the host
-still sees `focusin` on the `<webview>` element itself is unverified. It must be
-confirmed by running the app, not by reading the code, because a handler that
-compiles and never fires is exactly the defect class M1 shipped and then fixed
-(Task 8's popup handler). If `focusin` does not fire, the fallback is the
-main-side `webContents` focus events already reachable over the bridge.
+**The open question above was measured in Task 9, and both answers were no.**
+A click on page content inside a `<webview>` fires no `focusin` on the host, and
+no `mousedown`, `pointerdown` or `click` either. The fallback this spec
+sanctioned, main-side `webContents` focus events bridged to the renderer, does
+not fire either: the guest's `WebContents` emitted neither `focus` nor `blur`
+across six alternating clicks, and `guest.isFocused()` reported false while
+`document.hasFocus()` inside that same guest reported true.
+
+What the host does get is a `focusout` on whatever it had focused, a `window`
+blur, and `document.activeElement` becoming the `<webview>` element. What the
+region is actually decided from, in the end, is none of those: it is a
+`pointerdown` capture listener reading the EVENT TARGET, because
+`document.activeElement` settles on `BODY` for four of the five kinds of chrome
+a user clicks, including one inside the browser column. `focusin` is kept for
+the routes with no pointer event, such as tabbing in.
+
+This is why the question was worth asking before writing the handler rather
+than after: both approaches this document proposed would have compiled,
+typechecked, read correctly, and never fired.
 
 ## Persistence
 
