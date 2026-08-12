@@ -50,6 +50,9 @@ describe('isLoopbackUrl', () => {
       'chrome://settings',
       'javascript:alert(1)',
       'data:text/html,<script>1</script>',
+      // Its hostname parses to 'localhost', a loopback match, so this case
+      // only refuses if the protocol check runs before the hostname check.
+      'ws://localhost/',
     ]) {
       expect(isLoopbackUrl(url)).toBe(false)
     }
