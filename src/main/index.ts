@@ -219,9 +219,12 @@ function showColumns(collapsed: ColumnVisibility): void {
     git: 'toggle-git',
     issues: 'toggle-issues',
     todos: 'toggle-todos',
-    // No such menu item yet: the browser column has nothing to toggle until
-    // a later task gives it one. `getMenuItemById` below returns null for
-    // it and the `if (item)` guard already handles that.
+    // No such menu item: the browser column is put on screen by the browser
+    // panes the active project holds rather than by an item of its own.
+    // `getMenuItemById` below returns null for it and the `if (item)` guard
+    // already handles that. It still belongs in this map, because the loop
+    // also folds every column into `open`, and the hide-all item's label has
+    // to answer for this one too.
     browser: 'toggle-browser',
   }
   let open = false

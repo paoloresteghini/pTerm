@@ -2,6 +2,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useMemo,
   useReducer,
   useRef,
   useState,
@@ -177,10 +178,11 @@ export function App() {
   const [notesCollapsed, setNotesCollapsed] = useState(() => storedCollapsed(NOTES_KEY, true))
   const [tabsCollapsed, setTabsCollapsed] = useState(() => storedCollapsed(TABS_KEY, true))
   // Open, where every other column defaults to collapsed. The browser column
-  // is in the row only while a browser pane exists (see `renderSlot`), so it
-  // appears because the user has just asked for the pane it holds, and a
-  // 24px strip is not what they asked for. The stored value still wins once
-  // there is one, so collapsing it is remembered like any other column's.
+  // is in the row only while the active project has a browser pane (see
+  // `renderSlot`), so it appears because the user has just asked for the pane
+  // it holds, and a 24px strip is not what they asked for. The stored value
+  // still wins once there is one, so collapsing it is remembered like any
+  // other column's.
   const [browserCollapsed, setBrowserCollapsed] = useState(() => storedCollapsed(BROWSER_KEY, false))
   // Whether the Todos column's create dialog is open. Held here rather than
   // inside `TodosPanel` so something outside that column can open it.
@@ -197,12 +199,16 @@ export function App() {
     issues: storedCollapsed(HIDDEN_KEYS.issues, true),
     todos: storedCollapsed(HIDDEN_KEYS.todos, true),
     notes: storedCollapsed(HIDDEN_KEYS.notes, true),
-    // Read and remembered with the rest, by `hideAllColumns` and the `restore`
-    // beside it. Not by `renderSlot`'s `'browser'` case, which decides on
-    // whether there is a browser pane to draw: no View menu item and no
-    // shortcut reaches this entry, so hide-all is the only thing that writes
-    // it, and the column does not answer to it yet.
-    browser: storedCollapsed(HIDDEN_KEYS.browser, true),
+    // The one entry that defaults SHOWN, and the reason is that this column
+    // is gated on a second thing none of the others are: `renderSlot` draws
+    // it only where the active project has a browser pane, so a default of
+    // shown still puts nothing on screen until there is something to show.
+    // Defaulting hidden instead would mean a profile that already has
+    // browser panes restores with them nowhere on screen and no menu item to
+    // bring them back, since this column has neither an item nor a shortcut
+    // of its own. What writes it is hide-all, its `restore`, and the effect
+    // further down that follows the active project's browser panes.
+    browser: storedCollapsed(HIDDEN_KEYS.browser, false),
   }))
   // The row's left-to-right order. Restored from whatever the last drag
   // wrote, or the shipped order on a fresh profile: see `orderFromStored`
@@ -438,6 +444,36 @@ export function App() {
     browser: BROWSER_KEY,
   }
 
+  // The ACTIVE project's browser panes, which is a different list from
+  // `browserGroups` further down and the reason both exist. Membership in
+  // this one region is per project: this is what decides whether the column
+  // is in the row at all, and what the effect below counts to tell an open
+  // or a close from a project switch. Derived up here, above the two readers
+  // that need it, rather than beside the other browser derivations.
+  const browserPanes = state.activeProjectId
+    ? tabsOfProject(state, state.activeProjectId, 'browser')
+    : []
+
+  /**
+   * What is actually on screen, which is what "all columns" is a statement
+   * about.
+   *
+   * Identical to `hiddenColumns` except for the browser column, whose stored
+   * flag is only half of whether it is drawn: `renderSlot` also requires the
+   * active project to have a browser pane. Reading the raw flag instead
+   * would have this window offering to hide a column that is not there, and
+   * then hiding nothing when asked.
+   *
+   * Memoised because two consumers below take it as a dependency: a fresh
+   * object every render would re-register the keydown listener that reaches
+   * `hideAllColumns`, and would send the menu an IPC message on every render
+   * rather than on every change.
+   */
+  const onScreenColumns: ColumnVisibility = useMemo(
+    () => ({ ...hiddenColumns, browser: hiddenColumns.browser || browserPanes.length === 0 }),
+    [hiddenColumns, browserPanes.length],
+  )
+
   /**
    * Close every column, or reopen the set the last close remembered.
    *
@@ -447,24 +483,26 @@ export function App() {
   const hideAllColumns = useCallback(() => {
     // Reads and writes the HIDDEN flags, not the collapse ones: this item is
     // the menu's, and the menu's business is presence.
-    const next = anyOpen(hiddenColumns)
+    const next = anyOpen(onScreenColumns)
       ? (() => {
-          const closed = hideAll(hiddenColumns)
+          const closed = hideAll(onScreenColumns)
           rememberedColumns.current = closed.remembered
           return closed.next
         })()
-      : restore(hiddenColumns, rememberedColumns.current)
+      : restore(onScreenColumns, rememberedColumns.current)
     for (const id of COLUMN_IDS) setColumnHidden(id, next[id])
-  }, [hiddenColumns, setColumnHidden])
+  }, [onScreenColumns, setColumnHidden])
 
   // Main cannot read localStorage or React state, so the menu's checkmarks
   // would otherwise be a guess. Sent on mount too, not only on change: a
   // relaunch restores these from localStorage without any toggle firing.
   useEffect(() => {
     // The HIDDEN flags: a checkmark means the column is on screen, and a
-    // column collapsed to its strip is still on screen.
-    window.pterm.columnsVisible(hiddenColumns)
-  }, [hiddenColumns])
+    // column collapsed to its strip is still on screen. `onScreenColumns`
+    // rather than the raw flags, so the label main computes from these and
+    // the direction `hideAllColumns` takes are read off the same answer.
+    window.pterm.columnsVisible(onScreenColumns)
+  }, [onScreenColumns])
 
   // The *Collapsed booleans as one ColumnVisibility, for showsTabBar.
   const collapsedColumns: ColumnVisibility = {
@@ -498,15 +536,53 @@ export function App() {
   // The other region's two lists, derived exactly as the terminal region's
   // are above. `paneGroups` reads every pane, so a browser pane belonging to
   // another project keeps its box (and its page) here while the bar, which is
-  // per project, does not list it.
+  // per project, does not list it. That holds for as long as the column is
+  // drawn at all, which is a question about the ACTIVE project: see
+  // `renderSlot`'s `'browser'` case for what a switch onto a project with no
+  // browser panes costs.
   const browserGroups = paneGroups(state, 'browser')
-  const browserTabEntries = state.activeProjectId
-    ? groupedTabs(tabsOfProject(state, state.activeProjectId, 'browser'), state.tabs)
-    : []
+  // Grouped from `browserPanes` (derived above, beside its other reader), so
+  // the bar lists the active project's browser panes and not every project's.
+  const browserTabEntries = groupedTabs(browserPanes, state.tabs)
   // Whether a project is active, is not Unsorted, and its cwd is on disk:
   // see `canOpenSession` in workspace.ts, which `welcomeHint` also reads so
   // the two cannot silently disagree.
   const canOpen = canOpenSession(state)
+
+  // How many browser panes the active project had the last time the effect
+  // below ran, and which project that was. A ref rather than state: nothing
+  // renders from it, and a second render on every open would be a render
+  // scheduled to record something already on screen.
+  const browserPaneCount = useRef<{ projectId: string | null; count: number }>({
+    projectId: null,
+    count: 0,
+  })
+
+  /**
+   * The browser column follows the active project's browser panes: opening
+   * one brings the column on screen, closing the last takes it away.
+   *
+   * Unhiding is what any open does, not only the first: `setColumnHidden`
+   * also un-collapses, so the pane a user asks for while the column is a
+   * strip arrives on a column they can see. That is the whole of "a manual
+   * hide sticks until the next browser opens".
+   *
+   * A project switch is neither an open nor a close. It changes the count
+   * without anything having happened to a pane, so the run that sees a
+   * different project id records the new count and returns, which is what
+   * leaves the stored preference standing when a user comes back to a
+   * project whose column they had put away. The first run after launch takes
+   * that same branch, since the ref starts on no project at all, so a
+   * restored profile opens on the visibility it was left with.
+   */
+  useEffect(() => {
+    const was = browserPaneCount.current
+    const count = browserPanes.length
+    browserPaneCount.current = { projectId: state.activeProjectId, count }
+    if (was.projectId !== state.activeProjectId) return
+    if (count > was.count) setColumnHidden('browser', false)
+    else if (count === 0 && was.count > 0) setColumnHidden('browser', true)
+  }, [state.activeProjectId, browserPanes.length, setColumnHidden])
 
   // `type` is a declaration of intent recorded on the tab, not inferred from
   // `command` — it decides the launch state a fresh dot starts in
@@ -1874,10 +1950,17 @@ export function App() {
       case 'terminal':
         return terminalColumn
       case 'browser':
-        // Drawn only where there is a browser pane to draw. A column that was
-        // always in the row would put a strip on every window that has never
-        // opened one, and take the width for it out of the terminal.
-        return browserGroups.length === 0 ? null : (
+        // Membership is per project, visibility is a global column
+        // preference, and both have to be true for the column to be in the
+        // row. Drawing nothing for a project with no browser panes keeps an
+        // empty box off the screen without touching the stored preference,
+        // so switching back to a project that has one finds the preference
+        // exactly as the user left it. The cost of drawing nothing is that
+        // nothing is mounted either: `browserGroups` below hands the column
+        // every project's browser panes, so a project switch onto a project
+        // with none takes every one of those `<webview>`s down with the
+        // column, and switching back rebuilds them from their saved URLs.
+        return browserPanes.length === 0 || hiddenColumns.browser ? null : (
           <BrowserColumn
             groups={browserGroups}
             tabs={browserTabEntries}
@@ -1891,7 +1974,15 @@ export function App() {
             onNew={openBrowserPane}
             onRename={renameTab}
             onRecolor={recolorPane}
-            canOpen={canOpen}
+            // Not `canOpenSession`, which is what the terminal bar's `+`
+            // reads: that asks whether a pty can be started here (a real
+            // project, with its cwd still on disk), and a browser pane starts
+            // no pty and never visits the cwd it records. `openBrowser` in
+            // main needs the project ROW and nothing else, and the palette's
+            // "New browser pane" reaches it on exactly those terms, so a
+            // stricter gate here would leave one route to this action open
+            // and the other greyed out.
+            canOpen={project !== undefined}
             side={resizerSideFor(columnOrder, 'browser')}
           />
         )

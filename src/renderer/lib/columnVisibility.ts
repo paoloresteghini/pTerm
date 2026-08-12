@@ -26,9 +26,11 @@ export type { ColumnId, ColumnVisibility }
  *
  * `browser` sits where `COLUMN_ORDER_DEFAULT` puts it, right after the
  * terminal, ahead of every column that stands to its right. It has no View
- * menu item yet (there is nothing to toggle: the column renders nothing
- * until Task 7 fills it in), so it is a member of this list without yet
- * being one of the things the comment above says the menu lists.
+ * menu item of its own: it is put on screen by the browser panes the active
+ * project holds rather than by a menu item, so it is a member of this list
+ * without being one of the things the comment above says the menu lists.
+ * Being a member is what puts it under hide-all and its `restore` all the
+ * same, which is what the menu's one item covering "everything" means.
  */
 export const COLUMN_IDS: readonly ColumnId[] = [
   'tabs',

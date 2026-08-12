@@ -145,6 +145,28 @@ Task 8 owns the change. What a zero-sized or hidden `<webview>` does to the
 page inside it is not assumed here; it is to be measured before the approach
 is fixed.
 
+**Measured 2026-08-11 (Task 8), reading a live guest through
+`webContents.executeJavaScript`.** Four states, one page with a scroll
+position and a per-load nonce:
+
+| What was done to the pane's box | What the guest reported |
+| --- | --- |
+| shrunk to the collapsed strip's width | `innerWidth` 463 to 7, a full reflow; nonce and scroll kept |
+| `visibility: hidden`, box size kept | no `resize` at all; `innerWidth`, scroll and nonce all unchanged |
+| `position: absolute` off the flow, box width kept | `innerWidth` and scroll unchanged |
+| `display: none` | no `resize`; state kept, but the guest holds its last size, and a webview that is `display:none` when it mounts has no size to hold |
+
+So the mechanism is `visibility: hidden` on a box that KEEPS the column's open
+width, absolutely positioned so the row still pays only for the 24px strip.
+Not `display: none`, and not simply leaving the panes inside a 24px column.
+
+A fifth thing had to be measured because it is not CSS at all: React reconciles
+by position, so a `collapsed` branch that returns a DIFFERENT tree unmounts the
+`<webview>`s however they are styled. Measured, before `BrowserColumn` became
+one tree: a collapse and an expand left the pane on `about:blank`, since
+navigation is written through to main rather than back into renderer state, so
+the rebuilt pane read the URL the pane record still carried.
+
 ### Focus and keys
 
 `activeRegion` lives in `App.tsx` state and is not persisted. It is set on
