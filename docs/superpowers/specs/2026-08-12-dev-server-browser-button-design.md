@@ -79,6 +79,16 @@ prettier one would only hide which port was tried.
   `about:blank` when given nothing, so the no-server case needs no new path.
 - **A channel** for the renderer to ask main what URL a project has, if any.
 
+## Which project, and when the button does nothing
+
+The button acts on the active project, the same one the tab bar it sits in is
+drawing. A URL is filed under the project of the pane that announced it, so a
+server running in one project never opens for another.
+
+With no active project there is nothing to open and nothing to open it into, and
+the existing `openBrowserPane` already returns early in that case. The button
+follows it rather than inventing a second rule.
+
 ## Edge cases worth naming
 
 - **The button's testid must not begin with `tab-`.** More than 27 e2e locators
