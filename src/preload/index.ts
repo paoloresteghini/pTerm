@@ -149,6 +149,9 @@ const api: PTermApi = {
   clipboardWrite: (text) => ipcRenderer.invoke(CHANNELS.clipboardWrite, text),
   openEditor: (projectId, relPath) => ipcRenderer.invoke(CHANNELS.openEditor, projectId, relPath),
   openBrowser: (projectId, url) => ipcRenderer.invoke(CHANNELS.openBrowser, projectId, url),
+  // A slug, where the line above takes an id. See `devServerUrl` in
+  // `shared/ipc.ts` for why the two neighbours are named differently.
+  devServerUrl: (projectSlug) => ipcRenderer.invoke(CHANNELS.devServerUrl, projectSlug),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke(CHANNELS.openExternal, url),
   /*
    * The absolute path of a dropped file.

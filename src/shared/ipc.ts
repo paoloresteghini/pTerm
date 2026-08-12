@@ -73,6 +73,7 @@ export const CHANNELS = {
   clipboardWrite: 'pterm:clipboardWrite',
   openEditor: 'pterm:openEditor',
   openBrowser: 'pterm:openBrowser',
+  devServerUrl: 'pterm:devServerUrl',
   openExternal: 'pterm:openExternal',
   updateAvailable: 'pterm:updateAvailable',
   checkForUpdate: 'pterm:checkForUpdate',
@@ -1453,6 +1454,24 @@ export interface PTermApi {
    * every call mints a fresh one.
    */
   openBrowser(projectId: string, url?: string): Promise<TabDescriptor | null>
+  /**
+   * The loopback URL a dev server most recently announced in this project's
+   * terminal output, or null when none has.
+   *
+   * Asked by project SLUG, deliberately unlike `openBrowser` directly above,
+   * which is asked by project id. Main learns a URL from a pty chunk, and all
+   * a pane carries is `projectSlug` (`TabDescriptor`), so the slug is the only
+   * name main ever files one under. A caller holding a `ProjectDescriptor` has
+   * both fields and has to hand each of these two calls its own: `slug` here,
+   * `id` there. Nothing in main converts between them for this feature, so
+   * passing an id here answers null rather than the URL.
+   *
+   * Runtime only, and never persisted: a URL from a previous run is a lie the
+   * moment that server is gone. It is dropped when the pane that announced it
+   * dies, so an answer means some pane was alive and serving when it spoke,
+   * not that the port is still open now.
+   */
+  devServerUrl(projectSlug: string): Promise<string | null>
   /**
    * Hand a URL to the default browser.
    *

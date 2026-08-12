@@ -40,6 +40,7 @@ import {
 } from '../../shared/ipc'
 import type { ExitReason, SessionManager, PaneRecord, TerminalPaneRecord } from '../sessions/manager'
 import { normaliseUrl } from '../../shared/browserUrl'
+import { DevServerRegistry } from '../devserver/registry'
 import { isLoopbackUrl } from '../../shared/localOrigin'
 import { ConfigStore, type PTermConfig } from '../state/store'
 import { StatusRegistry } from '../status/registry'
@@ -867,7 +868,33 @@ export function registerIpc(
     }
   }
 
-  manager.onData((id, data) => send(CHANNELS.data, { id, data }))
+  /**
+   * Where a dev server's URL waits between the pty chunk that announced it and
+   * the press that opens a browser pane on it.
+   *
+   * Process lifetime, like `pendingKills` and `agentSessions` above, and for a
+   * blunter reason than either: a port is only true while the server holding
+   * it is running, so a URL read back off disk at the next launch would open a
+   * dead page and read as this feature being broken. The class says the same
+   * at itself (`devserver/registry.ts`), which is where the not-persisting is
+   * actually enforced.
+   */
+  const devServers = new DevServerRegistry()
+
+  manager.onData((id, data) => {
+    // Learned from the chunk already on its way to the renderer, rather than
+    // from a second listener: this is the only `manager.onData` in `src/`
+    // (measured 2026-08-12), so it is the one place a pty chunk is handled.
+    //
+    // The pane's record is what names the project. A chunk knows only which
+    // pane it came from, and `projectSlug` is the only project name a pane
+    // carries, which is why the registry files by slug. An entry already
+    // deleted (a chunk arriving as its session goes) simply has nothing to
+    // file it under.
+    const pane = manager.get(id)
+    if (pane) devServers.observe(id, pane.projectSlug, data)
+    send(CHANNELS.data, { id, data })
+  })
   manager.onExit((record, code, reason) => {
     // The renderer needs the answer to travel with the event: it draws the
     // tabs, and a tab whose session is still running must stay in the bar.
@@ -878,6 +905,14 @@ export function registerIpc(
       const sessionAlive = await sessionSurvived(record, reason)
       send(CHANNELS.exit, { id: record.id, code, sessionAlive, reason })
       if (!sessionAlive) {
+        // Whatever this pane was serving went down with its session, so the
+        // URL it announced stops being true here. This branch is where the
+        // app already learns a pane is really gone, and it is reached for a
+        // shell that exited on its own and for the kill `CHANNELS.closePane`
+        // asks for alike. Inside the guard rather than on every exit, because
+        // a `detached` client leaves its tmux session, and the server running
+        // inside it, perfectly alive.
+        devServers.forget(record.id)
         // Stamped ahead of `forgetTab` below, and carrying `record` with it.
         // `forgetTab` deletes the saved config row, and by the time a
         // listener as far away as the notification router tries to
@@ -2489,6 +2524,27 @@ export function registerIpc(
         })
         return pane
       }),
+  )
+
+  /**
+   * The URL a dev server in this project last announced, or null when none
+   * has.
+   *
+   * Slug in, slug out. The `manager.onData` forward above files a URL under
+   * the slug on the announcing pane's own record, and this reads back under
+   * the slug it is handed, so nothing on this feature's path looks a project
+   * up by id or turns one of the two names into the other.
+   * `CHANNELS.openBrowser` just above DOES resolve an id to a slug, for the
+   * pane row it writes, and this deliberately does not copy that: a caller
+   * holds a `ProjectDescriptor` carrying both names and can hand each call the
+   * one it asks for, so a config read per button press would buy nothing.
+   *
+   * Answered straight out of memory, and outside `serialise`, because nothing
+   * here reads or writes config at all.
+   */
+  ipcMain.handle(
+    CHANNELS.devServerUrl,
+    (_event, projectSlug: string): string | null => devServers.urlFor(projectSlug),
   )
 
   // `.on`, not `.handle`, for the same reason `setLayout` above is: nothing
