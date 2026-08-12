@@ -84,8 +84,9 @@ export function BrowserColumn({
   side: PanelSide
 }) {
   // 480 rather than the 208 the list columns default to: this one holds a web
-  // page, not a column of names. It is inside `clampColumnWidth`'s 140..560,
-  // so a stored width and this default live on the same scale.
+  // page, not a column of names. It is inside `clampColumnWidth`'s bounds,
+  // 140 up to at least 560 (`columnWidthMax` only grows from there on a
+  // wider window), so a stored width and this default live on the same scale.
   const { width, set, commit } = useColumnWidth('pterm:browserWidth', 480)
 
   // Both states that draw nothing put the panes in the same box, so there is
