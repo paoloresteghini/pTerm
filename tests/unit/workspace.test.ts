@@ -1110,6 +1110,27 @@ describe('workspaceReducer', () => {
     expect(next.dead['aaa']).toBeUndefined()
   })
 
+  it('clears agentSessionId on a browser pane owned by a dismissed session, and keeps the browser pane', () => {
+    const browser: TabDescriptor = {
+      id: 'browser-1',
+      projectSlug: 'lumio',
+      cwd: '/tmp',
+      type: 'browser',
+      url: 'about:blank',
+      agentSessionId: 'aaa',
+    }
+    const died = workspaceReducer(
+      { ...three, panes: [...three.panes, browser] },
+      { type: 'died', id: 'aaa', code: 1 },
+    )
+
+    const next = workspaceReducer(died, { type: 'dismissed', id: 'aaa' })
+
+    const survivor = next.panes.find((pane) => pane.id === 'browser-1')
+    expect(survivor).toBeDefined()
+    expect(survivor?.agentSessionId).toBeUndefined()
+  })
+
   it('moves the selection to a neighbour on dismiss, as a close does', () => {
     const selected = workspaceReducer(three, { type: 'activatedTab', id: 'aaa' })
     const died = workspaceReducer(selected, { type: 'died', id: 'aaa', code: 1 })
@@ -1345,6 +1366,48 @@ describe('workspaceReducer', () => {
       // of where ccc actually was.
       expect(activeTabId(next)).toBe('bbb')
       expect(activeTabId(next)).not.toBe('aaa2')
+    })
+
+    it('clears agentSessionId on a browser pane owned by the closed pane, and keeps the browser pane', () => {
+      const browser: TabDescriptor = {
+        id: 'browser-1',
+        projectSlug: 'lumio',
+        cwd: '/tmp',
+        type: 'browser',
+        url: 'about:blank',
+        agentSessionId: 'aaa',
+      }
+      const state: WorkspaceState = { ...three, panes: [...three.panes, browser] }
+      const next = workspaceReducer(state, {
+        type: 'closedPane',
+        paneId: 'aaa',
+        shape: { panes: [], tabs: [] },
+      })
+      // The browser pane survives, own url and all — this close must not
+      // reach it beyond the one field.
+      const survivor = next.panes.find((pane) => pane.id === 'browser-1')
+      expect(survivor).toBeDefined()
+      expect(survivor?.url).toBe('about:blank')
+      expect(survivor?.agentSessionId).toBeUndefined()
+    })
+
+    it('leaves a browser pane owned by a still-open session alone', () => {
+      const browser: TabDescriptor = {
+        id: 'browser-1',
+        projectSlug: 'lumio',
+        cwd: '/tmp',
+        type: 'browser',
+        url: 'about:blank',
+        agentSessionId: 'bbb',
+      }
+      const state: WorkspaceState = { ...three, panes: [...three.panes, browser] }
+      // Closing aaa, not bbb: browser-1's owner is still alive.
+      const next = workspaceReducer(state, {
+        type: 'closedPane',
+        paneId: 'aaa',
+        shape: { panes: [], tabs: [] },
+      })
+      expect(next.panes.find((pane) => pane.id === 'browser-1')?.agentSessionId).toBe('bbb')
     })
   })
 

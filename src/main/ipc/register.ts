@@ -318,6 +318,27 @@ export function claimForDeath(params: {
   return room > 0 ? share * room : share
 }
 
+/**
+ * Every browser pane `sessionPaneId` owned, released, mutating `agentSessions`
+ * in place.
+ *
+ * Pulled out of `registerIpc`'s closure so it is testable on its own, the same
+ * reason `carveRatio` and `claimForDeath` are above it: this file's own two
+ * call sites hand it their outer `agentSessions` map, exactly as they hand
+ * `tombstones` to those two.
+ *
+ * Only the map entry goes. No browser pane is closed, moved, or written to
+ * `store` by this call — that is the whole point of it: the agent's own pane
+ * can disappear without taking its confined browser pane along, because
+ * nothing here reaches the pane itself, only the association with the
+ * session that is gone.
+ */
+export function releaseAgentSession(agentSessions: Map<string, string>, sessionPaneId: string): void {
+  for (const [browserPaneId, owner] of agentSessions) {
+    if (owner === sessionPaneId) agentSessions.delete(browserPaneId)
+  }
+}
+
 export function registerIpc(
   manager: SessionManager,
   getWindow: () => BrowserWindow | null,
@@ -524,6 +545,32 @@ export function registerIpc(
    * would break the contract the two maps above keep.
    */
   const tombstones = new Map<string, Claim>()
+
+  /**
+   * Which agent session, if any, owns a browser pane right now: browser pane
+   * id to the id of the `claude` pane whose MCP tool call created it. This is
+   * `agentSessionId` on `TabDescriptor` (`shared/ipc.ts`) — the field
+   * `browserPaneFor` (`mcp/route.ts`) reads to keep an agent confined to its
+   * own browser pane and out of one the user opened by hand.
+   *
+   * Deliberately never reaches `store.write`: every `PaneRecord` this file
+   * builds for a browser pane is written to config with no `agentSessionId`
+   * field at all, so this map is the field's only home. That is on purpose,
+   * not an oversight to fix later. The flag means "an agent can act on this
+   * pane right now", and after a relaunch no agent can — the session is gone
+   * and the MCP bridge's socket is new — so persisting it would restore a
+   * confined, stripped browser pane owned by nobody. Process-lifetime, like
+   * `pendingKills` and `lastGeometry` above: empty at every launch, and a
+   * browser pane an agent owned in a previous run comes back as an ordinary
+   * one.
+   *
+   * Released by `releaseAgentSession`, called below wherever a pane leaves
+   * the workspace for good — the same two call sites that already call
+   * `registry.forget` for the same reason. Nothing sets an entry yet: the
+   * tool call that creates an agent-owned browser pane is later work, and
+   * this map is the association it will populate.
+   */
+  const agentSessions = new Map<string, string>()
 
   registry.onTransition(({ tabId, to }) => {
     // `sinceOf` read here rather than carried on the transition: the registry
@@ -1084,6 +1131,9 @@ export function registerIpc(
     // The row is already gone from config — the exit handler forgot it. This
     // drops the state, so the dock badge stops counting a tab nobody can see.
     registry.forget(id)
+    // This pane, dismissed, can no longer be anybody's agent session. Any
+    // browser pane it owned is released, not closed: see `agentSessions`.
+    releaseAgentSession(agentSessions, id)
     lastGeometry.delete(id)
     // Read before the delete, because the record is the only thing left that
     // can say which tab this pane was in and what it held: `forgetTab` dropped
@@ -1470,6 +1520,9 @@ export function registerIpc(
     // the tab a restart would have rejoined all go together. See
     // `SessionManager.forgetPane`.
     registry.forget(paneId)
+    // The closed pane, gone, can no longer be anybody's agent session. Any
+    // browser pane it owned is released, not closed: see `agentSessions`.
+    releaseAgentSession(agentSessions, paneId)
     lastGeometry.delete(paneId)
     tombstones.delete(paneId)
     manager.forgetPane(paneId)

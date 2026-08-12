@@ -1066,6 +1066,34 @@ function removeTab(state: WorkspaceState, id: string): WorkspaceState {
 }
 
 /**
+ * `panes`, with `agentSessionId` cleared on any browser pane whose session
+ * pane is no longer among them.
+ *
+ * Referential rather than tied to one action, because a session pane leaves
+ * `state.panes` through `'removed'`, `'dismissed'` and `'closedPane'` alike —
+ * see each case in `workspaceReducer`, below — and a browser pane's flag is
+ * stale the moment the pane it names is gone through any of the three, not
+ * only the one this function happens to be called from.
+ *
+ * Never drops a pane, only the field: the browser pane a closed or dismissed
+ * agent session owned stays on screen, confined but unowned, which is the
+ * survival half of the rule this exists for. Main does the matching thing on
+ * its own copy of the pane list, over its own runtime-only record of the
+ * association (`agentSessions` in `main/ipc/register.ts`) — this is the
+ * renderer's mirror of that, not a second source of truth for it: main is
+ * still what a relaunch reattaches from, and this map is empty again at
+ * every launch exactly as main's is.
+ */
+function withAgentSessionsCleared(panes: TabDescriptor[]): TabDescriptor[] {
+  const alive = new Set(panes.map((pane) => pane.id))
+  return panes.map((pane) =>
+    pane.agentSessionId !== undefined && !alive.has(pane.agentSessionId)
+      ? { ...pane, agentSessionId: undefined }
+      : pane,
+  )
+}
+
+/**
  * Every row with `id` taken out of its kids, and what is left renormalised.
  *
  * Called from exactly the two actions that take a pane out of `state.panes` —
@@ -1206,7 +1234,8 @@ export function workspaceReducer(
     case 'removed': {
       const { [action.id]: _dropped, ...status } = state.status
       const { [action.id]: _tombstone, ...dead } = state.dead
-      return { ...withoutKid(removeTab(state, action.id), action.id), status, dead }
+      const next = withoutKid(removeTab(state, action.id), action.id)
+      return { ...next, panes: withAgentSessionsCleared(next.panes), status, dead }
     }
 
     case 'movedTab': {
@@ -1291,7 +1320,8 @@ export function workspaceReducer(
       // looking at does not leave the pane showing nothing — and the tab's row
       // stops naming a pane that is no longer there, which is what kept every
       // divider in that tab from being grabbable (see `withoutKid`).
-      return { ...withoutKid(removeTab(state, action.id), action.id), dead }
+      const next = withoutKid(removeTab(state, action.id), action.id)
+      return { ...next, panes: withAgentSessionsCleared(next.panes), dead }
     }
 
     case 'split':
@@ -1310,7 +1340,7 @@ export function workspaceReducer(
       // know which project owned the pane, and a pane's project lives in its
       // own record.
       const closed = state.panes.find((pane) => pane.id === action.paneId)
-      const panes = state.panes.filter((pane) => pane.id !== action.paneId)
+      const panes = withAgentSessionsCleared(state.panes.filter((pane) => pane.id !== action.paneId))
       const nextRow = action.shape.tabs[0]
       // Keeping this tab's tombstones, which main forgot at their panes' death
       // and cannot name here — see `withKeptPanes`. Against `panes`, which has
