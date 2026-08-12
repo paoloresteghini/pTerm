@@ -266,8 +266,10 @@ export function renderBridge(): string {
  *
  * Two callers, both in step with the switch in Settings: `src/main/index.ts`
  * on a launch that finds the bridge on, and `setMcpEnabled` (`mcp/enabled.ts`)
- * when it is turned on. A launch that finds it off writes nothing here, so a
- * user who has switched it off does not get the script back.
+ * when it is turned on. A launch that finds it off writes nothing here, and
+ * that is all it does: switching off removes the registration and stops the
+ * socket, it does not delete this file. A script left on disk is inert, since
+ * nothing points at it and the socket it would dial is not there.
  *
  * The executable bit is not what runs it (the registration names a `node` and
  * passes this as an argument), but it means a user debugging the tool can run

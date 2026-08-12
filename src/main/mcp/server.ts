@@ -66,8 +66,12 @@ export function takeLines(held: string, chunk: string): { lines: string[]; held:
  * makes `listen` fail `EADDRINUSE` on the next launch. Connecting is the only
  * way to tell that apart from a second live process genuinely holding the
  * socket open.
+ *
+ * Exported for `mcpBridgeState` (`mcp/enabled.ts`), which asks the same
+ * question for a different reason: whether what the settings switch says is
+ * on is actually serving. Never rejects, for both callers' sake.
  */
-function probeListening(path: string): Promise<boolean> {
+export function probeListening(path: string): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = connect(path)
     socket.once('connect', () => {
@@ -115,12 +119,17 @@ function recoverId(line: string): number | null {
  * construction. That is what makes it testable against a raw socket with no
  * app around it.
  *
- * Unlike `HookServer`, every request that parses gets a response: the bridge
- * on the other end is waiting on that `id` and has no other way to learn a
- * call failed. A handler's rejection becomes `ok: false` with its message
- * rather than dropping the connection, and a line that fails to parse still
- * gets an error response when its `id` can be recovered, because the bridge
- * is still waiting either way.
+ * Unlike `HookServer`, every request that parses gets a response, with one
+ * exception named below: the bridge on the other end is waiting on that `id`
+ * and has no other way to learn a call failed. A handler's rejection becomes
+ * `ok: false` with its message rather than dropping the connection, and a line
+ * that fails to parse still gets an error response when its `id` can be
+ * recovered, because the bridge is still waiting either way.
+ *
+ * The exception is `close`, which destroys the connections it is serving and
+ * so drops a request that parsed and is still inside the handler. That is
+ * deliberate and it is what the off switch needs; see `connections` for why,
+ * and for what the caller gets instead of a response.
  */
 export class McpServer {
   private server: Server | null = null
@@ -242,15 +251,32 @@ export class McpServer {
   async close(): Promise<void> {
     const server = this.server
     if (!server) return
+    // Both fields taken and cleared before the first await, and the unlink
+    // below conditioned on nobody having bound the path since. The hazard is
+    // a `listen` interleaved at that await: it sees `this.server === null`,
+    // binds, and writes `this.socketPath` back. Reading the field after the
+    // await instead, this would null the path that new server is serving on
+    // (so no later `close` could ever clean it up) and unlink its socket file
+    // out from under it, leaving every bridge connect failing ENOENT against
+    // a UI reading "on". Unreachable through the app today: the switch's two
+    // buttons disable while busy and each is disabled in the direction
+    // already current, and launch's own `listen` finishes before the window
+    // that could press either exists. So this is a property of the class
+    // rather than a bug being fixed, and it is not covered by a test, because
+    // hitting that window from one would mean binding a path the old server
+    // has not finished releasing, which is a race rather than a scenario.
     this.server = null
-    // Both, and in this order: `close` is what stops it accepting, and
-    // destroying the live connections is what lets that finish. See
-    // `connections`.
+    const path = this.socketPath
+    this.socketPath = null
+    // In this order: `close` is what stops it accepting, and destroying the
+    // live connections is what lets that finish. See `connections`.
     const closed = new Promise<void>((resolve) => server.close(() => resolve()))
     for (const connection of this.connections) connection.destroy()
     this.connections.clear()
     await closed
-    if (this.socketPath) await rm(this.socketPath, { force: true })
-    this.socketPath = null
+    // `this.socketPath` was cleared above and `listen` is the only thing that
+    // ever writes a path into it, so finding it still null means nothing has
+    // taken this path over and the file is still this close's to remove.
+    if (path !== null && this.socketPath === null) await rm(path, { force: true })
   }
 }

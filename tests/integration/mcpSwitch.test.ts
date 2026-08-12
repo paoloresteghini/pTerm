@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { renderBridge } from '../../src/main/mcp/bridge'
-import { setMcpEnabled, readMcpEnabled } from '../../src/main/mcp/enabled'
+import { mcpBridgeState, setMcpEnabled, readMcpEnabled } from '../../src/main/mcp/enabled'
 import { bridgePaths, isMcpInstalled } from '../../src/main/mcp/install'
 import { McpServer } from '../../src/main/mcp/server'
 
@@ -227,5 +227,48 @@ describe('setMcpEnabled', () => {
     expect(on.enabled).toBe(true)
     expect(on.error).toContain('.claude.json')
     expect(await ask(bridgePaths().socket, REQUEST)).toContain('"ok":true')
+  })
+})
+
+/**
+ * What the settings section is told on mount, which is the one place this
+ * screen could say something the socket disagrees with.
+ *
+ * `listen` at `src/main/index.ts` can throw with the switch on (a socket a
+ * live process holds, a path over the macOS limit) and the launch carries on
+ * with only a stderr line. Without the probe, Settings then reads `on` over a
+ * bridge that is not serving. The `close()` below stands in for that launch:
+ * the preference still says on, and nothing is listening.
+ */
+describe('mcpBridgeState', () => {
+  it('says on with nothing to report while the socket is accepting', async () => {
+    await setMcpEnabled(true, server!)
+
+    expect(await mcpBridgeState()).toEqual({ enabled: true, error: null })
+  })
+
+  it('says on with a note when the setting is on and nothing is listening', async () => {
+    await setMcpEnabled(true, server!)
+    // Not through `setMcpEnabled`, deliberately: this is a bridge that is
+    // switched on and not serving, which is what a failed `listen` leaves.
+    await server!.close()
+    expect(await readMcpEnabled()).toBe(true)
+
+    const state = await mcpBridgeState()
+
+    expect(state.enabled).toBe(true)
+    expect(state.error).toContain('not listening')
+    expect(state.error).toContain(bridgePaths().socket)
+  })
+
+  /**
+   * The control that keeps the note from being an alarm on every correct
+   * install: nothing is listening here either, and that is what off means.
+   */
+  it('says off with nothing to report, without probing a socket it wants closed', async () => {
+    await setMcpEnabled(false, server!)
+    expect(await accepting(bridgePaths().socket)).toBe(false)
+
+    expect(await mcpBridgeState()).toEqual({ enabled: false, error: null })
   })
 })

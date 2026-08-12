@@ -524,6 +524,11 @@ test('the Settings switch stops the socket serving, and turning it back on rebin
 
   await openBridgeSwitch(app, window)
   await expect(window.getByTestId('mcp-status')).toHaveText('on')
+  // The mount read probes the socket rather than only reporting the stored
+  // setting, so this silence is a second witness that the bridge really is
+  // serving, from inside the app. `mcpSwitch.test.ts` is where the note it
+  // would carry instead is shown to appear.
+  await expect(window.getByTestId('mcp-warning')).toHaveCount(0)
   await window.getByTestId('mcp-disable').click()
   await expect(window.getByTestId('mcp-status')).toHaveText('off')
 

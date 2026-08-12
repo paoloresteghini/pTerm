@@ -15,8 +15,9 @@ import { errorMessage } from './errorMessage'
 export function McpSection() {
   const [bridge, setBridge] = useState<McpBridgeState | null>(null)
   // Its own error, separate from the state's `error`: this one is a call that
-  // failed, which should not happen (the handler catches its own trouble), and
-  // the other is a switch that worked and has something to report.
+  // failed, which should not happen (neither handler rejects), and the other
+  // is a switch that is working as far as it could and has something to say
+  // about it.
   const [failure, setFailure] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 

@@ -6,7 +6,7 @@ import type { McpBridgeState } from '../../shared/ipc'
 import { configRoot } from '../state/store'
 import { writeBridgeScript } from './bridge'
 import { bridgePaths, installMcpBridge, mcpConfigPath, uninstallMcpBridge } from './install'
-import type { McpServer } from './server'
+import { probeListening, type McpServer } from './server'
 
 /**
  * Whether the browser bridge is on, as the user last decided.
@@ -67,9 +67,40 @@ export async function writeMcpEnabled(enabled: boolean): Promise<void> {
   await writeFile(mcpPreferencePath(), `${JSON.stringify({ enabled }, null, 2)}\n`, 'utf8')
 }
 
-/** The current setting, for the settings section to draw on mount. */
+/**
+ * The current setting, for the settings section to draw on mount, with the
+ * socket asked whether it agrees.
+ *
+ * The setting alone would let this screen lie in the one direction that
+ * matters. `mcpServer.listen` at `src/main/index.ts` can throw for reasons
+ * that have nothing to do with the switch: a socket a live process is already
+ * holding, or a `PTERM_CONFIG_DIR` deep enough to put the path over the macOS
+ * 104-byte limit. The launch logs that and carries on, which is the right
+ * trade for the app, but it left this panel saying `on` over a bridge that
+ * was registered and not serving, with the only record on a stderr nobody
+ * running the app reads. The same failure through the switch has always been
+ * reported (`setMcpEnabled` pushes a note), so this was the launch path only.
+ *
+ * Asked by connecting rather than by remembering what launch answered. A
+ * stashed launch error would cover that one cause and go stale the moment
+ * anything else changed; a probe reports what is true when the panel opens,
+ * and covers a socket file removed by hand or a server that has since gone
+ * just as well.
+ *
+ * Only when the switch is on. Nothing listening is what off MEANS, so probing
+ * then would put a warning under every correctly switched-off bridge.
+ */
 export async function mcpBridgeState(): Promise<McpBridgeState> {
-  return { enabled: await readMcpEnabled(), error: null }
+  const enabled = await readMcpEnabled()
+  if (!enabled) return { enabled, error: null }
+  const socket = bridgePaths().socket
+  if (await probeListening(socket)) return { enabled, error: null }
+  return {
+    enabled,
+    error:
+      `The browser server is not listening on ${socket}, so a Claude session cannot reach it. ` +
+      'Turn this off and on again, or restart pTerm.',
+  }
 }
 
 function messageOf(error: unknown): string {

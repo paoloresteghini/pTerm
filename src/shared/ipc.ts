@@ -237,10 +237,14 @@ export interface HooksState {
  * same reason `HooksState` is: the renderer reads this shape and cannot import
  * from `src/main`.
  *
- * `error` is not a rejected call. The two installers underneath this throw on
- * a `~/.claude.json` that cannot be read, and the switch catches that so it
- * can still do the half that does not depend on that file (stop serving). What
- * it could not do arrives here, as a line to show under the switch.
+ * `error` is not a rejected call. It is whatever the section has to tell the
+ * user about a switch that otherwise worked, and it comes from both channels.
+ * From `setMcpBridgeEnabled`: the two installers underneath it throw on a
+ * `~/.claude.json` that cannot be read, and the switch catches that so it can
+ * still do the half that does not depend on that file (stop serving), so what
+ * it could not do arrives here. From `mcpBridgeState`: `enabled` is the stored
+ * setting, and this says so when the socket that setting promises is not
+ * actually accepting.
  */
 export interface McpBridgeState {
   enabled: boolean
@@ -1144,7 +1148,11 @@ export interface PTermApi {
   installHooks(): Promise<HooksState>
   /** Removes only pTerm's own hook groups, restoring the file it found. */
   uninstallHooks(): Promise<HooksState>
-  /** Whether the browser bridge is on, as the user last decided. Defaults to on. */
+  /**
+   * Whether the browser bridge is on, as the user last decided. Defaults to
+   * on. Carries a note when the setting says on and the socket is not
+   * accepting, which is the one way this screen could otherwise be wrong.
+   */
   mcpBridgeState(): Promise<McpBridgeState>
   /**
    * Turns the browser bridge on or off, and applies it to the running app: on

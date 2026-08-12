@@ -72,9 +72,16 @@ describe('the browser bridge preference', () => {
     expect(await readMcpEnabled()).toBe(true)
   })
 
-  it('writes JSON a human can read and edit by hand', async () => {
+  /**
+   * The whole file, byte for byte, because the claim is about a file a user
+   * opens rather than about a value this module can read back. A deep-equal on
+   * the parsed object said the same thing and stayed green with the pretty
+   * printing removed, which is the half of "readable by hand" that a parse
+   * cannot see.
+   */
+  it('writes two-space JSON with a trailing newline, for a human to edit', async () => {
     await writeMcpEnabled(false)
-    expect(JSON.parse(await readFile(mcpPreferencePath(), 'utf8'))).toEqual({ enabled: false })
+    expect(await readFile(mcpPreferencePath(), 'utf8')).toBe('{\n  "enabled": false\n}\n')
   })
 
   /**
