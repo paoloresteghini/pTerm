@@ -234,9 +234,11 @@ export async function launchApp(opts: {
       // was installed that week.
       PTERM_CLAUDE_HOME: opts.claudeHome,
       // The third file of the user's that this app writes, and the one no
-      // spec passes in: `installMcpBridge` runs on EVERY launch (see
-      // `src/main/index.ts`), so without this every launch in this suite
-      // would open the real `~/.claude.json`: 191KB of the developer's own
+      // spec passes in: `installMcpBridge` runs on every launch the browser
+      // bridge is switched on for (see `src/main/index.ts`), and it is on
+      // unless a spec has turned it off through Settings, so without this
+      // every launch in this suite would open the real `~/.claude.json`:
+      // 191KB of the developer's own
       // MCP servers and per-project history. Since task 8b, this now writes
       // even on a fresh, never-registered config, which is exactly the kind
       // of "passes today" a suite must not depend on. Derived from

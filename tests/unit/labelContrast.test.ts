@@ -72,12 +72,13 @@ describe('the section-label colour', () => {
   // exists because of. It was missed the first time because that fix went
   // through `ui/Panel.tsx`, which the settings sections do not use.
   //
-  // Since 2026-08-07's tab strip, Hooks is the only one of the four that
-  // still draws a heading: the strip already names Notifications, Shell
-  // history and Updates, so their own headings repeated the tab label and
-  // were dropped, while "Claude hooks" says something "Hooks" does not and
-  // stayed. So only Hooks is checked for the colour; the other three are
-  // checked only for the regression this file exists to catch, which is
+  // Since 2026-08-07's tab strip, a section draws a heading only when it has
+  // something to say that the tab label does not: the strip already names
+  // Notifications, Shell history and Updates, so their own headings repeated
+  // it and were dropped. Two sections keep one, and both share the Hooks tab
+  // and so cannot be told apart by the strip at all: "Claude hooks" and
+  // "Browser bridge". Both are checked for the colour by name below; the rest
+  // are checked only for the regression this file exists to catch, which is
   // still a live risk for whatever text they do draw.
   it('is what the settings sections draw their headings in', () => {
     const dir = new URL('../../src/renderer/settings/', import.meta.url)
@@ -88,6 +89,10 @@ describe('the section-label colour', () => {
     // the heading span were recoloured.
     expect(hooks).toMatch(/className="[^"]*\btext-label\b[^"]*"[^>]*>Claude hooks/)
     expect(hooks).not.toContain('text-faint')
+
+    const mcp = readFileSync(new URL('McpSection.tsx', dir), 'utf8')
+    expect(mcp).toMatch(/className="[^"]*\btext-label\b[^"]*"[^>]*>Browser bridge/)
+    expect(mcp).not.toContain('text-faint')
 
     // Every other file the settings pane renders, checked for the regression
     // this file exists to catch. `SettingsTabs.tsx` and `SettingsPane.tsx`

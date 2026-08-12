@@ -36,12 +36,28 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { spawn } from 'node:child_process'
 import { createServer, type Server } from 'node:http'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchApp, killServer } from './harness'
+import { CHANNELS, type MenuCommand } from '../../src/shared/ipc'
 
 const SOCKET = 'pterm-e2e-browsermcp'
+
+// A typed assignment, not a bare string, for the reason `settingsTabs.spec.ts`
+// gives: a renamed variant fails to compile here rather than sending a command
+// nothing listens for.
+const SETTINGS_COMMAND: MenuCommand = 'settings'
+
+/**
+ * The key the app owns inside `mcpServers`, spelled out rather than imported
+ * from `src/main/mcp/install.ts`.
+ *
+ * This is the name Claude Code itself reads out of the file, so a test that
+ * took it from the module would agree with a rename that broke every existing
+ * session's tool. Spelling it is the assertion.
+ */
+const SERVER_KEY = 'pterm-browser'
 
 /** The browser pane the CONTROL test seeds: one the user opened by hand. */
 const HAND_OPENED = 'b1'
@@ -259,6 +275,38 @@ async function openSessionPane(window: Page): Promise<string> {
   return ids[0]!
 }
 
+/**
+ * Opens Settings on the Hooks tab, which is where the browser bridge's switch
+ * lives, and waits for the switch to have read its own state.
+ *
+ * The menu command is sent to the renderer directly, the way
+ * `settingsTabs.spec.ts` does it: the accelerator cannot be driven from
+ * Playwright (a synthetic keypress arrives below the layer Electron matches
+ * accelerators at) and the menu bar is not in the DOM.
+ */
+async function openBridgeSwitch(app: ElectronApplication, window: Page): Promise<void> {
+  expect(CHANNELS.menuCommand).toBe('pterm:menuCommand')
+  expect(SETTINGS_COMMAND).toBe('settings')
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0].webContents.send('pterm:menuCommand', 'settings')
+  })
+  await expect(window.getByTestId('settings-pane')).toBeVisible({ timeout: 20_000 })
+  await window.getByTestId('settings-tab-hooks').click()
+  await expect(window.getByTestId('mcp-status')).toBeVisible()
+}
+
+/**
+ * Whether the app's entry is in the Claude config this launch was pointed at.
+ *
+ * Read off disk rather than asked of the app, because the file is the whole
+ * point: it is what a Claude session's own client reads at startup.
+ */
+async function registered(): Promise<boolean> {
+  const raw = await readFile(join(configDir, 'claude.json'), 'utf8').catch(() => '{}')
+  const servers = (JSON.parse(raw) as { mcpServers?: Record<string, unknown> }).mcpServers
+  return servers !== undefined && SERVER_KEY in servers
+}
+
 /** What one `tools/call` answered with, unwrapped to its text and error flag. */
 interface ToolReply {
   text: string
@@ -448,10 +496,105 @@ test('browser_navigate opens a browser pane for the calling session and reuses i
 })
 
 /**
+ * The off switch, through the real UI and against the real socket.
+ *
+ * The control comes first and is not decoration: the same call that fails
+ * after the click succeeds before it, so what the failure demonstrates is the
+ * switch rather than a bridge that never worked in this test.
+ *
+ * The failing call is the demonstration the ruling asked for. An assertion
+ * that the entry is gone from `~/.claude.json` would not be one: a session
+ * with a shell can put that entry back itself, and the reason off has to stop
+ * the socket is that only a server which is not accepting actually denies it.
+ * The bridge script here is spawned with `PTERM_MCP_SOCKET` pointing straight
+ * at the socket path, exactly as the registration would, so it is reaching the
+ * socket directly and not through anything the config still says.
+ *
+ * Turning it back on is asserted in the same test and on the same launch,
+ * because "immediate in both directions" is the claim: no relaunch happens
+ * between the last two calls.
+ */
+test('the Settings switch stops the socket serving, and turning it back on rebinds it', async () => {
+  const { app, window } = await launch()
+  const sessionId = await openSessionPane(window)
+
+  // The control: on by default, registered by the launch, and serving.
+  expect(await registered()).toBe(true)
+  expect((await callNavigate(sessionId, baseUrl)).isError).toBe(false)
+
+  await openBridgeSwitch(app, window)
+  await expect(window.getByTestId('mcp-status')).toHaveText('on')
+  await window.getByTestId('mcp-disable').click()
+  await expect(window.getByTestId('mcp-status')).toHaveText('off')
+
+  expect(await registered()).toBe(false)
+  const denied = await callNavigate(sessionId, baseUrl)
+  expect(denied.isError).toBe(true)
+  // The bridge's own words for a socket that refused the connection. It is
+  // what the model reads, and it is the difference between denied and hung.
+  expect(denied.text).toContain('pTerm is not running')
+
+  await window.getByTestId('mcp-enable').click()
+  await expect(window.getByTestId('mcp-status')).toHaveText('on')
+
+  expect(await registered()).toBe(true)
+  const again = await callNavigate(sessionId, `${baseUrl}next`)
+  expect(again.isError).toBe(false)
+  await expect.poll(() => guestUrl(app), { timeout: 20_000 }).toBe(`${baseUrl}next`)
+
+  await app.close()
+})
+
+/**
+ * The half a preference exists for: the next launch must not put back what the
+ * user took away.
+ *
+ * Two launches against one config directory, with the app closed in between,
+ * so the second one reads the decision off disk exactly as a real relaunch
+ * does. The first launch opens no pane at all, which keeps the second one's
+ * `openSessionPane` looking at a tab bar with one tab in it.
+ *
+ * The stderr assertion is the control for the silence. A relaunch that failed
+ * to bind its socket for some unrelated reason would deny the call in exactly
+ * the same way, and this is what tells the two apart: the launch says nothing
+ * about a server it could not start, because it never tried to start one.
+ */
+test('the off state survives a relaunch, which does not put the registration back', async () => {
+  const first = await launch()
+  await openBridgeSwitch(first.app, first.window)
+  await expect(first.window.getByTestId('mcp-status')).toHaveText('on')
+  expect(await registered()).toBe(true)
+
+  await first.window.getByTestId('mcp-disable').click()
+  await expect(first.window.getByTestId('mcp-status')).toHaveText('off')
+  await first.app.close()
+
+  const { app, window, stderr } = await launch()
+
+  await openBridgeSwitch(app, window)
+  await expect(window.getByTestId('mcp-status')).toHaveText('off')
+  expect(await registered()).toBe(false)
+
+  // The dialog draws a full-screen overlay that swallows clicks, so it has to
+  // go before a tab can be opened underneath it.
+  await window.keyboard.press('Escape')
+  await expect(window.getByTestId('settings-pane')).toHaveCount(0)
+
+  const sessionId = await openSessionPane(window)
+  const denied = await callNavigate(sessionId, baseUrl)
+  expect(denied.isError).toBe(true)
+  expect(denied.text).toContain('pTerm is not running')
+  expect(stderr()).not.toContain('failed to start the MCP browser server')
+
+  await app.close()
+})
+
+/**
  * The launch path, which reads a file this app does not own.
  *
  * `installMcpBridge` registers the bridge, or re-points a stale registration,
- * on every launch (task 8b), and it THROWS on a `~/.claude.json` that cannot
+ * on every launch that finds the switch on (task 8b, and task 10 for the
+ * switch), and it THROWS on a `~/.claude.json` that cannot
  * be read, does not parse, or does not hold a JSON object. That file is the
  * user's own, 191KB of it on this machine, and it is edited by other tools;
  * a corrupt one must cost the browser tool and nothing else. The harness

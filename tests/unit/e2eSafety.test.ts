@@ -38,8 +38,9 @@ vi.mock('node:child_process', () => ({
  *
  * That last one is not like the other five, and the difference is the reason
  * this list is pinned rather than left to habit. `installMcpBridge` runs on
- * EVERY launch (`src/main/index.ts`) and read-modify-WRITES the file
- * `PTERM_MCP_CONFIG` names, dropping a timestamped backup beside it. So
+ * every launch the browser bridge is switched on for (`src/main/index.ts`),
+ * which is every launch unless a spec turns it off, and it read-modify-WRITES
+ * the file `PTERM_MCP_CONFIG` names, dropping a timestamped backup beside it. So
  * deleting one line from `harness.ts` would not merely make a suite depend on
  * the developer's state: it would rewrite the developer's own 191KB
  * `~/.claude.json` once per launch across a 299-test run, with every
@@ -278,8 +279,8 @@ describe('the E2E suite keeps its hands off the developer\'s real state', () => 
     // reads it, so the failure THIS var prevents is not destruction: it is a
     // suite whose assertions depend on whatever was installed that week. The
     // same is not true of `PTERM_MCP_CONFIG`, which guards a file this app
-    // writes on every launch; see the header for what dropping that one
-    // costs.
+    // writes on every launch that finds the browser bridge on; see the header
+    // for what dropping that one costs.
     const harness = readCode(HARNESS)
     expect(harness).toContain('PTERM_CLAUDE_HOME: opts.claudeHome')
     expect(harness).toContain("assertUnderTmp('claudeHome', opts.claudeHome)")

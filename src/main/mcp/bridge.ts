@@ -49,8 +49,9 @@ export function renderBridge(): string {
   return [
     '#!/usr/bin/env node',
     "'use strict'",
-    '// pTerm MCP bridge. Installed by pTerm and rewritten on every launch:',
-    '// edits here are lost. Source: src/main/mcp/bridge.ts.',
+    '// pTerm MCP bridge. Installed by pTerm and rewritten every time it starts',
+    '// with the browser bridge on: edits here are lost.',
+    '// Source: src/main/mcp/bridge.ts.',
     '//',
     '// stdin/stdout carry newline-delimited JSON-RPC 2.0 (MCP stdio). The unix',
     '// socket carries pTerm\'s own one-line request/response protocol. Nothing',
@@ -257,11 +258,16 @@ export function renderBridge(): string {
 /**
  * Write the bridge script and make it executable.
  *
- * Called on every launch rather than only from an install gesture, for the
- * same reason `writeScript` (`hooks/install.ts`) is: an upgrade must replace
- * an older copy, and the registration in `~/.claude.json` names this path
- * whether or not the user has pressed anything since. Safe to call
- * repeatedly, since it writes the same bytes.
+ * Called by the launch path rather than only by a gesture, for the same reason
+ * `writeScript` (`hooks/install.ts`) is: an upgrade must replace an older copy,
+ * and the registration in `~/.claude.json` names this path whether or not the
+ * user has pressed anything since. Safe to call repeatedly, since it writes
+ * the same bytes.
+ *
+ * Two callers, both in step with the switch in Settings: `src/main/index.ts`
+ * on a launch that finds the bridge on, and `setMcpEnabled` (`mcp/enabled.ts`)
+ * when it is turned on. A launch that finds it off writes nothing here, so a
+ * user who has switched it off does not get the script back.
  *
  * The executable bit is not what runs it (the registration names a `node` and
  * passes this as an argument), but it means a user debugging the tool can run

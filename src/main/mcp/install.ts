@@ -111,8 +111,8 @@ export function bridgePaths(): { dir: string; script: string; socket: string } {
  * Both paths are absolute and both can go stale: `PTERM_CONFIG_DIR` can move
  * the script, and a Homebrew upgrade or a switch of node manager can move the
  * runtime. `installMcpBridge` is what keeps the registration true, by
- * rebuilding this on every launch (`src/main/index.ts:802`) and rewriting
- * the entry when it differs from what is stored.
+ * rebuilding this on each launch that finds the bridge on (`src/main/index.ts`)
+ * and rewriting the entry when it differs from what is stored.
  *
  * No `ELECTRON_RUN_AS_NODE` here. See `nodeBin` for what was measured; a
  * variable that the shipped binary ignores would be a claim about this app
@@ -176,8 +176,9 @@ function assertRecognisedServers(config: ClaudeConfig): void {
  * Compared field by field rather than by stringifying both, so that a
  * hand-reordered `env` or a differently ordered object does not read as a
  * difference. That matters more than it looks: `installMcpBridge` runs on
- * every launch, and a comparison that saw a difference where there is none
- * would rewrite a 191KB file every time the app started.
+ * every launch the bridge is switched on for, which is every launch by
+ * default, and a comparison that saw a difference where there is none would
+ * rewrite a 191KB file every time the app started.
  */
 function sameEntry(current: unknown, entry: McpServerEntry): boolean {
   if (!isRecord(current)) return false
@@ -317,13 +318,16 @@ async function writeConfig(path: string, config: ClaudeConfig): Promise<void> {
  * Register the bridge, or bring an existing registration up to date with the
  * paths this launch resolved.
  *
- * **There is no Install gesture.** Nothing in `src/renderer/` or
- * `src/preload/` mentions MCP at all; the only caller is `src/main/index.ts`,
- * which calls this unconditionally on every launch. That is the rule the user
- * ruled for after the plan was written (see that call site), and it is worth
- * stating here rather than leaving to be discovered by someone asking whether
- * this app can register an MCP server without being asked. It can, and does,
- * the first time it opens.
+ * **No Install gesture is needed, and there is now an Uninstall one.** The
+ * user ruled that the bridge registers itself the first time pTerm opens
+ * rather than waiting to be asked, so `src/main/index.ts` calls this on every
+ * launch that finds the switch on, and the switch defaults to on: a user who
+ * never opens Settings does find an MCP server registered for them, which is
+ * worth stating here rather than leaving to be discovered. What they also have
+ * is a way to say no. `McpSection.tsx` (Settings, under Hooks) turns the
+ * bridge off, which unregisters the entry, stops the socket and is remembered
+ * across launches, and turns it back on again; both go through `setMcpEnabled`
+ * in `mcp/enabled.ts`, which is this function's second caller.
  *
  * Writes only when something actually changed, so a second launch that
  * resolves the same runtime and script leaves the file's mtime alone. Throws
@@ -362,9 +366,11 @@ export async function uninstallMcpBridge(): Promise<{ configPath: string; remove
  * **Nothing in `src/` calls this, and what ships does the opposite of what it
  * was written for.** It only ever updates a registration that is already
  * there, on the rule that a config with no pTerm server in it belongs to
- * someone who never asked for one. The app registers on every launch instead
- * (`installMcpBridge`, from `src/main/index.ts`), so that rule is not this
- * app's behaviour and this function is not the code path anyone is running.
+ * someone who never asked for one. The app registers on every launch the
+ * switch is on for instead (`installMcpBridge`, from `src/main/index.ts`), and
+ * the switch is what a user who never asked for one uses now, so that rule is
+ * not this app's behaviour and this function is not the code path anyone is
+ * running.
  * No task in this plan reactivates or removes it, so this is not a temporary
  * gap awaiting a scheduled fix; it stays dead-but-tested code, still covered
  * by its own five tests in `tests/unit/mcpInstall.test.ts`, until that

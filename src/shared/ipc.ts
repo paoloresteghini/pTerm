@@ -41,6 +41,8 @@ export const CHANNELS = {
   hooksState: 'pterm:hooksState',
   installHooks: 'pterm:installHooks',
   uninstallHooks: 'pterm:uninstallHooks',
+  mcpBridgeState: 'pterm:mcpBridgeState',
+  setMcpBridgeEnabled: 'pterm:setMcpBridgeEnabled',
   historyList: 'pterm:historyList',
   shellHistoryState: 'pterm:shellHistoryState',
   installShellHistory: 'pterm:installShellHistory',
@@ -227,6 +229,22 @@ export interface HooksState {
   /** The JSON that would be added, for the screen to show before it happens. */
   pending: string
   collisions: { event: string; command: string }[]
+}
+
+/**
+ * What the settings pane needs to draw the browser bridge switch. Declared
+ * here rather than in `src/main/mcp/enabled.ts`, which now imports it, for the
+ * same reason `HooksState` is: the renderer reads this shape and cannot import
+ * from `src/main`.
+ *
+ * `error` is not a rejected call. The two installers underneath this throw on
+ * a `~/.claude.json` that cannot be read, and the switch catches that so it
+ * can still do the half that does not depend on that file (stop serving). What
+ * it could not do arrives here, as a line to show under the switch.
+ */
+export interface McpBridgeState {
+  enabled: boolean
+  error: string | null
 }
 
 /**
@@ -1126,6 +1144,20 @@ export interface PTermApi {
   installHooks(): Promise<HooksState>
   /** Removes only pTerm's own hook groups, restoring the file it found. */
   uninstallHooks(): Promise<HooksState>
+  /** Whether the browser bridge is on, as the user last decided. Defaults to on. */
+  mcpBridgeState(): Promise<McpBridgeState>
+  /**
+   * Turns the browser bridge on or off, and applies it to the running app: on
+   * writes the bridge script, registers the entry in `~/.claude.json` and
+   * binds the unix socket; off removes the entry and stops the socket
+   * accepting, which is what actually denies a session that registered a
+   * bridge of its own. Both take effect without a relaunch.
+   *
+   * Never rejects. A `~/.claude.json` that cannot be read comes back in the
+   * state's `error` rather than as a failed call, because stopping the server
+   * does not depend on that file and must not be lost with it.
+   */
+  setMcpBridgeEnabled(enabled: boolean): Promise<McpBridgeState>
   /**
    * Past commands a `shell` pane ran, newest first, scoped to `projectCwd`
    * (`'project'`) or across every project (`'all'`).
@@ -1263,10 +1295,17 @@ export interface PTermApi {
    * pane that is still on screen in exactly one case, which is not a case
    * where an event can still arrive: `withAgentSessionsCleared`
    * (`renderer/workspace.ts`) drops the flag when the OWNING SESSION's pane
-   * leaves `state.panes`, and the two live actions that do that
-   * (`'dismissed'` and `'closedPane'`) answer the two IPC calls main released
-   * ownership on first, so nothing is left to send. Short of that,
-   * `BrowserColumn` hides panes rather than unmounting
+   * leaves `state.panes`. Two live actions do that, and they are not alike.
+   * `'closedPane'` is dispatched inside the `.then` of `closePane`'s invoke
+   * (`App.tsx`), so main has already released ownership and nothing is left to
+   * send. `'dismissed'` is not: `dismissTab` is an `ipcRenderer.send`
+   * (`preload/index.ts`) and `App.tsx` dispatches on the next line without
+   * waiting, so the renderer can drop the flag before main has run
+   * `releaseAgentSession`. What that costs is one strip line for an event
+   * arriving in that window, on a pane whose owning session has just gone;
+   * what it is not is a pane left unconfined, because confinement reads main's
+   * map rather than this flag. Short of that, `BrowserColumn` hides panes
+   * rather than unmounting
    * them, and a reply that is silent about `agentSessionId` is kept from
    * clearing it by `panesMerged` (`renderer/workspace.ts`). That last one is
    * not a hypothetical: it is where a rename anywhere in the app used to take
@@ -1274,10 +1313,14 @@ export interface PTermApi {
    *
    * One exception, stated rather than left to be found: a renderer reload (⌘R)
    * rebuilds the whole window, this strip and its pane's `<webview>` included.
-   * Ownership survives it, because `CHANNELS.restore`'s reply carries the
-   * runtime owner (`withAgentOwners`), so the strip is drawn again; its line is
-   * empty until the next call or refusal, and whatever was on it before is
-   * gone. The stderr line in `refusesNonLoopback` is the record that keeps.
+   * Whether the strip comes back depends on the owning session, because
+   * `CHANNELS.restore`'s reply carries the runtime owner through
+   * `agentOwnersOf` (`main/ipc/register.ts`), which skips an owner that is not
+   * itself in the pane list it is mapping. A session still in the tab bar gets
+   * its strip drawn again; one that has exited does not, which is the whole
+   * point of that check. Either way the line is empty until the next call or
+   * refusal, and whatever was on it before is gone. The stderr line in
+   * `refusesNonLoopback` is the record that keeps.
    */
   onBrowserAgentActivity(listener: (event: BrowserAgentActivity) => void): () => void
   /**

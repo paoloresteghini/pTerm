@@ -467,7 +467,8 @@ describe('installMcpBridge', () => {
   })
 
   it('three launches with the entry already current write the config exactly once', async () => {
-    // Task 8b's own property: `installMcpBridge` now runs on every launch, so
+    // Task 8b's own property: `installMcpBridge` runs on every launch the
+    // browser bridge is switched on for, which is every launch by default, so
     // an implementation that wrote unconditionally would rewrite the user's
     // 191KB file, and leave a fresh never-pruned backup, on every single one.
     await writeConfig(realistic())
@@ -533,10 +534,11 @@ describe('uninstallMcpBridge', () => {
 
 /**
  * **`refreshMcpBridge` is not reachable in the shipped app, and none of these
- * five tests describes what it does.** Nothing in `src/` calls it: the app
- * calls `installMcpBridge` unconditionally on every launch instead, so a user
- * who has never asked for anything DOES find an MCP server registered for
- * them. Read every assertion below as a statement about this function alone.
+ * five tests describes what the APP does.** Nothing in `src/` calls it: the
+ * app calls `installMcpBridge` on every launch the browser bridge is switched
+ * on for, and that switch defaults to on, so a user who has never asked for
+ * anything DOES find an MCP server registered for them. Read every assertion
+ * below as a statement about this function alone.
  *
  * They are kept, rather than deleted with the function, because the decision
  * to leave it in the tree was taken deliberately (see its doc comment in

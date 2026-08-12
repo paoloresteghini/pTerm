@@ -125,6 +125,20 @@ function recoverId(line: string): number | null {
 export class McpServer {
   private server: Server | null = null
   private socketPath: string | null = null
+  /**
+   * The connections being served right now, so `close` can end them.
+   *
+   * `net.Server#close` stops accepting and then waits for every live
+   * connection to end on its own. That is the right default for a process on
+   * its way out, and the wrong one for the off switch: measured 2026-08-12,
+   * `setMcpEnabled(false, …)` against a handler that had not answered yet
+   * never returned at all, so the click that turned the bridge off hung.
+   * Destroying them instead bounds it, and what the caller on the other end
+   * sees is a close with no response, which the bridge script reports to the
+   * model as a call pTerm did not answer rather than a wait to its own 30s
+   * timeout.
+   */
+  private readonly connections = new Set<Socket>()
 
   constructor(private readonly handler: (request: McpRequest) => Promise<unknown>) {}
 
@@ -171,6 +185,8 @@ export class McpServer {
 
   private accept(connection: Socket): void {
     let buffer = ''
+    this.connections.add(connection)
+    connection.once('close', () => this.connections.delete(connection))
     connection.setEncoding('utf8')
     // Swallowed rather than rethrown: a reset connection would otherwise
     // surface as an uncaught 'error' event and take the process down with it.
@@ -227,7 +243,13 @@ export class McpServer {
     const server = this.server
     if (!server) return
     this.server = null
-    await new Promise<void>((resolve) => server.close(() => resolve()))
+    // Both, and in this order: `close` is what stops it accepting, and
+    // destroying the live connections is what lets that finish. See
+    // `connections`.
+    const closed = new Promise<void>((resolve) => server.close(() => resolve()))
+    for (const connection of this.connections) connection.destroy()
+    this.connections.clear()
+    await closed
     if (this.socketPath) await rm(this.socketPath, { force: true })
     this.socketPath = null
   }

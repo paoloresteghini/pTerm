@@ -14,6 +14,7 @@ import { ConfigStore } from './state/store'
 import { HookServer } from './hooks/server'
 import { hookPaths, migrateLegacyHooks, writeScript } from './hooks/install'
 import { writeBridgeScript } from './mcp/bridge'
+import { mcpBridgeState, readMcpEnabled, setMcpEnabled } from './mcp/enabled'
 import { bridgePaths, installMcpBridge } from './mcp/install'
 import type { McpServer } from './mcp/server'
 import {
@@ -785,26 +786,35 @@ app.whenReady().then(async () => {
   // `readConfig` there). That file is 191KB of the user's own state, and a
   // corrupt one must cost them the browser tool, not the app.
   //
-  // `installMcpBridge`, not `refreshMcpBridge`, and unconditionally on every
-  // launch: the user was asked and ruled that the bridge registers itself the
-  // first time pTerm opens, rather than needing a separate action nothing in
-  // this app exposes. `refreshMcpBridge` existed to re-point an ALREADY
-  // installed entry without ever adding one; now that installing on every
-  // launch is exactly what this app does, that consent gate would only ever
-  // block the one thing this task exists to make happen, so `installMcpBridge`
-  // is the one call. It writes only when the entry is missing or stale
-  // (`mergeMcpServer`'s `sameEntry` check), so a launch that finds the entry
-  // already current writes nothing at all, the same as `refreshMcpBridge` did.
-  // The script is still rewritten unconditionally, like `writeScript` above,
-  // so an upgrade cannot leave an old copy behind.
-  try {
-    await writeBridgeScript()
-    const { changed } = await installMcpBridge()
-    if (changed) {
-      console.info(`pTerm: registered the MCP browser bridge at ${bridgePaths().script}`)
+  // `installMcpBridge`, not `refreshMcpBridge`: the user was asked and ruled
+  // that the bridge registers itself the first time pTerm opens, rather than
+  // needing a separate action. `refreshMcpBridge` existed to re-point an
+  // ALREADY installed entry without ever adding one; now that installing on
+  // launch is what this app does, that consent gate would only ever block the
+  // one thing the task exists to make happen, so `installMcpBridge` is the one
+  // call. It writes only when the entry is missing or stale (`mergeMcpServer`'s
+  // `sameEntry` check), so a launch that finds the entry already current writes
+  // nothing at all, the same as `refreshMcpBridge` did. The script is rewritten
+  // on every enabled launch, like `writeScript` above, so an upgrade cannot
+  // leave an old copy behind.
+  //
+  // The one condition on all of it is the switch in Settings, read here and
+  // again below for the socket. It defaults to ON, so a user who never opens
+  // Settings gets the launch this comment describes; a user who turned it off
+  // gets a launch that writes no script, adds no entry and binds no socket,
+  // which is what off has to mean when the caller it denies is an agent with
+  // a shell of its own. See `src/main/mcp/enabled.ts`.
+  const mcpEnabled = await readMcpEnabled()
+  if (mcpEnabled) {
+    try {
+      await writeBridgeScript()
+      const { changed } = await installMcpBridge()
+      if (changed) {
+        console.info(`pTerm: registered the MCP browser bridge at ${bridgePaths().script}`)
+      }
+    } catch (error) {
+      console.error('pTerm: could not register the MCP browser bridge', error)
     }
-  } catch (error) {
-    console.error('pTerm: could not register the MCP browser bridge', error)
   }
 
   installMenu()
@@ -812,18 +822,41 @@ app.whenReady().then(async () => {
     showColumns(collapsed)
   })
 
-  mcpServer = registerIpc(manager, () => mainWindow, registry, store, setAttendedTab, () =>
+  // A local as well as the module-level `mcpServer`, so the two handlers below
+  // can close over a value the compiler knows is a server. The module-level one
+  // is nullable because `before-quit` may fire before this line ever runs.
+  const browserServer = registerIpc(manager, () => mainWindow, registry, store, setAttendedTab, () =>
     router.refreshBadge(),
   )
+  mcpServer = browserServer
   // Same trade as the hook server above, and the same shape of failure: a
   // socket that cannot be bound costs the browser tool and nothing else. A
   // Claude session that calls in meanwhile is told by its own bridge that
-  // pTerm is not running, which is the honest answer from where it stands.
-  try {
-    await mcpServer.listen(bridgePaths().socket)
-  } catch (error) {
-    console.error('pTerm: failed to start the MCP browser server', error)
+  // pTerm is not running, which is the honest answer from where it stands, and
+  // is also exactly what a session gets when the switch is off.
+  if (mcpEnabled) {
+    try {
+      await browserServer.listen(bridgePaths().socket)
+    } catch (error) {
+      console.error('pTerm: failed to start the MCP browser server', error)
+    }
   }
+
+  // The switch itself, registered here rather than in `register.ts` because
+  // this is where the browser server's lifecycle already lives. That file
+  // deliberately builds the server and hands it back without ever binding it
+  // (see its return statement), so that the three integration tests calling
+  // `registerIpc` directly cannot bind a socket in the developer's real
+  // `~/.pterm`, and a `listen` reachable from a handler there would put a hole
+  // in that.
+  //
+  // Neither handler rejects: `mcpBridgeState` reads a file it treats as
+  // optional, and `setMcpEnabled` catches what it cannot do and reports it in
+  // the state instead. See `src/main/mcp/enabled.ts`.
+  ipcMain.handle(CHANNELS.mcpBridgeState, () => mcpBridgeState())
+  ipcMain.handle(CHANNELS.setMcpBridgeEnabled, (_event, enabled: boolean) =>
+    setMcpEnabled(enabled === true, browserServer),
+  )
   storedTheme = (await store.read()).theme
   createWindow()
   scheduleUpdateChecks(() => mainWindow)

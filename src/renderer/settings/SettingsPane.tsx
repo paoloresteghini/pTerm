@@ -6,6 +6,7 @@ import { SettingsTabs } from './SettingsTabs'
 import { SETTINGS_TABS, type SettingsTabId } from './tabs'
 import { AppearanceSection } from './AppearanceSection'
 import { HooksSection } from './HooksSection'
+import { McpSection } from './McpSection'
 import { ShellHistorySection } from './ShellHistorySection'
 import { NotificationsSection } from './NotificationsSection'
 import { UpdatesSection } from './UpdatesSection'
@@ -83,7 +84,16 @@ export function SettingsPane({
               onNotificationsChange={onNotificationsChange}
             />
           ) : null}
-          {tab === 'hooks' ? <HooksSection /> : null}
+          {/* Two sections on one tab, which is what the user ruled for: the
+              switch lives beside Hooks rather than in a tab of its own,
+              because both are about what pTerm writes into a Claude session's
+              world and neither is big enough to be a screen. */}
+          {tab === 'hooks' ? (
+            <>
+              <HooksSection />
+              <McpSection />
+            </>
+          ) : null}
           {tab === 'shell-history' ? <ShellHistorySection /> : null}
           {tab === 'updates' ? <UpdatesSection /> : null}
         </div>
