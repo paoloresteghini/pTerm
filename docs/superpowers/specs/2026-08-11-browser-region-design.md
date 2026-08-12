@@ -134,6 +134,17 @@ do not move between regions.
   touches no stored preference.
 - Restore honors the stored visibility, so a manual hide survives relaunch.
 
+**A collapse must not unmount the panes (decided 2026-08-11, during Task 7).**
+Task 7 shipped the column with a collapsed branch that renders the strip and
+nothing else, which destroys every `<webview>`: expanding then reloads each
+pane from its saved URL with its scroll position and back history gone, and a
+logged-in page may need re-authenticating. That contradicts "collapse it while
+the browsers stay alive" above. The rule is the one hidden terminal tabs
+already follow: a collapsed column keeps its panes mounted and hides them.
+Task 8 owns the change. What a zero-sized or hidden `<webview>` does to the
+page inside it is not assumed here; it is to be measured before the approach
+is fixed.
+
 ### Focus and keys
 
 `activeRegion` lives in `App.tsx` state and is not persisted. It is set on
