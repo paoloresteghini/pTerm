@@ -27,6 +27,7 @@ export function TabBar({
   onJoin,
   canJoin,
   canOpen,
+  onOpenBrowser,
   testIdPrefix = 'tab',
   capabilities,
   newLabel = 'New terminal',
@@ -52,6 +53,16 @@ export function TabBar({
   /** Whether dragging `paneId` onto `targetPaneId` would do anything. Matches `TabsPanel`'s prop of the same name. */
   canJoin: (paneId: string, targetPaneId: string) => boolean
   canOpen: boolean
+  /**
+   * Opens a browser pane on the project's dev server. Optional, and the button
+   * is rendered only where it is given, which is how one bar can offer it and
+   * another not: this component is shared, and the button belongs beside the
+   * terminals whose output is where a dev server announces itself. Which bars
+   * pass it is deliberately not written down here, that being the kind of
+   * sentence that goes stale silently; `grep -rn '<TabBar' src/` lists every
+   * bar this draws.
+   */
+  onOpenBrowser?: () => void
   /**
    * Distinguishes one bar's testids from another's when a second `TabBar`
    * is on screen. Defaults to `'tab'`, which reproduces today's ids
@@ -429,6 +440,29 @@ export function TabBar({
       >
         +
       </button>
+      {onOpenBrowser ? (
+        <button
+          // Fixed rather than derived from `testIdPrefix` the way `new-` above
+          // is, because this button exists only where `onOpenBrowser` is
+          // passed. Two bars offering it at once would put two elements under
+          // this one id on screen, a strict-mode violation in every locator
+          // that takes it, so a second caller passing the prop has to derive
+          // the id here first. It does not begin with `tab-`: the e2e suite
+          // counts tabs with a `[data-testid^="tab-"]` prefix match, and an
+          // element under that prefix inflates every one of those counts while
+          // each assertion still passes.
+          data-testid="open-devserver"
+          aria-label="Open the dev server in a browser pane"
+          title="Open the dev server in a browser pane"
+          onClick={onOpenBrowser}
+          // No `disabled`, unlike `+` beside it: a project with no announced
+          // server still opens a blank pane, so there is no state in which this
+          // button has nothing to do.
+          className="cursor-default border-none bg-transparent px-3 text-xs text-faint hover:text-muted"
+        >
+          ↗
+        </button>
+      ) : null}
     </div>
   )
 }

@@ -816,6 +816,49 @@ export function App() {
   }, [project, fail])
 
   /**
+   * Open a browser pane on the URL a dev server in the active project last
+   * announced, or a blank one when none has.
+   *
+   * The two calls take DIFFERENT names for the same project. `devServerUrl`
+   * is asked by `project.slug`, because a pane carries only a slug and that is
+   * what main files a URL under, while `openBrowser` is asked by
+   * `project.id`, which is what it looks a project row up by. Nothing
+   * in main converts between them for this feature (see both doc comments in
+   * `shared/ipc.ts`), so getting them the wrong way round is not a crash: the
+   * URL lookup answers null, which is exactly what "no server has announced
+   * itself" answers, and the button goes on opening blank panes.
+   *
+   * `?? undefined` because null is not absent to a parameter that is
+   * `url?: string`. Main writes `about:blank` for the absent case, which is
+   * the no-server behaviour, so there is no second branch here for it.
+   *
+   * A second callback rather than a URL parameter on `openBrowserPane` above:
+   * that one is handed to `BrowserColumn`'s `onNew`, which becomes a button's
+   * `onClick`, so a first parameter of any kind would arrive as a
+   * `MouseEvent`.
+   */
+  const openDevServer = useCallback(() => {
+    if (!project) return
+    window.pterm
+      .devServerUrl(project.slug)
+      .then((url) => window.pterm.openBrowser(project.id, url ?? undefined))
+      .then((tab) => {
+        if (tab) {
+          dispatch({ type: 'opened', tab })
+          // The same move `openBrowserPane` makes, and for the same reason:
+          // the pane that just opened is in the browser column, and nothing
+          // focuses a fresh `<webview>` on its own. The press that got here
+          // was in the TERMINAL column, so the `pointerdown` rule has just
+          // pointed the keys at that one.
+          setActiveRegion('browser')
+          return
+        }
+        fail('Could not open a browser pane')
+      })
+      .catch(fail)
+  }, [project, fail])
+
+  /**
    * Open a read-only diff pane for one path of the active project's
    * repository, in a new tab.
    *
@@ -1898,6 +1941,7 @@ export function App() {
           onJoin={joinPanes}
           canJoin={canJoin}
           canOpen={canOpen}
+          onOpenBrowser={openDevServer}
         />
       ) : null}
       {error ? (
