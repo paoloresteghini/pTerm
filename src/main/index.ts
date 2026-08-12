@@ -14,7 +14,7 @@ import { ConfigStore } from './state/store'
 import { HookServer } from './hooks/server'
 import { hookPaths, migrateLegacyHooks, writeScript } from './hooks/install'
 import { writeBridgeScript } from './mcp/bridge'
-import { bridgePaths, refreshMcpBridge } from './mcp/install'
+import { bridgePaths, installMcpBridge } from './mcp/install'
 import type { McpServer } from './mcp/server'
 import {
   CHANNELS,
@@ -780,24 +780,31 @@ app.whenReady().then(async () => {
   // The browser bridge: the script Claude Code spawns, and the registration
   // that points at it. Its own block, after the hook ones and before the
   // window, and wrapped for the same reason `migrateLegacyHooks` is:
-  // `refreshMcpBridge` reads `~/.claude.json` and THROWS on a file that
+  // `installMcpBridge` reads `~/.claude.json` and THROWS on a file that
   // cannot be read, does not parse, or does not hold a JSON object (see
   // `readConfig` there). That file is 191KB of the user's own state, and a
   // corrupt one must cost them the browser tool, not the app.
   //
-  // Unconditional, like `writeScript` above and unlike the registration: the
-  // script is rewritten on every launch so an upgrade cannot leave an old
-  // copy behind, whereas `refreshMcpBridge` only ever updates a registration
-  // that is already there. A config with no pTerm server in it belongs to
-  // someone who has never asked for one, and startup does not ask for them.
+  // `installMcpBridge`, not `refreshMcpBridge`, and unconditionally on every
+  // launch: the user was asked and ruled that the bridge registers itself the
+  // first time pTerm opens, rather than needing a separate action nothing in
+  // this app exposes. `refreshMcpBridge` existed to re-point an ALREADY
+  // installed entry without ever adding one; now that installing on every
+  // launch is exactly what this app does, that consent gate would only ever
+  // block the one thing this task exists to make happen, so `installMcpBridge`
+  // is the one call. It writes only when the entry is missing or stale
+  // (`mergeMcpServer`'s `sameEntry` check), so a launch that finds the entry
+  // already current writes nothing at all, the same as `refreshMcpBridge` did.
+  // The script is still rewritten unconditionally, like `writeScript` above,
+  // so an upgrade cannot leave an old copy behind.
   try {
     await writeBridgeScript()
-    const { changed } = await refreshMcpBridge()
+    const { changed } = await installMcpBridge()
     if (changed) {
-      console.info(`pTerm: re-pointed the MCP browser bridge at ${bridgePaths().script}`)
+      console.info(`pTerm: registered the MCP browser bridge at ${bridgePaths().script}`)
     }
   } catch (error) {
-    console.error('pTerm: could not refresh the MCP browser bridge registration', error)
+    console.error('pTerm: could not register the MCP browser bridge', error)
   }
 
   installMenu()

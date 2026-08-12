@@ -458,6 +458,22 @@ describe('installMcpBridge', () => {
     expect(await backups()).toHaveLength(0)
   })
 
+  it('three launches with the entry already current write the config exactly once', async () => {
+    // Task 8b's own property: `installMcpBridge` now runs on every launch, so
+    // an implementation that wrote unconditionally would rewrite the user's
+    // 191KB file, and leave a fresh never-pruned backup, on every single one.
+    await writeConfig(realistic())
+
+    await installMcpBridge() // first launch: actually installs
+    const afterFirst = await stat(configFile)
+
+    await installMcpBridge() // second launch: entry already current
+    await installMcpBridge() // third launch: entry still current
+
+    expect((await stat(configFile)).mtimeMs).toBe(afterFirst.mtimeMs)
+    expect(await backups()).toHaveLength(1)
+  })
+
   it('writes the file the way Claude Code does', async () => {
     // Measured 2026-08-12: the real file is 2-space pretty-printed and ends
     // with `}` and no trailing newline. Matching it keeps this app's write

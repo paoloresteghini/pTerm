@@ -450,12 +450,13 @@ test('browser_navigate opens a browser pane for the calling session and reuses i
 /**
  * The launch path, which reads a file this app does not own.
  *
- * `refreshMcpBridge` re-points a stale registration on every launch, and it
- * THROWS on a `~/.claude.json` that cannot be read, does not parse, or does
- * not hold a JSON object. That file is the user's own, 191KB of it on this
- * machine, and it is edited by other tools; a corrupt one must cost the
- * browser tool and nothing else. The harness points `PTERM_MCP_CONFIG` at
- * `configDir/claude.json` (see `launchApp`), which is the file written here.
+ * `installMcpBridge` registers the bridge, or re-points a stale registration,
+ * on every launch (task 8b), and it THROWS on a `~/.claude.json` that cannot
+ * be read, does not parse, or does not hold a JSON object. That file is the
+ * user's own, 191KB of it on this machine, and it is edited by other tools;
+ * a corrupt one must cost the browser tool and nothing else. The harness
+ * points `PTERM_MCP_CONFIG` at `configDir/claude.json` (see `launchApp`),
+ * which is the file written here.
  *
  * Both halves are asserted, because a window that opens over a bridge that
  * quietly did not install itself is the failure this is really about: the app
@@ -470,7 +471,7 @@ test('a corrupt Claude config costs the registration and not the app', async () 
 
   await expect
     .poll(() => stderr(), { timeout: 10_000 })
-    .toContain('could not refresh the MCP browser bridge registration')
+    .toContain('could not register the MCP browser bridge')
   expect(await guestUrl(app)).toBeNull()
 
   const reply = await callNavigate(sessionId, baseUrl)

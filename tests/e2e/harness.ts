@@ -234,16 +234,16 @@ export async function launchApp(opts: {
       // was installed that week.
       PTERM_CLAUDE_HOME: opts.claudeHome,
       // The third file of the user's that this app writes, and the one no
-      // spec passes in: `refreshMcpBridge` runs on EVERY launch (see
+      // spec passes in: `installMcpBridge` runs on EVERY launch (see
       // `src/main/index.ts`), so without this every launch in this suite
       // would open the real `~/.claude.json`: 191KB of the developer's own
-      // MCP servers and per-project history. It writes nothing unless pTerm
-      // is already registered there, which is exactly the kind of "passes
-      // today" a suite must not depend on. Derived from `configDir` rather
-      // than taken as an option because there is nothing for a spec to
-      // choose: the path is under the same asserted-under-tmp directory the
-      // app's own config lives in, and a launch that never reads it costs
-      // one ENOENT.
+      // MCP servers and per-project history. Since task 8b, this now writes
+      // even on a fresh, never-registered config, which is exactly the kind
+      // of "passes today" a suite must not depend on. Derived from
+      // `configDir` rather than taken as an option because there is nothing
+      // for a spec to choose: the path is under the same asserted-under-tmp
+      // directory the app's own config lives in, and a launch that never
+      // reads it costs one ENOENT.
       PTERM_MCP_CONFIG: join(opts.configDir, 'claude.json'),
       // Off in every spec. `scheduleUpdateChecks` otherwise fires ten seconds
       // after each launch, and every spec here launches a real app, so the
