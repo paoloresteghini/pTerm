@@ -78,8 +78,19 @@ describe('McpServer', () => {
     c.close()
   })
 
-  it('answers two requests on one connection with two responses', async () => {
-    const { socket } = await start(async (request) => ({ id: request.id }))
+  it('answers two requests on one connection with two responses, in submission order, even when the first resolves after the second would have', async () => {
+    // id 1 is deliberately the slow one: its handler does not settle until
+    // well after id 2's would have. Two requests that both resolve in the
+    // same microtask tick cannot tell a real serialization queue apart from
+    // independent per-request dispatch, since microtasks drain in submission
+    // order either way. A 50ms delay on id 1 against an effectively
+    // immediate id 2 is not a close call on any machine: the gap is four to
+    // five orders of magnitude past microtask or scheduler jitter, so this
+    // is not a timing-flaky assertion.
+    const { socket } = await start(async (request) => {
+      if (request.id === 1) await new Promise((resolve) => setTimeout(resolve, 50))
+      return { id: request.id }
+    })
     const c = client(socket)
 
     c.send(`{"id":1,"paneId":"p","tool":"a","args":{}}\n`)

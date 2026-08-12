@@ -128,7 +128,7 @@ export class McpServer {
     // use, so this refuses loudly instead of stealing the socket out from
     // under it.
     if (await probeListening(path)) {
-      throw new Error(`McpServer: ${path} is already in use by another live process — refusing to steal it.`)
+      throw new Error(`McpServer: ${path} is already in use by another live process. Refusing to steal it.`)
     }
     await rm(path, { force: true })
     this.server = await attempt()
