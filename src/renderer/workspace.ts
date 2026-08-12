@@ -188,8 +188,9 @@ const SELECTION_FIELD: Record<Region, 'activeTabId' | 'activeBrowserTabId'> = {
  * `undefined` as well as a missing project.
  *
  * Not exported: `activeTabId` is the answer every caller outside this file
- * wants, and the two sites that call this directly are the reducer's own
- * close paths.
+ * wants. Three sites call this one directly, all of them in this file:
+ * `activeTabId` just below, and the reducer's two close paths, `removeTab`
+ * and `closedPane`.
  */
 function selectionOf(project: ProjectDescriptor | undefined, region: Region): string | null {
   return project?.[SELECTION_FIELD[region]] ?? null
