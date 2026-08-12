@@ -166,6 +166,36 @@ export function activeProject(state: WorkspaceState): ProjectDescriptor | undefi
 }
 
 /**
+ * Which of a project's two selection fields a region owns.
+ *
+ * One mapping, read by `selectionOf` below and written through by
+ * `setActiveTab`. Every one of those sites used to spell the choice out as its
+ * own ternary, which is four copies of a rule that is really about the shape
+ * of `ProjectDescriptor`, and a third region would have to find all four.
+ */
+const SELECTION_FIELD: Record<Region, 'activeTabId' | 'activeBrowserTabId'> = {
+  terminal: 'activeTabId',
+  browser: 'activeBrowserTabId',
+}
+
+/**
+ * One project's selection in one region, absent spelled as null.
+ *
+ * `activeTabId` below answers for the ACTIVE project only, and the reducer's
+ * close paths need the same answer about the project that owned the pane, so
+ * the rule lives here rather than inside it. `activeBrowserTabId` is optional
+ * on `ProjectDescriptor` (see its comment there), which is why this collapses
+ * `undefined` as well as a missing project.
+ *
+ * Not exported: `activeTabId` is the answer every caller outside this file
+ * wants, and the two sites that call this directly are the reducer's own
+ * close paths.
+ */
+function selectionOf(project: ProjectDescriptor | undefined, region: Region): string | null {
+  return project?.[SELECTION_FIELD[region]] ?? null
+}
+
+/**
  * The active tab is a property of the active project, not of the workspace.
  *
  * Defaults to `'terminal'`, the region this returned before `region` existed,
@@ -173,9 +203,7 @@ export function activeProject(state: WorkspaceState): ProjectDescriptor | undefi
  * column's selection exactly as before.
  */
 export function activeTabId(state: WorkspaceState, region: Region = 'terminal'): string | null {
-  const project = activeProject(state)
-  if (!project) return null
-  return (region === 'browser' ? project.activeBrowserTabId : project.activeTabId) ?? null
+  return selectionOf(activeProject(state), region)
 }
 
 /**
@@ -997,11 +1025,7 @@ function setActiveTab(
   return {
     ...state,
     projects: state.projects.map((project) =>
-      project.id !== projectId
-        ? project
-        : region === 'browser'
-          ? { ...project, activeBrowserTabId: activeTabId }
-          : { ...project, activeTabId },
+      project.id !== projectId ? project : { ...project, [SELECTION_FIELD[region]]: activeTabId },
     ),
   }
 }
@@ -1027,9 +1051,11 @@ function removeTab(state: WorkspaceState, id: string): WorkspaceState {
   const siblings = groupedTabs(tabsOfProject(state, owner, region), state.tabs).map(
     (entry) => entry.pane,
   )
-  const project = state.projects.find((candidate) => candidate.id === owner)
-  const selected = region === 'browser' ? project?.activeBrowserTabId : project?.activeTabId
-  const nextActive = selected === id ? neighbourOf(siblings, id) : (selected ?? null)
+  const selected = selectionOf(
+    state.projects.find((candidate) => candidate.id === owner),
+    region,
+  )
+  const nextActive = selected === id ? neighbourOf(siblings, id) : selected
   return setActiveTab(
     { ...state, panes: state.panes.filter((candidate) => candidate.id !== id) },
     owner,
@@ -1317,9 +1343,11 @@ export function workspaceReducer(
       if (!closed) return next
       const region = regionOf(closed)
       const owner = projectIdForTab(state.projects, closed)
-      const project = state.projects.find((candidate) => candidate.id === owner)
-      const selected = region === 'browser' ? project?.activeBrowserTabId : project?.activeTabId
-      if ((selected ?? null) !== action.paneId) return next
+      const selected = selectionOf(
+        state.projects.find((candidate) => candidate.id === owner),
+        region,
+      )
+      if (selected !== action.paneId) return next
       // Main's own answer first — `closePane` names the survivor that takes
       // over in the row it hands back — and the tab bar's neighbour rule when
       // there is no row left to name one, which is a tab that has closed

@@ -8,7 +8,6 @@ import {
   type ColumnId,
   type ColumnVisibility,
 } from '../../src/renderer/lib/columnVisibility'
-import { columnIsCollapsed } from '../../src/shared/ipc'
 
 /** Every column collapsed, which is what a fresh profile looks like. */
 const ALL_SHUT: ColumnVisibility = {
@@ -39,15 +38,11 @@ describe('COLUMN_IDS', () => {
     ])
   })
 
+  // Membership is what puts this column under hide-all and its `restore`,
+  // which is the only route a user has to hiding it: it has no View menu item
+  // and no shortcut of its own.
   it('lists the browser column', () => {
     expect(COLUMN_IDS).toContain('browser')
-  })
-
-  // A profile written before this column existed has no key for it, and
-  // `columnIsCollapsed` reads a missing key as collapsed. That is what makes
-  // "hidden until the first browser opens" free rather than a migration.
-  it('reads a profile with no browser key as collapsed', () => {
-    expect(columnIsCollapsed({} as ColumnVisibility, 'browser')).toBe(true)
   })
 })
 

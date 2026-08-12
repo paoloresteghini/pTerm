@@ -18,8 +18,9 @@ import {
 
 /**
  * Turn stored project rows into what the renderer draws: presets merged with
- * the repo's own, each project's active tab resolved against the tabs it is
- * given, and whether its directory still exists.
+ * the repo's own, each project's TWO active tabs (one per region) resolved
+ * against that region's share of the tabs it is given, and whether its
+ * directory still exists.
  *
  * Returns one descriptor per project, in the order the projects came in, so a
  * caller holding both lists can index one by the other.
