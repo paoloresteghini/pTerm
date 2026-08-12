@@ -56,17 +56,17 @@ export function TabBar({
    * Distinguishes one bar's testids from another's when a second `TabBar`
    * is on screen. Defaults to `'tab'`, which reproduces today's ids
    * (`tabbar`, `tab-${id}`, `new-tab`) exactly. The e2e suite counts terminal
-   * tabs with `[data-testid^="tab-"]` in dozens of places across most of its
-   * spec files, and a second bar rendered under the same prefix would inflate
-   * every one of those counts, so a caller adding a second bar must pass a
-   * different prefix. No exact number is written here on purpose: the count
-   * this comment used to carry (69, across 12 files) was falsified by the very
-   * commit that added the second bar, because the spec it added uses the
-   * locator too. Count them when you need to, with
+   * tabs with `[data-testid^="tab-"]` in dozens of places, and a second bar
+   * rendered under the same prefix would inflate every one of those counts, so
+   * a caller adding a second bar must pass a different prefix. Neither an
+   * exact number nor a share of the suite is written here, on purpose: the
+   * count this comment used to carry (69, across 12 files) was falsified by
+   * the very commit that added the second bar, because the spec it added uses
+   * the locator too, and the qualifier that replaced it ("most of the spec
+   * files") was wrong in its own way. Count them when you need to, with
    * `grep -rn 'data-testid\^="tab-"' tests/e2e/ | wc -l`. `elapsed-` and
-   * `tabinput-` are keyed by pane id
-   * instead, which is already unique across any number of bars, so they
-   * take no prefix and cannot collide.
+   * `tabinput-` are keyed by pane id instead, which is already unique across
+   * any number of bars, so they take no prefix and cannot collide.
    */
   testIdPrefix?: string
   /**
@@ -416,9 +416,9 @@ export function TabBar({
       <button
         // `new-${prefix}`, so the default prefix still spells `new-tab` and
         // every e2e locator on that id keeps pointing at this bar's button.
-        // There are dozens, spread over most of the suite: count them with
+        // There are dozens of them: count them with
         // `grep -rn "getByTestId('new-tab')" tests/e2e/`, and see the note on
-        // `testIdPrefix` above for why the number is not written down. Derived
+        // `testIdPrefix` above for why no number is written down. Derived
         // from the prefix rather than left fixed because two bars on screen
         // under one testid is a strict-mode violation in every one of them.
         data-testid={`new-${testIdPrefix}`}
