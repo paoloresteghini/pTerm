@@ -49,6 +49,7 @@ export const CHANNELS = {
   setLayout: 'pterm:setLayout',
   setPaneUrl: 'pterm:setPaneUrl',
   browserGuestAttached: 'pterm:browserGuestAttached',
+  browserPaneOpened: 'pterm:browserPaneOpened',
   skills: 'pterm:skills',
   notesRead: 'pterm:notesRead',
   notesWrite: 'pterm:notesWrite',
@@ -1198,6 +1199,25 @@ export interface PTermApi {
    * starts, not something the renderer asserts here.
    */
   browserGuestAttached(paneId: string, guestId: number): void
+  /**
+   * A browser pane main opened by itself, for an agent's MCP tool call.
+   *
+   * The only pane in this app the renderer does not ask for. Every other one
+   * is opened by a renderer call that gets its descriptor back
+   * (`openBrowser`, `openEditor`, `open`), because the user asked for it
+   * there; this one is asked for by a Claude session over a unix socket, and
+   * main has already written the pane to config by the time the renderer
+   * hears about it. The renderer's job is to put it on screen, which is also
+   * what mounts the `<webview>` main then navigates.
+   *
+   * The descriptor carries `agentSessionId`, which is what keeps the
+   * renderer's mirror of the association (`withAgentSessionsCleared` in
+   * `workspace.ts`) in step with main's `agentSessions` map. Main sets its
+   * own entry before this is sent, never after: the pane must be owned
+   * before it is mounted, or the gap would be a browser pane an agent had
+   * asked for that nothing was confining yet.
+   */
+  onBrowserPaneOpened(listener: (tab: TabDescriptor) => void): () => void
   /**
    * One directory of one project, directories first then files.
    *

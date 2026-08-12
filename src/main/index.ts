@@ -13,6 +13,9 @@ import { mergeTab, NotificationRouter } from './notify/router'
 import { ConfigStore } from './state/store'
 import { HookServer } from './hooks/server'
 import { hookPaths, migrateLegacyHooks, writeScript } from './hooks/install'
+import { writeBridgeScript } from './mcp/bridge'
+import { bridgePaths, refreshMcpBridge } from './mcp/install'
+import type { McpServer } from './mcp/server'
 import {
   CHANNELS,
   columnIsCollapsed,
@@ -27,6 +30,13 @@ declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string
 declare const MAIN_WINDOW_VITE_NAME: string
 
 let mainWindow: BrowserWindow | null = null
+
+/**
+ * The MCP browser server, once `registerIpc` has built it (see its return
+ * value). Null until then, which is why `before-quit` reaches it optionally:
+ * a launch that quits before `whenReady` resolves has nothing to close.
+ */
+let mcpServer: McpServer | null = null
 
 /**
  * Set by the e2e harness, and by nothing else.
@@ -767,14 +777,46 @@ app.whenReady().then(async () => {
     console.error('pTerm: could not migrate pre-rename Claude hooks', error)
   }
 
+  // The browser bridge: the script Claude Code spawns, and the registration
+  // that points at it. Its own block, after the hook ones and before the
+  // window, and wrapped for the same reason `migrateLegacyHooks` is:
+  // `refreshMcpBridge` reads `~/.claude.json` and THROWS on a file that
+  // cannot be read, does not parse, or does not hold a JSON object (see
+  // `readConfig` there). That file is 191KB of the user's own state, and a
+  // corrupt one must cost them the browser tool, not the app.
+  //
+  // Unconditional, like `writeScript` above and unlike the registration: the
+  // script is rewritten on every launch so an upgrade cannot leave an old
+  // copy behind, whereas `refreshMcpBridge` only ever updates a registration
+  // that is already there. A config with no pTerm server in it belongs to
+  // someone who has never asked for one, and startup does not ask for them.
+  try {
+    await writeBridgeScript()
+    const { changed } = await refreshMcpBridge()
+    if (changed) {
+      console.info(`pTerm: re-pointed the MCP browser bridge at ${bridgePaths().script}`)
+    }
+  } catch (error) {
+    console.error('pTerm: could not refresh the MCP browser bridge registration', error)
+  }
+
   installMenu()
   ipcMain.on(CHANNELS.columnsVisible, (_event, collapsed: ColumnVisibility) => {
     showColumns(collapsed)
   })
 
-  registerIpc(manager, () => mainWindow, registry, store, setAttendedTab, () =>
+  mcpServer = registerIpc(manager, () => mainWindow, registry, store, setAttendedTab, () =>
     router.refreshBadge(),
   )
+  // Same trade as the hook server above, and the same shape of failure: a
+  // socket that cannot be bound costs the browser tool and nothing else. A
+  // Claude session that calls in meanwhile is told by its own bridge that
+  // pTerm is not running, which is the honest answer from where it stands.
+  try {
+    await mcpServer.listen(bridgePaths().socket)
+  } catch (error) {
+    console.error('pTerm: failed to start the MCP browser server', error)
+  }
   storedTheme = (await store.read()).theme
   createWindow()
   scheduleUpdateChecks(() => mainWindow)
@@ -788,6 +830,7 @@ app.whenReady().then(async () => {
 app.on('before-quit', () => {
   manager.detachAll()
   void hookServer.stop()
+  void mcpServer?.close()
 })
 
 app.on('window-all-closed', () => {

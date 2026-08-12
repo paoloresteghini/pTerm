@@ -2,7 +2,7 @@ import { _electron as electron, expect, type ElectronApplication, type Page } fr
 import { execFile } from 'node:child_process'
 import { realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { resolve, sep } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 
 const run = promisify(execFile)
@@ -170,18 +170,6 @@ export async function launchApp(opts: {
   ghStubLog?: string
   /** Diverts `shell.openExternal` to this file instead of the real browser. */
   externalLog?: string
-  /**
-   * Marks one browser pane as owned by one agent session for this launch,
-   * as `browserPaneId:ownerPaneId`.
-   *
-   * Only `browserMcp.spec.ts` sets it, and only because there is no other
-   * way into that state yet: the MCP tool call that claims a browser pane is
-   * later work in the same plan, so without this the confinement rule in
-   * `registerIpc` has no pane to apply to and a test of it could only watch
-   * an unconfined pane behave normally. See the env var's own comment in
-   * `src/main/ipc/register.ts`.
-   */
-  agentBrowserPane?: string
   ghStubDelayMs?: number
 }): Promise<ElectronApplication> {
   assertTestSocket(opts.socket)
@@ -245,6 +233,18 @@ export async function launchApp(opts: {
       // but a suite resolving against the real one asserts against whatever
       // was installed that week.
       PTERM_CLAUDE_HOME: opts.claudeHome,
+      // The third file of the user's that this app writes, and the one no
+      // spec passes in: `refreshMcpBridge` runs on EVERY launch (see
+      // `src/main/index.ts`), so without this every launch in this suite
+      // would open the real `~/.claude.json`: 191KB of the developer's own
+      // MCP servers and per-project history. It writes nothing unless pTerm
+      // is already registered there, which is exactly the kind of "passes
+      // today" a suite must not depend on. Derived from `configDir` rather
+      // than taken as an option because there is nothing for a spec to
+      // choose: the path is under the same asserted-under-tmp directory the
+      // app's own config lives in, and a launch that never reads it costs
+      // one ENOENT.
+      PTERM_MCP_CONFIG: join(opts.configDir, 'claude.json'),
       // Off in every spec. `scheduleUpdateChecks` otherwise fires ten seconds
       // after each launch, and every spec here launches a real app, so the
       // suite would put a request on api.github.com per launch and its
@@ -276,9 +276,6 @@ export async function launchApp(opts: {
       ...(opts.ghStubFixture !== undefined ? { PTERM_GH_STUB_FIXTURE: opts.ghStubFixture } : {}),
       ...(opts.ghStubLog !== undefined ? { PTERM_GH_STUB_LOG: opts.ghStubLog } : {}),
       ...(opts.externalLog !== undefined ? { PTERM_EXTERNAL_LOG: opts.externalLog } : {}),
-      ...(opts.agentBrowserPane !== undefined
-        ? { PTERM_AGENT_BROWSER_PANE: opts.agentBrowserPane }
-        : {}),
       ...(opts.ghStubDelayMs !== undefined
         ? { PTERM_GH_STUB_DELAY_MS: String(opts.ghStubDelayMs) }
         : {}),

@@ -77,6 +77,11 @@ const api: PTermApi = {
     ipcRenderer.on(CHANNELS.focusTab, handler)
     return () => ipcRenderer.removeListener(CHANNELS.focusTab, handler)
   },
+  onBrowserPaneOpened: (listener: (tab: TabDescriptor) => void) => {
+    const handler = (_event: IpcRendererEvent, tab: TabDescriptor): void => listener(tab)
+    ipcRenderer.on(CHANNELS.browserPaneOpened, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.browserPaneOpened, handler)
+  },
   onMenuCommand: (listener: (command: MenuCommand) => void) => {
     const handler = (_event: IpcRendererEvent, command: MenuCommand): void => listener(command)
     ipcRenderer.on(CHANNELS.menuCommand, handler)

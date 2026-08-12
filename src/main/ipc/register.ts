@@ -1,4 +1,13 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, shell, webContents } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  shell,
+  webContents,
+  type WebContents,
+} from 'electron'
 import { appendFile } from 'node:fs/promises'
 import {
   CHANNELS,
@@ -62,6 +71,8 @@ import { isDirectory } from '../fsutil'
 import { scanCandidates } from '../projects/discovery'
 import { hookPaths, installHooks, readHooksState, uninstallHooks } from '../hooks/install'
 import { drainSpool } from '../hooks/spool'
+import { planBrowserNavigate } from '../mcp/navigate'
+import { McpServer } from '../mcp/server'
 import { readHistory, selectHistory } from '../shell/history'
 import {
   installShellHistory,
@@ -371,6 +382,37 @@ export function releaseAgentSession(agentSessions: Map<string, string>, paneId: 
 const guests = new Map<number, { paneId: string; isOwned: () => boolean }>()
 
 /**
+ * The live guest showing `paneId`, once there is one.
+ *
+ * Polled rather than awaited on an event, because both cases this has to
+ * cover are already in the past or already handled by a loop: a pane that has
+ * been on screen for an hour is in `guests` on the first pass, and a pane
+ * main created a moment ago is not there until the renderer has mounted it
+ * and its `did-attach` has come back over `browserGuestAttached`. A promise
+ * registered per pane would need its own bookkeeping in that handler and its
+ * own cleanup for the pane that never arrives; 50ms of latency on a tool call
+ * that is about to fetch a page over HTTP is not worth that.
+ *
+ * Throws rather than resolving null: every caller is answering an agent that
+ * is waiting on the call, and "the pane never appeared" is something it needs
+ * told rather than a value to branch on.
+ */
+async function guestForPane(paneId: string, timeoutMs = 10_000): Promise<WebContents> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    for (const [guestId, guest] of guests) {
+      if (guest.paneId !== paneId) continue
+      const contents = webContents.fromId(guestId)
+      if (contents && !contents.isDestroyed()) return contents
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`browser pane ${paneId} never put a page on screen to navigate`)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+}
+
+/**
  * Whether a browser pane's guest must be kept off `url`, reporting the
  * attempt when it must.
  *
@@ -444,7 +486,10 @@ export function registerIpc(
   // design — see `CHANNELS.restore` below) so the dock badge does not sit
   // stale until some unrelated tab's next transition happens to refresh it.
   refreshBadge: () => void = () => undefined,
-): void {
+  // Returns the MCP browser server: built here because its handler needs this
+  // closure's `store`, `serialise`, `send` and `agentSessions`, and started
+  // by `index.ts`. See the return statement at the foot of this function.
+): McpServer {
   // The saved pane list means "reattach these next launch", which is not the
   // same set as "clients attached right now" — a detached pane must stay in it.
   // So every mutation reads, edits and rewrites rather than dumping the
@@ -565,7 +610,7 @@ export function registerIpc(
     })
   }
 
-  // Keyed to the three channels this file actually pushes unprompted, rather
+  // Keyed to the four channels this file actually pushes unprompted, rather
   // than left as `(channel: string, payload: unknown)`: `unknown` is exactly
   // what let `CHANNELS.exit`'s payload go out missing `reason` for as long as
   // it did — `tsc` has no payload shape to check an omission against. A
@@ -574,6 +619,7 @@ export function registerIpc(
     [CHANNELS.data]: DataEvent
     [CHANNELS.exit]: ExitEvent
     [CHANNELS.statusChanged]: StatusEvent
+    [CHANNELS.browserPaneOpened]: TabDescriptor
   }
 
   const send = <C extends keyof SentPayloads>(channel: C, payload: SentPayloads[C]): void => {
@@ -661,39 +707,22 @@ export function registerIpc(
    * dismissing the session pane releases every browser pane it owned, and
    * closing or dismissing an agent-owned browser pane directly releases just
    * that one entry, leaving its (now former) owner's other entries alone.
-   * The tool call that claims a browser pane for an agent is later work in
-   * this plan, and this map is the association it will populate. Until it
-   * lands the map has exactly one writer, the `PTERM_AGENT_BROWSER_PANE`
-   * seam directly below: a knob no user sets, carried so the confinement can
-   * be tested at all. That is a temporary state, and what ends it is the
-   * claim call arriving, which is also when the seam goes.
+   *
+   * Added to in exactly one place, `openAgentBrowserPane` below (the one
+   * `agentSessions.set` in `src/`, counted 2026-08-12), and only ever with a
+   * pane this file has just created for the session that asked for it. There is
+   * no way to mark a pane the user opened by hand as agent-owned, and that is
+   * a property worth stating rather than leaving to be read off the code,
+   * because it is what this map now decides. It began as the input to the
+   * confinement rule, where a wrong entry could only over-restrict; it is now
+   * also the authorisation record `browserPaneFor` routes on, where a wrong
+   * entry would hand an agent a pane the user may already be logged into.
+   * (An earlier `PTERM_AGENT_BROWSER_PANE` environment seam wrote it too, for
+   * want of any other route into the owned state; it was removed by the task
+   * that added the real one, since it named any pane id at all with no
+   * validation.)
    */
   const agentSessions = new Map<string, string>()
-
-  /*
-   * The only writer that map has today, and it is here for the e2e suite
-   * rather than for a user: `PTERM_AGENT_BROWSER_PANE=browserPane:ownerPane`
-   * marks one browser pane as owned by one session for the life of a launch.
-   *
-   * Why it exists at all. The confinement below only ever applies to an
-   * agent-owned pane, and the tool call that claims one is later work in this
-   * plan (`docs/superpowers/plans/2026-08-12-browser-mcp-foundation.md`,
-   * Task 8). Without a way to reach the owned state, an e2e test of the rule
-   * could only watch an unowned pane navigate normally, which passes whether
-   * the rule is wired up or deleted. This is what makes
-   * `tests/e2e/browserMcp.spec.ts` able to fail.
-   *
-   * Unset in an ordinary launch and in every other spec, so a user's browser
-   * panes carry no owner and nothing here confines them.
-   * `PTERM_EXTERNAL_LOG` (the `openExternal` handler, below) is the same
-   * trade already made in this file: a knob no user sets, carried in
-   * production code because what it makes observable cannot be observed any
-   * other way.
-   */
-  const seededOwner = (process.env.PTERM_AGENT_BROWSER_PANE ?? '').split(':')
-  if (seededOwner.length === 2 && seededOwner[0] && seededOwner[1]) {
-    agentSessions.set(seededOwner[0], seededOwner[1])
-  }
 
   registry.onTransition(({ tabId, to }) => {
     // `sinceOf` read here rather than carried on the transition: the registry
@@ -2458,4 +2487,111 @@ export function registerIpc(
     // costs nothing to leave in.
     guest.on('will-frame-navigate', refuse)
   })
+
+  /**
+   * Open a browser pane for an agent session and claim it, in that order and
+   * before it is pointed at anything.
+   *
+   * The pane is written to config exactly as `CHANNELS.openBrowser` writes
+   * one, with two differences that are the whole of this function:
+   *
+   * - **It starts on `about:blank`,** never on the URL the call named. Task
+   *   7's confinement is fail-open in the window between a guest being
+   *   created and `browserGuestAttached` reporting it: nothing is attached
+   *   there, so nothing refuses. Creating the pane blank and navigating it
+   *   afterwards (below) means the only navigation that can happen inside
+   *   that window is to `about:blank`, and the URL is checked against
+   *   `isLoopbackUrl` before this is even called.
+   * - **`agentSessions` is written before the renderer is told.** The pane is
+   *   owned before it exists on screen, so `refusesNonLoopback` answers true
+   *   for it from its guest's very first navigation. Reversing these two
+   *   lines would leave a real gap rather than a theoretical one.
+   *
+   * `agentSessionId` is on the descriptor the renderer is sent and on no
+   * `PaneRecord` this writes: see `agentSessions` for why it never reaches
+   * disk, and `withAgentSessionsCleared` (`renderer/workspace.ts`) for the
+   * mirror this keeps in step.
+   */
+  const openAgentBrowserPane = (
+    create: { projectSlug: string; cwd: string },
+    owner: string,
+  ): Promise<string> =>
+    serialise(async () => {
+      const config = await store.read()
+      const id = newSessionId()
+      const pane: PaneRecord = {
+        id,
+        projectSlug: create.projectSlug,
+        cwd: create.cwd,
+        type: 'browser',
+        url: 'about:blank',
+      }
+      const row: TabRow = {
+        id,
+        groupId: id,
+        activePaneId: id,
+        layout: { dir: 'row', ratio: [1], kids: [id] },
+      }
+      await store.write({
+        ...config,
+        panes: [...config.panes, pane],
+        tabs: withTabRow(config.tabs, id, row),
+      })
+      agentSessions.set(id, owner)
+      send(CHANNELS.browserPaneOpened, { ...pane, agentSessionId: owner })
+      return id
+    })
+
+  /*
+   * The socket a Claude session's MCP bridge calls in on.
+   *
+   * The bridge script (`mcp/bridge.ts`) is spawned by Claude Code, not by
+   * this app, and carries the calling pane's id in `PTERM_TAB_ID`; it does no
+   * deciding of its own beyond refusing to offer the tool at all when there
+   * is no pane id. Everything that decides anything is here and in
+   * `planBrowserNavigate`, on this side of the socket, because the script is
+   * a file on the user's disk and the app cannot trust its own copy of it.
+   *
+   * A handler rejection becomes `ok: false` with its message (`McpServer`),
+   * which the bridge turns into a tool error the model reads. So every
+   * refusal below is a `throw` carrying a sentence worth showing to whoever
+   * is watching the session.
+   */
+  const mcpServer = new McpServer(async (request) => {
+    const config = await store.read()
+    // The runtime association put back onto the rows read off disk. Config
+    // never carries `agentSessionId` (see `agentSessions`), and it is the
+    // field `browserPaneFor` routes on, so a plain `config.panes` here would
+    // route every call as if no session owned anything and mint a new pane on
+    // every call.
+    const panes: TabDescriptor[] = config.panes.map((pane) => {
+      const owner = agentSessions.get(pane.id)
+      return owner === undefined ? pane : { ...pane, agentSessionId: owner }
+    })
+    const projects = await describeProjects(config.projects, panes)
+    const plan = planBrowserNavigate({ projects, panes }, request)
+    if ('error' in plan) throw new Error(plan.error)
+
+    const paneId =
+      'create' in plan ? await openAgentBrowserPane(plan.create, request.paneId) : plan.paneId
+    // `loadURL` on the guest rather than a write to `config`, because a pane
+    // already on screen reads its `url` exactly once, at mount
+    // (`BrowserPane.tsx`'s `address`), and would never look at a new one. The
+    // address bar and the saved URL follow anyway: the guest's `did-navigate`
+    // is what feeds both.
+    const guest = await guestForPane(paneId)
+    await guest.loadURL(plan.url)
+    return { paneId, url: plan.url }
+  })
+
+  // Handed back rather than started here, which is the same split
+  // `HookServer` already has: `index.ts` constructs and starts that one, and
+  // this file only ever handles what arrives on it. It matters more than
+  // symmetry. Three integration test files call `registerIpc` directly
+  // (`history`, `openBrowser`, `persistence`, counted 2026-08-12), and a
+  // `listen` inside it would bind a socket under `configRoot()` in every one
+  // of their cases, which for a case that has not set `PTERM_CONFIG_DIR` is
+  // the developer's real `~/.pterm` and the socket their running pTerm is
+  // serving on.
+  return mcpServer
 }

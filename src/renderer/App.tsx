@@ -1457,6 +1457,28 @@ export function App() {
     [state.panes, state.projects],
   )
 
+  /*
+   * A browser pane an agent's MCP tool call asked main for, which main has
+   * already written to config: this puts it on screen.
+   *
+   * `opened` alone, without the `activatedProject` its neighbour above
+   * dispatches, and that is the difference between showing a pane and taking
+   * the user somewhere. The pane still mounts either way: `BrowserColumn`
+   * renders EVERY project's browser groups and hides the ones that are not
+   * on screen with `visibility` (see its `panes` const), so the `<webview>`
+   * attaches, reports its guest to main, and can be navigated even while the
+   * user is looking at another project. Stealing the window for a tool call
+   * a background session made would be the wrong trade.
+   *
+   * `[]`, unlike `onFocusTab` above: the descriptor arrives whole in the
+   * event and nothing here reads `state`, so there is no stale closure to
+   * avoid and no reason to resubscribe on every workspace change.
+   */
+  useEffect(
+    () => window.pterm.onBrowserPaneOpened((tab) => dispatch({ type: 'opened', tab })),
+    [],
+  )
+
   // Pushed by main on its own schedule, not polled: see `onUpdateAvailable`'s
   // own comment in `shared/ipc.ts`.
   useEffect(() => window.pterm.onUpdateAvailable(setUpdate), [])

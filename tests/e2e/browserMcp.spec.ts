@@ -1,36 +1,40 @@
 /**
- * A browser pane an agent owns, held to loopback origins.
+ * The browser MCP loop, end to end, and the confinement of the pane it opens.
  *
- * This is the enforcement point of the browser MCP plan
- * (`docs/superpowers/plans/2026-08-12-browser-mcp-foundation.md`, Task 7):
- * the decision taken in brainstorming was full control of the agent's own
- * pane, confined to loopback, which is only worth anything if the confinement
- * sits on the pane rather than on a tool's arguments.
+ * Everything here goes through the real path a Claude session takes: the
+ * bridge script this app writes to disk (`src/main/mcp/bridge.ts`), spawned
+ * as its own process on a system `node` exactly as Claude Code spawns it,
+ * speaking JSON-RPC on stdio to reach the app over its unix socket. No
+ * environment seam marks a pane as agent-owned: `browser_navigate` opening
+ * the pane is what claims it, which is the whole of Task 8.
  *
- * Every test here drives a navigation with NO tool argument in it: a link
- * clicked inside the page, a redirect served by a page that was itself
- * loopback, and a subframe of a loopback page. None has a `url` parameter for
- * a tool to check, which is the argument the whole task rests on.
+ * (It replaced one: `PTERM_AGENT_BROWSER_PANE` seeded the ownership map for
+ * Task 7's tests, because nothing else could reach the owned state yet. It
+ * marked any pane id at all with no validation, which was tolerable while the
+ * map could only restrict a pane and is not now that it authorises an agent
+ * to drive one. Those tests are the confinement ones below, unchanged in what
+ * they assert and re-pointed at the pane the tool actually creates.)
  *
- * The pane is seeded into `config.json` rather than opened through the
- * palette, and ownership arrives through `PTERM_AGENT_BROWSER_PANE`
- * (`harness.ts`'s `agentBrowserPane`, and the env var's own comment in
- * `src/main/ipc/register.ts`). Ownership has no other route into a running
- * app yet: the MCP tool call that claims a pane is Task 8. When it lands,
- * these tests should claim through it and the env var can go.
+ * Every confinement test drives a navigation with NO tool argument in it: a
+ * link clicked inside the page, a redirect served by a page that was itself
+ * loopback, a subframe, and a `target=_blank`. None has a `url` parameter for
+ * a tool to check, which is the argument the pane-level rule rests on. The
+ * one test that DOES check a tool argument is the last one, because
+ * `loadURL` called from main emits no navigation event at all and the
+ * pane-level rule cannot see it.
  *
- * Reading the guest goes main-side through
- * `webContents.getAllWebContents()`, the same mechanism and for the same
- * measured reason as `browser.spec.ts`: Playwright cannot enter a
- * `<webview>`, `page.frames()` reports the guest as `about:blank` and
- * `frameLocator` throws.
+ * Reading the guest goes main-side through `webContents.getAllWebContents()`,
+ * the same mechanism and for the same measured reason as `browser.spec.ts`:
+ * Playwright cannot enter a `<webview>`, `page.frames()` reports the guest as
+ * `about:blank` and `frameLocator` throws.
  *
  * A refusal is reported on the main process's stderr, and the tests poll for
- * that line rather than waiting a fixed time for nothing to happen: "the
- * pane did not move" is otherwise a claim that is true before the click as
- * well as after it.
+ * that line rather than waiting a fixed time for nothing to happen: "the pane
+ * did not move" is otherwise a claim that is true before the click as well as
+ * after it.
  */
-import { test, expect, type ElectronApplication } from '@playwright/test'
+import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
+import { spawn } from 'node:child_process'
 import { createServer, type Server } from 'node:http'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -39,9 +43,8 @@ import { launchApp, killServer } from './harness'
 
 const SOCKET = 'pterm-e2e-browsermcp'
 
-/** The pane every test here seeds, and the session that owns it. */
-const PANE = 'b1'
-const OWNER = 'claude-1'
+/** The browser pane the CONTROL test seeds: one the user opened by hand. */
+const HAND_OPENED = 'b1'
 
 /**
  * The origin a confined pane must not reach.
@@ -146,6 +149,38 @@ function startServer(): Promise<{ server: Server; baseUrl: string }> {
   })
 }
 
+/**
+ * The config the app starts from: one project, and whichever panes a test
+ * needs seeded.
+ *
+ * The agent tests seed none. That is deliberate and is half of what they
+ * prove: the browser pane they drive does not exist until `browser_navigate`
+ * creates it, so nothing about the seeding can be what makes it confined.
+ */
+async function writeConfig(seeded: { panes: unknown[]; tabs: unknown[]; activeBrowserTabId: string | null }): Promise<void> {
+  await writeFile(
+    join(configDir, 'config.json'),
+    JSON.stringify({
+      version: 9,
+      projects: [
+        {
+          id: 'p1',
+          name: 'demo',
+          slug: 'demo',
+          cwd: projectCwd,
+          presets: [],
+          activeTabId: null,
+          activeBrowserTabId: seeded.activeBrowserTabId,
+        },
+      ],
+      panes: seeded.panes,
+      tabs: seeded.tabs,
+      activeProjectId: 'p1',
+    }),
+    'utf8',
+  )
+}
+
 test.beforeEach(async () => {
   await killServer(SOCKET)
   userDataDir = await mkdtemp(join(tmpdir(), 'pterm-mcp-user-'))
@@ -160,35 +195,7 @@ test.beforeEach(async () => {
   await mkdir(projectCwd, { recursive: true })
   ;({ server, baseUrl } = await startServer())
 
-  // One browser pane, on the local page, in its own tab row: the same shape
-  // `CHANNELS.openBrowser` writes when the palette command opens one, so the
-  // pane this restores is an ordinary browser pane and nothing about the
-  // seeding is what makes it confined. `activeBrowserTabId` is what puts it
-  // on screen: the browser region shows the project's active browser tab, and
-  // a pane that is never mounted attaches no guest to confine.
-  await writeFile(
-    join(configDir, 'config.json'),
-    JSON.stringify({
-      version: 9,
-      projects: [
-        {
-          id: 'p1',
-          name: 'demo',
-          slug: 'demo',
-          cwd: projectCwd,
-          presets: [],
-          activeTabId: null,
-          activeBrowserTabId: PANE,
-        },
-      ],
-      panes: [{ id: PANE, projectSlug: 'demo', cwd: projectCwd, type: 'browser', url: baseUrl }],
-      tabs: [
-        { id: PANE, groupId: PANE, activePaneId: PANE, layout: { dir: 'row', ratio: [1], kids: [PANE] } },
-      ],
-      activeProjectId: 'p1',
-    }),
-    'utf8',
-  )
+  await writeConfig({ panes: [], tabs: [], activeBrowserTabId: null })
 })
 
 test.afterEach(async () => {
@@ -205,12 +212,11 @@ test.afterEach(async () => {
 })
 
 /**
- * Launches the app, optionally with `PANE` owned by `OWNER`, and starts
- * collecting the main process's stderr straight away: a refusal logged
- * before a listener is attached would be lost, and the refusal is what these
- * tests wait on.
+ * Launches the app and starts collecting the main process's stderr straight
+ * away: a refusal logged before a listener is attached would be lost, and the
+ * refusal is what these tests wait on.
  */
-async function launch(owned: boolean): Promise<{ app: ElectronApplication; stderr: () => string }> {
+async function launch(): Promise<{ app: ElectronApplication; window: Page; stderr: () => string }> {
   const app = await launchApp({
     socket: SOCKET,
     configDir,
@@ -218,7 +224,6 @@ async function launch(owned: boolean): Promise<{ app: ElectronApplication; stder
     claudeSettings: claudeSettingsPath,
     claudeHome,
     userDataDir,
-    ...(owned ? { agentBrowserPane: `${PANE}:${OWNER}` } : {}),
   })
   running = app
   const stream = app.process().stderr
@@ -227,7 +232,107 @@ async function launch(owned: boolean): Promise<{ app: ElectronApplication; stder
   stream.on('data', (chunk: Buffer) => {
     text += chunk.toString()
   })
-  return { app, stderr: () => text }
+  const window = await app.firstWindow()
+  await expect(window.getByTestId('titlebar')).toBeVisible({ timeout: 20_000 })
+  return { app, window, stderr: () => text }
+}
+
+/**
+ * Opens a terminal tab and answers with its pane id, which is what a Claude
+ * session running in it would carry as `PTERM_TAB_ID`.
+ *
+ * A real pane rather than a seeded config row, because a saved terminal row
+ * whose tmux session is gone is pruned by restore (`restoreWorkspace`) and
+ * would not be in the config the tool call routes against. The tab bar is
+ * where its id is legible: `[data-testid^="tab-"]` is one element per
+ * terminal tab, which is how the rest of this suite counts them.
+ */
+async function openSessionPane(window: Page): Promise<string> {
+  await window.getByTestId('new-tab').click()
+  await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
+  const ids = await window
+    .locator('[data-testid^="tab-"]')
+    .evaluateAll((nodes) =>
+      nodes.map((node) => (node.getAttribute('data-testid') ?? '').slice('tab-'.length)),
+    )
+  expect(ids).toHaveLength(1)
+  return ids[0]!
+}
+
+/** What one `tools/call` answered with, unwrapped to its text and error flag. */
+interface ToolReply {
+  text: string
+  isError: boolean
+}
+
+/**
+ * Calls `browser_navigate` the way Claude Code would: the installed bridge
+ * script, spawned on this machine's `node`, handed only `PTERM_MCP_SOCKET`
+ * and `PTERM_TAB_ID`, spoken to in JSON-RPC over its stdin.
+ *
+ * The whole handshake is sent, in order, because that is what a client sends
+ * and a bridge that only worked when addressed out of order would be no use.
+ * `process.execPath` under Playwright is node itself.
+ */
+function callNavigate(paneId: string, url: string): Promise<ToolReply> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [join(configDir, 'bin', 'pterm-mcp')], {
+      env: {
+        PATH: process.env.PATH ?? '',
+        PTERM_MCP_SOCKET: join(configDir, 'mcp.sock'),
+        PTERM_TAB_ID: paneId,
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    let out = ''
+    let errors = ''
+    const timer = setTimeout(() => {
+      child.kill()
+      reject(new Error(`the bridge did not answer in 30s. stdout: ${out} stderr: ${errors}`))
+    }, 30_000)
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stderr.on('data', (chunk: string) => {
+      errors += chunk
+    })
+    child.stdout.on('data', (chunk: string) => {
+      out += chunk
+      for (const line of out.split('\n')) {
+        if (line.trim() === '') continue
+        const message = JSON.parse(line) as {
+          id?: number
+          result?: { content?: { text: string }[]; isError?: boolean }
+        }
+        // id 2 is the `tools/call` below; id 1 is the initialize handshake.
+        if (message.id !== 2) continue
+        clearTimeout(timer)
+        child.kill()
+        resolve({
+          text: (message.result?.content ?? []).map((entry) => entry.text).join('\n'),
+          isError: message.result?.isError === true,
+        })
+        return
+      }
+    })
+    child.stdin.write(
+      `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } })}\n`,
+    )
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`)
+    child.stdin.write(
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'browser_navigate', arguments: { url } },
+      })}\n`,
+    )
+  })
+}
+
+/** The pane id out of a successful reply, whose text is `{paneId, url}`. */
+function paneIdOf(reply: ToolReply): string {
+  expect(reply.isError).toBe(false)
+  return (JSON.parse(reply.text) as { paneId: string }).paneId
 }
 
 /**
@@ -302,22 +407,112 @@ async function waitForGuestPage(
     .toBe(`${url} ready`)
 }
 
-/** The start page, ready to be clicked. */
-async function waitForStartPage(app: ElectronApplication): Promise<void> {
+/**
+ * The whole opening move of every agent test: a session pane, a
+ * `browser_navigate` to the local start page, and the pane id it created,
+ * with its page ready to click.
+ */
+async function agentOnStartPage(
+  app: ElectronApplication,
+  window: Page,
+): Promise<{ sessionId: string; paneId: string }> {
+  const sessionId = await openSessionPane(window)
+  const paneId = paneIdOf(await callNavigate(sessionId, baseUrl))
   await waitForGuestPage(app, baseUrl, '#bounce')
+  return { sessionId, paneId }
 }
 
+test('browser_navigate opens a browser pane for the calling session and reuses it after', async () => {
+  const { app, window } = await launch()
+  const sessionId = await openSessionPane(window)
+
+  // No browser pane exists at all at this point: the config seeded none and
+  // the user has opened none.
+  expect(await guestUrl(app)).toBeNull()
+
+  const first = await callNavigate(sessionId, baseUrl)
+  const paneId = paneIdOf(first)
+
+  expect(first.text).toContain(baseUrl)
+  await expect(window.getByTestId(`browserpane-${paneId}`)).toBeVisible({ timeout: 20_000 })
+  await expect.poll(() => guestUrl(app), { timeout: 20_000 }).toBe(baseUrl)
+
+  // The second call routes to the pane the first one claimed rather than
+  // minting another: `browserPaneFor` matches on the ownership this app
+  // recorded, which is the only reason it can tell that pane from any other.
+  const second = await callNavigate(sessionId, `${baseUrl}next`)
+  expect(paneIdOf(second)).toBe(paneId)
+  await expect.poll(() => guestUrl(app), { timeout: 20_000 }).toBe(`${baseUrl}next`)
+
+  await app.close()
+})
+
+/**
+ * The launch path, which reads a file this app does not own.
+ *
+ * `refreshMcpBridge` re-points a stale registration on every launch, and it
+ * THROWS on a `~/.claude.json` that cannot be read, does not parse, or does
+ * not hold a JSON object. That file is the user's own, 191KB of it on this
+ * machine, and it is edited by other tools; a corrupt one must cost the
+ * browser tool and nothing else. The harness points `PTERM_MCP_CONFIG` at
+ * `configDir/claude.json` (see `launchApp`), which is the file written here.
+ *
+ * Both halves are asserted, because a window that opens over a bridge that
+ * quietly did not install itself is the failure this is really about: the app
+ * comes up, it says on stderr what it could not do, and the tool still works,
+ * since the script and the socket do not depend on that file at all.
+ */
+test('a corrupt Claude config costs the registration and not the app', async () => {
+  await writeFile(join(configDir, 'claude.json'), '{ this is not JSON', 'utf8')
+
+  const { app, window, stderr } = await launch()
+  const sessionId = await openSessionPane(window)
+
+  await expect
+    .poll(() => stderr(), { timeout: 10_000 })
+    .toContain('could not refresh the MCP browser bridge registration')
+  expect(await guestUrl(app)).toBeNull()
+
+  const reply = await callNavigate(sessionId, baseUrl)
+  expect(reply.isError).toBe(false)
+  await expect.poll(() => guestUrl(app), { timeout: 20_000 }).toBe(baseUrl)
+
+  await app.close()
+})
+
+/**
+ * The tool's own argument, which is the one route into a pane that Task 7's
+ * confinement cannot see: `loadURL` called from main emits no
+ * `will-navigate`, `will-redirect` or `will-frame-navigate`. Without the
+ * check in `planBrowserNavigate` this is simply how an agent reaches any
+ * origin it likes.
+ *
+ * The pane must also not be created, which is the second assertion: a refusal
+ * that had already minted a claimed pane would leave an agent holding one.
+ */
+test('browser_navigate refuses a non-loopback URL and opens no pane at all', async () => {
+  const { app, window } = await launch()
+  const sessionId = await openSessionPane(window)
+
+  const reply = await callNavigate(sessionId, AWAY)
+
+  expect(reply.isError).toBe(true)
+  expect(reply.text).toContain('loopback')
+  expect(await guestUrl(app)).toBeNull()
+
+  await app.close()
+})
+
 test('a link to a non-loopback origin does not navigate an agent-owned pane', async () => {
-  const { app, stderr } = await launch(true)
-  await expect((await app.firstWindow()).getByTestId('titlebar')).toBeVisible({ timeout: 20_000 })
-  await waitForStartPage(app)
+  const { app, window, stderr } = await launch()
+  const { paneId } = await agentOnStartPage(app, window)
 
   await clickInGuest(app, '#away')
 
   // The refusal is the positive signal that the click was handled at all.
-  await expect.poll(() => stderr(), { timeout: 10_000 }).toContain(
-    `refused a non-loopback navigation to ${AWAY_ORIGIN} in agent-owned browser pane ${PANE}`,
-  )
+  await expect
+    .poll(() => stderr(), { timeout: 10_000 })
+    .toContain(`refused a non-loopback navigation to ${AWAY_ORIGIN} in agent-owned browser pane ${paneId}`)
   // And the pane is still on the page it was on, rather than showing an error
   // card for a request that was made anyway.
   expect(await guestUrl(app)).toBe(baseUrl)
@@ -326,9 +521,8 @@ test('a link to a non-loopback origin does not navigate an agent-owned pane', as
 })
 
 test('a link to another local page still navigates an agent-owned pane', async () => {
-  const { app, stderr } = await launch(true)
-  await expect((await app.firstWindow()).getByTestId('titlebar')).toBeVisible({ timeout: 20_000 })
-  await waitForStartPage(app)
+  const { app, window, stderr } = await launch()
+  await agentOnStartPage(app, window)
 
   await clickInGuest(app, '#local')
 
@@ -339,40 +533,18 @@ test('a link to another local page still navigates an agent-owned pane', async (
 })
 
 test('a redirect off loopback does not move an agent-owned pane', async () => {
-  const { app, stderr } = await launch(true)
-  await expect((await app.firstWindow()).getByTestId('titlebar')).toBeVisible({ timeout: 20_000 })
-  await waitForStartPage(app)
+  const { app, window, stderr } = await launch()
+  const { paneId } = await agentOnStartPage(app, window)
 
   // `/bounce` is itself loopback, so `will-navigate` lets this start. Only
   // `will-redirect` sees where it was going, which is what makes this test
   // fail if that second listener is dropped.
   await clickInGuest(app, '#bounce')
 
-  await expect.poll(() => stderr(), { timeout: 10_000 }).toContain(
-    `refused a non-loopback navigation to ${AWAY_ORIGIN} in agent-owned browser pane ${PANE}`,
-  )
-  expect(await guestUrl(app)).toBe(baseUrl)
-
-  await app.close()
-})
-
-test('the same link navigates a browser pane the user opened by hand', async () => {
-  // No `agentBrowserPane`, so this pane carries no owner: the shape every
-  // browser pane in the app has today. Without this test, confining every
-  // pane in the app would pass everything above.
-  const { app, stderr } = await launch(false)
-  await expect((await app.firstWindow()).getByTestId('titlebar')).toBeVisible({ timeout: 20_000 })
-  await waitForStartPage(app)
-
-  await clickInGuest(app, '#away')
-
-  // Left the local page. Where it ends up depends on whether this machine can
-  // reach example.com (an error page commits at the same URL when it cannot),
-  // so the assertion is on the origin, not on the page loading.
   await expect
-    .poll(() => guestUrl(app), { timeout: 20_000 })
-    .toMatch(/^https:\/\/example\.com/)
-  expect(stderr()).not.toContain('refused a non-loopback navigation')
+    .poll(() => stderr(), { timeout: 10_000 })
+    .toContain(`refused a non-loopback navigation to ${AWAY_ORIGIN} in agent-owned browser pane ${paneId}`)
+  expect(await guestUrl(app)).toBe(baseUrl)
 
   await app.close()
 })
@@ -388,9 +560,8 @@ test('the same link navigates a browser pane the user opened by hand', async () 
  * to succeed first, so a refusal seen afterwards can only be the subframe's.
  */
 test('an iframe to a non-loopback origin does not load in an agent-owned pane', async () => {
-  const { app, stderr } = await launch(true)
-  await expect((await app.firstWindow()).getByTestId('titlebar')).toBeVisible({ timeout: 20_000 })
-  await waitForStartPage(app)
+  const { app, window, stderr } = await launch()
+  const { paneId } = await agentOnStartPage(app, window)
 
   await clickInGuest(app, '#framed')
   await waitForGuestPage(app, `${baseUrl}framed`, '#frame-away')
@@ -398,9 +569,9 @@ test('an iframe to a non-loopback origin does not load in an agent-owned pane', 
 
   await clickInGuest(app, '#frame-away')
 
-  await expect.poll(() => stderr(), { timeout: 10_000 }).toContain(
-    `refused a non-loopback navigation to ${AWAY_ORIGIN} in agent-owned browser pane ${PANE}`,
-  )
+  await expect
+    .poll(() => stderr(), { timeout: 10_000 })
+    .toContain(`refused a non-loopback navigation to ${AWAY_ORIGIN} in agent-owned browser pane ${paneId}`)
   // The frame never left where it started, rather than loading and being
   // reported after the fact.
   expect(await subframeUrls(app)).toEqual(['about:blank'])
@@ -419,16 +590,62 @@ test('an iframe to a non-loopback origin does not load in an agent-owned pane', 
  * `https://example.com/` with nothing logged (measured 2026-08-12).
  */
 test('a target=_blank link to a non-loopback origin does not navigate an agent-owned pane', async () => {
-  const { app, stderr } = await launch(true)
-  await expect((await app.firstWindow()).getByTestId('titlebar')).toBeVisible({ timeout: 20_000 })
-  await waitForStartPage(app)
+  const { app, window, stderr } = await launch()
+  const { paneId } = await agentOnStartPage(app, window)
 
   await clickInGuest(app, '#blank')
 
-  await expect.poll(() => stderr(), { timeout: 10_000 }).toContain(
-    `refused a non-loopback navigation to ${AWAY_ORIGIN} in agent-owned browser pane ${PANE}`,
-  )
+  await expect
+    .poll(() => stderr(), { timeout: 10_000 })
+    .toContain(`refused a non-loopback navigation to ${AWAY_ORIGIN} in agent-owned browser pane ${paneId}`)
   expect(await guestUrl(app)).toBe(baseUrl)
+
+  await app.close()
+})
+
+/**
+ * The control, and the test that keeps every one above honest: a browser pane
+ * the user opened by hand carries no owner, and confining every pane in the
+ * app would pass all of them without it.
+ *
+ * It is also the second half of the routing rule. The session pane opened
+ * here calls the tool while this hand-opened pane is sitting in the same
+ * project, and the tool creates a pane of its own rather than taking this
+ * one, which is the decision from brainstorming: the agent drives its own
+ * browser pane, never the user's.
+ */
+test('the same link navigates a browser pane the user opened by hand, which the tool never claims', async () => {
+  await writeConfig({
+    panes: [{ id: HAND_OPENED, projectSlug: 'demo', cwd: projectCwd, type: 'browser', url: baseUrl }],
+    tabs: [
+      {
+        id: HAND_OPENED,
+        groupId: HAND_OPENED,
+        activePaneId: HAND_OPENED,
+        layout: { dir: 'row', ratio: [1], kids: [HAND_OPENED] },
+      },
+    ],
+    activeBrowserTabId: HAND_OPENED,
+  })
+  const { app, window, stderr } = await launch()
+  await expect(window.getByTestId(`browserpane-${HAND_OPENED}`)).toBeVisible({ timeout: 20_000 })
+  await waitForGuestPage(app, baseUrl, '#away')
+
+  // While this is still the only guest in the app, so `clickInGuest` and
+  // `guestUrl` are asking about it and nothing else.
+  await clickInGuest(app, '#away')
+
+  // Left the local page. Where it ends up depends on whether this machine can
+  // reach example.com (an error page commits at the same URL when it cannot),
+  // so the assertion is on the origin, not on the page loading.
+  await expect.poll(() => guestUrl(app), { timeout: 20_000 }).toMatch(/^https:\/\/example\.com/)
+  expect(stderr()).not.toContain('refused a non-loopback navigation')
+
+  // And the pane is not something a session can take over by asking: the tool
+  // opens one of its own, in the same project, with this one sitting there.
+  const sessionId = await openSessionPane(window)
+  const claimed = paneIdOf(await callNavigate(sessionId, `${baseUrl}next`))
+  expect(claimed).not.toBe(HAND_OPENED)
 
   await app.close()
 })
