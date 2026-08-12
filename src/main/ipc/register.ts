@@ -11,6 +11,7 @@ import {
 import { appendFile } from 'node:fs/promises'
 import {
   CHANNELS,
+  type BrowserAgentActivity,
   canHaveSession,
   type Candidate,
   type DataEvent,
@@ -366,20 +367,25 @@ export function releaseAgentSession(agentSessions: Map<string, string>, paneId: 
 /**
  * Every browser-pane guest this process has been told about, by the
  * `webContents` id `BrowserPane.tsx` reported (`browserGuestAttached`): which
- * pane it belongs to, and whether an agent owns that pane right now.
+ * pane it belongs to, whether an agent owns that pane right now, and how to
+ * tell that pane's strip a navigation was refused.
  *
  * At module scope rather than inside `registerIpc` because two places have to
  * ask, and only one of them is in that closure: the navigation events
  * attached below, and `setWindowOpenHandler` in `main/index.ts`, which is
- * where a `target=_blank` click ends up. `agentSessions` itself does not
- * escape: what is stored here is one thunk per guest, which can answer
- * "is this pane owned right now" without handing the map out.
+ * where a `target=_blank` click ends up. Neither `agentSessions` nor the
+ * window escapes: what is stored here is two thunks per guest, one answering
+ * "is this pane owned right now" and one sending a refusal to the renderer,
+ * without handing either of the things they close over out.
  *
  * Entries are added when a guest attaches and dropped when it is destroyed,
  * so this holds one entry per browser pane on screen rather than one per pane
  * the process has ever seen.
  */
-const guests = new Map<number, { paneId: string; isOwned: () => boolean }>()
+const guests = new Map<
+  number,
+  { paneId: string; isOwned: () => boolean; report: (origin: string) => void }
+>()
 
 /**
  * The live guest showing `paneId`, once there is one.
@@ -445,19 +451,23 @@ export function refusesNonLoopback(guestId: number, url: string): boolean {
   // like any other.
   if (!guest) return false
   if (!guest.isOwned() || isLoopbackUrl(url)) return false
-  // How an attempt is reported today. The pane simply stays where it was,
-  // which on its own is indistinguishable from a link that did nothing, so
-  // the refusal says so where a developer running the app can see it. The
-  // strip that puts this in front of the user is Task 9 of this plan, and
-  // this is the point it will be fed from.
+  // How an attempt is reported. The pane simply stays where it was, which on
+  // its own is indistinguishable from a link that did nothing, so the refusal
+  // is said twice: on stderr, where a developer running the app can see it,
+  // and to the pane's own strip (`renderer/AgentStrip.tsx`), which is the half
+  // the user sees. Both from here, because this is the one function both
+  // refusal paths go through (the guest's navigation events below, and
+  // `setWindowOpenHandler` in `main/index.ts`), so neither report can be told
+  // about one kind of refusal and miss the other.
   //
-  // By origin rather than by the whole URL: the full text carries the query
-  // string and can carry embedded credentials, and the page a confined pane
-  // sits on can write this line as often as it likes by looping
+  // By origin rather than by the whole URL, on both: the full text carries the
+  // query string and can carry embedded credentials, and the page a confined
+  // pane sits on can write this line as often as it likes by looping
   // `location.href`. `origin` is the string "null" for a URL with no host of
   // its own (`mailto:`, `about:`, measured 2026-08-12), where the scheme is
-  // the only part worth naming. Collapsing repeats belongs to Task 9's strip,
-  // not here.
+  // the only part worth naming. Repeats are not collapsed anywhere: the strip
+  // shows the LAST thing that happened rather than a list, so an origin
+  // refused a thousand times reads the same as one refused once.
   let where: string
   try {
     const parsed = new URL(url)
@@ -468,6 +478,7 @@ export function refusesNonLoopback(guestId: number, url: string): boolean {
   console.warn(
     `pTerm: refused a non-loopback navigation to ${where} in agent-owned browser pane ${guest.paneId}`,
   )
+  guest.report(where)
   return true
 }
 
@@ -610,7 +621,7 @@ export function registerIpc(
     })
   }
 
-  // Keyed to the four channels this file actually pushes unprompted, rather
+  // Keyed to the five channels this file actually pushes unprompted, rather
   // than left as `(channel: string, payload: unknown)`: `unknown` is exactly
   // what let `CHANNELS.exit`'s payload go out missing `reason` for as long as
   // it did — `tsc` has no payload shape to check an omission against. A
@@ -620,6 +631,7 @@ export function registerIpc(
     [CHANNELS.exit]: ExitEvent
     [CHANNELS.statusChanged]: StatusEvent
     [CHANNELS.browserPaneOpened]: TabDescriptor
+    [CHANNELS.browserAgentActivity]: BrowserAgentActivity
   }
 
   const send = <C extends keyof SentPayloads>(channel: C, payload: SentPayloads[C]): void => {
@@ -2463,7 +2475,15 @@ export function registerIpc(
     // Gone already, or an id nothing answers to. Either way there is nothing
     // to confine, and a pane that attaches another guest reports again.
     if (!guest) return
-    guests.set(guestId, { paneId, isOwned: () => agentSessions.has(paneId) })
+    guests.set(guestId, {
+      paneId,
+      isOwned: () => agentSessions.has(paneId),
+      // Built here rather than in `refusesNonLoopback` because `send` is this
+      // closure's and that function is at module scope. Only ever called for
+      // a pane `isOwned` has just answered true for, so a pane the user opened
+      // by hand never puts anything on this channel.
+      report: (origin) => send(CHANNELS.browserAgentActivity, { paneId, kind: 'blocked', origin }),
+    })
     guest.once('destroyed', () => guests.delete(guestId))
 
     const refuse = (details: { url: string; preventDefault: () => void }): void => {
@@ -2597,6 +2617,12 @@ export function registerIpc(
       )
     }
     await guest.loadURL(plan.url)
+    // The pane's strip, told what the agent just did to it. After the load
+    // rather than before it: a call that ends in a rejected `loadURL` did not
+    // navigate anything, and a strip claiming it did would be the one thing
+    // the strip exists to prevent: a pane whose recent history the user cannot
+    // see, showing something they were told was something else.
+    send(CHANNELS.browserAgentActivity, { paneId, kind: 'navigate', url: plan.url })
     return { paneId, url: plan.url }
   })
 

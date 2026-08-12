@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import {
   CHANNELS,
+  type BrowserAgentActivity,
   type DataEvent,
   type DiffSide,
   type ExitEvent,
@@ -81,6 +82,12 @@ const api: PTermApi = {
     const handler = (_event: IpcRendererEvent, tab: TabDescriptor): void => listener(tab)
     ipcRenderer.on(CHANNELS.browserPaneOpened, handler)
     return () => ipcRenderer.removeListener(CHANNELS.browserPaneOpened, handler)
+  },
+  onBrowserAgentActivity: (listener: (event: BrowserAgentActivity) => void) => {
+    const handler = (_event: IpcRendererEvent, payload: BrowserAgentActivity): void =>
+      listener(payload)
+    ipcRenderer.on(CHANNELS.browserAgentActivity, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.browserAgentActivity, handler)
   },
   onMenuCommand: (listener: (command: MenuCommand) => void) => {
     const handler = (_event: IpcRendererEvent, command: MenuCommand): void => listener(command)

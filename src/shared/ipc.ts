@@ -50,6 +50,7 @@ export const CHANNELS = {
   setPaneUrl: 'pterm:setPaneUrl',
   browserGuestAttached: 'pterm:browserGuestAttached',
   browserPaneOpened: 'pterm:browserPaneOpened',
+  browserAgentActivity: 'pterm:browserAgentActivity',
   skills: 'pterm:skills',
   notesRead: 'pterm:notesRead',
   notesWrite: 'pterm:notesWrite',
@@ -486,6 +487,28 @@ export interface StatusEvent {
    */
   since: number | null
 }
+
+/**
+ * The last thing an agent did to one browser pane, as the strip above that
+ * pane reports it (`renderer/AgentStrip.tsx`).
+ *
+ * Two kinds because the two arrive from different places and mean opposite
+ * things. `navigate` is sent by the MCP handler in `main/ipc/register.ts`, once
+ * per `browser_navigate` that actually loaded a page. `blocked` is sent by
+ * `refusesNonLoopback` in the same file, which is the one function both refusal
+ * paths go through (the guest's navigation events, and `setWindowOpenHandler`
+ * in `main/index.ts`), so the strip cannot learn about one kind of refusal and
+ * miss the other.
+ *
+ * `origin` rather than the whole URL, and this is not a formatting choice: the
+ * full text carries the query string and can carry embedded credentials, and
+ * the page a confined pane sits on can provoke this as often as it likes by
+ * looping `location.href`. See `refusesNonLoopback`, which is where the origin
+ * is derived and where the same reasoning is written down for the stderr line.
+ */
+export type BrowserAgentActivity =
+  | { paneId: string; kind: 'navigate'; url: string }
+  | { paneId: string; kind: 'blocked'; origin: string }
 
 /**
  * What Restart needs: the dead tab's record, plus the size to attach at.
@@ -1218,6 +1241,23 @@ export interface PTermApi {
    * asked for that nothing was confining yet.
    */
   onBrowserPaneOpened(listener: (tab: TabDescriptor) => void): () => void
+  /**
+   * What an agent last did to one of its browser panes, for the strip that
+   * pane draws (`renderer/AgentStrip.tsx`).
+   *
+   * Every browser pane's events come down this one channel, named by
+   * `paneId`, and each strip filters for its own: a per-pane channel would
+   * need main to know which panes have a listener, and the renderer already
+   * knows which pane it is.
+   *
+   * Nothing replays. A strip that mounts after an event has been sent has
+   * missed it for good, which is sound here only because the pane is created
+   * and mounted before the tool call that navigates it can finish (see
+   * `openAgentBrowserPane` and `guestForPane` in `main/ipc/register.ts`, which
+   * waits for the guest the mount attaches). A strip is never unmounted while
+   * its pane lives: `BrowserColumn` hides panes rather than unmounting them.
+   */
+  onBrowserAgentActivity(listener: (event: BrowserAgentActivity) => void): () => void
   /**
    * One directory of one project, directories first then files.
    *

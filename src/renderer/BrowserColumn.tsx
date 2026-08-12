@@ -165,6 +165,7 @@ export function BrowserColumn({
                 projectId={projectIdForTab(projects, box.pane)}
                 url={box.pane.url}
                 paneColor={box.pane.color}
+                agentSessionId={box.pane.agentSessionId}
               />
             </div>
           ))}

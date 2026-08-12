@@ -605,6 +605,84 @@ test('a target=_blank link to a non-loopback origin does not navigate an agent-o
 })
 
 /**
+ * The strip, which is the only place the user is told a browser pane is not
+ * theirs.
+ *
+ * Both halves are in one test deliberately. The absence half is a control, and
+ * on its own it passes for all the wrong reasons: against a strip that is
+ * never drawn anywhere, against a testid nobody spells that way, and against a
+ * hand-opened pane that is not on screen to have been given one. The three
+ * assertions before it are what make its silence worth anything: the agent's
+ * pane HAS a strip under this exact testid, that strip names the call, and the
+ * hand-opened pane is mounted at the moment it is asked about.
+ *
+ * Measured with `BrowserPane`'s `agentSessionId &&` guard removed, so every
+ * browser pane drew a strip: this test failed on the `toHaveCount(0)` below
+ * and every other test in this file still passed.
+ */
+test("the strip names the agent's last call, and a pane the user opened by hand has none", async () => {
+  await writeConfig({
+    panes: [{ id: HAND_OPENED, projectSlug: 'demo', cwd: projectCwd, type: 'browser', url: baseUrl }],
+    tabs: [
+      {
+        id: HAND_OPENED,
+        groupId: HAND_OPENED,
+        activePaneId: HAND_OPENED,
+        layout: { dir: 'row', ratio: [1], kids: [HAND_OPENED] },
+      },
+    ],
+    activeBrowserTabId: HAND_OPENED,
+  })
+  const { app, window } = await launch()
+  await expect(window.getByTestId(`browserpane-${HAND_OPENED}`)).toBeVisible({ timeout: 20_000 })
+
+  const sessionId = await openSessionPane(window)
+  const paneId = paneIdOf(await callNavigate(sessionId, `${baseUrl}next`))
+
+  const strip = window.getByTestId(`agentstrip-${paneId}`)
+  await expect(strip).toBeVisible({ timeout: 20_000 })
+  // The call, not the pane's current page: the two agree here, and the strip
+  // is fed by the tool rather than by `did-navigate`, which is the difference
+  // that matters when a page moves itself afterwards.
+  await expect(strip).toContainText(`${baseUrl}next`, { timeout: 20_000 })
+
+  // Still mounted, so the absence below is about ownership rather than about
+  // a pane that has gone: opening the agent's pane makes its tab the active
+  // one, and `BrowserColumn` hides a pane rather than unmounting it.
+  await expect(window.getByTestId(`browserpane-${HAND_OPENED}`)).toHaveCount(1)
+  await expect(window.getByTestId(`agentstrip-${HAND_OPENED}`)).toHaveCount(0)
+
+  await app.close()
+})
+
+/**
+ * What a refusal looks like to the user, which until this task was a line on a
+ * stderr nobody running the app reads: the pane stays where it was, which on
+ * its own is indistinguishable from a link that did nothing.
+ *
+ * By origin, not by the whole URL, for the reasons `refusesNonLoopback` gives:
+ * the full text carries the query string, and the page can write this line as
+ * often as it likes.
+ */
+test('a refused navigation shows in the strip as blocked, naming the origin', async () => {
+  const { app, window } = await launch()
+  const { paneId } = await agentOnStartPage(app, window)
+
+  const strip = window.getByTestId(`agentstrip-${paneId}`)
+  await expect(strip).toContainText(baseUrl, { timeout: 20_000 })
+  await expect(strip).not.toContainText('blocked')
+
+  await clickInGuest(app, '#away')
+
+  await expect(strip).toContainText(`blocked: ${AWAY_ORIGIN}`, { timeout: 20_000 })
+  // The pane did not move either, so what the strip is reporting is the
+  // refusal and not a navigation that happened anyway.
+  expect(await guestUrl(app)).toBe(baseUrl)
+
+  await app.close()
+})
+
+/**
  * The control, and the test that keeps every one above honest: a browser pane
  * the user opened by hand carries no owner, and confining every pane in the
  * app would pass all of them without it.

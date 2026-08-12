@@ -5,6 +5,7 @@ import type {
   DidNavigateInPageEvent,
   RenderProcessGoneEvent,
 } from 'electron'
+import { AgentStrip } from './AgentStrip'
 import { Button } from './ui/Button'
 import { normaliseUrl } from '../shared/browserUrl'
 import { UNSORTED_ID } from '../shared/ipc'
@@ -123,12 +124,20 @@ export function BrowserPane({
   projectId,
   url,
   paneColor,
+  agentSessionId,
 }: {
   paneId: string
   projectId: string
   url: string | undefined
   /** The pane's own background, or undefined when it has none of its own. */
   paneColor: PaneColor | undefined
+  /**
+   * The Claude session driving this pane, or undefined for a pane the user
+   * opened by hand, which is every pane but the ones an agent's own
+   * `browser_navigate` created (`TabDescriptor.agentSessionId`). Read here for
+   * one thing only: whether to draw the strip.
+   */
+  agentSessionId: string | undefined
 }) {
   const view = useRef<HTMLWebViewElement | null>(null)
   const [address] = useState(url ?? 'about:blank')
@@ -283,6 +292,13 @@ export function BrowserPane({
       // has to move with the theme rather than pin to one palette's hex.
       style={{ background: paneColor ?? 'var(--color-bg)' }}
     >
+      {/* Above the chrome, and only for a pane an agent owns. The condition is
+          the whole of what this pane decides about the strip: the id itself is
+          not shown, and nothing here reads it for anything else. A pane the
+          user opened by hand carries no `agentSessionId` and so draws no row
+          at all, which is what keeps this off every pane in the app but the
+          agent's own. */}
+      {agentSessionId !== undefined && <AgentStrip paneId={paneId} />}
       <div className="flex items-center gap-1 border-b border-border bg-surface p-1 text-[11px]">
         <Button
           data-testid={`browserback-${paneId}`}
