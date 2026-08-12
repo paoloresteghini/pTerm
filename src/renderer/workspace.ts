@@ -1070,8 +1070,8 @@ function removeTab(state: WorkspaceState, id: string): WorkspaceState {
  * pane is no longer among them.
  *
  * Referential rather than tied to one action, because a session pane leaves
- * `state.panes` through `'removed'`, `'dismissed'` and `'closedPane'` alike —
- * see each case in `workspaceReducer`, below — and a browser pane's flag is
+ * `state.panes` through `'removed'`, `'dismissed'` and `'closedPane'` alike
+ * (see each case in `workspaceReducer`, below), and a browser pane's flag is
  * stale the moment the pane it names is gone through any of the three, not
  * only the one this function happens to be called from.
  *
@@ -1079,8 +1079,8 @@ function removeTab(state: WorkspaceState, id: string): WorkspaceState {
  * agent session owned stays on screen, confined but unowned, which is the
  * survival half of the rule this exists for. Main does the matching thing on
  * its own copy of the pane list, over its own runtime-only record of the
- * association (`agentSessions` in `main/ipc/register.ts`) — this is the
- * renderer's mirror of that, not a second source of truth for it: main is
+ * association (`agentSessions` in `main/ipc/register.ts`): this is the
+ * renderer's mirror of that, not a second source of truth for it. Main is
  * still what a relaunch reattaches from, and this map is empty again at
  * every launch exactly as main's is.
  */

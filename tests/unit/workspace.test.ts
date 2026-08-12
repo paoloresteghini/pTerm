@@ -1383,7 +1383,7 @@ describe('workspaceReducer', () => {
         paneId: 'aaa',
         shape: { panes: [], tabs: [] },
       })
-      // The browser pane survives, own url and all — this close must not
+      // The browser pane survives, own url and all: this close must not
       // reach it beyond the one field.
       const survivor = next.panes.find((pane) => pane.id === 'browser-1')
       expect(survivor).toBeDefined()

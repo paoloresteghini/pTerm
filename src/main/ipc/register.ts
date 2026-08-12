@@ -320,23 +320,35 @@ export function claimForDeath(params: {
 }
 
 /**
- * Every browser pane `sessionPaneId` owned, released, mutating `agentSessions`
- * in place.
+ * Every `agentSessions` entry `paneId` touches, released, mutating the map in
+ * place.
  *
  * Pulled out of `registerIpc`'s closure so it is testable on its own, the same
  * reason `carveRatio` and `claimForDeath` are above it: this file's own two
  * call sites hand it their outer `agentSessions` map, exactly as they hand
  * `tombstones` to those two.
  *
- * Only the map entry goes. No browser pane is closed, moved, or written to
- * `store` by this call — that is the whole point of it: the agent's own pane
- * can disappear without taking its confined browser pane along, because
- * nothing here reaches the pane itself, only the association with the
- * session that is gone.
+ * `paneId` is the id of whatever pane just closed or was dismissed, and both
+ * call sites (`CHANNELS.dismissTab`, `CHANNELS.closePane`) are generic across
+ * pane kinds, so `paneId` can be either half of an entry: a session pane (a
+ * map VALUE, owning zero or more browser panes) or a browser pane (a map KEY,
+ * owned by at most one session). This clears both directions: first the
+ * direct key, for a browser pane closed on its own, then every entry still
+ * owned by `paneId` as a session. A session pane is never also a browser
+ * pane's key, so the two deletions never collide; a browser pane closed on
+ * its own owns nothing as a session, so the loop below is a no-op for it.
+ *
+ * Only map entries go. No browser pane is closed, moved, or written to
+ * `store` by this call: that is the whole point of it. A session's own pane
+ * can disappear without taking its confined browser pane along, and a browser
+ * pane can disappear without needing its owning session to be told, because
+ * nothing here reaches a pane itself, only the association with whichever
+ * side of it just went away.
  */
-export function releaseAgentSession(agentSessions: Map<string, string>, sessionPaneId: string): void {
+export function releaseAgentSession(agentSessions: Map<string, string>, paneId: string): void {
+  agentSessions.delete(paneId)
   for (const [browserPaneId, owner] of agentSessions) {
-    if (owner === sessionPaneId) agentSessions.delete(browserPaneId)
+    if (owner === paneId) agentSessions.delete(browserPaneId)
   }
 }
 
@@ -603,7 +615,7 @@ export function registerIpc(
   /**
    * Which agent session, if any, owns a browser pane right now: browser pane
    * id to the id of the `claude` pane whose MCP tool call created it. This is
-   * `agentSessionId` on `TabDescriptor` (`shared/ipc.ts`) — the field
+   * `agentSessionId` on `TabDescriptor` (`shared/ipc.ts`), the field
    * `browserPaneFor` (`mcp/route.ts`) reads to keep an agent confined to its
    * own browser pane and out of one the user opened by hand.
    *
@@ -611,18 +623,23 @@ export function registerIpc(
    * builds for a browser pane is written to config with no `agentSessionId`
    * field at all, so this map is the field's only home. That is on purpose,
    * not an oversight to fix later. The flag means "an agent can act on this
-   * pane right now", and after a relaunch no agent can — the session is gone
-   * and the MCP bridge's socket is new — so persisting it would restore a
+   * pane right now", and after a relaunch no agent can (the session is gone
+   * and the MCP bridge's socket is new), so persisting it would restore a
    * confined, stripped browser pane owned by nobody. Process-lifetime, like
    * `pendingKills` and `lastGeometry` above: empty at every launch, and a
    * browser pane an agent owned in a previous run comes back as an ordinary
    * one.
    *
    * Released by `releaseAgentSession`, called below wherever a pane leaves
-   * the workspace for good — the same two call sites that already call
-   * `registry.forget` for the same reason. Nothing sets an entry yet: the
-   * tool call that creates an agent-owned browser pane is later work, and
-   * this map is the association it will populate.
+   * the workspace for good: the same two call sites that already call
+   * `registry.forget` for the same reason. Cleared from both directions,
+   * since either half of an entry can be the pane that just left: closing or
+   * dismissing the session pane releases every browser pane it owned, and
+   * closing or dismissing an agent-owned browser pane directly releases just
+   * that one entry, leaving its (now former) owner's other entries alone.
+   * Nothing sets an entry yet: the tool call that creates an agent-owned
+   * browser pane is later work, and this map is the association it will
+   * populate.
    */
   const agentSessions = new Map<string, string>()
 

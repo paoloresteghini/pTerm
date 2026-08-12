@@ -33,4 +33,15 @@ describe('releaseAgentSession', () => {
 
     expect(agentSessions.get('browser-1')).toBe('session-a')
   })
+
+  it('also clears the entry when the id passed is the browser pane itself, not its owning session', () => {
+    // CHANNELS.dismissTab and CHANNELS.closePane pass the id of whatever pane
+    // just closed, which is a browser pane's own key exactly when the user
+    // closes that pane directly rather than closing its owning session pane.
+    const agentSessions = new Map([['browser-1', 'session-a']])
+
+    releaseAgentSession(agentSessions, 'browser-1')
+
+    expect(agentSessions.has('browser-1')).toBe(false)
+  })
 })

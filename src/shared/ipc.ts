@@ -370,8 +370,8 @@ export interface TabDescriptor {
    * kind too.
    *
    * Runtime only, deliberately: it means "an agent can act on this pane
-   * right now", which stops being true the moment this process exits — the
-   * session is gone and the MCP bridge's next socket is new. No `PaneRecord`
+   * right now", which stops being true the moment this process exits (the
+   * session is gone and the MCP bridge's next socket is new). No `PaneRecord`
    * `main/ipc/register.ts` writes to `store.write` ever carries this field
    * (see `agentSessions` there, which is where the association actually
    * lives), so a relaunch always reattaches a browser pane with this absent,
