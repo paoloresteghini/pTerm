@@ -216,6 +216,17 @@ The bindings, as they actually exist in `App.tsx`'s keydown handler:
 | ⌘D / ⇧⌘D | splits the active pane | unchanged, and a no-op while the browser region has focus, since the region has no splits |
 | ⌘⌥ arrows | moves pane focus inside a tab | unchanged, terminal region only |
 
+**⌘W does not reach the app from inside a focused page (accepted 2026-08-12).**
+While the guest holds focus, the page owns the keyboard and the host never
+receives the keystroke at all, so the close binding works from the column's own
+chrome (its tab strip, its URL bar) and does nothing while the caret is in the
+page. Measured during Task 9, not inferred. The user accepted this rather than
+routing ⌘W through a main-process accelerator: an accelerator fires whichever
+webview holds focus, but this repo has measured that Playwright cannot test
+Electron accelerators, so that route would ship covered by a hand-run alone,
+and it would take ⌘W away from any page that uses it. Clicking the column's tab
+strip returns the keys.
+
 **One thing to measure before code depends on it:** a click on page content
 inside a `<webview>` does not bubble into the host document. Whether the host
 still sees `focusin` on the `<webview>` element itself is unverified. It must be
