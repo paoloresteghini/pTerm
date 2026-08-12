@@ -188,6 +188,12 @@ export function BrowserColumn({
       // Only on the panel. A test asking for the panel by name is asking
       // about the panel, not about a strip or an empty box wearing its name.
       data-testid={putAway ? undefined : 'browser-column'}
+      // How a focused element names its region: `App`'s `inBrowserRegion`
+      // walks up from `document.activeElement` looking for this. Written in
+      // all three states, unlike the testid above, because the pane box is a
+      // child of this element even when the column is put away, and a
+      // `<webview>` inside it can still be what the host has focused.
+      data-region="browser"
       className={cn(
         'relative flex shrink-0',
         // A COLUMN stacks its heading, bar and panes, so open is `flex-col`.

@@ -84,6 +84,7 @@ import {
   type HistoryEntry,
   type HistoryScope,
   type NotificationConfig,
+  type Region,
   type TabDescriptor,
   type TabType,
   type UpdateInfo,
@@ -162,6 +163,19 @@ function storedCollapsed(key: string, fallback: boolean): boolean {
   const stored = localStorage.getItem(key)
   if (stored === null) return fallback
   return stored !== '0'
+}
+
+/**
+ * Whether a focused element sits inside the browser region.
+ *
+ * `BrowserColumn`'s root carries `data-region="browser"` for this, in all
+ * three of its states, and the pane box is a child of that root even when the
+ * column is put away. An attribute rather than the column's `data-testid`,
+ * which is only written while the panel is open and is a test's handle rather
+ * than a fact the app reads.
+ */
+function inBrowserRegion(node: Element | null): boolean {
+  return node !== null && node.closest('[data-region="browser"]') !== null
 }
 
 export function App() {
@@ -602,6 +616,75 @@ export function App() {
     else if (browserPaneTotal === 0 && was > 0) setColumnHidden('browser', true)
   }, [ready, browserPaneTotal, setColumnHidden])
 
+  /**
+   * Where focus last went, which is not the same as which region the keys act
+   * on: `keyRegion` below is that, and it overrides this one.
+   *
+   * Not persisted, and deliberately: a relaunch restores panes and columns but
+   * focuses nothing, so a stored answer would be a claim about a state the new
+   * window is not in.
+   */
+  const [activeRegion, setActiveRegion] = useState<Region>('terminal')
+
+  /**
+   * Follow focus between the two regions.
+   *
+   * Both listeners read `document.activeElement` rather than the event's
+   * target, because of what was MEASURED here on 2026-08-11: driving a real
+   * click into a live `<webview>`'s page, with capture listeners on the host
+   * document for `focusin`, `focusout`, `mousedown`, `pointerdown` and
+   * `click`, the host saw no `focusin` at all. Three separate guest clicks
+   * produced only a `focusout` on whatever the host had focused and a `window`
+   * blur, after which `document.activeElement` was the `<webview>` element.
+   * So the `focusin` this task was planned around never fires for the one case
+   * it exists to catch, and `blur` is what carries it.
+   *
+   * The same run attached `focus` and `blur` listeners to the guest's own
+   * `WebContents` in main, across the same six clicks, and they fired zero
+   * times: the main-side bridge named as the fallback would not have worked
+   * either.
+   *
+   * `blur` only ever CLAIMS the region and never releases it. It also fires
+   * when the whole window loses focus to another application, where
+   * `document.activeElement` is simply whatever it already was and says
+   * nothing new about which region the user means; releasing on that would
+   * hand the keys back to the terminal every time the user switched apps.
+   */
+  useEffect(() => {
+    const follow = (): void => {
+      setActiveRegion(inBrowserRegion(document.activeElement) ? 'browser' : 'terminal')
+    }
+    const claim = (): void => {
+      if (inBrowserRegion(document.activeElement)) setActiveRegion('browser')
+    }
+    document.addEventListener('focusin', follow, true)
+    window.addEventListener('blur', claim)
+    return () => {
+      document.removeEventListener('focusin', follow, true)
+      window.removeEventListener('blur', claim)
+    }
+  }, [])
+
+  /**
+   * The region ⌘W and ⌥1-9 act on.
+   *
+   * Derived rather than stored, which is the whole point: `activeRegion`
+   * records where focus last went, and the column can leave the screen
+   * afterwards with no focus event to say so: a hide, a hide-all, a project
+   * switch to one with no browser panes, or the last browser pane closing.
+   * Reading the stored value in any of those would leave ⌘W closing a pane in
+   * a region that is not on screen.
+   *
+   * `onScreenColumns.browser` is exactly that test and is already computed
+   * above (the stored hide OR no browser pane in the active project), so this
+   * and what `renderSlot` draws cannot drift apart. It is true when the region
+   * is NOT there, hence the order of the branches.
+   *
+   * A COLLAPSED column is not one of these states: it is still on screen, its
+   * panes are still mounted, and its bar comes straight back.
+   */
+  const keyRegion: Region = onScreenColumns.browser ? 'terminal' : activeRegion
+
   // `type` is a declaration of intent recorded on the tab, not inferred from
   // `command` — it decides the launch state a fresh dot starts in
   // (`stateForOpen` in src/main/status/machine.ts) and, for `claude`, gives a
@@ -689,6 +772,11 @@ export function App() {
       .then((tab) => {
         if (tab) {
           dispatch({ type: 'opened', tab })
+          // Inside the success branch, so a refusal leaves the keys where they
+          // were. Nothing focuses a fresh `<webview>`, so no focus event would
+          // otherwise say that the pane the user just asked for is the one
+          // they mean.
+          setActiveRegion('browser')
           return
         }
         fail('Could not open a browser pane')
@@ -1059,6 +1147,12 @@ export function App() {
   /** Make `paneId` the pane the keyboard talks to, and record it on its tab. */
   const selectPane = useCallback(
     (paneId: string) => {
+      // Above the early return, not below it. Clicking the pane that is
+      // already active is not a change of selection, but it IS the terminal
+      // region taking the keys back from the browser, and that is the case a
+      // user lands in every time they click a page and then click the
+      // terminal they were already working in.
+      setActiveRegion('terminal')
       if (paneId === activePaneId) return
       const row = tabOfPane(state, paneId)
       if (row) dispatch({ type: 'activatedPane', tabId: row.id, paneId })
@@ -1517,9 +1611,15 @@ export function App() {
         openTab()
         return
       }
-      if (event.code === 'KeyW' && !event.altKey && activePaneId) {
-        event.preventDefault()
-        requestClosePane(activePaneId)
+      // Closes in whichever region has focus, which is the one thing this
+      // binding does differently from the two below it: ⌘S and ⌘T are the
+      // terminal region's whatever has focus, and ⌘W is not.
+      if (event.code === 'KeyW' && !event.altKey) {
+        const target = keyRegion === 'browser' ? currentBrowserTabId : activePaneId
+        if (target) {
+          event.preventDefault()
+          requestClosePane(target)
+        }
         return
       }
       // `saveEditorPane` is a no-op for a pane that is not an editor (or not
@@ -1536,7 +1636,12 @@ export function App() {
       // running Claude. ⇧ picks the axis, so `KeyD` covers both.
       if (event.code === 'KeyD' && !event.altKey) {
         event.preventDefault()
-        splitActive(event.shiftKey ? 'col' : 'row')
+        // Terminal only. `splitActive` works off `activePaneId`, which is the
+        // TERMINAL region's selection, so running it while the browser region
+        // has focus would split a terminal pane the user is not looking at.
+        // `preventDefault` still runs either way, so the keystroke does not
+        // fall through to Chromium's own ⌘D.
+        if (keyRegion === 'terminal') splitActive(event.shiftKey ? 'col' : 'row')
         return
       }
       // Below the `data-shortcuts="off"` guard at the top of this handler, so
@@ -1604,7 +1709,12 @@ export function App() {
       if (!digit) return
       const index = Number(digit[1]) - 1
       if (event.altKey) {
-        const target = tabEntries[index]?.pane
+        // The focused region's own strip. Both are grouped by `groupedTabs`
+        // and both are what their bar draws, so ⌥3 is the third row on screen
+        // in whichever bar the user is working in. ⌘1-9 below is unaffected:
+        // it selects a PROJECT, which both regions share.
+        const strip = keyRegion === 'browser' ? browserTabEntries : tabEntries
+        const target = strip[index]?.pane
         if (target) {
           event.preventDefault()
           dispatch({ type: 'activatedTab', id: target.id })
@@ -1622,6 +1732,12 @@ export function App() {
   }, [
     activePaneId,
     tabEntries,
+    // The browser region's three inputs, beside the terminal's two above:
+    // which strip ⌥1-9 indexes, which pane ⌘W closes, and which of the two
+    // regions both of those questions are about.
+    browserTabEntries,
+    currentBrowserTabId,
+    keyRegion,
     state.projects,
     openTab,
     requestClosePane,
@@ -1696,7 +1812,15 @@ export function App() {
           now={now}
           dead={state.dead}
           dirty={dirty}
-          onActivate={(id) => dispatch({ type: 'activatedTab', id })}
+          // Measured 2026-08-11: clicking a tab's label focuses nothing (the
+          // row is a `<span>`, and `document.activeElement` is left at
+          // `BODY`), so no focus event reaches the effect above and the claim
+          // has to be made here. The browser bar's own `onActivate` makes the
+          // mirror-image claim.
+          onActivate={(id) => {
+            setActiveRegion('terminal')
+            dispatch({ type: 'activatedTab', id })
+          }}
           onClose={requestClosePane}
           onRestart={restartTab}
           onDismiss={dismissTab}
@@ -1998,7 +2122,13 @@ export function App() {
             collapsed={browserCollapsed}
             onToggle={() => toggleColumnCollapsed('browser')}
             onDragStart={() => setDragging('browser')}
-            onActivate={(id) => dispatch({ type: 'activatedTab', id })}
+            // The mirror of the terminal bar's, and needed for the same
+            // measured reason: a tab row focuses nothing, so this is the only
+            // thing that says the browser region is the one the user means.
+            onActivate={(id) => {
+              setActiveRegion('browser')
+              dispatch({ type: 'activatedTab', id })
+            }}
             onClose={requestClosePane}
             onNew={openBrowserPane}
             onRename={renameTab}

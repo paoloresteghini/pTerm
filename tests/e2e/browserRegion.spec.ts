@@ -575,3 +575,205 @@ test('a hide survives a relaunch, with the pane still there behind it', async ()
 
   await second.close()
 })
+
+/**
+ * Clicks the page INSIDE the browser column's live `<webview>`, which is the
+ * case the region's focus rule was measured against.
+ *
+ * The centre of `browser-column` lands in the pane area, so this is a click on
+ * guest content and not on the column's own chrome. What the host sees for it
+ * was measured 2026-08-11 and is the reason `App` does not listen for
+ * `focusin` alone: the host document gets NO `focusin`, no `mousedown` and no
+ * `click`, only a `focusout` on whatever it had focused and a `window` blur,
+ * after which `document.activeElement` is the `<webview>` element. See the
+ * `activeRegion` effect in `App.tsx` for the handler that reads that.
+ */
+async function clickGuestPage(page: Page): Promise<void> {
+  await page.getByTestId('browser-column').click()
+}
+
+/** Clicks the visible terminal pane, away from its edges. */
+async function clickTerminal(page: Page): Promise<void> {
+  await page.getByTestId('terminal-active').click({ position: { x: 40, y: 60 } })
+}
+
+test('Cmd-W closes a pane in the region that has focus, and leaves the other alone', async () => {
+  const app = await launch()
+  const page = await app.firstWindow()
+  await expect(page.getByTestId('titlebar')).toBeVisible({ timeout: 20_000 })
+
+  // TWO of each. One apiece would make each "the other region did not change"
+  // assertion a statement about a count that had nowhere to go: with a single
+  // terminal tab, a ⌘W that wrongly closed it would be caught, but with none
+  // at all the same assertion holds however wrong the routing is.
+  await page.getByTestId('new-tab').click()
+  await expect(page.getByTestId('terminal-active')).toBeVisible()
+  await page.getByTestId('new-tab').click()
+  await expect(page.locator('[data-testid^="tab-"]')).toHaveCount(2)
+  await openBrowserPaneViaPalette(page)
+  await openBrowserPaneViaPalette(page)
+  await expect(page.getByTestId('browser-column')).toBeVisible({ timeout: 20_000 })
+  await expect(page.locator('[data-testid^="browsertab-"]')).toHaveCount(2)
+
+  // Both counts read BEFORE the keystroke. A count taken afterwards is the
+  // number the keystroke produced, and comparing it to itself proves nothing.
+  const terminalTabs = await page.locator('[data-testid^="tab-"]').count()
+  const browserTabs = await page.locator('[data-testid^="browsertab-"]').count()
+  expect(terminalTabs).toBe(2)
+  expect(browserTabs).toBe(2)
+
+  await clickGuestPage(page)
+  await page.keyboard.press('Meta+w')
+
+  await expect(page.locator('[data-testid^="browsertab-"]')).toHaveCount(browserTabs - 1)
+  await expect(page.locator('[data-testid^="tab-"]')).toHaveCount(terminalTabs)
+
+  // And back. This click is on the terminal pane that is ALREADY active, so
+  // `selectPane` returns early and does not run: the region only comes back
+  // if focus itself is what moves it.
+  await clickTerminal(page)
+  await page.keyboard.press('Meta+w')
+
+  await expect(page.locator('[data-testid^="tab-"]')).toHaveCount(terminalTabs - 1)
+  await expect(page.locator('[data-testid^="browsertab-"]')).toHaveCount(browserTabs - 1)
+
+  await app.close()
+})
+
+test('the tab-select chord selects within the region that has focus', async () => {
+  const app = await launch()
+  const page = await app.firstWindow()
+  await expect(page.getByTestId('titlebar')).toBeVisible({ timeout: 20_000 })
+
+  await page.getByTestId('new-tab').click()
+  await expect(page.getByTestId('terminal-active')).toBeVisible()
+  await page.getByTestId('new-tab').click()
+  await expect(page.locator('[data-testid^="tab-"]')).toHaveCount(2)
+  await openBrowserPaneViaPalette(page)
+  await openBrowserPaneViaPalette(page)
+  await expect(page.getByTestId('browser-column')).toBeVisible({ timeout: 20_000 })
+
+  // `data-active` is what `TabBar` already marks its active row with, for both
+  // bars: see its `active` const. Nothing new is added here to read it.
+  const terminal = page.locator('[data-testid^="tab-"]')
+  const browser = page.locator('[data-testid^="browsertab-"]')
+
+  // Opening selects, so the SECOND of each is active. That is what makes both
+  // halves below able to fail: ⌥1 asks for the first row either way, so a
+  // keystroke that reached the wrong bar would be visible in it.
+  await expect(terminal.nth(1)).toHaveAttribute('data-active', 'true')
+  await expect(browser.nth(1)).toHaveAttribute('data-active', 'true')
+
+  await clickGuestPage(page)
+  await page.keyboard.press('Alt+Meta+1')
+
+  await expect(browser.nth(0)).toHaveAttribute('data-active', 'true')
+  await expect(browser.nth(1)).toHaveAttribute('data-active', 'false')
+  await expect(terminal.nth(1)).toHaveAttribute('data-active', 'true')
+  await expect(terminal.nth(0)).toHaveAttribute('data-active', 'false')
+
+  // Put the browser's selection back on its second row, so the terminal half
+  // below is asking ⌥1 to move a selection that is somewhere else. Without
+  // this the browser would already be on row one and "the browser did not
+  // move" would be satisfied by a ⌥1 that moved it there.
+  await browser.nth(1).click()
+  await expect(browser.nth(1)).toHaveAttribute('data-active', 'true')
+
+  await clickTerminal(page)
+  await page.keyboard.press('Alt+Meta+1')
+
+  await expect(terminal.nth(0)).toHaveAttribute('data-active', 'true')
+  await expect(terminal.nth(1)).toHaveAttribute('data-active', 'false')
+  await expect(browser.nth(1)).toHaveAttribute('data-active', 'true')
+  await expect(browser.nth(0)).toHaveAttribute('data-active', 'false')
+
+  await app.close()
+})
+
+test('a browser region that leaves the screen hands the keys back to the terminal', async () => {
+  const app = await launch()
+  const page = await app.firstWindow()
+  await expect(page.getByTestId('titlebar')).toBeVisible({ timeout: 20_000 })
+
+  await page.getByTestId('new-tab').click()
+  await expect(page.getByTestId('terminal-active')).toBeVisible()
+  await page.getByTestId('new-tab').click()
+  await expect(page.locator('[data-testid^="tab-"]')).toHaveCount(2)
+  const id = await openBrowserPaneViaPalette(page)
+  await expect(page.getByTestId('browser-column')).toBeVisible({ timeout: 20_000 })
+
+  // The browser region has the keys, and nothing that follows is a focus
+  // event: hiding a column moves no focus, which is exactly why `keyRegion`
+  // is derived from what is on screen rather than left as whatever focus
+  // last said.
+  await clickGuestPage(page)
+  await page.keyboard.press('Meta+Shift+Backslash')
+  await expect(page.getByTestId('browser-column')).toBeHidden()
+  // Put away, not unmounted. That is what makes the assertions below able to
+  // fail: there is still a browser pane for ⌘W to close if the derivation is
+  // missing, and a stale `activeRegion` would name it.
+  await expect(page.getByTestId(`browserpane-${id}`)).toHaveCount(1)
+
+  const terminalTabs = await page.locator('[data-testid^="tab-"]').count()
+  expect(terminalTabs).toBe(2)
+
+  await page.keyboard.press('Meta+w')
+
+  await expect(page.locator('[data-testid^="tab-"]')).toHaveCount(terminalTabs - 1)
+  await expect(page.getByTestId(`browserpane-${id}`)).toHaveCount(1)
+
+  // And the region comes back with its pane still listed, so nothing above
+  // closed it behind the hide.
+  await page.keyboard.press('Meta+Shift+Backslash')
+  await expect(page.getByTestId('browser-column')).toBeVisible()
+  await expect(page.locator('[data-testid^="browsertab-"]')).toHaveCount(1)
+
+  await app.close()
+})
+
+test('Cmd-D does nothing while the browser region has focus, and still splits the terminal', async () => {
+  const app = await launch()
+  const page = await app.firstWindow()
+  await expect(page.getByTestId('titlebar')).toBeVisible({ timeout: 20_000 })
+
+  await page.getByTestId('new-tab').click()
+  await expect(page.getByTestId('terminal-active')).toBeVisible()
+  const id = await openBrowserPaneViaPalette(page)
+  await expect(page.getByTestId('browser-column')).toBeVisible({ timeout: 20_000 })
+
+  // `:scope >`, as every pane count in `splits.spec.ts` takes it: `PaneDivider`
+  // renders `data-testid="pane-divider"`, which a bare `[data-testid^="pane-"]`
+  // inside the group also matches. Measured 2026-08-11: one split reads as
+  // three elements without the child combinator, two with it.
+  const terminalPanes = page
+    .getByTestId('terminal-active')
+    .locator(':scope > [data-testid^="pane-"]')
+  await expect(terminalPanes).toHaveCount(1)
+
+  await clickGuestPage(page)
+  await page.keyboard.press('Meta+d')
+  await page.keyboard.press('Meta+Shift+d')
+
+  // The browser region gained nothing, which is a count these two keystrokes
+  // could have changed: ⌘D is the only binding in the handler that adds a pane.
+  await expect(page.locator('[data-testid^="browsertab-"]')).toHaveCount(1)
+  await expect(page.getByTestId(`browserpane-${id}`)).toHaveCount(1)
+
+  // The control, and the reason the assertions around it can fail: the same
+  // keystroke against the same window still splits, once the terminal is the
+  // region with focus.
+  await clickTerminal(page)
+  await page.keyboard.press('Meta+d')
+  await expect(terminalPanes).toHaveCount(2)
+
+  // Read again after a settle, because the assertion above stops the moment
+  // the control's own split lands and a leaked one arriving a beat later would
+  // never be seen. 2.5s is the window a split was measured to complete in on
+  // 2026-08-11 (three ⌘D presses held that long against a focused browser
+  // region left the count at one, and one press against a focused terminal was
+  // on screen well inside it). Exactly two: the control's split and no other.
+  await page.waitForTimeout(2500)
+  await expect(terminalPanes).toHaveCount(2)
+
+  await app.close()
+})
