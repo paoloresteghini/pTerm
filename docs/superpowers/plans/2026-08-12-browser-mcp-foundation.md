@@ -149,7 +149,9 @@ Expected: FAIL, the module does not exist.
 
 - [ ] **Step 3: Implement**
 
-Parse with `new URL(raw)` inside a try/catch, refuse on throw. Accept only `http:` and `https:` protocols. Then compare `url.hostname` against `localhost`, `127.0.0.1`, `::1` (which `URL` normalises out of the brackets), and any hostname ending in `.localhost`.
+Parse with `new URL(raw)` inside a try/catch, refuse on throw. Accept only `http:` and `https:` protocols. Then compare `url.hostname` against `localhost`, `127.0.0.1`, the IPv6 loopback, and any hostname ending in `.localhost`.
+
+Measure the IPv6 spelling rather than assuming it. This plan originally asserted that `URL` normalises `::1` out of its brackets, and that is FALSE: measured on 2026-08-12, `new URL('http://[::1]:3000/').hostname` is `'[::1]'`, brackets included, and `.host` is `'[::1]:3000'`. Compare against the bracketed form.
 
 Two traps to handle deliberately rather than incidentally: `hostname` excludes the port and any credentials, which is why the check reads it rather than `host` or the raw string; and `127.0.0.1.evil.com` ends in neither, so an `endsWith('localhost')` without the dot would pass `notlocalhost`.
 
