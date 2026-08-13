@@ -7,6 +7,7 @@ import { tabLabel } from './lib/tabLabel'
 import { useColumnWidth } from './lib/columnWidth'
 import { usePaneDragDrop } from './lib/usePaneDragDrop'
 import { ColumnResizer, PanelHeading, PanelStrip, type PanelSide } from './ui/Panel'
+import { BrowserWindowIcon } from './ui/BrowserWindowIcon'
 import { cn } from './lib/cn'
 
 /**
@@ -36,6 +37,8 @@ export function TabsPanel({
   onSelect,
   onClose,
   onRename,
+  onOpenBrowser,
+  canOpenBrowser,
   onJoin,
   canJoin,
   side,
@@ -61,6 +64,25 @@ export function TabsPanel({
    * other one is on screen.
    */
   onRename: (paneId: string, name: string) => void
+  /**
+   * Open the project's dev server in a browser pane, the same press the
+   * terminal tab bar offers.
+   *
+   * Here because this column REPLACES that bar rather than sitting beside it
+   * (`showsTabBar`), so with the column open the control had nowhere to be
+   * and the gesture was simply unavailable. Optional so a caller that has no
+   * project to hang a pane on can leave it out entirely and draw no button,
+   * which is a different state from the disabled one below.
+   */
+  onOpenBrowser?: () => void
+  /**
+   * Whether that press can do anything. Off where there is no project for
+   * main to hang a pane on: with none active the press does nothing at all,
+   * and on a project main has no row for it comes back as an error banner
+   * from a control that looked ready. Not off for the ABSENCE of a dev
+   * server, which opens a blank pane on purpose.
+   */
+  canOpenBrowser?: boolean
   /** Drag one pane's row onto another's to merge them into a split. */
   onJoin: (paneId: string, targetPaneId: string) => void
   /** Whether dragging `paneId` onto `targetPaneId` would do anything. */
@@ -234,6 +256,24 @@ export function TabsPanel({
         label="Tabs"
         onClick={onToggle}
         onDragStart={onDragStart}
+        action={
+          onOpenBrowser ? (
+            <button
+              // The same id the tab bar's button carries, deliberately: the
+              // two are alternatives that are never on screen together, so a
+              // locator on it resolves to whichever surface is up. See the
+              // note beside `TabBar`'s copy.
+              data-testid="open-devserver"
+              aria-label="Open the dev server in a browser pane"
+              title="Open the dev server in a browser pane"
+              onClick={onOpenBrowser}
+              disabled={canOpenBrowser === false}
+              className="flex shrink-0 cursor-default items-center border-none bg-transparent px-2.5 pb-1 pt-3 text-faint disabled:opacity-40 enabled:hover:text-fg"
+            >
+              <BrowserWindowIcon />
+            </button>
+          ) : undefined
+        }
       />
       <div className="min-h-0 flex-1 overflow-y-auto">
         {nodes.map((node) => (

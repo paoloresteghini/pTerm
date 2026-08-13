@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, type ReactNode } from 'react'
 import { cn } from '../lib/cn'
 
 /**
@@ -71,24 +71,39 @@ export function PanelHeading({
   label,
   onClick,
   onDragStart,
+  action,
 }: {
   testid: string
   label: string
   onClick: () => void
   /** Same drag handle `PanelStrip` takes; see its doc comment. */
   onDragStart?: () => void
+  /**
+   * A control to sit at the right of the heading, or nothing.
+   *
+   * A sibling of the heading button rather than something inside it, because
+   * the heading IS a button (pressing it hides the column) and a button
+   * inside a button is invalid HTML that browsers resolve by dropping the
+   * inner one. A column with no action passes nothing and draws exactly what
+   * it drew before: the row is `flex`, the heading is its only child, and it
+   * takes the full width it used to have.
+   */
+  action?: ReactNode
 }) {
   return (
-    <button
-      data-testid={testid}
-      onClick={onClick}
-      draggable={onDragStart !== undefined}
-      onDragStart={onDragStart}
-      title={`Hide ${label.toLowerCase()}`}
-      className="cursor-default border-none bg-transparent px-2.5 pb-1 pt-3 text-left text-[10px] uppercase tracking-wider text-label hover:text-fg"
-    >
-      {label}
-    </button>
+    <div className="flex items-center">
+      <button
+        data-testid={testid}
+        onClick={onClick}
+        draggable={onDragStart !== undefined}
+        onDragStart={onDragStart}
+        title={`Hide ${label.toLowerCase()}`}
+        className="min-w-0 flex-1 cursor-default border-none bg-transparent px-2.5 pb-1 pt-3 text-left text-[10px] uppercase tracking-wider text-label hover:text-fg"
+      >
+        {label}
+      </button>
+      {action}
+    </div>
   )
 }
 

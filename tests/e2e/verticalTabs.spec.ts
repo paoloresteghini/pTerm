@@ -3,8 +3,9 @@
  * closing it (either through the menu or by collapsing to its strip) brings
  * the bar back, a split's panes are bracketed as PEERS at one indent rather
  * than one being nested under the other, clicking either of them moves the
- * keyboard to that pane, and a row can be renamed by double-clicking its
- * label the way a tab in the bar can.
+ * keyboard to that pane, a row can be renamed by double-clicking its label
+ * the way a tab in the bar can, and the dev server button moves into the
+ * column's heading rather than disappearing with the bar.
  *
  * The rename is covered HERE and not in `tabs.spec.ts` because the two
  * surfaces are never on screen together (`showsTabBar`): whichever one is up
@@ -145,6 +146,41 @@ test('a split brackets its panes as peers, not one nested under the other', asyn
 
   // The pane that was there before the split is still one of the two.
   await expect(window.getByTestId(`vpane-${first}`)).toBeVisible()
+})
+
+test('the column carries the dev server button the bar took away with it', async () => {
+  // With the bar up, the button is the bar's. This is the control, and it is
+  // what makes the assertion after the toggle a MOVE rather than an appearance.
+  await expect(window.getByTestId('open-devserver')).toBeVisible()
+  await expect(window.getByTestId('tabbar')).toBeVisible()
+
+  await clickMenuItem('toggle-tabs')
+  await expect(window.getByTestId('tabs-panel')).toBeVisible()
+  await expect(window.getByTestId('tabbar')).toHaveCount(0)
+
+  // Still exactly one on screen, and it is in the column now. `toBeVisible`
+  // on a locator that matched two elements would be a strict-mode error
+  // rather than a pass, so the count is the half that says the bar's copy
+  // really went and this is not a second one.
+  await expect(window.getByTestId('open-devserver')).toHaveCount(1)
+  await expect(
+    window.getByTestId('tabs-panel').getByTestId('open-devserver'),
+  ).toBeVisible()
+
+  // And it works: pressing it opens a browser pane on the project. There is
+  // no dev server running, which is deliberately not a precondition; a blank
+  // pane is the documented answer.
+  //
+  // Asserted in the BROWSER region, not in this column. The pane the press
+  // creates is a browser pane, and browser panes live in their own region, so
+  // this column's own `vpane-` rows never gain one. Measured the hard way:
+  // the first version of this test waited for a `vpane-` row and timed out
+  // against a button that had worked perfectly.
+  await window.getByTestId('tabs-panel').getByTestId('open-devserver').click()
+  const browserTab = window.locator('[data-testid^="browsertab-"]').last()
+  await expect(browserTab).toBeVisible({ timeout: 20_000 })
+  const id = ((await browserTab.getAttribute('data-testid')) ?? '').replace('browsertab-', '')
+  await expect(window.getByTestId(`browserpane-${id}`)).toBeVisible({ timeout: 20_000 })
 })
 
 test('double-clicking a row renames the pane, and survives a relaunch', async () => {

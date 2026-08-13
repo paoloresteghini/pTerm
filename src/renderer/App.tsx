@@ -2427,6 +2427,11 @@ export function App() {
             onSelect={selectPane}
             onClose={requestClosePane}
             onRename={renameTab}
+            // The same pair the terminal tab bar is given. That bar is hidden
+            // while this column is open, so without these the gesture is
+            // unreachable rather than merely elsewhere.
+            onOpenBrowser={openDevServer}
+            canOpenBrowser={canOpenDevServer}
             onJoin={joinPanes}
             canJoin={canJoin}
             side={resizerSideFor(columnOrder, 'tabs')}
