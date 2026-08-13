@@ -39,9 +39,27 @@ const { StatusRegistry } = await import('../../src/main/status/registry')
 const PROJECT_ID = 'p-alpha'
 const PROJECT_SLUG = 'demo-app'
 
-/** A Vite banner as the pty actually delivers it, escapes and all. */
+/**
+ * The `Local:` line of a Vite banner as a pty actually delivers it, copied
+ * character for character out of `CAPTURED_VITE_CHUNK` in
+ * `tests/unit/devServerScan.test.ts` (that header records how the capture was
+ * taken; this is its first line, up to and including the `\r\n`).
+ *
+ * Copied rather than written to look like Vite, because the difference is the
+ * whole reason the scanner has the shape it has and the two are not
+ * interchangeable. Vite writes the bold-off inside the URL as `\x1b[22m`, a
+ * plain CSI; tmux re-emits it as terminfo's `sgr0`, `\x1b(B\x1b[m`, and every
+ * pTerm pane is a tmux client. A fixture holding Vite's own `\x1b[22m`, which
+ * this constant used to be, is passed by a scanner that strips CSI alone,
+ * which is the exact defect that made this feature detect no real dev server
+ * at all. That fixture could not fail, so none of the tests below could
+ * either.
+ */
 const VITE_LINE =
-  '  \x1b[32m>\x1b[39m  \x1b[1mLocal\x1b[22m:   \x1b[36mhttp://localhost:\x1b[1m5173\x1b[22m/\x1b[39m\r\n'
+  '  \x1b[32m➜\x1b[39m  \x1b[1mLocal\x1b(B\x1b[m:   \x1b[36mhttp://localhost:\x1b[1m5401\x1b(B\x1b[m\x1b[36m/\r\n'
+
+/** The port `VITE_LINE` announces, as the capture recorded it. */
+const ANNOUNCED_URL = 'http://localhost:5401/'
 
 function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   const handler = ipc.handlers.get(channel)
@@ -123,7 +141,7 @@ describe('CHANNELS.devServerUrl', () => {
   it('answers with the URL a pane of that project announced', async () => {
     emitData(pane.id, VITE_LINE)
 
-    expect(await devServerUrl(PROJECT_SLUG)).toBe('http://localhost:5173/')
+    expect(await devServerUrl(PROJECT_SLUG)).toBe(ANNOUNCED_URL)
   })
 
   it('answers null before anything has announced a server', async () => {
@@ -141,7 +159,7 @@ describe('CHANNELS.devServerUrl', () => {
 
   it('forgets the URL when the pane that announced it dies', async () => {
     emitData(pane.id, VITE_LINE)
-    expect(await devServerUrl(PROJECT_SLUG)).toBe('http://localhost:5173/')
+    expect(await devServerUrl(PROJECT_SLUG)).toBe(ANNOUNCED_URL)
 
     emitExit(pane, 0, 'exited')
     await settle()
@@ -159,6 +177,6 @@ describe('CHANNELS.devServerUrl', () => {
     emitExit(pane, 0, 'detached')
     await settle()
 
-    expect(await devServerUrl(PROJECT_SLUG)).toBe('http://localhost:5173/')
+    expect(await devServerUrl(PROJECT_SLUG)).toBe(ANNOUNCED_URL)
   })
 })
