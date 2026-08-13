@@ -7,6 +7,7 @@ import type { PaneColor } from '../shared/paneColors'
 import type { ThemeId } from '../shared/themes'
 import { findLinks, followsLink, linkRange } from './lib/terminalLinks'
 import { dropText } from './lib/shellQuote'
+import { symbolFontReady } from './lib/symbolFont'
 import { leastRecentlyUsed, webglPaneBudget } from './lib/webglBudget'
 import { xtermTheme } from './lib/xtermTheme'
 
@@ -391,23 +392,39 @@ export function Terminal({
 
     const term = new XTerm({
       /*
-       * The monospace faces first, then a symbol face, then the generic.
+       * The monospace faces first, then the bundled symbol subset, then the
+       * system symbol face, then the generic.
        *
-       * Claude Code's chrome prints characters no macOS monospace font has a
-       * glyph for — `⏵⏵` (U+23F5) for auto mode is the one that shows, and
-       * `⚠`, `●` and the braille spinner are the same class. xterm rasterises
-       * into a canvas atlas, and where a family has no glyph it takes a
-       * substitute whose metrics do not fit the cell, which clips to a sliver
-       * that reads on screen as a stray underscore. Terminal.app and iTerm2
-       * run a full CoreText fallback instead, which is why the same session
-       * looks correct there and wrong here.
+       * xterm draws every cell at one fixed width, so a glyph whose advance is
+       * not that width is clipped, and a badly clipped one reads on screen as
+       * a stray underscore. Measured in Chromium at this 13px, where the cell
+       * is 7.827px, against the previous stack
+       * (`ui-monospace, SFMono-Regular, Menlo, 'Apple Symbols', monospace`):
        *
-       * `Apple Symbols` is appended rather than inserted: it is not
-       * monospaced, so putting it ahead of Menlo would change the metrics of
-       * ordinary text. Last before the generic, it is consulted only for
-       * characters nothing above it can draw.
+       *   U+23F4-23F7  0.830-0.835 of a cell   the media-control triangles
+       *   U+23F8-23FA  1.046                   pause, stop, record
+       *   U+2800-28FF  1.135                   the whole braille block
+       *
+       * Those are the only characters that were wrong. `❯`, `✳`, `⚠`, `╭`,
+       * `●` and `█` each measured exactly 1.000 and never needed anything:
+       * Menlo covers them. Claude Code prints U+23F5 for auto mode and cycles
+       * braille for its spinner, which is why this shows up constantly.
+       *
+       * `pTerm Symbols` (`src/renderer/fonts/`, declared in `index.css`)
+       * carries exactly those two ranges and brings all of them to 0.997.
+       * Appending it AFTER `Menlo` is what leaves ordinary text alone: Menlo
+       * still answers first for everything it covers, and the nine characters
+       * above still measure 1.000 with this stack in force.
+       *
+       * `Apple Symbols` stays behind it. It has no U+23F5 at all. No
+       * monospace font on macOS does: a scan of all 377 installed faces found
+       * it only in STIX Two Math, which is proportional, so `Apple Symbols`
+       * never fixed the triangle it was added for. It does cover braille, at the
+       * 1.135 above. Kept because it is still the better answer than the
+       * generic for symbols outside the subset.
        */
-      fontFamily: "ui-monospace, SFMono-Regular, Menlo, 'Apple Symbols', monospace",
+      fontFamily:
+        "ui-monospace, SFMono-Regular, Menlo, 'pTerm Symbols', 'Apple Symbols', monospace",
       fontSize: 13,
       allowProposedApi: true,
       // Bounded per-pane so twelve live panes cannot grow without limit.
@@ -426,13 +443,18 @@ export function Terminal({
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(container)
-    // After `open()`, which the addon requires. The DOM renderer draws every
-    // character from the font, and the glyphs Claude Code's chrome leans on
-    // (`╭`, `⏺`, `⏵⏵`, its spinner) are not in SF Mono or Menlo — the
-    // fallback font's metrics leave a clipped sliver in the cell that reads
-    // as a stray underscore. The WebGL renderer rasterises into its own
-    // atlas and draws box/block characters itself (`customGlyphs`, on by
-    // default), which the DOM renderer explicitly cannot do.
+    // After `open()`, which the addon requires. The WebGL renderer draws the
+    // box-drawing and block characters itself, from geometry rather than from
+    // the font (`customGlyphs`, on by default): `addon-webgl` reads that
+    // option, and nothing in the core bundle's DOM renderer does. Claude
+    // Code's chrome is built out of exactly those characters, so the context
+    // bar and the boxes around its output are what degrade when a pane ends
+    // up on `dom`.
+    //
+    // That is a separate matter from the font stack above. The symbols in
+    // `pTerm Symbols` are drawn from the font on either renderer; what the
+    // renderers differ on is the box/block set, which Menlo covers at exactly
+    // one cell anyway.
     //
     // Marked used first, so a pane opening into a full budget takes its
     // context from some older pane and not from itself.
@@ -445,6 +467,31 @@ export function Terminal({
     claimRenderer(tabId, term)
     termRef.current = term
     mounted.set(tabId, term)
+
+    // The symbol face may not have loaded yet at this line, and on a cold
+    // start it has not: measured in Chromium, a face declared in CSS and
+    // referenced by nothing in the DOM was still `loading` when the page
+    // finished parsing. xterm fills its glyph cache when the terminal is
+    // built and the WebGL renderer keeps a texture atlas of its own, so a
+    // pane built ahead of the font keeps the clipped fallback glyph even
+    // after the font arrives. Measured against real xterm and the real WebGL
+    // addon: the screenshot before and after the font loaded was the same
+    // file, and only clearing the atlas changed it. See
+    // `lib/symbolFont.ts` for both measurements.
+    //
+    // `clearTextureAtlas` throws the cached rasterisations away; `refresh`
+    // redraws the viewport, since clearing alone leaves already-drawn rows as
+    // they are. Once per pane, on a promise that is shared across panes.
+    //
+    // `disposed` rather than checking `termRef`: a pane closed while the font
+    // is still in flight would otherwise call into a disposed terminal, and
+    // `tabId` can be remounted onto a different terminal in the meantime.
+    let disposed = false
+    void symbolFontReady().then(() => {
+      if (disposed) return
+      term.clearTextureAtlas()
+      term.refresh(0, term.rows - 1)
+    })
 
     // The two keys this app takes off xterm, each only when there is
     // something to put in its place: Shift+Return (replaced by ESC CR) and
@@ -565,6 +612,7 @@ export function Terminal({
     observer.observe(container)
 
     return () => {
+      disposed = true
       observer.disconnect()
       linkDisposable.dispose()
       inputDisposable.dispose()

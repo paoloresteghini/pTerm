@@ -1,5 +1,33 @@
 @import "tailwindcss";
 
+/* The terminal's symbol face, and the only @font-face in this app.
+
+   `fonts/pterm-symbols.woff2` is an 8KB subset of JuliaMono covering exactly
+   U+23F4-23FA and U+2800-28FF: the media-control glyphs Claude Code prints
+   for auto mode, and the braille block its spinner cycles through. No
+   monospace font on macOS covers U+23F5 at all, and the proportional face
+   CoreText falls back to draws it at 0.835 of a cell, which xterm's
+   fixed-cell atlas clips to the sliver that reads as a stray underscore.
+   Braille reaches Apple Symbols and comes out at 1.135, clipped the same way.
+   `src/renderer/Terminal.tsx` names the stack this joins and holds the
+   measurements.
+
+   The family is `pTerm Symbols`, not `JuliaMono`, for two independent
+   reasons. JuliaMono is a Reserved Font Name under OFL 1.1 (see
+   `fonts/LICENSE-JuliaMono.txt`, line 2), and clause 3 bars a modified
+   version (which a subset is) from presenting under it. And a private name
+   cannot be answered by a system-installed copy, so a machine that happens to
+   have JuliaMono installed cannot mask a bundled font that failed to load.
+
+   `font-display: block` rather than the default `auto`: the only consumer is
+   an xterm canvas, so there is no text to flash unstyled, and a swap period
+   would let a pane rasterise the fallback into its atlas. */
+@font-face {
+  font-family: 'pTerm Symbols';
+  src: url('./fonts/pterm-symbols.woff2') format('woff2');
+  font-display: block;
+}
+
 /* The single source of truth for the app's colours.
    Tailwind v4 turns each --color-* into utilities: bg-surface, text-muted,
    border-border, and so on. */
