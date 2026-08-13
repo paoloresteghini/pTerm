@@ -22,7 +22,7 @@ const theme = EditorView.theme(
     '&': { color: '#d4d4d8', backgroundColor: 'transparent' },
     '.cm-content': { padding: 0 },
     '.cm-scroller': {
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+      fontFamily: "ui-monospace, SFMono-Regular, Menlo, 'pTerm Symbols', monospace",
       fontSize: '11px',
       lineHeight: '1.6',
     },

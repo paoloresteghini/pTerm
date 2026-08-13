@@ -68,7 +68,7 @@ function BodyEditor({ value, onChange }: { value: string; onChange: (text: strin
           {
             '&': { color: '#d4d4d8', height: '220px' },
             '.cm-scroller': {
-              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+              fontFamily: "ui-monospace, SFMono-Regular, Menlo, 'pTerm Symbols', monospace",
               fontSize: '11px',
               overflow: 'auto',
             },

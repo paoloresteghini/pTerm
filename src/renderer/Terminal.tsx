@@ -471,7 +471,14 @@ export function Terminal({
     // The symbol face may not have loaded yet at this line, and on a cold
     // start it has not: measured in Chromium, a face declared in CSS and
     // referenced by nothing in the DOM was still `loading` when the page
-    // finished parsing. xterm fills its glyph cache when the terminal is
+    // finished parsing. Every monospace surface in the app now NAMES this
+    // family, and that does not change the above, because a stack reference
+    // is not a load either: measured in Electron 43, a page whose body used
+    // the stack but rendered only ASCII still read `document.fonts.check("11px
+    // 'pTerm Symbols'")` false 1.5s in, and only went true once a node
+    // containing `⏵⠋` was laid out. Chromium fetches a face when a character
+    // actually resolves to it, so nothing upstream of this line loads it for
+    // us. xterm fills its glyph cache when the terminal is
     // built and the WebGL renderer keeps a texture atlas of its own, so a
     // pane built ahead of the font keeps the clipped fallback glyph even
     // after the font arrives. Measured against real xterm and the real WebGL

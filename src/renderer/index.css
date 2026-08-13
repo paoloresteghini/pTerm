@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* The terminal's symbol face, and the only @font-face in this app.
+/* The app's symbol face, and the only @font-face in it.
 
    `fonts/pterm-symbols.woff2` is an 8KB subset of JuliaMono covering exactly
    U+23F4-23FA and U+2800-28FF: the media-control glyphs Claude Code prints
@@ -9,8 +9,23 @@
    CoreText falls back to draws it at 0.835 of a cell, which xterm's
    fixed-cell atlas clips to the sliver that reads as a stray underscore.
    Braille reaches Apple Symbols and comes out at 1.135, clipped the same way.
-   `src/renderer/Terminal.tsx` names the stack this joins and holds the
+   `src/renderer/Terminal.tsx` names the terminal's stack and holds those
    measurements.
+
+   The app's DOM surfaces name it too, in the same position, and there the
+   symptom is a different one: DOM text has no fixed cell, so nothing clips.
+   What breaks is alignment. Measured off a running pane's `.cm-scroller` at
+   11px, nine braille characters set 67.7px against 59.6px for nine `M`s, and
+   nine media controls 53.9px, so two rows of a block that is monospace
+   precisely so its columns line up ended 13.8px apart. With this face in the
+   stack all three set 59.4px.
+
+   Two routes reach a stack, and both now carry it: `--font-mono` below, which
+   the `font-mono` utility resolves through, and the four CodeMirror
+   `.cm-scroller` rules that spell one out inline (`FileView`, `TodoModal`,
+   `IssueModal`, `ui/MarkdownView`). `ui/FileIcon.tsx` is the one monospace
+   stack deliberately left alone: it sets SVG `<text>` for a hard-coded
+   two-letter badge (`TS` or `JS`), so these ranges cannot reach it.
 
    The family is `pTerm Symbols`, not `JuliaMono`, for two independent
    reasons. JuliaMono is a Reserved Font Name under OFL 1.1 (see
@@ -19,9 +34,15 @@
    cannot be answered by a system-installed copy, so a machine that happens to
    have JuliaMono installed cannot mask a bundled font that failed to load.
 
-   `font-display: block` rather than the default `auto`: the only consumer is
-   an xterm canvas, so there is no text to flash unstyled, and a swap period
-   would let a pane rasterise the fallback into its atlas. */
+   `font-display: block` rather than the default `auto`, which is chosen for
+   the terminal: a swap period would let a pane rasterise the fallback into its
+   WebGL atlas, where it stays until something clears it. DOM text is now a
+   consumer as well, so `block` does withhold these characters for the load
+   window rather than painting them at the wrong width. Measured in Chromium
+   loading this face off local disk, that window was one to two frames
+   (`document.fonts.status` read `loading` at the first animation frame and
+   `loaded` by the third); captures at each end of it were pixel-identical, so
+   no unstyled frame was observed. */
 @font-face {
   font-family: 'pTerm Symbols';
   src: url('./fonts/pterm-symbols.woff2') format('woff2');
@@ -84,7 +105,13 @@
      one. */
   --color-inset: #00000000;
 
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* `pTerm Symbols` after `Menlo`, matching the terminal's stack and for the
+     same reason: it answers only for characters the real monospace faces
+     above it do not cover. Measured in a DOM span at 11px, ordinary text is
+     untouched (M, x, ❯, ✳, ●, █, ╭, ⚠ all 6.6234px with and without it) while
+     U+23F4-23F7 go from 0.835 of a cell to 0.996, U+23F8-23FA from 1.046, and
+     the braille block from 1.135. */
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, 'pTerm Symbols', monospace;
 }
 
 html, body, #root {

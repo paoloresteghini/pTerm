@@ -9,6 +9,12 @@
  * at 0.835 of a cell, the unfixed width; three seconds later it was `loaded`
  * and 0.997.
  *
+ * Naming the family in a stack is not a load either, so the DOM surfaces that
+ * now name it do not make this module redundant: Chromium fetches a face only
+ * when a character actually resolves to it. Measured in Electron 43, a page
+ * whose body used the stack but rendered only ASCII still read
+ * `document.fonts.check("11px 'pTerm Symbols'")` false 1.5s in.
+ *
  * A pane built inside that window keeps the wrong glyph, and that was measured
  * too, against real xterm 6.0.0 and the real WebGL addon: a terminal built and
  * drawn before the face arrived rendered byte-for-byte identically after the
@@ -23,7 +29,12 @@
  * of terminals at launch.
  */
 
-/** The family `index.css` declares and `Terminal.tsx` names in its stack. */
+/**
+ * The family `index.css` declares. Every monospace stack in the app names it,
+ * via `--font-mono` or spelled out inline; `Terminal.tsx` is the only one that
+ * also has to wait for it, because DOM text repaints itself when a face
+ * arrives and an xterm atlas does not.
+ */
 export const SYMBOL_FAMILY = 'pTerm Symbols'
 
 /**

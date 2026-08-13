@@ -127,7 +127,7 @@ function themeFor(theme: ThemeId, paneColor: PaneColor | undefined): Extension {
     {
       '&': { color: foreground, height: '100%' },
       '.cm-scroller': {
-        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+        fontFamily: "ui-monospace, SFMono-Regular, Menlo, 'pTerm Symbols', monospace",
         fontSize: '11px',
       },
       '.cm-gutters': { backgroundColor: background, color: GUTTER_TEXT, border: 'none' },
