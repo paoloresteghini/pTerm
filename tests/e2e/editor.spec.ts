@@ -904,7 +904,8 @@ test('an editor tab under Unsorted is not offered a move, where a terminal is', 
   await page.getByTestId('premove-p1').click()
 
   // Unsorted has to be the selected project before it lists its tabs at all:
-  // `Sidebar` renders the tab rows only for the `active` project.
+  // `Sidebar` renders tab rows only for the `active` project, and only when
+  // that project is Unsorted. A real project's panes are not listed there.
   await page.getByTestId(`project-${UNSORTED_ID}`).click({ timeout: 10_000 })
 
   // The control, asserted first. A terminal pane under Unsorted still gets its

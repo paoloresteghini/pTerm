@@ -36,23 +36,29 @@
  * failures, not one.
  *
  * **Measured, 2026-08-03, this file run alone**: two mutations, one per
- * surface the rename has to reach. Reverting `Sidebar.tsx`'s
- * `{tabLabel(tab)}` to its own inlined `{tab.projectSlug} · {tab.id.slice(0, 6)}`
- * copy fails `a renamed tab shows its name in the bar and the sidebar, and
+ * surface the rename had to reach then. Only one of them still has a surface
+ * here, and the record is kept in full because which half died matters.
+ *
+ * The dead one reverted `Sidebar.tsx`'s `{tabLabel(tab)}` to an inlined
+ * `{tab.projectSlug} · {tab.id.slice(0, 6)}` copy, and failed the rename test
+ * below at `await expect(window.getByTestId('stab-${id}')).toContainText(
+ * 'payments api')` and only there, the `tab-` assertion above it still
+ * passing. That assertion is gone: the sidebar no longer lists a normal
+ * project's panes at all, since the tab bar and the Tabs column both already
+ * do. So nothing in this file covers `Sidebar.tsx` any more, and the shared
+ * `tabLabel` selector is held on the sidebar side only by the `stab-`
+ * assertions that Unsorted still has (`editor.spec.ts`, `projects.spec.ts`).
+ *
+ * The live one drops the `store.write` call from `renameTab`'s handler in
+ * `register.ts`, and fails `a renamed tab shows its name in the bar and
  * survives a relaunch` at the assertion `await
- * expect(window.getByTestId('stab-${id}')).toContainText('payments api')`,
- * and only there: the `tab-` assertion just above it still passed, so the
- * bar side of the rename kept reading the shared selector while the sidebar
- * side went back to computing its own copy. 1 failed, 12 passed of the
- * thirteen tests this file now holds. Dropping the `store.write` call from
- * `renameTab`'s handler in `register.ts` fails the same test at the
- * assertion `await expect(reopened.getByTestId('tab-${id}')).toContainText(
- * 'payments api')`, the one after the relaunch, not at either assertion
- * before the close and relaunch: the name reached both surfaces live and
- * only failed to come back, which is what a reply-only rename with nothing
- * written to disk would do. Same shape, 1 failed, 12 passed. Restoring each
- * file in turn returned this file to green with an empty `git diff` against
- * the committed version before the next mutation was made.
+ * expect(reopened.getByTestId('tab-${id}')).toContainText('payments api')`,
+ * the one after the relaunch, not at the assertion before the close: the name
+ * reached the bar live and only failed to come back, which is what a
+ * reply-only rename with nothing written to disk would do. 1 failed, 12
+ * passed of the thirteen tests this file held that day. Restoring the file
+ * returned this file to green with an empty `git diff` against the committed
+ * version.
  *
  * **Measured, 2026-08-04, this file run alone**: two mutations against the
  * palette test, one per half of its claim. Building the palette's label inline
@@ -563,7 +569,7 @@ test('closing a tab destroys its session', async () => {
   await app.close()
 })
 
-test('a renamed tab shows its name in the bar and the sidebar, and survives a relaunch', async () => {
+test('a renamed tab shows its name in the bar and survives a relaunch', async () => {
   const app = await launch()
   const window = await app.firstWindow()
 
@@ -582,11 +588,10 @@ test('a renamed tab shows its name in the bar and the sidebar, and survives a re
   await field.fill('payments api')
   await field.press('Enter')
 
-  // Both surfaces, which is the whole point: they read one selector over one
-  // pane list, so a name that reaches the bar and not the sidebar means they
-  // have drifted apart again.
+  // The bar, which is the only surface in a normal project that lists panes
+  // by name now. The sidebar's copy of this list was removed; `tabLabel` is
+  // still shared, and Unsorted's rows are where that sharing is asserted.
   await expect(window.getByTestId(`tab-${id}`)).toContainText('payments api')
-  await expect(window.getByTestId(`stab-${id}`)).toContainText('payments api')
 
   await app.close()
 
@@ -596,13 +601,12 @@ test('a renamed tab shows its name in the bar and the sidebar, and survives a re
   const reopened = await second.firstWindow()
   await expect(reopened.getByTestId(`tab-${id}`)).toContainText('payments api')
 
-  // Blank clears it, and both surfaces go back to slug and id.
+  // Blank clears it, and the bar goes back to slug and id.
   await reopened.getByTestId(`tablabel-${id}`).dblclick()
   const again = reopened.getByTestId(`tabinput-${id}`)
   await again.fill('')
   await again.press('Enter')
   await expect(reopened.getByTestId(`tab-${id}`)).toContainText(id.slice(0, 6))
-  await expect(reopened.getByTestId(`stab-${id}`)).toContainText(id.slice(0, 6))
 
   await second.close()
 })

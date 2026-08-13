@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, type ReactElement } from 'react'
 import {
   UNSORTED_ID,
   canHaveSession,
@@ -106,9 +106,9 @@ export function Sidebar({
   }
 
   // Grouped, not sorted: the projects you have sessions open in sit together at
-  // the top, the dormant ones below a divider. Within each group the manual
-  // order from "Move up"/"Move down" is untouched, so the list a user arranged
-  // is still the list they get.
+  // the top, the dormant ones in a section of their own pinned above the
+  // footer. Within each group the manual order from "Move up"/"Move down" is
+  // untouched, so the list a user arranged is still the list they get.
   const rows: Row[] = projects.map((project, index) => ({
     project,
     index,
@@ -117,9 +117,207 @@ export function Sidebar({
   const live = rows.filter((row) => row.tabs.length > 0)
   const dormant = rows.filter((row) => row.tabs.length === 0)
   const orderedRows = [...live, ...dormant]
-  // The divider only earns its line when there is something on both sides of
-  // it. A heading over the whole list would be labelling nothing.
-  const firstDormant = live.length > 0 && dormant.length > 0 ? live.length : -1
+  // The Inactive section only earns its place when there is something on both
+  // sides of it: a heading over the whole list would be labelling nothing, and
+  // a list anchored to the footer with an empty scroll area above it would be
+  // the entire sidebar hanging off the bottom of the window. When it is not
+  // split, every row goes in the scroll area in the usual order.
+  const split = live.length > 0 && dormant.length > 0
+
+  /** One project row: the row itself, its menu, and (for Unsorted only) its
+   *  tab rows. A function rather than an inline map body, because the scroll
+   *  area and the pinned Inactive section below both draw it. */
+  const projectRow = ({ project, index, tabs }: Row): ReactElement => {
+    const active = project.id === activeProjectId
+    const synthetic = project.id === UNSORTED_ID
+    const isMuted = muted(project.id)
+    return (
+      <div key={project.id}>
+        <div
+          data-testid={`project-${project.id}`}
+          data-active={active ? 'true' : 'false'}
+          onClick={() => onSelectProject(project.id)}
+          className={cn(
+            'group flex cursor-default items-center gap-1.5 px-2.5 py-1',
+            active ? 'bg-raised text-fg' : 'text-muted hover:text-fg',
+          )}
+        >
+          {/* ⌘1–9 follows sidebar order, so the number is the shortcut. */}
+          <span className="w-3 text-faint">{index < 9 ? index + 1 : ''}</span>
+          <StatusDot state={projectStateOf(project.id)} testid={`pdot-${project.id}`} />
+          {renamingId === project.id ? (
+            <input
+              data-testid={`rename-input-${project.id}`}
+              // The window-level ⌘ handler skips anything inside this,
+              // so ⌘W typed mid-rename edits the text instead of closing
+              // a tab and destroying its session. See App.tsx's keydown.
+              data-shortcuts="off"
+              aria-label={`Rename ${project.name}`}
+              autoFocus
+              // Selected, not just focused: the draft is seeded with the
+              // current name, and a rename is usually a replacement.
+              onFocus={(event) => event.target.select()}
+              value={draft}
+              // Without this, typing in the row also selects the project.
+              onClick={(event) => event.stopPropagation()}
+              onChange={(event) => setDraft(event.target.value)}
+              onBlur={() => finishRename(project.id, true)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') finishRename(project.id, true)
+                if (event.key === 'Escape') finishRename(project.id, false)
+              }}
+              className="min-w-0 flex-1 border border-border bg-raised px-1 text-fg outline-none"
+            />
+          ) : (
+            <span className="flex-1 truncate">{project.name}</span>
+          )}
+          {!project.available ? (
+            <span title={`${project.cwd} is missing`} className="text-danger">
+              !
+            </span>
+          ) : null}
+          <span className="text-faint">{tabs.length || ''}</span>
+          {synthetic ? null : (
+            <button
+              data-testid={`pmenu-${project.id}`}
+              aria-label={`Actions for ${project.name}`}
+              onClick={(event) => {
+                // Without this the click also selects the project.
+                event.stopPropagation()
+                setMenuFor((current) => (current === project.id ? null : project.id))
+              }}
+              className="cursor-default border-none bg-transparent px-0.5 text-faint hover:text-fg"
+            >
+              ⋯
+            </button>
+          )}
+        </div>
+
+        {menuFor === project.id ? (
+          <div className="flex flex-col border-y border-border-strong bg-overlay py-0.5">
+            <MenuItem
+              testid={`prename-${project.id}`}
+              label="Rename…"
+              onClick={() => {
+                setMenuFor(null)
+                startRename(project)
+              }}
+            />
+            <MenuItem
+              testid={`pup-${project.id}`}
+              label="Move up"
+              disabled={index === 0}
+              onClick={() => {
+                setMenuFor(null)
+                onMove(project.id, -1)
+              }}
+            />
+            <MenuItem
+              testid={`pdown-${project.id}`}
+              label="Move down"
+              onClick={() => {
+                setMenuFor(null)
+                onMove(project.id, 1)
+              }}
+            />
+            <MenuItem
+              testid={`pmute-${project.id}`}
+              label={isMuted ? 'Unmute project' : 'Mute project'}
+              onClick={() => {
+                setMenuFor(null)
+                onToggleMute(project.id)
+              }}
+            />
+            <MenuItem
+              testid={`premove-${project.id}`}
+              label="Remove project"
+              onClick={() => {
+                setMenuFor(null)
+                onRemove(project.id)
+              }}
+            />
+          </div>
+        ) : null}
+
+        {/* Tab rows, and ONLY under Unsorted.
+
+            A real project's panes are listed twice already, in the tab bar and
+            in the Tabs column, and the terminal region is always on screen, so
+            repeating them under the project name was three copies of one list.
+            Unsorted is the exception because it is not a place to work but a
+            place to rescue from: the `move…` select below is the only
+            affordance anywhere in the app that rehomes a stray pane, and
+            without these rows a crash-orphaned session could be seen and never
+            filed. The status dot and elapsed label come along because a stray
+            is identified by what it is doing, not by its id. */}
+        {active && synthetic
+          ? tabs.map((tab) => (
+              <div key={tab.id} className="flex items-center gap-1 pl-8 pr-2.5">
+                <StatusDot state={status[tab.id] ?? null} testid={`sdot-${tab.id}`} />
+                {(() => {
+                  const label = elapsedLabel(since[tab.id] ?? null, now)
+                  return label === null ? null : (
+                    <span data-testid={`selapsed-${tab.id}`} className="ml-1 shrink-0 text-faint">
+                      {label}
+                    </span>
+                  )
+                })()}
+                <div
+                  data-testid={`stab-${tab.id}`}
+                  onClick={() => onSelectTab(tab.id)}
+                  className={cn(
+                    'flex-1 cursor-default truncate py-0.5',
+                    tab.id === activeTabId ? 'text-fg' : 'text-muted hover:text-fg',
+                  )}
+                >
+                  {tabLabel(tab)}
+                </div>
+                {/* Rehoming: a stray must be filable, or Unsorted is a
+                    place things can be seen but never leave. Renaming
+                    its tmux session is what actually moves it.
+
+                    Which is exactly why a sessionless pane is not
+                    offered it. `manager.moveTabToProject` resolves the
+                    tab through `panesOfTab`, which reads live tmux, and
+                    an editor tab has nothing there: it threw
+                    `moveTabToProject: no session for tab <id>` and
+                    `fail` painted that string into `startup-error`.
+                    Rehoming one is not merely unimplemented, it has no
+                    good answer in B1 either. An editor pane's project
+                    membership is `PaneRecord.projectSlug` on disk rather
+                    than a tmux name, so the rename has nothing to do,
+                    but its `filePath` is ABSOLUTE inside the project it
+                    came from, so a move that "worked" would leave the
+                    pane reporting that its file is gone. A move that
+                    succeeds and then breaks the pane is worse than no
+                    move, so the affordance is withheld rather than the
+                    error being made prettier. */}
+                {canHaveSession(tab) ? (
+                  <select
+                    data-testid={`smove-${tab.id}`}
+                    aria-label={`Move ${tab.id.slice(0, 6)} to a project`}
+                    value=""
+                    onChange={(event) => {
+                      if (event.target.value) onMoveTab(tab.id, event.target.value)
+                    }}
+                    className="cursor-default border border-border bg-raised text-[10px] text-muted"
+                  >
+                    <option value="">move…</option>
+                    {projects
+                      .filter((candidate) => candidate.id !== UNSORTED_ID)
+                      .map((candidate) => (
+                        <option key={candidate.id} value={candidate.id}>
+                          {candidate.name}
+                        </option>
+                      ))}
+                  </select>
+                ) : null}
+              </div>
+            ))
+          : null}
+      </div>
+    )
+  }
 
   return (
     <div
@@ -145,202 +343,28 @@ export function Sidebar({
       </div>
 
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-        {orderedRows.map(({ project, index, tabs }, position) => {
-          const active = project.id === activeProjectId
-          const synthetic = project.id === UNSORTED_ID
-          const isMuted = muted(project.id)
-          return (
-            <div key={project.id}>
-              {position === firstDormant ? (
-                <div
-                  data-testid="inactive-heading"
-                  className="mt-2 border-t border-border px-2.5 pb-1 pt-2 text-[10px] uppercase tracking-wider text-label"
-                >
-                  Inactive
-                </div>
-              ) : null}
-              <div
-                data-testid={`project-${project.id}`}
-                data-active={active ? 'true' : 'false'}
-                onClick={() => onSelectProject(project.id)}
-                className={cn(
-                  'group flex cursor-default items-center gap-1.5 px-2.5 py-1',
-                  active ? 'bg-raised text-fg' : 'text-muted hover:text-fg',
-                )}
-              >
-                {/* ⌘1–9 follows sidebar order, so the number is the shortcut. */}
-                <span className="w-3 text-faint">{index < 9 ? index + 1 : ''}</span>
-                <StatusDot state={projectStateOf(project.id)} testid={`pdot-${project.id}`} />
-                {renamingId === project.id ? (
-                  <input
-                    data-testid={`rename-input-${project.id}`}
-                    // The window-level ⌘ handler skips anything inside this,
-                    // so ⌘W typed mid-rename edits the text instead of closing
-                    // a tab and destroying its session. See App.tsx's keydown.
-                    data-shortcuts="off"
-                    aria-label={`Rename ${project.name}`}
-                    autoFocus
-                    // Selected, not just focused: the draft is seeded with the
-                    // current name, and a rename is usually a replacement.
-                    onFocus={(event) => event.target.select()}
-                    value={draft}
-                    // Without this, typing in the row also selects the project.
-                    onClick={(event) => event.stopPropagation()}
-                    onChange={(event) => setDraft(event.target.value)}
-                    onBlur={() => finishRename(project.id, true)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') finishRename(project.id, true)
-                      if (event.key === 'Escape') finishRename(project.id, false)
-                    }}
-                    className="min-w-0 flex-1 border border-border bg-raised px-1 text-fg outline-none"
-                  />
-                ) : (
-                  <span className="flex-1 truncate">{project.name}</span>
-                )}
-                {!project.available ? (
-                  <span title={`${project.cwd} is missing`} className="text-danger">
-                    !
-                  </span>
-                ) : null}
-                <span className="text-faint">{tabs.length || ''}</span>
-                {synthetic ? null : (
-                  <button
-                    data-testid={`pmenu-${project.id}`}
-                    aria-label={`Actions for ${project.name}`}
-                    onClick={(event) => {
-                      // Without this the click also selects the project.
-                      event.stopPropagation()
-                      setMenuFor((current) => (current === project.id ? null : project.id))
-                    }}
-                    className="cursor-default border-none bg-transparent px-0.5 text-faint hover:text-fg"
-                  >
-                    ⋯
-                  </button>
-                )}
-              </div>
-
-              {menuFor === project.id ? (
-                <div className="flex flex-col border-y border-border-strong bg-overlay py-0.5">
-                  <MenuItem
-                    testid={`prename-${project.id}`}
-                    label="Rename…"
-                    onClick={() => {
-                      setMenuFor(null)
-                      startRename(project)
-                    }}
-                  />
-                  <MenuItem
-                    testid={`pup-${project.id}`}
-                    label="Move up"
-                    disabled={index === 0}
-                    onClick={() => {
-                      setMenuFor(null)
-                      onMove(project.id, -1)
-                    }}
-                  />
-                  <MenuItem
-                    testid={`pdown-${project.id}`}
-                    label="Move down"
-                    onClick={() => {
-                      setMenuFor(null)
-                      onMove(project.id, 1)
-                    }}
-                  />
-                  <MenuItem
-                    testid={`pmute-${project.id}`}
-                    label={isMuted ? 'Unmute project' : 'Mute project'}
-                    onClick={() => {
-                      setMenuFor(null)
-                      onToggleMute(project.id)
-                    }}
-                  />
-                  <MenuItem
-                    testid={`premove-${project.id}`}
-                    label="Remove project"
-                    onClick={() => {
-                      setMenuFor(null)
-                      onRemove(project.id)
-                    }}
-                  />
-                </div>
-              ) : null}
-
-              {active
-                ? tabs.map((tab) => (
-                    <div key={tab.id} className="flex items-center gap-1 pl-8 pr-2.5">
-                      <StatusDot state={status[tab.id] ?? null} testid={`sdot-${tab.id}`} />
-                      {/* Every state here, idle included: this list is where
-                          "nothing has happened on that one for two hours" is
-                          the thing worth seeing, which is exactly the idle
-                          case the tab bar leaves out. */}
-                      {(() => {
-                        const label = elapsedLabel(since[tab.id] ?? null, now)
-                        return label === null ? null : (
-                          <span
-                            data-testid={`selapsed-${tab.id}`}
-                            className="ml-1 shrink-0 text-faint"
-                          >
-                            {label}
-                          </span>
-                        )
-                      })()}
-                      <div
-                        data-testid={`stab-${tab.id}`}
-                        onClick={() => onSelectTab(tab.id)}
-                        className={cn(
-                          'flex-1 cursor-default truncate py-0.5',
-                          tab.id === activeTabId ? 'text-fg' : 'text-muted hover:text-fg',
-                        )}
-                      >
-                        {tabLabel(tab)}
-                      </div>
-                      {/* Rehoming: a stray must be filable, or Unsorted is a
-                          place things can be seen but never leave. Renaming
-                          its tmux session is what actually moves it.
-
-                          Which is exactly why a sessionless pane is not
-                          offered it. `manager.moveTabToProject` resolves the
-                          tab through `panesOfTab`, which reads live tmux, and
-                          an editor tab has nothing there: it threw
-                          `moveTabToProject: no session for tab <id>` and
-                          `fail` painted that string into `startup-error`.
-                          Rehoming one is not merely unimplemented, it has no
-                          good answer in B1 either. An editor pane's project
-                          membership is `PaneRecord.projectSlug` on disk rather
-                          than a tmux name, so the rename has nothing to do,
-                          but its `filePath` is ABSOLUTE inside the project it
-                          came from, so a move that "worked" would leave the
-                          pane reporting that its file is gone. A move that
-                          succeeds and then breaks the pane is worse than no
-                          move, so the affordance is withheld rather than the
-                          error being made prettier. */}
-                      {synthetic && canHaveSession(tab) ? (
-                        <select
-                          data-testid={`smove-${tab.id}`}
-                          aria-label={`Move ${tab.id.slice(0, 6)} to a project`}
-                          value=""
-                          onChange={(event) => {
-                            if (event.target.value) onMoveTab(tab.id, event.target.value)
-                          }}
-                          className="cursor-default border border-border bg-raised text-[10px] text-muted"
-                        >
-                          <option value="">move…</option>
-                          {projects
-                            .filter((candidate) => candidate.id !== UNSORTED_ID)
-                            .map((candidate) => (
-                              <option key={candidate.id} value={candidate.id}>
-                                {candidate.name}
-                              </option>
-                            ))}
-                        </select>
-                      ) : null}
-                    </div>
-                  ))
-                : null}
-            </div>
-          )
-        })}
+        {(split ? live : orderedRows).map(projectRow)}
       </div>
+
+      {/* Anchored to the footer rather than trailing the active projects: the
+          dormant list is a destination you go to, and one that moved down the
+          column every time a session started was never in the same place
+          twice. `shrink-0` so it keeps its rows when the scroll area above is
+          full, and its own `max-h` so a workspace with thirty dormant projects
+          leaves the live ones somewhere to be. */}
+      {split ? (
+        <div className="shrink-0 border-t border-border">
+          <div
+            data-testid="inactive-heading"
+            className="px-2.5 pb-1 pt-2 text-[10px] uppercase tracking-wider text-label"
+          >
+            Inactive
+          </div>
+          <div className="scroll-thin max-h-[40vh] overflow-y-auto pb-1">
+            {dormant.map(projectRow)}
+          </div>
+        </div>
+      ) : null}
 
       <div className="flex flex-col gap-1 border-t border-border p-2">
         <Button data-testid="add-project" variant="ghost" onClick={onAdd} className="w-full">
