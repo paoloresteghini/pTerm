@@ -58,7 +58,7 @@ const PROJECT_SLUG = 'demo-app'
 const VITE_LINE =
   '  \x1b[32m➜\x1b[39m  \x1b[1mLocal\x1b(B\x1b[m:   \x1b[36mhttp://localhost:\x1b[1m5401\x1b(B\x1b[m\x1b[36m/\r\n'
 
-/** The port `VITE_LINE` announces, as the capture recorded it. */
+/** The URL `VITE_LINE` announces, as the capture recorded it. */
 const ANNOUNCED_URL = 'http://localhost:5401/'
 
 function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {

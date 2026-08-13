@@ -474,9 +474,39 @@ export function TabBar({
           // opens a blank pane on purpose: detection is a bonus here, never a
           // precondition.
           disabled={!canOpenBrowser}
-          className="cursor-default border-none bg-transparent px-3 text-xs text-faint disabled:opacity-40 enabled:hover:text-muted"
+          // `px-2.5` rather than the `px-3` on the `+` beside it: a 12px icon
+          // in the room a ~7px glyph had would otherwise widen the button, and
+          // this one is the last thing in the bar, so its width is where the
+          // bar's content ends. Its LEFT edge is pinned by the `+` in front of
+          // it and does not move with the width, which is why the bare
+          // centre-of-element click that `tests/e2e/editor.spec.ts` dismisses a
+          // menu with kept the exact margin it had. Both measured either side
+          // of this change rather than argued.
+          className="flex cursor-default items-center border-none bg-transparent px-2.5 text-faint disabled:opacity-40 enabled:hover:text-muted"
         >
-          ↗
+          {/* A browser window: a frame, the chrome bar under its top edge, and
+              two dots in that bar. Drawn rather than typed, for the reason the
+              branch glyph in `StatusBar.tsx` is, and because the `↗` that used
+              to sit here is spoken for: `src/renderer/IssueModal.tsx` draws it
+              on Open on GitHub. Beside a `+`, an arrow leaving a box reads as
+              "this leaves the app" and as acting on the tab. A window says what
+              the press does: a pane opens, inside pTerm, on the project.
+
+              `currentColor`, unlike `ui/FileIcon.tsx`, which passes an explicit
+              colour: there the colour IS a file kind's signal, whereas here it
+              is the button's own classes that carry it (`text-faint`, with
+              `enabled:hover:text-muted` over the top), so a fixed colour would
+              sit unchanged while the control lit up under the pointer. */}
+          <svg viewBox="0 0 16 16" aria-hidden="true" className="h-3 w-3 shrink-0">
+            <g fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round">
+              <rect x="1.5" y="2.5" width="13" height="11" rx="1.75" />
+              <path d="M1.5 6.5h13" />
+            </g>
+            <g fill="currentColor">
+              <circle cx="4" cy="4.5" r="0.7" />
+              <circle cx="6.4" cy="4.5" r="0.7" />
+            </g>
+          </svg>
         </button>
       ) : null}
     </div>
