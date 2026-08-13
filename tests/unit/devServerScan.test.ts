@@ -67,6 +67,39 @@ describe('scanForLocalUrl', () => {
     expect(scanForLocalUrl('', 'Network: https://example.com:5173/\r\n').url).toBeNull()
   })
 
+  /**
+   * A loopback origin with no port at all. `new URL('http://localhost').port`
+   * is the empty string, so a caller that filed this and navigated to it
+   * would land on port 80, which no dev server this feature watches for is
+   * on. Ordinary prose in a pane reaches here, not just a chunk boundary.
+   */
+  it('ignores a loopback URL that announces no port', () => {
+    expect(scanForLocalUrl('', 'see the README at http://localhost/docs\r\n').url).toBeNull()
+  })
+
+  it('ignores a bare loopback origin left by a shell echo', () => {
+    expect(scanForLocalUrl('', '$ printf http://127.0.0.1:\r\n').url).toBeNull()
+  })
+
+  /**
+   * The carried tail is up to 512 characters of stream that the previous call
+   * already scanned. A URL still sitting in it was reported then, and
+   * reporting it again on every later chunk from that pane is what would let
+   * a pane that has gone quiet outrank one that announced after it.
+   */
+  it('does not report a URL that survives only in the carried tail', () => {
+    const first = scanForLocalUrl('', 'Local: http://localhost:5173/\r\n')
+    expect(first.url).toBe('http://localhost:5173/')
+    expect(scanForLocalUrl(first.tail, 'x').url).toBeNull()
+    expect(scanForLocalUrl(first.tail, '\x1b[2K\x1b[G$ ').url).toBeNull()
+  })
+
+  it('reports a URL again when the chunk announces it a second time', () => {
+    const first = scanForLocalUrl('', 'Local: http://localhost:5173/\r\n')
+    const second = scanForLocalUrl(first.tail, 'Local: http://localhost:5173/\r\n')
+    expect(second.url).toBe('http://localhost:5173/')
+  })
+
   it('returns the last loopback URL when a chunk holds several', () => {
     const chunk = 'Local: http://localhost:3000/\r\nLocal: http://127.0.0.1:8080/\r\n'
     expect(scanForLocalUrl('', chunk).url).toBe('http://127.0.0.1:8080/')
