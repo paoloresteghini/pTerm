@@ -816,6 +816,30 @@ export function App() {
   }, [project, fail])
 
   /**
+   * Whether the tab bar's browser button has a project to open a pane for.
+   *
+   * Not `canOpenSession`, which the `+` beside it reads: that asks whether a
+   * PTY can start here, and a browser pane starts none and never visits the
+   * cwd it records, so a project whose directory has been renamed can still
+   * have one. What `openBrowser` needs is a row in `config.projects` to look
+   * the id up in, and both states that fail that test are reachable from a
+   * bar that is on screen:
+   *
+   * - no project at all, since `showsTabBar` reads column visibility and
+   *   nothing else, so the bar renders on the welcome page too. The press
+   *   would hit the early return below and do nothing at all;
+   * - Unsorted, which the renderer holds as a project (`withUnsorted`, in
+   *   `ipc/restore.ts`) while config has no row for it. The press would reach
+   *   main, come back null and raise an error banner.
+   *
+   * Deliberately not the browser column's own `canOpen={project !== undefined}`
+   * either. That one admits Unsorted, which is the second case above, and its
+   * `+` puts that banner up today. Left as it is: it is one column over and
+   * not this button.
+   */
+  const canOpenDevServer = project !== undefined && project.id !== UNSORTED_ID
+
+  /**
    * Open a browser pane on the URL a dev server in the active project last
    * announced, or a blank one when none has.
    *
@@ -842,30 +866,6 @@ export function App() {
    * `onClick`, so a first parameter of any kind would arrive as a
    * `MouseEvent`.
    */
-  /**
-   * Whether the tab bar's browser button has a project to open a pane for.
-   *
-   * Not `canOpenSession`, which the `+` beside it reads: that asks whether a
-   * PTY can start here, and a browser pane starts none and never visits the
-   * cwd it records, so a project whose directory has been renamed can still
-   * have one. What `openBrowser` needs is a row in `config.projects` to look
-   * the id up in, and both states that fail that test are reachable from a
-   * bar that is on screen:
-   *
-   * - no project at all, since `showsTabBar` reads column visibility and
-   *   nothing else, so the bar renders on the welcome page too. The press
-   *   would hit the early return below and do nothing at all;
-   * - Unsorted, which the renderer holds as a project (`withUnsorted`, in
-   *   `ipc/restore.ts`) while config has no row for it. The press would reach
-   *   main, come back null and raise an error banner.
-   *
-   * Deliberately not the browser column's own `canOpen={project !== undefined}`
-   * either. That one admits Unsorted, which is the second case above, and its
-   * `+` puts that banner up today. Left as it is: it is one column over and
-   * not this button.
-   */
-  const canOpenDevServer = project !== undefined && project.id !== UNSORTED_ID
-
   const openDevServer = useCallback(() => {
     if (!project) return
     window.pterm

@@ -1,16 +1,20 @@
 /**
  * The dev server button in the terminal column's tab bar, end to end.
  *
- * Three tests, each launching its own app on the `pterm-e2e-devserver` socket:
- * the button is in the terminal bar and not in the browser column's bar, a
- * press with nothing announced opens a blank pane, and a press after a pane
+ * Five tests, each launching its own app on the `pterm-e2e-devserver` socket:
+ * the button is in the terminal bar and not in the browser column's bar, it
+ * is disabled with no project at all, it is disabled on Unsorted, a press
+ * with nothing announced opens a blank pane, and a press after a pane
  * announced a dev server URL opens a pane on that URL.
  *
  * **The project's id and its slug are deliberately different strings here.**
  * `window.pterm.devServerUrl` is asked by project SLUG and
  * `window.pterm.openBrowser` by project ID (see both doc comments in
- * `src/shared/ipc.ts`), and nothing in main converts one into the other for
- * this feature. A handler that hands either call the other name looks right
+ * `src/shared/ipc.ts`). `openBrowser` does convert one into the other, on
+ * every press of this button: it finds the project row by id and stamps the
+ * pane it writes with that row's slug. What no handler does is convert on the
+ * LOOKUP side, so an id handed to `devServerUrl` is not resolved to a slug,
+ * it simply misses. A handler that hands either call the other name looks right
  * and fails quietly: asking for a URL by id answers null, which is
  * indistinguishable from "no server has announced itself", so the button still
  * opens a pane and only the URL is wrong. A fixture whose project id equalled
@@ -21,8 +25,8 @@
  * **The announcement is driven through a real pty**, by typing a `printf` into
  * a terminal pane and running it. Pty output is what files a URL: main's
  * registry is written from one `manager.onData` forward and from nowhere else
- * (`grep -rn 'devServers\.observe(' src/`, one hit,
- * `src/main/ipc/register.ts:899`). The shell produces the escape bytes from the
+ * (`grep -rn 'devServers\.observe(' src/`, one hit, in
+ * `src/main/ipc/register.ts`). The shell produces the escape bytes from the
  * format string rather than the test typing an ESC byte, which a terminal
  * would echo back as a visible `^[` instead of acting on.
  *
@@ -352,9 +356,12 @@ test('pressing it after a pane announced a URL opens a pane on that URL', async 
   // scanner can accept: `http://%s...` does not parse (`new URL` throws on
   // the `%s` host), whereas typing the origin as an argument left a bare
   // `http://127.0.0.1:` in the echo, which parses as loopback and was filed
-  // as the answer when the real announcement went undetected. With the
-  // scheme in the format, printf's output is the only detectable URL in the
-  // whole stream, so the assertion below cannot be answered by the echo.
+  // as the answer when the real announcement went undetected. The scanner
+  // refuses a portless origin now (`announcesLoopbackPort`, `devserver/
+  // scan.ts`), so that echo would no longer be filed; the scheme stays in the
+  // format string anyway, because it makes printf's output the only URL in
+  // the whole stream a scanner could accept at all, and the assertion below
+  // should not rest on a second rule holding.
   await page.keyboard.type(
     `printf '  \\033[32m->\\033[39m  \\033[1mLocal\\033[22m:   \\033[36mhttp://%s\\033[1m%s\\033[22m/\\033[39m\\n' '127.0.0.1:' ${devPort}`,
   )

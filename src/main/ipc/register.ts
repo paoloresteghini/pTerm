@@ -895,9 +895,19 @@ export function registerIpc(
     // carries, which is why the registry files by slug. An entry already
     // deleted (a chunk arriving as its session goes) simply has nothing to
     // file it under.
+    //
+    // The forward goes FIRST and the observation second, which costs nothing
+    // and buys one guarantee: no defect reachable under `observe` can ever
+    // stop a pane's output reaching the screen. Nothing observable moves by
+    // the swap, because both statements run in the same tick and the registry
+    // is read only from an IPC handler, which cannot run until this one
+    // returns. No throw exists under `observe` today either: the scan is
+    // regex and Map work, and every `new URL` on that path sits inside a
+    // `try` (`devserver/scan.ts`, `shared/localOrigin.ts`). The ordering is
+    // what keeps that from being something to re-check.
+    send(CHANNELS.data, { id, data })
     const pane = manager.get(id)
     if (pane) devServers.observe(id, pane.projectSlug, data)
-    send(CHANNELS.data, { id, data })
   })
   manager.onExit((record, code, reason) => {
     // The renderer needs the answer to travel with the event: it draws the
@@ -2536,10 +2546,13 @@ export function registerIpc(
    *
    * Slug in, slug out. The `manager.onData` forward above files a URL under
    * the slug on the announcing pane's own record, and this reads back under
-   * the slug it is handed, so nothing on this feature's path looks a project
+   * the slug it is handed, so nothing on THIS handler's path looks a project
    * up by id or turns one of the two names into the other.
    * `CHANNELS.openBrowser` just above DOES resolve an id to a slug, for the
-   * pane row it writes, and this deliberately does not copy that: a caller
+   * pane row it writes, and it is on this button's path too: a press calls
+   * that one straight after this one. What is not shared is the conversion,
+   * which stays inside that handler, so an id handed to this one still
+   * answers null. This deliberately does not copy it: a caller
    * holds a `ProjectDescriptor` carrying both names and can hand each call the
    * one it asks for, so a config read per button press would buy nothing.
    *
@@ -2769,10 +2782,11 @@ export function registerIpc(
   // Handed back rather than started here, which is the same split
   // `HookServer` already has: `index.ts` constructs and starts that one, and
   // this file only ever handles what arrives on it. It matters more than
-  // symmetry. Three integration test files call `registerIpc` directly
-  // (`history`, `openBrowser`, `persistence`, counted 2026-08-12), and a
-  // `listen` inside it would bind a socket under `configRoot()` in every one
-  // of their cases, which for a case that has not set `PTERM_CONFIG_DIR` is
+  // symmetry. Four integration test files call `registerIpc` directly
+  // (`devServerWiring`, `history`, `openBrowser`, `persistence`; counted with
+  // `grep -rln 'registerIpc(' tests/` on 2026-08-12), and a `listen` inside
+  // it would bind a socket under `configRoot()` in every one of their cases,
+  // which for a case that has not set `PTERM_CONFIG_DIR` is
   // the developer's real `~/.pterm` and the socket their running pTerm is
   // serving on.
   return mcpServer
