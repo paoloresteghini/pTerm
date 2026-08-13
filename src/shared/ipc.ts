@@ -65,6 +65,8 @@ export const CHANNELS = {
   fsRename: 'pterm:fsRename',
   fsTrash: 'pterm:fsTrash',
   fsReveal: 'pterm:fsReveal',
+  fsProbe: 'pterm:fsProbe',
+  fsOpen: 'pterm:fsOpen',
   fsCopyPath: 'pterm:fsCopyPath',
   fsCreate: 'pterm:fsCreate',
   projectFiles: 'pterm:projectFiles',
@@ -1350,6 +1352,45 @@ export interface PTermApi {
    * rather than rejecting.
    */
   fsRead(projectId: string, relPath: string): Promise<FileContents | null>
+  /**
+   * Which of `relPaths` name a readable regular file inside the project.
+   *
+   * The gate on terminal path links: `terminalPaths.ts` recognises SHAPES,
+   * permissively and on purpose, and this is what decides which of them are
+   * underlined. Without it every `e.g` in a paragraph would be a link that
+   * reports an error when clicked, which is the enabled-control-that-fails
+   * shape this app already has two of.
+   *
+   * Answers a subset of the input, in the input's order, so a caller can
+   * compare by identity. Batched because the caller asks per hovered line and
+   * a line can hold several: one round trip a line, not one a candidate. A
+   * directory is NOT a file here (nothing can open one), and a path that would
+   * leave the project is simply absent from the answer rather than an error:
+   * the caller's next step is to draw a link or not, and it treats every
+   * reason the same.
+   *
+   * `relPath` is relative and resolved in main, like `fsRead`: no absolute
+   * path crosses this boundary.
+   */
+  fsProbe(projectId: string, relPaths: string[]): Promise<string[]>
+  /**
+   * Hand one file of one project to the system, the way double-clicking it in
+   * Finder would.
+   *
+   * For the files the editor pane cannot show: an image, a pdf, an archive.
+   * `opensInEditor` in `terminalPaths.ts` is what routes a click here rather
+   * than to `openEditor`.
+   *
+   * Deliberately NOT reachable through `openExternal`, which refuses anything
+   * that is not http(s) precisely so that the renderer cannot ask the system
+   * to open a local file by naming a `file:` url. This channel is that
+   * capability, given its own name and its own containment check, so that
+   * allowing it here does not widen that one.
+   *
+   * Answers false for an unknown project, a path that leaves it, and a file
+   * the system declines to open.
+   */
+  fsOpen(projectId: string, relPath: string): Promise<boolean>
   /**
    * Write one file of one project, refusing if it changed since it was read.
    *

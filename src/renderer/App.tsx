@@ -37,6 +37,7 @@ import { Welcome } from './Welcome'
 import { CommandPalette, type PaletteSession } from './CommandPalette'
 import { FileView, saveEditorPane } from './FileView'
 import { clearTerminal, selectionOf } from './Terminal'
+import { opensInEditor } from './lib/terminalPaths'
 import { DiffView } from './DiffView'
 import { cn } from './lib/cn'
 import { tabLabel } from './lib/tabLabel'
@@ -777,6 +778,50 @@ export function App() {
         .catch(fail)
     },
     [project, fail],
+  )
+
+  /**
+   * Everything a terminal pane needs to make the file paths in its output
+   * ⌘-clickable, or undefined when there is no project to resolve them
+   * against.
+   *
+   * Undefined rather than a set of no-op callbacks: `Terminal` registers no
+   * provider at all in that case, so an Unsorted pane underlines nothing
+   * instead of underlining paths that would refuse.
+   *
+   * The routing lives here rather than in `Terminal` because it is a question
+   * about what a project can SHOW: a source file founds an editor pane
+   * (`openFile`, and every refusal it already handles), and a file the pane
+   * cannot render goes to the system opener instead (`fsOpen`), which is the
+   * choice made for images and pdfs. `opensInEditor` decides by extension
+   * alone, so neither branch reads the file to find out which it is.
+   */
+  const pathLinks = useMemo(
+    () =>
+      project === undefined
+        ? undefined
+        : {
+            cwd: project.cwd,
+            probe: (relPaths: string[]): Promise<string[]> =>
+              window.pterm.fsProbe(project.id, relPaths),
+            open: (relPath: string): void => {
+              if (opensInEditor(relPath)) {
+                openFile(relPath)
+                return
+              }
+              window.pterm
+                .fsOpen(project.id, relPath)
+                .then((opened) => {
+                  // The same shape `openFile` uses for its own refusal: main
+                  // answers false for an unknown project, a path that leaves
+                  // it, and a file the system declines, and the renderer
+                  // cannot tell those apart, so it names none of them.
+                  if (!opened) fail(`Could not open ${relPath}`)
+                })
+                .catch(fail)
+            },
+          },
+    [project, openFile, fail],
   )
 
   /**
@@ -2119,6 +2164,7 @@ export function App() {
                     // would move typing to a terminal the user cannot see.
                     focused={group.visible && box.pane.id === activePaneId}
                     onHistoryRequested={requestHistory}
+                    pathLinks={pathLinks}
                   />
                 )}
                 {/* Inside the pane box, which is the whole point: it rises
@@ -2380,6 +2426,7 @@ export function App() {
             onDragStart={() => setDragging('tabs')}
             onSelect={selectPane}
             onClose={requestClosePane}
+            onRename={renameTab}
             onJoin={joinPanes}
             canJoin={canJoin}
             side={resizerSideFor(columnOrder, 'tabs')}

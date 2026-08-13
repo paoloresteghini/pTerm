@@ -2,8 +2,14 @@
  * The tabs column end to end: opening it takes the horizontal bar away,
  * closing it (either through the menu or by collapsing to its strip) brings
  * the bar back, a split's panes are bracketed as PEERS at one indent rather
- * than one being nested under the other, and clicking either of them moves
- * the keyboard to that pane.
+ * than one being nested under the other, clicking either of them moves the
+ * keyboard to that pane, and a row can be renamed by double-clicking its
+ * label the way a tab in the bar can.
+ *
+ * The rename is covered HERE and not in `tabs.spec.ts` because the two
+ * surfaces are never on screen together (`showsTabBar`): whichever one is up
+ * is the only place a pane can be renamed from, so each needs its own end to
+ * end proof rather than one standing in for both.
  *
  * Modeled on `webgl.spec.ts`'s setup: a temp-dir `beforeEach`/`afterEach`, a
  * seeded single-project config, and a private socket so this file's tmux
@@ -139,6 +145,69 @@ test('a split brackets its panes as peers, not one nested under the other', asyn
 
   // The pane that was there before the split is still one of the two.
   await expect(window.getByTestId(`vpane-${first}`)).toBeVisible()
+})
+
+test('double-clicking a row renames the pane, and survives a relaunch', async () => {
+  await window.getByTestId('new-tab').click()
+  await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
+  await clickMenuItem('toggle-tabs')
+  await expect(window.getByTestId('tabs-panel')).toBeVisible()
+  const id = (await window.locator('[data-testid^="vpane-"]').getAttribute('data-testid'))!.slice(
+    'vpane-'.length,
+  )
+
+  // The label, not the row: the row's own double-click does nothing, which is
+  // what made this column's panes unrenameable while the bar's were not.
+  await window.getByTestId(`vlabel-${id}`).dblclick()
+  const field = window.getByTestId(`vinput-${id}`)
+  await field.fill('payments api')
+  await field.press('Enter')
+  await expect(window.getByTestId(`vlabel-${id}`)).toContainText('payments api')
+
+  // The half no unit test reaches: the name has to be on disk and come back
+  // through restore, not merely live in the renderer's state. Asserted in this
+  // column rather than the bar, since the column is what restore reopens on.
+  await app.close()
+  app = await launchApp({
+    socket: SOCKET,
+    configDir,
+    projectsRoot,
+    claudeSettings: claudeSettingsPath,
+    claudeHome,
+    userDataDir,
+  })
+  window = await app.firstWindow()
+  await expect(window.getByTestId(`vlabel-${id}`)).toContainText('payments api', {
+    timeout: 20_000,
+  })
+
+  // Blank clears it, back to the slug-and-id default `tabLabel` computes.
+  await window.getByTestId(`vlabel-${id}`).dblclick()
+  const again = window.getByTestId(`vinput-${id}`)
+  await again.fill('')
+  await again.press('Enter')
+  await expect(window.getByTestId(`vlabel-${id}`)).toContainText(id.slice(0, 6))
+})
+
+test('Escape abandons a rename in the column instead of committing it', async () => {
+  await window.getByTestId('new-tab').click()
+  await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
+  await clickMenuItem('toggle-tabs')
+  await expect(window.getByTestId('tabs-panel')).toBeVisible()
+  const id = (await window.locator('[data-testid^="vpane-"]').getAttribute('data-testid'))!.slice(
+    'vpane-'.length,
+  )
+
+  await window.getByTestId(`vlabel-${id}`).dblclick()
+  const field = window.getByTestId(`vinput-${id}`)
+  await field.fill('discarded')
+  await field.press('Escape')
+  // Both halves: the field is gone, and what it held was not kept. `editing`
+  // is the ref that makes the second true: without it, the blur that follows
+  // the unmount commits the draft Escape was pressed to throw away.
+  await expect(window.getByTestId(`vinput-${id}`)).toHaveCount(0)
+  await expect(window.getByTestId(`vlabel-${id}`)).not.toContainText('discarded')
+  await expect(window.getByTestId(`vlabel-${id}`)).toContainText(id.slice(0, 6))
 })
 
 test('clicking a split\'s other pane moves the keyboard to it', async () => {

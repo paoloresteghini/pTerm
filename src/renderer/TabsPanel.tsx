@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react'
 import { canHaveSession, type TabDescriptor, type TabState } from '../shared/ipc'
 import type { TabTreeNode } from './lib/tabGroups'
 import { StatusDot } from './StatusDot'
@@ -34,6 +35,7 @@ export function TabsPanel({
   onDragStart,
   onSelect,
   onClose,
+  onRename,
   onJoin,
   canJoin,
   side,
@@ -51,6 +53,14 @@ export function TabsPanel({
   onDragStart: () => void
   onSelect: (paneId: string) => void
   onClose: (paneId: string) => void
+  /**
+   * Commit a new name, or clear it with a blank string. Same handler
+   * `TabBar` is given (`renameTab`), because this column replaces that bar
+   * rather than sitting beside it: a rename that only one of the two
+   * surfaces offered would be a rename the user cannot reach whenever the
+   * other one is on screen.
+   */
+  onRename: (paneId: string, name: string) => void
   /** Drag one pane's row onto another's to merge them into a split. */
   onJoin: (paneId: string, targetPaneId: string) => void
   /** Whether dragging `paneId` onto `targetPaneId` would do anything. */
@@ -59,6 +69,33 @@ export function TabsPanel({
 }) {
   const { width, set, commit } = useColumnWidth('pterm:tabsWidth', 208)
   const drag = usePaneDragDrop(canJoin, onJoin)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+  // Which edit is still open, readable synchronously so that whichever of the
+  // two commit paths arrives second is a no-op. Enter and Escape both unmount
+  // the input, and today's Chromium does not reliably follow that with a blur.
+  // Copied from `TabBar`, which copied it from `Sidebar`'s project rename.
+  const editing = useRef<string | null>(null)
+
+  const startRename = (pane: TabDescriptor): void => {
+    editing.current = pane.id
+    // The raw title, not `tabLabel`: opening the field on an unnamed pane
+    // should offer an empty box, not the slug and id to delete first.
+    setDraft(pane.title ?? '')
+    setRenamingId(pane.id)
+  }
+
+  const finishRename = (id: string, commit: boolean): void => {
+    if (editing.current !== id) return
+    editing.current = null
+    setRenamingId(null)
+    // No non-empty guard: a blank name is how a pane's name is removed, and a
+    // pane has `tabLabel`'s slug-and-id default to fall back to.
+    if (commit) onRename(id, draft.trim())
+  }
+
+  // After the hooks, never before: an early return above them would change the
+  // hook order between the collapsed and expanded renders.
   if (collapsed) {
     return (
       <PanelStrip
@@ -123,7 +160,46 @@ export function TabsPanel({
           className="h-2.5 w-2.5 shrink-0 rounded-sm border border-border"
           style={{ background: pane.color ?? undefined }}
         />
-        <span className="flex-1 truncate">{tabLabel(pane)}</span>
+        {renamingId === pane.id ? (
+          <input
+            data-testid={`vinput-${pane.id}`}
+            // `App.tsx`'s ⌘ handler returns early inside this. Without it,
+            // ⌘W typed mid-rename closes the pane and kills its session,
+            // taking the half-typed name with it. Same attribute, same
+            // reason, as `TabBar`'s field.
+            data-shortcuts="off"
+            aria-label={`Rename ${tabLabel(pane)}`}
+            autoFocus
+            // Selected, not just focused: renaming an already-named pane is
+            // usually replacing the name.
+            onFocus={(event) => event.target.select()}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onBlur={() => finishRename(pane.id, true)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') finishRename(pane.id, true)
+              if (event.key === 'Escape') finishRename(pane.id, false)
+            }}
+            // Stops the click that lands in the field from also re-selecting
+            // the pane underneath it.
+            onClick={(event) => event.stopPropagation()}
+            className="min-w-0 flex-1 border border-border bg-raised px-1 text-fg outline-none"
+          />
+        ) : (
+          <span
+            data-testid={`vlabel-${pane.id}`}
+            // Not `vpane-`-prefixed: this column's rows are counted by
+            // `[data-testid^="vpane-"]`, so a second element per row under
+            // that prefix would inflate every one of those counts.
+            onDoubleClick={(event) => {
+              event.stopPropagation()
+              startRename(pane)
+            }}
+            className="flex-1 truncate"
+          >
+            {tabLabel(pane)}
+          </span>
+        )}
         {label === null ? null : <span className="shrink-0 text-faint">{label}</span>}
         <StatusDot state={status[pane.id] ?? null} testid={`vdot-${pane.id}`} />
         {tombstoned ? null : (

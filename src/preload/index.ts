@@ -139,6 +139,8 @@ const api: PTermApi = {
     ipcRenderer.invoke(CHANNELS.fsRename, projectId, relPath, newName),
   fsTrash: (projectId, relPath) => ipcRenderer.invoke(CHANNELS.fsTrash, projectId, relPath),
   fsReveal: (projectId, relPath) => ipcRenderer.invoke(CHANNELS.fsReveal, projectId, relPath),
+  fsProbe: (projectId, relPaths) => ipcRenderer.invoke(CHANNELS.fsProbe, projectId, relPaths),
+  fsOpen: (projectId, relPath) => ipcRenderer.invoke(CHANNELS.fsOpen, projectId, relPath),
   fsCopyPath: (projectId, relPath, kind) =>
     ipcRenderer.invoke(CHANNELS.fsCopyPath, projectId, relPath, kind),
   fsCreate: (projectId, relDir, name, kind) =>

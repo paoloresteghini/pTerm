@@ -8,7 +8,7 @@ import {
   webContents,
   type WebContents,
 } from 'electron'
-import { appendFile } from 'node:fs/promises'
+import { appendFile, stat } from 'node:fs/promises'
 import {
   CHANNELS,
   type BrowserAgentActivity,
@@ -2278,6 +2278,76 @@ export function registerIpc(
       if (target === null) return { ok: false, error: 'That path is not in this project' }
       shell.showItemInFolder(target)
       return { ok: true }
+    },
+  )
+
+  /*
+   * Which of a batch of candidate paths are readable files in this project.
+   *
+   * The gate that keeps a terminal path link from being an enabled control
+   * that fails: `terminalPaths.ts` recognises shapes permissively, and only
+   * what this confirms is ever underlined. Everything unanswerable is simply
+   * absent from the reply, at the same weight: an unknown project, a path that
+   * leaves it, a directory, a missing file and an unreadable one all mean "do
+   * not draw a link", and the caller has nothing different to do for any of
+   * them.
+   *
+   * `stat`, not `access`: a directory is readable and opens nothing, so the
+   * kind has to be part of the answer rather than left for the click to
+   * discover. Symlinks are followed, which `stat` does and `lstat` would not,
+   * because a link to a file in the project is a file for this purpose;
+   * `resolveInside` has already refused the path lexically, and the deeper
+   * escape a symlink allows is `readFileInside`'s to refuse when the pane
+   * actually opens it.
+   *
+   * Bounded input. This is called on hover, so a pathological line cannot be
+   * allowed to turn into a thousand `stat` calls; the cap is generous next to
+   * what a terminal line can hold and small next to what would hurt.
+   */
+  ipcMain.handle(
+    CHANNELS.fsProbe,
+    async (_event, projectId: string, relPaths: string[]): Promise<string[]> => {
+      if (!Array.isArray(relPaths) || relPaths.length === 0) return []
+      const config = await store.read()
+      const project = config.projects.find((row) => row.id === projectId)
+      if (!project) return []
+      const found: string[] = []
+      for (const relPath of relPaths.slice(0, 64)) {
+        const target = resolveInside(project.cwd, relPath)
+        if (target === null) continue
+        try {
+          if ((await stat(target)).isFile()) found.push(relPath)
+        } catch {
+          // Missing, or not readable. Both mean no link.
+        }
+      }
+      return found
+    },
+  )
+
+  /*
+   * Hand a file to the system opener, for the ones the editor pane cannot
+   * show.
+   *
+   * A separate channel from `openExternal` rather than a relaxation of it.
+   * That handler refuses everything but http(s) so that the renderer cannot
+   * ask the system to open a local file by naming a `file:` url; widening it
+   * would give every caller of it that reach. This one has the capability and
+   * pays for it with its own containment check, so the two boundaries stay
+   * independent.
+   *
+   * `openPath` answers with a message on failure and an empty string on
+   * success, which is inverted here into the boolean the renderer needs.
+   */
+  ipcMain.handle(
+    CHANNELS.fsOpen,
+    async (_event, projectId: string, relPath: string): Promise<boolean> => {
+      const config = await store.read()
+      const project = config.projects.find((row) => row.id === projectId)
+      if (!project) return false
+      const target = resolveInside(project.cwd, relPath)
+      if (target === null) return false
+      return (await shell.openPath(target)) === ''
     },
   )
 

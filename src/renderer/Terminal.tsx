@@ -6,6 +6,7 @@ import '@xterm/xterm/css/xterm.css'
 import type { PaneColor } from '../shared/paneColors'
 import type { ThemeId } from '../shared/themes'
 import { findLinks, followsLink, linkRange } from './lib/terminalLinks'
+import { findPaths, toRelative } from './lib/terminalPaths'
 import { dropText } from './lib/shellQuote'
 import { symbolFontReady } from './lib/symbolFont'
 import { leastRecentlyUsed, webglPaneBudget } from './lib/webglBudget'
@@ -366,6 +367,17 @@ export function Terminal({
    * this pane's Up belongs to the shell exactly as it always has.
    */
   onHistoryRequested,
+  /**
+   * What makes a file path in this pane's output ⌘-clickable, or undefined
+   * when nothing should be.
+   *
+   * One object rather than three props because it is all-or-nothing: without
+   * a project there is no `cwd` to make an absolute path relative against and
+   * no project id to probe or open with, so there is no half of this feature
+   * that still works. `App.tsx` passes undefined in that case and no provider
+   * is registered at all.
+   */
+  pathLinks,
 }: {
   tabId: string
   visible: boolean
@@ -373,6 +385,16 @@ export function Terminal({
   paneColor: PaneColor | undefined
   theme: ThemeId
   onHistoryRequested: (paneId: string) => boolean
+  pathLinks:
+    | {
+        /** The project's own directory, for `toRelative`. */
+        cwd: string
+        /** Which of these relative paths are readable files. See `fsProbe`. */
+        probe: (relPaths: string[]) => Promise<string[]>
+        /** Follow one. Routing between the editor pane and the system opener is the caller's. */
+        open: (relPath: string) => void
+      }
+    | undefined
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const fitRef = useRef<(() => void) | null>(null)
@@ -385,6 +407,14 @@ export function Terminal({
   useEffect(() => {
     historyRef.current = onHistoryRequested
   }, [onHistoryRequested])
+  // Through a ref for the same reason, and it matters more here: this object
+  // is rebuilt on every parent render, so naming it in the mount effect's
+  // dependencies would dispose and rebuild the xterm on each one, taking the
+  // pane's scrollback with it every time.
+  const pathLinksRef = useRef(pathLinks)
+  useEffect(() => {
+    pathLinksRef.current = pathLinks
+  }, [pathLinks])
 
   useEffect(() => {
     const container = containerRef.current
@@ -587,6 +617,69 @@ export function Terminal({
       },
     })
 
+    /*
+     * ⌘-click a file path to open it.
+     *
+     * A second provider beside the url one rather than a branch inside it.
+     * xterm asks every registered provider and takes the first that answers,
+     * and the two never overlap: `findPaths` skips anything containing `://`,
+     * so a url is offered by exactly one of them however they are ordered.
+     *
+     * The asynchronous half is the point. `findPaths` recognises SHAPES and is
+     * permissive on purpose, so this asks main which of them are readable
+     * files before drawing anything (`fsProbe`). Nothing is underlined that
+     * cannot be opened, which is what keeps this from being the third enabled
+     * control in this app that fails when pressed.
+     *
+     * `provideLinks`' callback may be called later, and xterm handles that;
+     * what it must not be is called after this pane has gone, so `disposed`
+     * gates it. A hover that resolves after the tab was closed would otherwise
+     * reach a disposed terminal.
+     *
+     * The routing between an editor pane and the system opener is the
+     * caller's (`App.tsx`), not this component's: it is a decision about what
+     * a project can show, and this file already holds enough.
+     */
+    const pathDisposable = term.registerLinkProvider({
+      provideLinks(bufferLineNumber, callback) {
+        const links = pathLinksRef.current
+        if (!links) return callback(undefined)
+        const line = term.buffer.active.getLine(bufferLineNumber - 1)
+        if (!line) return callback(undefined)
+        const found = findPaths(line.translateToString(true))
+        if (found.length === 0) return callback(undefined)
+        // Paired with the candidate it came from: the probe answers in
+        // relative paths, and the underline needs the offsets of the ORIGINAL
+        // token, which for an absolute path is a different string entirely.
+        const pairs = found
+          .map((candidate) => ({ candidate, rel: toRelative(candidate.path, links.cwd) }))
+          .filter((pair): pair is { candidate: typeof found[number]; rel: string } => pair.rel !== null)
+        if (pairs.length === 0) return callback(undefined)
+        links
+          .probe(pairs.map((pair) => pair.rel))
+          .then((real) => {
+            if (disposed) return
+            const keep = new Set(real)
+            const offered = pairs.filter((pair) => keep.has(pair.rel))
+            callback(
+              offered.length === 0
+                ? undefined
+                : offered.map(({ candidate, rel }) => ({
+                    range: linkRange(candidate, bufferLineNumber),
+                    text: rel,
+                    activate(event) {
+                      if (!followsLink(event)) return
+                      links.open(rel)
+                    },
+                  })),
+            )
+          })
+          .catch(() => {
+            if (!disposed) callback(undefined)
+          })
+      },
+    })
+
     const offData = window.pterm.onData(({ id, data }) => {
       if (id === tabId) term.write(data)
     })
@@ -622,6 +715,7 @@ export function Terminal({
       disposed = true
       observer.disconnect()
       linkDisposable.dispose()
+      pathDisposable.dispose()
       inputDisposable.dispose()
       offData()
       // Before `term.dispose()`, which disposes the addon with it: an entry
