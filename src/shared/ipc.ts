@@ -18,6 +18,8 @@ export const CHANNELS = {
   removeProject: 'pterm:removeProject',
   reorderProjects: 'pterm:reorderProjects',
   setActiveProject: 'pterm:setActiveProject',
+  setWallPin: 'pterm:setWallPin',
+  setWallFollow: 'pterm:setWallFollow',
   scanCandidates: 'pterm:scanCandidates',
   pickFolder: 'pterm:pickFolder',
   moveTabToProject: 'pterm:moveTabToProject',
@@ -1067,6 +1069,16 @@ export interface PTermApi {
   removeProject(id: string): Promise<ProjectDescriptor[]>
   reorderProjects(ids: string[]): Promise<ProjectDescriptor[]>
   setActiveProject(id: string | null): void
+  /**
+   * Fire and forget, like `setActiveProject`: the renderer has already drawn
+   * the wall from its own state, and this exists only so the next launch
+   * agrees. A failed write costs a pin, not a session.
+   *
+   * Keyed by PANE, not by project: the pane names its owner, and a pin on a
+   * project that does not hold the pane means nothing.
+   */
+  setWallPin(paneId: string, pin: string | null): void
+  setWallFollow(projectId: string, follow: boolean): void
   scanCandidates(): Promise<Candidate[]>
   /** The chosen folder, or null when the user cancelled. */
   pickFolder(): Promise<string | null>

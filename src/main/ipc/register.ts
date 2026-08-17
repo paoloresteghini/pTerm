@@ -43,6 +43,7 @@ import { normaliseUrl } from '../../shared/browserUrl'
 import { DevServerRegistry } from '../devserver/registry'
 import { isLoopbackUrl } from '../../shared/localOrigin'
 import { ConfigStore, type PTermConfig } from '../state/store'
+import { withWallFollow, withWallPin } from '../state/wallPin'
 import { StatusRegistry } from '../status/registry'
 import {
   describeProjects,
@@ -1117,6 +1118,20 @@ export function registerIpc(
     void serialise(async () => {
       const config = await store.read()
       await store.write({ ...config, activeProjectId: id })
+    })
+  })
+
+  ipcMain.on(CHANNELS.setWallPin, (_event, paneId: string, pin: string | null) => {
+    void serialise(async () => {
+      const config = await store.read()
+      await store.write(withWallPin(config, paneId, pin))
+    })
+  })
+
+  ipcMain.on(CHANNELS.setWallFollow, (_event, projectId: string, follow: boolean) => {
+    void serialise(async () => {
+      const config = await store.read()
+      await store.write(withWallFollow(config, projectId, follow))
     })
   })
 
