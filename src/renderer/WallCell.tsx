@@ -90,7 +90,11 @@ export function WallCell({
           readable from across a desk. The dot says the same thing at 6px, and
           reading three of those at a glance is the problem this view exists
           to solve. */}
-      {state === 'waiting' ? <div className="h-0.5 w-full bg-amber-400" /> : null}
+      {/* `bg-warn`, not a bare amber value: every theme sets `--color-warn` to
+          the same hex `amber-400` resolves to today, which is exactly why the
+          token has to be the one written here. A theme that later changes
+          warn should carry this strip with it, and a literal wouldn't. */}
+      {state === 'waiting' ? <div className="h-0.5 w-full bg-warn" /> : null}
       <div
         onMouseDown={onFocus}
         className={cn(
@@ -137,26 +141,36 @@ export function WallCell({
           {choices.length === 0 ? (
             <div className="px-2 py-1 text-faint">No terminals in this project</div>
           ) : (
-            choices.map((choice) => (
-              <button
-                key={choice.id}
-                type="button"
-                onClick={() => {
-                  onPin(choice.id)
-                  setOpen(false)
-                }}
-                className={cn(
-                  'flex w-full items-center gap-1.5 px-2 py-0.5 text-left',
-                  choice.id === pinned?.id
-                    ? 'bg-raised text-fg'
-                    : 'text-muted hover:bg-raised hover:text-fg',
-                )}
-              >
-                <StatusDot state={status[choice.id] ?? null} />
-                <span className="truncate">{tabLabel(choice)}</span>
-                {choice.id === pinned?.id ? <span className="ml-auto text-accent">✓</span> : null}
-              </button>
-            ))
+            choices.map((choice) => {
+              const isPinned = choice.id === pinned?.id
+              return (
+                <button
+                  key={choice.id}
+                  type="button"
+                  // The pinned row is a toggle, not just a marker: the empty
+                  // cell the spec draws is a real state (a project on the
+                  // wall with nothing chosen yet), not a mistake to route
+                  // around, so there has to be a way back to it that doesn't
+                  // mean pulling the whole project off the wall. Every other
+                  // row only ever pins, since choosing a different pane never
+                  // needs to ask which pane it is replacing.
+                  aria-pressed={isPinned}
+                  title={isPinned ? 'Unpin this pane' : undefined}
+                  onClick={() => {
+                    onPin(isPinned ? null : choice.id)
+                    setOpen(false)
+                  }}
+                  className={cn(
+                    'flex w-full items-center gap-1.5 px-2 py-0.5 text-left',
+                    isPinned ? 'bg-raised text-fg' : 'text-muted hover:bg-raised hover:text-fg',
+                  )}
+                >
+                  <StatusDot state={status[choice.id] ?? null} />
+                  <span className="truncate">{tabLabel(choice)}</span>
+                  {isPinned ? <span className="ml-auto text-accent">✓</span> : null}
+                </button>
+              )
+            })
           )}
           <button
             type="button"
