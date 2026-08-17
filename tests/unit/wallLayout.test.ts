@@ -8,7 +8,7 @@ import { cellRect } from '../../src/renderer/lib/wallLayout'
  * spreads these onto a group's box belongs to `App.tsx` and to `wall.spec.ts`,
  * not here.
  *
- * Sabotage-checked (2026-08-17), each mutation applied and reverted by hand:
+ * Sabotage-checked (2026-08-17, fixed 2026-08-17), each mutation applied and reverted by hand:
  * 1. dropped the final-row stretch (`inThisRow` always `perRow`): reddened
  *    "stretches a short final row to fill the width" and "tiles the column with
  *    no gap and no overlap", as expected.
@@ -17,7 +17,9 @@ import { cellRect } from '../../src/renderer/lib/wallLayout'
  * 3. returned `top: '0%'` unconditionally: reddened "wraps onto a second row
  *    past the column count" and "stretches a short final row to fill the width",
  *    as expected.
- * All three landed on exactly the named test(s); none left the suite green.
+ * 4. dropped the `.toFixed(4)` rounding: reddened "rounds a third to four
+ *    places", as expected.
+ * All four landed on exactly the named test(s); none left the suite green.
  */
 
 /** `left`/`width` as numbers, so a test can do arithmetic on a tiling. */
@@ -37,7 +39,11 @@ describe('cellRect', () => {
   })
 
   it('splits three cells across three columns in one row', () => {
-    expect(box(0, 3, 3)).toEqual({ left: 0, top: 0, width: 100 / 3, height: 100 })
+    const b0 = box(0, 3, 3)
+    expect(b0.left).toBe(0)
+    expect(b0.top).toBe(0)
+    expect(b0.width).toBeCloseTo(100 / 3, 3)
+    expect(b0.height).toBe(100)
     expect(box(1, 3, 3).left).toBeCloseTo(100 / 3, 3)
     expect(box(2, 3, 3).left).toBeCloseTo(200 / 3, 3)
   })
@@ -62,7 +68,8 @@ describe('cellRect', () => {
           const rect = box(index, count, columns)
           area += (rect.width / 100) * (rect.height / 100)
         }
-        expect(area).toBeCloseTo(1, 6)
+        // Rounding to four places leaves at most a 1e-6 shortfall per row.
+        expect(area).toBeCloseTo(1, 5)
       }
     }
   })
@@ -89,5 +96,13 @@ describe('cellRect', () => {
 
   it('never gives a cell less than its share when columns exceed the count', () => {
     expect(box(0, 2, 4)).toEqual({ left: 0, top: 0, width: 50, height: 100 })
+  })
+
+  // The convention itself, asserted on the string rather than the number:
+  // `workspace.ts:632` rounds to four places and this file must agree, or two
+  // halves of one layout round differently.
+  it('rounds a third to four places', () => {
+    expect(cellRect(1, 3, 3).left).toBe('33.3333%')
+    expect(cellRect(0, 3, 3).width).toBe('33.3333%')
   })
 })

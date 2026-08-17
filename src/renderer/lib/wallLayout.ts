@@ -19,11 +19,17 @@ export interface CellRect {
 }
 
 /**
- * Percentages as strings, computed as (numerator * 100 / denominator) to avoid
- * floating point precision issues from intermediate division.
+ * Four places, the same rounding `workspace.ts`'s own `percent` uses, so `1/3`
+ * lands on a stable string rather than `33.33333333333333%`.
+ *
+ * Lossy on purpose, and the loss is bounded: a rounded row of three cells
+ * covers 99.9999% of the column rather than 100%, which is a thousandth of a
+ * pixel on any window this app can be opened at. `workspace.ts:557` accepts
+ * the same give-away for a pane's flex basis, and a wall cell holding a
+ * different rule would leave two halves of one layout rounding differently.
  */
-function percent(numerator: number, denominator: number): string {
-  return `${numerator * 100 / denominator}%`
+function percent(fraction: number): string {
+  return `${Number((fraction * 100).toFixed(4))}%`
 }
 
 /**
@@ -49,9 +55,9 @@ export function cellRect(index: number, count: number, columns: number): CellRec
   const inThisRow = row === rows - 1 ? total - row * perRow : perRow
   const column = index - row * perRow
   return {
-    left: percent(column, inThisRow),
-    top: percent(row, rows),
-    width: percent(1, inThisRow),
-    height: percent(1, rows),
+    left: percent(column / inThisRow),
+    top: percent(row / rows),
+    width: percent(1 / inThisRow),
+    height: percent(1 / rows),
   }
 }
