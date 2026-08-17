@@ -33,10 +33,31 @@ export interface ProjectRecord {
   activeTabId: string | null
   /** Same as `activeTabId`, resolved by `describeProjects` against the browser region instead. */
   activeBrowserTabId: string | null
+  /**
+   * The pane this project shows in wall mode, or null for a slot with nothing
+   * in it yet.
+   *
+   * A pane id, resolved against live panes at read time the way `activeTabId`
+   * is, and for the same reason: `restoreWorkspace` prunes every saved pane
+   * that live tmux no longer has, so a pin outliving its pane is the ordinary
+   * outcome of a relaunch after a session ended. It reads as an empty slot,
+   * not as an error.
+   */
+  wallPin: string | null
+  /**
+   * When true the pin tracks this project's `activeTabId` instead of staying
+   * put.
+   *
+   * Off by default: a wall slot that quietly changes what it shows is a slot
+   * that cannot be read at a glance, which is the whole point of the view. It
+   * exists for the one case where following IS what the user means, a project
+   * being actively driven while the others are watched.
+   */
+  wallFollowActive: boolean
 }
 
 export interface PTermConfig {
-  version: 9
+  version: 10
   /** Array order is sidebar order, and the order ⌘1–9 follows. */
   projects: ProjectRecord[]
   activeProjectId: string | null
@@ -72,7 +93,7 @@ export const DEFAULT_NOTIFICATIONS: NotificationConfig = {
 }
 
 const EMPTY: PTermConfig = {
-  version: 9,
+  version: 10,
   projects: [],
   activeProjectId: null,
   panes: [],
@@ -366,6 +387,8 @@ function normaliseProject(project: ProjectRecord): ProjectRecord {
     activeTabId: typeof project.activeTabId === 'string' ? project.activeTabId : null,
     activeBrowserTabId:
       typeof project.activeBrowserTabId === 'string' ? project.activeBrowserTabId : null,
+    wallPin: typeof project.wallPin === 'string' ? project.wallPin : null,
+    wallFollowActive: project.wallFollowActive === true,
   }
 }
 
@@ -435,23 +458,24 @@ export function migrate(value: unknown): PTermConfig {
   const activeProjectId =
     typeof candidate.activeProjectId === 'string' ? candidate.activeProjectId : null
 
-  // 5 through 9 share a shape. v6 added an optional pane title, v7 an optional
+  // 5 through 10 share a shape. v6 added an optional pane title, v7 an optional
   // pane colour, v8 an optional file path plus a session that is optional per
-  // kind, and v9 an optional theme id. In every case an older file not having
-  // the field is exactly what "never set" already means, so there is nothing
-  // to convert and one branch reads all five. A v7 row is a terminal row by
-  // construction, because no version before v8 could express a pane without a
-  // session.
+  // kind, v9 an optional theme id, and v10 a per-project wall pin and follow
+  // flag. In every case an older file not having the field is exactly what
+  // "never set" already means, so there is nothing to convert and one branch
+  // reads all six. A v7 row is a terminal row by construction, because no
+  // version before v8 could express a pane without a session.
   if (
     value.version === 5 ||
     value.version === 6 ||
     value.version === 7 ||
     value.version === 8 ||
-    value.version === 9
+    value.version === 9 ||
+    value.version === 10
   ) {
     const panes = paneRows(candidate.panes)
     return {
-      version: 9,
+      version: 10,
       projects,
       activeProjectId,
       panes,
@@ -465,7 +489,7 @@ export function migrate(value: unknown): PTermConfig {
     // and a tab holding just that pane, full width and necessarily selected.
     const panes = paneRows(candidate.tabs)
     return {
-      version: 9,
+      version: 10,
       projects,
       activeProjectId,
       panes,

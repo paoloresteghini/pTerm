@@ -41,6 +41,8 @@ const api: PTermApi = {
   removeProject: (id) => ipcRenderer.invoke(CHANNELS.removeProject, id),
   reorderProjects: (ids) => ipcRenderer.invoke(CHANNELS.reorderProjects, ids),
   setActiveProject: (id) => ipcRenderer.send(CHANNELS.setActiveProject, id),
+  setWallPin: (paneId, pin) => ipcRenderer.send(CHANNELS.setWallPin, paneId, pin),
+  setWallFollow: (projectId, follow) => ipcRenderer.send(CHANNELS.setWallFollow, projectId, follow),
   scanCandidates: () => ipcRenderer.invoke(CHANNELS.scanCandidates),
   pickFolder: () => ipcRenderer.invoke(CHANNELS.pickFolder),
   moveTabToProject: (tabId, projectId) =>
@@ -229,6 +231,7 @@ const api: PTermApi = {
   openDiff: (projectId: string, relPath: string, side: DiffSide): Promise<TabDescriptor | null> =>
     ipcRenderer.invoke(CHANNELS.openDiff, projectId, relPath, side),
   columnsVisible: (collapsed) => ipcRenderer.send(CHANNELS.columnsVisible, collapsed),
+  wallVisible: (wall) => ipcRenderer.send(CHANNELS.wallVisible, wall),
   // Off `process.argv`, not `process.env`: vite compiles this bundle with
   // `process.env` replaced by an empty object literal, so reading a variable
   // here would be statically undefined and silently do nothing. `createWindow`

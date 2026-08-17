@@ -18,6 +18,8 @@ export const CHANNELS = {
   removeProject: 'pterm:removeProject',
   reorderProjects: 'pterm:reorderProjects',
   setActiveProject: 'pterm:setActiveProject',
+  setWallPin: 'pterm:setWallPin',
+  setWallFollow: 'pterm:setWallFollow',
   scanCandidates: 'pterm:scanCandidates',
   pickFolder: 'pterm:pickFolder',
   moveTabToProject: 'pterm:moveTabToProject',
@@ -93,6 +95,7 @@ export const CHANNELS = {
   gitDiff: 'pterm:gitDiff',
   openDiff: 'pterm:openDiff',
   columnsVisible: 'pterm:columnsVisible',
+  wallVisible: 'pterm:wallVisible',
   issuesList: 'pterm:issuesList',
   issuesGet: 'pterm:issuesGet',
   issuesCreate: 'pterm:issuesCreate',
@@ -142,6 +145,10 @@ export type MenuCommand =
   | 'toggleTodos'
   | 'hideAllColumns'
   | 'settings'
+  | 'toggleWall'
+  | 'wallColumns2'
+  | 'wallColumns3'
+  | 'wallColumns4'
 
 /**
  * What a tab was launched as.
@@ -762,6 +769,18 @@ export interface ProjectDescriptor {
    * `?? null`.
    */
   activeBrowserTabId?: string | null
+  /**
+   * The pane this project shows in wall mode, or null for an empty slot.
+   *
+   * Optional for the same reason `activeBrowserTabId` is: `grep -rln
+   * "activeTabId:" tests/` (2026-08-17) still matches 49 files building a
+   * `ProjectDescriptor` or `ProjectRecord` literal, and a required field would
+   * fail `tsc` in every one of them for no behaviour change. A reader must
+   * spell the absence as `?? null`.
+   */
+  wallPin?: string | null
+  /** Same optionality, same reason, as `wallPin`. A reader must spell the absence `=== true`. */
+  wallFollowActive?: boolean
   /** False when `cwd` is no longer a directory — renamed or deleted. */
   available: boolean
 }
@@ -1055,6 +1074,16 @@ export interface PTermApi {
   removeProject(id: string): Promise<ProjectDescriptor[]>
   reorderProjects(ids: string[]): Promise<ProjectDescriptor[]>
   setActiveProject(id: string | null): void
+  /**
+   * Fire and forget, like `setActiveProject`: the renderer has already drawn
+   * the wall from its own state, and this exists only so the next launch
+   * agrees. A failed write costs a pin, not a session.
+   *
+   * Keyed by PANE, not by project: the pane names its owner, and a pin on a
+   * project that does not hold the pane means nothing.
+   */
+  setWallPin(paneId: string, pin: string | null): void
+  setWallFollow(projectId: string, follow: boolean): void
   scanCandidates(): Promise<Candidate[]>
   /** The chosen folder, or null when the user cancelled. */
   pickFolder(): Promise<string | null>
@@ -1671,6 +1700,17 @@ export interface PTermApi {
    * command still asks the renderer to flip its own state.
    */
   columnsVisible(collapsed: ColumnVisibility): void
+  /**
+   * Tell main whether the wall is on and how many columns it has, so the View
+   * menu's Wall checkbox and its column-count radios can show the truth.
+   *
+   * Same trade as `columnsVisible` just above, and the same route rather than
+   * a second mechanism: fire and forget, main holds this only for display,
+   * and a dropped message costs a stale tick until the next change rather
+   * than a wrong toggle, because every menu command still asks the renderer
+   * to flip its own state.
+   */
+  wallVisible(wall: { on: boolean; columns: number }): void
   /**
    * Values the main process puts on the command line at window creation,
    * readable synchronously before the first frame.

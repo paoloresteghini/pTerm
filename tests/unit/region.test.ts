@@ -203,6 +203,8 @@ const recordFor = (id: string): ProjectRecord => ({
   presets: [],
   activeTabId: null,
   activeBrowserTabId: null,
+  wallPin: null,
+  wallFollowActive: false,
 })
 
 describe('describeProjects', () => {

@@ -26,6 +26,7 @@ import { IssuesPanel } from './IssuesPanel'
 import { TodosPanel } from './TodosPanel'
 import { NotesPanel } from './NotesPanel'
 import { BrowserColumn } from './BrowserColumn'
+import { WallCell } from './WallCell'
 import { AddProjectDialog } from './AddProjectDialog'
 import { ConfirmClosePane } from './ConfirmClosePane'
 import { SettingsPane } from './settings/SettingsPane'
@@ -53,6 +54,8 @@ import {
   type ColumnVisibility,
 } from './lib/columnVisibility'
 import { moveColumn, orderFromStored, resizerSideFor, type ColumnSlot } from './lib/columnOrder'
+import { cellRect } from './lib/wallLayout'
+import { columnsFromStored, slotsFromStored, toggleSlot } from './lib/wallSlots'
 import {
   INITIAL_WORKSPACE_STATE,
   activeProject,
@@ -67,10 +70,12 @@ import {
   stateOfProject,
   tabOfPane,
   tabsOfProject,
+  wallPinFor,
   welcomeHint,
   workspaceReducer,
   type PaneBox,
   type PaneDirection,
+  type PaneGroup,
 } from './workspace'
 import { groupedTabs, tabTree } from './lib/tabGroups'
 import { projectMuted, toggleProjectMute } from './mute'
@@ -85,6 +90,7 @@ import {
   type HistoryEntry,
   type HistoryScope,
   type NotificationConfig,
+  type ProjectDescriptor,
   type Region,
   type TabDescriptor,
   type TabType,
@@ -179,6 +185,88 @@ function inBrowserRegion(node: Element | null): boolean {
   return node !== null && node.closest('[data-region="browser"]') !== null
 }
 
+/**
+ * Whether the wall is on, which projects hold its slots, and how many cells go
+ * in a row.
+ *
+ * In `localStorage` beside `ORDER_KEY` and the `*Collapsed` keys rather than in
+ * the config, which is the split `wallSlots.ts` argues: these are facts about
+ * how THIS window is arranged. Which PANE a project shows is a fact about the
+ * project and lives in `ProjectRecord.wallPin` instead.
+ */
+const WALL_KEY = 'pterm:wall'
+const WALL_SLOTS_KEY = 'pterm:wallSlots'
+const WALL_COLUMNS_KEY = 'pterm:wallColumns'
+
+/** What `useWallState` hands back. The setters are the routes Task 8 wires. */
+interface WallState {
+  on: boolean
+  /** Project ids in slot order, resolved against the projects that exist. */
+  slots: string[]
+  columns: number
+  setOn: (on: boolean) => void
+  setColumns: (count: number) => void
+  toggleSlot: (projectId: string) => void
+}
+
+/**
+ * The three preferences above, read once and written back on every change the
+ * user makes.
+ *
+ * A hook rather than three more `useState`s in `App`, which is long enough
+ * already, and because the slot list needs a piece of care the other two do
+ * not. **The RAW stored string is what is held**, and it is resolved against
+ * the live project list at read time. Resolving it in the initialiser instead
+ * looks equivalent and is not: projects arrive over IPC from `restore`, so at
+ * the first render there are none, every stored id would be dropped as naming
+ * a project that does not exist, and the wall would come up empty on every
+ * launch. Held raw, it fills in as `restore` lands, and a project removed later
+ * leaves the wall on its own with nothing written.
+ *
+ * That is also why the write only ever happens in `toggleSlot`: persisting the
+ * resolved read would take a launch's momentarily-empty answer and make it the
+ * stored truth.
+ */
+function useWallState(projects: ProjectDescriptor[]): WallState {
+  const [on, setOnState] = useState(() => localStorage.getItem(WALL_KEY) === '1')
+  const [stored, setStored] = useState(() => localStorage.getItem(WALL_SLOTS_KEY))
+  const [columns, setColumnsState] = useState(() =>
+    columnsFromStored(localStorage.getItem(WALL_COLUMNS_KEY)),
+  )
+
+  const slots = useMemo(() => slotsFromStored(stored, projects), [stored, projects])
+
+  const setOn = useCallback((next: boolean) => {
+    setOnState(next)
+    localStorage.setItem(WALL_KEY, next ? '1' : '0')
+  }, [])
+
+  // Through the reader the stored value already goes through, so a menu item
+  // and a hand-edited profile are clamped by one rule rather than two.
+  const setColumns = useCallback((count: number) => {
+    const clamped = columnsFromStored(String(count))
+    setColumnsState(clamped)
+    localStorage.setItem(WALL_COLUMNS_KEY, String(clamped))
+  }, [])
+
+  // The write sits in the updater, the shape `moveColumnTo` uses: it is
+  // idempotent, so StrictMode's double invocation costs nothing. This is the
+  // one moment the stored list is allowed to lose an id naming a project that
+  // is gone, because it is the one moment a user asked for a change.
+  const toggle = useCallback(
+    (projectId: string) => {
+      setStored((was) => {
+        const next = JSON.stringify(toggleSlot(slotsFromStored(was, projects), projectId))
+        localStorage.setItem(WALL_SLOTS_KEY, next)
+        return next
+      })
+    },
+    [projects],
+  )
+
+  return { on, slots, columns, setOn, setColumns, toggleSlot: toggle }
+}
+
 export function App() {
   const [state, dispatch] = useReducer(workspaceReducer, INITIAL_WORKSPACE_STATE)
   const [error, setError] = useState<string | null>(null)
@@ -233,6 +321,10 @@ export function App() {
   const [columnOrder, setColumnOrder] = useState<ColumnSlot[]>(() =>
     orderFromStored(localStorage.getItem(ORDER_KEY)),
   )
+
+  // Whether the terminal column is a wall, and what is in it. Beside the row's
+  // order because it is the same kind of fact: how this window is arranged.
+  const wallState = useWallState(state.projects)
 
   /** Move `id` to `toIndex` and persist the result. See `moveColumn`. */
   const moveColumnTo = useCallback((id: ColumnSlot, toIndex: number) => {
@@ -533,6 +625,15 @@ export function App() {
     window.pterm.columnsVisible(onScreenColumns)
   }, [onScreenColumns])
 
+  // Same reason and the same route as the effect just above, for the wall's
+  // own two facts: main cannot read `localStorage`, so the View menu's Wall
+  // checkbox and its column-count radios would otherwise be guesses, and a
+  // toggle made from the palette has to reach them without a click on the
+  // menu itself.
+  useEffect(() => {
+    window.pterm.wallVisible({ on: wallState.on, columns: wallState.columns })
+  }, [wallState.on, wallState.columns])
+
   // The *Collapsed booleans as one ColumnVisibility, for showsTabBar.
   const collapsedColumns: ColumnVisibility = {
     tabs: tabsCollapsed,
@@ -562,8 +663,25 @@ export function App() {
   // off it. "No visible group" is the literal statement of an empty pane area,
   // and it is not the same as "no tabs": a tab whose kids were all boxed by an
   // earlier row emits no group at all (`workspace.ts:667`).
-  const groups = paneGroups(state)
-  const showWelcome = !groups.some((group) => group.visible)
+  //
+  // The wall, when it is on, and null when it is not: this is the value that
+  // keeps every group on `inset-0` and exactly one of them visible, as it was
+  // before wall mode. It is passed HERE and nowhere else: `browserGroups` below
+  // must never see a wall, which is what keeps the browser region
+  // single-visible (`paneGroups` repeats the region test for the same reason).
+  const wallView = wallState.on ? { slots: wallState.slots, columns: wallState.columns } : null
+  const groups = paneGroups(state, 'terminal', wallView)
+  // "No visible group" still carries this, and a wall with no slots at all is
+  // exactly that case, but a wall that HAS cells is not an empty pane area
+  // even when none of them is filled. Its placeholders already say what to do
+  // and its headers already offer the pane picker, so the welcome drawn over
+  // them was two answers to one question, printed on top of each other
+  // (measured: the hint row landed across both cells' placeholder text).
+  // Reads `wallView.slots` rather than `wallState.slots`: the two are the same
+  // array (see `wallView` above), and reading through one object rather than
+  // two keeps this from silently drifting if that ever stops being true.
+  const showWelcome =
+    !groups.some((group) => group.visible) && (wallView === null || wallView.slots.length === 0)
   // The other region's two lists, derived exactly as the terminal region's
   // are above. `paneGroups` reads every pane, so a browser pane belonging to
   // another project keeps its box (and its page) here while the bar, which is
@@ -1332,6 +1450,110 @@ export function App() {
   )
 
   /**
+   * Choose a pane by clicking it, which on the wall also chooses its project.
+   *
+   * **Wall focus IS the active project.** That is the whole of why every
+   * project-scoped column follows a click in a cell without the wall inventing
+   * a focus concept of its own, and it is why this is a dispatch rather than a
+   * second piece of state: `activatedProject` is what ⌘1-9, the sidebar and the
+   * palette already send.
+   *
+   * The early return is the point of the gate. With the wall off this is
+   * `selectPane` and nothing else, so normal mode dispatches exactly what it
+   * dispatched before: a click on a pane belonging to some other project (a
+   * state the terminal column cannot reach without a wall) would otherwise
+   * start switching projects under the user.
+   */
+  const choosePane = useCallback(
+    (pane: TabDescriptor) => {
+      selectPane(pane.id)
+      if (!wallState.on) return
+      dispatch({ type: 'activatedProject', id: projectIdForTab(state.projects, pane) })
+    },
+    [selectPane, wallState.on, state.projects],
+  )
+
+  /**
+   * Change one project's row here and now, so a wall cell repaints before the
+   * config write lands.
+   *
+   * Painted first, stored second, the trade `onThemeChange` states, but here
+   * it is not only about latency. `setWallPin` and `setWallFollow` are fire and
+   * forget and nothing pushes the written config back into this window, so
+   * without this the cell would not change until the next launch.
+   */
+  const patchProject = useCallback(
+    (id: string, patch: Partial<ProjectDescriptor>) => {
+      dispatch({
+        type: 'projects',
+        projects: state.projects.map((entry) =>
+          entry.id === id ? { ...entry, ...patch } : entry,
+        ),
+      })
+    },
+    [state.projects],
+  )
+
+  /** A click on a cell's header, which means the same as a click in its pane. */
+  const focusWallCell = useCallback(
+    (projectId: string, paneId: string | undefined) => {
+      dispatch({ type: 'activatedProject', id: projectId })
+      // The cell's own pane, not just its project. `activePaneId` is the active
+      // project's active TAB, which need not be the pinned one, so focusing the
+      // project alone could take the keyboard to a pane the wall is not showing.
+      if (paneId !== undefined) selectPane(paneId)
+    },
+    [selectPane],
+  )
+
+  /**
+   * Pin a pane to a cell, or take the pin off.
+   *
+   * `setWallPin` resolves the OWNER from the pane rather than taking a project
+   * id (`src/main/state/wallPin.ts`), on the argument that a pane carries the
+   * only authority on whose it is. An unpin therefore still has to name a pane
+   * of this project, and `current` is the one available: the pane coming off.
+   * `WallCell` only draws the row that sends `null` while there is one.
+   */
+  const pinWallPane = useCallback(
+    (projectId: string, paneId: string | null, current: string | undefined) => {
+      const named = paneId ?? current
+      if (named === undefined) return
+      window.pterm.setWallPin(named, paneId)
+      patchProject(projectId, { wallPin: paneId })
+    },
+    [patchProject],
+  )
+
+  /**
+   * The cell's follow-active-pane flag.
+   *
+   * `visibleGroupIds` (`workspace.ts`'s `wallPinFor`) is what reads it: while
+   * on, the cell shows the project's active pane instead of its pin, so this
+   * write is what makes the picker's "Follow active pane" row do anything at
+   * all.
+   */
+  const toggleWallFollow = useCallback(
+    (projectId: string, follow: boolean) => {
+      window.pterm.setWallFollow(projectId, follow)
+      patchProject(projectId, { wallFollowActive: follow })
+    },
+    [patchProject],
+  )
+
+  /**
+   * Pin the pane the keyboard is currently on to the active project's wall
+   * slot. The palette's "Pin this pane to the wall" route to `pinWallPane`,
+   * naming the active project and the active pane in the same way a click on
+   * the picker's own row would, but from the keyboard rather than a cell that
+   * has to already be on screen to click.
+   */
+  const pinActivePane = useCallback(() => {
+    if (!state.activeProjectId || !activePaneId) return
+    pinWallPane(state.activeProjectId, activePaneId, undefined)
+  }, [state.activeProjectId, activePaneId, pinWallPane])
+
+  /**
    * Move the selection one pane along its tab's axis.
    *
    * A movement that would fall off either end does nothing, and so does one
@@ -1750,6 +1972,18 @@ export function App() {
           case 'settings':
             setSettingsOpen(true)
             return
+          case 'toggleWall':
+            wallState.setOn(!wallState.on)
+            return
+          case 'wallColumns2':
+            wallState.setColumns(2)
+            return
+          case 'wallColumns3':
+            wallState.setColumns(3)
+            return
+          case 'wallColumns4':
+            wallState.setColumns(4)
+            return
           default: {
             // Same reasoning as `renderSlot`'s own `default`: assigning `command`
             // to `never` only typechecks once every member of `MenuCommand` has
@@ -1776,6 +2010,9 @@ export function App() {
       toggleIssues,
       toggleTodos,
       hideAllColumns,
+      wallState.on,
+      wallState.setOn,
+      wallState.setColumns,
     ],
   )
 
@@ -1914,6 +2151,12 @@ export function App() {
         }
         return
       }
+      // This is already the wall's focus key, and deliberately has no wall
+      // branch beside it: wall focus IS the active project (see `choosePane`),
+      // so ⌘1-9 moves the outline and every project-scoped column with it by
+      // dispatching exactly what it dispatched before the wall existed. A
+      // project not on the wall is still selectable this way, which is right:
+      // it is what the columns and a wall turned off would then show.
       const target = state.projects[index]
       if (target) {
         event.preventDefault()
@@ -1985,6 +2228,22 @@ export function App() {
     }
   })
 
+  /**
+   * Which project a group belongs to, a question only the wall asks: which cell
+   * carries the focus outline, and which project a click in one focuses.
+   *
+   * `panes[0]` is safe because `paneGroups` never emits an empty group (it
+   * `continue`s on one rather than pushing it), and `projectIdForTab` is the
+   * route every other reader of a pane's project in this file takes.
+   */
+  const projectOfGroup = (group: PaneGroup): string =>
+    projectIdForTab(state.projects, group.panes[0].pane)
+
+  // Which slots have a pane in them, read off the groups rather than by asking
+  // the pin rule a second time here: the placeholder then appears exactly where
+  // no group was drawn, whatever the reason one was not.
+  const filledSlots = new Set(groups.filter((group) => group.visible).map(projectOfGroup))
+
   // Cut, not rewritten, from the row it used to sit in directly: this is the
   // one slot `renderSlot` cannot build inline, since a fragment case that
   // returned it verbatim would be indistinguishable from the JSX it replaced.
@@ -1996,7 +2255,7 @@ export function App() {
     // helper's drop targets cost the row) should not have to spawn a tmux
     // session to ask for it.
     <div data-testid="terminal-column" className="flex min-w-0 flex-1 flex-col">
-      {showsTabBar(collapsedColumns, hiddenColumns) ? (
+      {showsTabBar(collapsedColumns, hiddenColumns, wallState.on) ? (
         <TabBar
           tabs={tabEntries}
           activeId={currentTabId}
@@ -2028,7 +2287,14 @@ export function App() {
         </pre>
       ) : null}
       <div className="relative min-h-0 flex-1">
-        {showWelcome ? <Welcome hint={welcomeHint(state)} /> : null}
+        {/* `showWelcome` is only ever true with `wallView !== null` when the wall
+            is on and has no slots at all: the ordinary hints ("press Cmd+T",
+            "select a project") describe a keystroke that would open a session
+            off the wall, invisible until the wall is turned off again. This
+            line names the actual next step instead. */}
+        {showWelcome ? (
+          <Welcome hint={wallView !== null ? 'add a project to the wall to get started' : welcomeHint(state)} />
+        ) : null}
         {/* Every terminal stays mounted, across every project and every tab:
             both maps below are unconditional, and neither list is filtered
             down to what is on screen. Unmounting would dispose an xterm and
@@ -2061,10 +2327,34 @@ export function App() {
               // A background paints the padding box by default, which would
               // turn the `p-2` frame into an 8px border around every tab
               // instead of a hairline between panes.
-              'absolute inset-0 flex gap-px bg-border bg-clip-content p-2',
+              'absolute flex gap-px bg-border bg-clip-content p-2',
+              // No rect means the whole column, which is every group without a
+              // wall and every HIDDEN group with one. That second half is the
+              // load-bearing one: a hidden group is `invisible`, not
+              // `display: none`, precisely so it keeps measuring itself, and
+              // one measured at a cell's size would drive its tmux session to
+              // that size while nobody is looking at it.
+              group.rect ? '' : 'inset-0',
+              // Room for the cell's header, which is drawn over this box by
+              // `WallCell` and is opaque. Its own comment says the group's
+              // `p-2` keeps the terminal clear of it; measured, it does not:
+              // the header is 22px tall (24 with the waiting strip above it)
+              // against 8px of padding, and the top two rows of every wall
+              // terminal sat behind it. The pane box shrinking by 16px is the
+              // right answer rather than a cost: the header IS part of the
+              // cell, and a terminal measured at a box it does not really have
+              // is the one thing this column must never hand tmux.
+              group.rect ? 'pt-6' : '',
               group.visible ? 'visible z-10' : 'invisible z-0 pointer-events-none',
+              // Which cell the keyboard and the columns are talking about, said
+              // out loud. An outline rather than a border, for the reason the
+              // active pane's ring gives below: it takes no space, so marking a
+              // cell cannot resize it and set off a fit of the real session.
+              group.rect &&
+                projectOfGroup(group) === state.activeProjectId &&
+                'outline outline-1 -outline-offset-1 outline-accent',
             )}
-            style={group.style}
+            style={{ ...group.style, ...group.rect }}
           >
             {group.panes.map((box) => (
               <div
@@ -2076,14 +2366,14 @@ export function App() {
                 // it before the click moves DOM focus into that pane's
                 // textarea — and so a drag that starts a selection inside a
                 // pane counts as choosing it too.
-                onMouseDown={() => selectPane(box.pane.id)}
+                onMouseDown={() => choosePane(box.pane)}
                 // Right-click opens the colour menu. Nothing else in the
                 // app listened for `contextmenu` on a pane, and xterm does
                 // not take it either, so this claims a gesture that did
                 // nothing rather than displacing one.
                 onContextMenu={(event) => {
                   event.preventDefault()
-                  selectPane(box.pane.id)
+                  choosePane(box.pane)
                   setPaneMenu({ id: box.pane.id, left: event.clientX, top: event.clientY })
                 }}
                 className={cn(
@@ -2260,6 +2550,80 @@ export function App() {
             </div>
           </div>
         ))}
+        {/* The wall's chrome, one box per SLOT rather than one per group.
+            An empty slot is a real state (a project put on the wall before
+            anything was pinned, or a pin whose pane has since gone), and its
+            header's picker is the only place a pane can be chosen for it, so a
+            slot that drew nothing would be a project on the wall that the wall
+            never shows.
+
+            Drawn after the groups, and positioned rather than laid out, for the
+            reason `WallCell` gives: a header inside a group's flex layout would
+            be one more item dividing the axis with the panes, which is not what
+            it is. What keeps the terminal clear of it is the `pt-6` on a group
+            with a rect, measured against the header's real height: NOT the
+            `p-2` `WallCell`'s own comment credits, which is 8px against 22.
+
+            `cellRect` with the same three arguments `paneGroups` passes, so a
+            header and the terminal under it cannot disagree about where the
+            cell is. */}
+        {wallView
+          ? wallState.slots.map((projectId, index) => {
+              const cellProject = state.projects.find((entry) => entry.id === projectId)
+              // Unreachable: `slotsFromStored` resolved this list against the
+              // same projects. Here because `find` says it could happen.
+              if (cellProject === undefined) return null
+              // `wallPinFor`, not `cellProject.wallPin` directly: with follow
+              // on, the terminal drawn in this cell (`visibleGroupIds`, same
+              // function) is the project's active pane, and a header reading
+              // the pin on its own would name a different pane than the one
+              // showing, or none at all while the terminal shows one.
+              const pin = wallPinFor(cellProject)
+              // The region test is `visibleGroupIds`' own, so a pin naming a
+              // browser pane reads as no pin here too rather than putting a
+              // label on a cell that has no terminal in it.
+              const pinned = state.panes.find(
+                (entry) => entry.id === pin && regionOf(entry) === 'terminal',
+              )
+              return (
+                <div
+                  key={cellProject.id}
+                  // `pointer-events-none` so this box is invisible to the mouse
+                  // everywhere its header is not: what is under it is a live
+                  // terminal, and clicks belong to that. `WallCell` opts its
+                  // header and its picker back in.
+                  className="pointer-events-none absolute"
+                  style={cellRect(index, wallState.slots.length, wallState.columns)}
+                >
+                  {filledSlots.has(cellProject.id) ? null : (
+                    <div
+                      data-testid={`wall-empty-${cellProject.id}`}
+                      // The group's own padding written again, so an empty cell
+                      // frames exactly where its terminal would be: `top-6`
+                      // included, which is the room the header takes.
+                      className="absolute top-6 right-2 bottom-2 left-2 flex items-center justify-center border border-dashed border-border px-2 text-center text-[11px] text-faint"
+                    >
+                      {pin === null ? 'nothing pinned yet' : 'the pinned pane is gone'}
+                    </div>
+                  )}
+                  <WallCell
+                    project={cellProject}
+                    pinned={pinned}
+                    choices={tabsOfProject(state, cellProject.id, 'terminal')}
+                    status={state.status}
+                    since={state.since}
+                    now={now}
+                    focused={cellProject.id === state.activeProjectId}
+                    onFocus={() => focusWallCell(cellProject.id, pinned?.id)}
+                    onPin={(paneId) => pinWallPane(cellProject.id, paneId, pinned?.id)}
+                    onToggleFollow={() =>
+                      toggleWallFollow(cellProject.id, cellProject.wallFollowActive !== true)
+                    }
+                  />
+                </div>
+              )
+            })
+          : null}
       </div>
     </div>
   )
@@ -2360,6 +2724,8 @@ export function App() {
             onToggleMute={toggleMute}
             onSelectProject={(id) => dispatch({ type: 'activatedProject', id })}
             onSelectTab={(id) => dispatch({ type: 'activatedTab', id })}
+            inWall={(id) => wallState.slots.includes(id)}
+            onToggleWall={(id) => wallState.toggleSlot(id)}
             onAdd={() => setAdding(true)}
             onOpenSettings={() => setSettingsOpen(true)}
             onMoveTab={(tabId, projectId) => {
@@ -2781,6 +3147,27 @@ export function App() {
               },
             },
             { name: 'New browser pane', run: openBrowserPane },
+            {
+              name: wallState.on ? 'Turn the wall off' : 'Turn the wall on',
+              run: () => wallState.setOn(!wallState.on),
+            },
+            // Gated on there being an active project that is not Unsorted, the
+            // way `canOpenSession` already gates neighbouring commands: Unsorted
+            // is a synthetic row with no matching config entry, so a pin against
+            // it takes effect in the renderer and silently no-ops in main (see
+            // `wallPin.ts`). "Add this project to the wall" needs no active
+            // pane beyond that: a project with no terminals yet is exactly the
+            // empty-cell state the wall supports. "Pin this pane" names a pane,
+            // so it also needs one.
+            ...(project !== undefined && project.id !== UNSORTED_ID
+              ? [
+                  {
+                    name: 'Add this project to the wall',
+                    run: () => wallState.toggleSlot(project.id),
+                  },
+                  ...(activePaneId ? [{ name: 'Pin this pane to the wall', run: pinActivePane }] : []),
+                ]
+              : []),
           ]}
           onOpenFile={openFile}
           onSelectSession={(id) => {

@@ -91,6 +91,8 @@ function project(): ProjectRecord {
     presets: [],
     activeTabId: null,
     activeBrowserTabId: null,
+    wallPin: null,
+    wallFollowActive: false,
   }
 }
 

@@ -35,6 +35,8 @@ export function Sidebar({
   onMove,
   onRemove,
   onMoveTab,
+  inWall,
+  onToggleWall,
   onAdd,
   onOpenSettings,
   side,
@@ -60,6 +62,9 @@ export function Sidebar({
   onMove: (id: string, direction: -1 | 1) => void
   onRemove: (id: string) => void
   onMoveTab: (tabId: string, projectId: string) => void
+  /** Whether this project holds a slot on the wall. */
+  inWall: (id: string) => boolean
+  onToggleWall: (id: string) => void
   onAdd: () => void
   onOpenSettings: () => void
   /** Always `'left'` in practice: `App.tsx`'s `moveColumn` refuses to move
@@ -226,6 +231,14 @@ export function Sidebar({
               onClick={() => {
                 setMenuFor(null)
                 onToggleMute(project.id)
+              }}
+            />
+            <MenuItem
+              testid={`pwall-${project.id}`}
+              label={inWall(project.id) ? 'Remove from wall' : 'Add to wall'}
+              onClick={() => {
+                setMenuFor(null)
+                onToggleWall(project.id)
               }}
             />
             <MenuItem

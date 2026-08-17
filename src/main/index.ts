@@ -249,6 +249,28 @@ function showColumns(collapsed: ColumnVisibility): void {
   if (all) all.label = open ? 'Hide All Columns' : 'Show All Columns'
 }
 
+/**
+ * Show the renderer's wall state on the View menu: the Wall checkbox, and
+ * which column-count radio is selected.
+ *
+ * Same route `showColumns` above takes, for the same reason: read the live
+ * menu by id and set `checked`, rather than rebuild the template on every
+ * change. The radio items are set by hand rather than left to Electron's own
+ * grouping, because that grouping only fires on a click through the menu
+ * itself; a toggle made from the palette reaches this function directly, and
+ * without setting every item here two counts could show checked at once.
+ */
+function showWall(wall: { on: boolean; columns: number }): void {
+  const menu = Menu.getApplicationMenu()
+  if (!menu) return
+  const toggle = menu.getMenuItemById('toggle-wall')
+  if (toggle) toggle.checked = wall.on
+  for (const count of [2, 3, 4]) {
+    const item = menu.getMenuItemById(`wall-columns-${count}`)
+    if (item) item.checked = count === wall.columns
+  }
+}
+
 function installMenu(): void {
   const template: MenuItemConstructorOptions[] = [
     { role: 'appMenu' },
@@ -290,6 +312,41 @@ function installMenu(): void {
     {
       label: 'View',
       submenu: [
+        {
+          id: 'toggle-wall',
+          label: 'Wall',
+          type: 'checkbox',
+          // No accelerator, for the reason `toggle-tabs` below states: this
+          // replaces the tab bar rather than appearing beside it, which is
+          // not a change to make by a keystroke a hand can land on by
+          // accident.
+          registerAccelerator: false,
+          click: () => sendMenuCommand('toggleWall'),
+        },
+        {
+          label: 'Wall columns',
+          submenu: [
+            {
+              id: 'wall-columns-2',
+              label: '2',
+              type: 'radio',
+              click: () => sendMenuCommand('wallColumns2'),
+            },
+            {
+              id: 'wall-columns-3',
+              label: '3',
+              type: 'radio',
+              click: () => sendMenuCommand('wallColumns3'),
+            },
+            {
+              id: 'wall-columns-4',
+              label: '4',
+              type: 'radio',
+              click: () => sendMenuCommand('wallColumns4'),
+            },
+          ],
+        },
+        { type: 'separator' },
         {
           id: 'toggle-tabs',
           label: 'Tabs',
@@ -820,6 +877,9 @@ app.whenReady().then(async () => {
   installMenu()
   ipcMain.on(CHANNELS.columnsVisible, (_event, collapsed: ColumnVisibility) => {
     showColumns(collapsed)
+  })
+  ipcMain.on(CHANNELS.wallVisible, (_event, wall: { on: boolean; columns: number }) => {
+    showWall(wall)
   })
 
   // A local as well as the module-level `mcpServer`, so the two handlers below

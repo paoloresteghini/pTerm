@@ -11,6 +11,7 @@ import {
 } from '../shared/ipc'
 import { worst, type TabState } from '../shared/status'
 import { groupedTabs } from './lib/tabGroups'
+import { cellRect, type CellRect } from './lib/wallLayout'
 
 export interface WorkspaceState {
   /** Sidebar order. Unsorted, when present, is last. */
@@ -620,6 +621,17 @@ export interface PaneGroup {
   id: string
   visible: boolean
   style: { flexDirection: 'row' | 'column' }
+  /**
+   * Where this group sits in the terminal column, when the wall is on and this
+   * group fills one of its slots.
+   *
+   * Beside `style` rather than inside it, and absent rather than a full-column
+   * rect when there is no wall: `App.tsx` reads the absence as "keep
+   * `inset-0`", which is the one thing a hidden group must never stop doing. A
+   * hidden group that shrank would be measured at its shrunken size by the
+   * next fit that reached it (`Terminal.tsx:688`).
+   */
+  rect?: CellRect
   /** In `kids` order, and never empty. */
   panes: PaneBox[]
 }
@@ -712,18 +724,83 @@ function isDead(state: WorkspaceState, pane: TabDescriptor): boolean {
   return canHaveSession(pane) && state.dead[pane.id] !== undefined
 }
 
+/** The wall as `paneGroups` needs to read it: slot order, and cells per row. */
+export interface WallView {
+  /** Project ids, in slot order. */
+  slots: readonly string[]
+  columns: number
+}
+
 /**
- * Which group is on screen.
+ * Which pane a project's wall cell should show: the pane it is following,
+ * when follow-active is on, or its pin otherwise.
  *
- * The active id is resolved through `tabOfPane` because it may name a pane
- * rather than a tab: the tab bar still lists panes, so selecting the second
- * pane of a split sets an id no row is keyed by. Showing that pane's tab is
- * what the user asked for; matching group ids alone would show nothing.
+ * One function for `visibleGroupIds` below and for `App.tsx`'s own read of
+ * the pin, which draws the cell's header and its empty-cell placeholder from
+ * the same answer. Two copies of this rule is how a follow-active cell would
+ * come to show one pane in its terminal and a different one, or none, in its
+ * header.
+ *
+ * A null `activeTabId` answers null rather than falling back to the pin:
+ * the whole point of the flag is that the slot tracks whatever is active
+ * now, and a project between panes is a project with nothing active, not a
+ * reason to show what it last had pinned.
  */
-function visibleGroupId(state: WorkspaceState, region: Region): string | null {
-  const id = activeTabId(state, region)
-  if (id === null) return null
-  return tabOfPane(state, id)?.id ?? id
+export function wallPinFor(project: ProjectDescriptor): string | null {
+  return project.wallFollowActive === true ? project.activeTabId : (project.wallPin ?? null)
+}
+
+/**
+ * Which groups are on screen, in the order they are drawn.
+ *
+ * One entry without a wall, which is what this returned before wall mode and
+ * why the normal branch is written as the one-element case rather than as a
+ * branch beside it. With a wall, one entry per FILLED slot: a slot whose
+ * project has no pin, or whose pin names a pane that is gone, contributes
+ * nothing here and is drawn as an empty cell by the renderer instead.
+ *
+ * **Each entry carries the index of its SLOT, not its position among the
+ * filled ones**, and the difference is the whole of what an empty cell is. A
+ * wall of three slots with the middle one unpinned is three cells, the middle
+ * one empty: the renderer draws a header and a placeholder there, which is the
+ * only route from "this project is on the wall" to "this project shows a pane".
+ * Numbering by filled slots instead would give that project no box to draw in,
+ * and would resize every surviving cell (fitting tmux sessions nobody touched)
+ * each time one pin came or went.
+ *
+ * The active id is resolved through `tabOfPane` in both branches because it may
+ * name a pane rather than a tab: the tab bar lists panes, and a pin names a
+ * pane, so neither is an id a row is necessarily keyed by. Showing that pane's
+ * tab is what the user asked for; matching group ids alone would show nothing.
+ */
+function visibleGroupIds(
+  state: WorkspaceState,
+  region: Region,
+  wall: WallView | null,
+): { id: string; slot: number }[] {
+  if (wall === null || region !== 'terminal') {
+    const id = activeTabId(state, region)
+    if (id === null) return []
+    return [{ id: tabOfPane(state, id)?.id ?? id, slot: 0 }]
+  }
+  const filled: { id: string; slot: number }[] = []
+  for (const [slot, projectId] of wall.slots.entries()) {
+    const project = state.projects.find((entry) => entry.id === projectId)
+    if (project === undefined) continue
+    const pin = wallPinFor(project)
+    if (pin === null) continue
+    const pane = state.panes.find((entry) => entry.id === pin)
+    if (pane === undefined || regionOf(pane) !== 'terminal') continue
+    const id = tabOfPane(state, pin)?.id ?? pin
+    // Two slots pinned to panes of the same tab would otherwise ask for one
+    // group in two places, and a group has one box. The earlier slot keeps it,
+    // and the later one is left to the renderer as an empty cell, which is
+    // wrong about that cell's pin but right about its geometry, and no state
+    // the app can reach today produces it: `slotsFromStored` gives a project
+    // one slot, and a tab belongs to one project.
+    if (!filled.some((entry) => entry.id === id)) filled.push({ id, slot })
+  }
+  return filled
 }
 
 /**
@@ -771,8 +848,15 @@ function visibleGroupId(state: WorkspaceState, region: Region): string | null {
  * away at the exact moment it is wanted — the same mistake that once made
  * `crashed` a state nothing could render (see the `died` case below).
  */
-export function paneGroups(state: WorkspaceState, region: Region = 'terminal'): PaneGroup[] {
-  const visibleId = visibleGroupId(state, region)
+export function paneGroups(
+  state: WorkspaceState,
+  region: Region = 'terminal',
+  wall: WallView | null = null,
+): PaneGroup[] {
+  const visible = visibleGroupIds(state, region, wall)
+  // Index into the wall, not into `groups`: `groups` is built in `state.panes`
+  // order, and a cell's place on screen is its SLOT's place.
+  const slotOf = new Map(visible.map((entry) => [entry.id, entry.slot]))
   const groups: PaneGroup[] = []
   const seen = new Set<string>()
   const claimed = new Set<string>()
@@ -797,13 +881,29 @@ export function paneGroups(state: WorkspaceState, region: Region = 'terminal'): 
     // the panes are already visible elsewhere.
     if (panes.length === 0) continue
     for (const box of panes) claimed.add(box.pane.id)
+    const slot = slotOf.get(id)
     groups.push({
       id,
-      visible: id === visibleId,
+      visible: slot !== undefined,
       // A one-pane tab has a row and therefore a `dir`, set by whichever split
       // created the tab it came from. That is an axis with nothing to divide,
       // not a claim that this tab is split.
       style: { flexDirection: row?.layout.dir === 'col' ? 'column' : 'row' },
+      // Only when there is a wall AND this is the terminal column: wall mode is
+      // terminal-region only, and `visibleGroupIds` already refuses to route a
+      // browser id through the wall branch, but that refusal lives in HOW
+      // `visible` is built, and a `slot` found here says nothing about which
+      // region put it there. Repeating the region test at the one place a rect
+      // is actually handed out means a caller that mistakenly passes a wall
+      // into a browser-region call still cannot make this column resize with
+      // it, rather than relying on every future caller keeping that promise.
+      // The grid is sized by the SLOTS, not by the filled ones, for the reason
+      // `visibleGroupIds` gives. `wall.slots` is expected to name projects that
+      // exist (`slotsFromStored` resolves it against the live list before it
+      // gets here), so a cell counted here is a cell the renderer draws.
+      ...(wall !== null && region === 'terminal' && slot !== undefined
+        ? { rect: cellRect(slot, wall.slots.length, wall.columns) }
+        : {}),
       panes,
     })
   }
