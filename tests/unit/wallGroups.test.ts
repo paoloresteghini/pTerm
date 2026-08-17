@@ -66,6 +66,18 @@ import type { ProjectDescriptor, TabDescriptor } from '../../src/shared/ipc'
  *    the two numberings agree on everything before it. Recorded rather than
  *    tidied away: it is why the second test puts the hole in the MIDDLE of the
  *    wall, and why one test would not have been enough.
+ *
+ * Sabotage-checked again 2026-08-17 for Task 8's `wallFollowActive` fix
+ * (`wallPinFor`, applied and reverted by hand):
+ * 8. made `wallPinFor` ignore `wallFollowActive` and always answer the pin
+ *    (`return project.wallPin ?? null`): reddened exactly the two tests that
+ *    exist to prove follow-active does anything — "shows the active pane, not
+ *    the pin, when follow is on" and "draws an empty cell rather than falling
+ *    back to the pin when the active pane is null" — and left "leaves a
+ *    project with follow off unchanged" green, which is the correct result
+ *    for that mutation: a project with follow off never reads
+ *    `wallFollowActive` for anything other than "is it true", so removing the
+ *    branch cannot touch it.
  */
 
 const project = (id: string, slug: string, extra: Partial<ProjectDescriptor> = {}): ProjectDescriptor => ({
@@ -211,5 +223,56 @@ describe('paneGroups with a wall', () => {
   it('leaves flexDirection alone', () => {
     const group = paneGroups(STATE, 'terminal', WALL).find((entry) => entry.id === 'a')
     expect(group?.style).toEqual({ flexDirection: 'row' })
+  })
+})
+
+// Task 8's added scope: `wallFollowActive` was written, persisted and
+// labelled in the picker, and read by nothing (Task 7's review). A project
+// following the active pane shows that pane in its cell instead of its pin.
+describe('paneGroups with follow-active', () => {
+  it('shows the active pane, not the pin, when follow is on', () => {
+    const state = {
+      ...STATE,
+      projects: STATE.projects.map((entry) =>
+        entry.id === 'p1' ? { ...entry, wallPin: 'a', activeTabId: 'd', wallFollowActive: true } : entry,
+      ),
+      panes: [...STATE.panes, pane('d', 'one')],
+    }
+    // Not an order assertion: `paneGroups`'s array order follows
+    // `state.panes`, not the wall's slots (only `rect` reads slot order,
+    // covered by "orders the visible groups by slot" above). The set of
+    // visible ids is what follow-active changes.
+    const ids = paneGroups(state, 'terminal', WALL)
+      .filter((group) => group.visible)
+      .map((group) => group.id)
+    expect(new Set(ids)).toEqual(new Set(['d', 'b']))
+  })
+
+  // The whole point of the flag is that the slot tracks whatever is active
+  // NOW. A null active pane is not a reason to fall back to the pin.
+  it('draws an empty cell rather than falling back to the pin when the active pane is null', () => {
+    const state = {
+      ...STATE,
+      projects: STATE.projects.map((entry) =>
+        entry.id === 'p1' ? { ...entry, wallPin: 'a', activeTabId: null, wallFollowActive: true } : entry,
+      ),
+    }
+    const visible = paneGroups(state, 'terminal', WALL).filter((group) => group.visible)
+    expect(visible.map((group) => group.id)).toEqual(['b'])
+    expect(visible.map((group) => group.id)).not.toContain('a')
+  })
+
+  it('leaves a project with follow off unchanged', () => {
+    const state = {
+      ...STATE,
+      projects: STATE.projects.map((entry) =>
+        entry.id === 'p1'
+          ? { ...entry, wallPin: 'a', activeTabId: 'd', wallFollowActive: false }
+          : entry,
+      ),
+      panes: [...STATE.panes, pane('d', 'one')],
+    }
+    const visible = paneGroups(state, 'terminal', WALL).filter((group) => group.visible)
+    expect(visible.map((group) => group.id)).toEqual(['a', 'b'])
   })
 })

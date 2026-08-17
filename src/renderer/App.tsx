@@ -70,6 +70,7 @@ import {
   stateOfProject,
   tabOfPane,
   tabsOfProject,
+  wallPinFor,
   welcomeHint,
   workspaceReducer,
   type PaneBox,
@@ -623,6 +624,15 @@ export function App() {
     // the direction `hideAllColumns` takes are read off the same answer.
     window.pterm.columnsVisible(onScreenColumns)
   }, [onScreenColumns])
+
+  // Same reason and the same route as the effect just above, for the wall's
+  // own two facts: main cannot read `localStorage`, so the View menu's Wall
+  // checkbox and its column-count radios would otherwise be guesses, and a
+  // toggle made from the palette has to reach them without a click on the
+  // menu itself.
+  useEffect(() => {
+    window.pterm.wallVisible({ on: wallState.on, columns: wallState.columns })
+  }, [wallState.on, wallState.columns])
 
   // The *Collapsed booleans as one ColumnVisibility, for showsTabBar.
   const collapsedColumns: ColumnVisibility = {
@@ -1512,7 +1522,14 @@ export function App() {
     [patchProject],
   )
 
-  /** The cell's follow-active-pane flag. Nothing acts on it yet — see the report. */
+  /**
+   * The cell's follow-active-pane flag.
+   *
+   * `visibleGroupIds` (`workspace.ts`'s `wallPinFor`) is what reads it: while
+   * on, the cell shows the project's active pane instead of its pin, so this
+   * write is what makes the picker's "Follow active pane" row do anything at
+   * all.
+   */
   const toggleWallFollow = useCallback(
     (projectId: string, follow: boolean) => {
       window.pterm.setWallFollow(projectId, follow)
@@ -1520,6 +1537,18 @@ export function App() {
     },
     [patchProject],
   )
+
+  /**
+   * Pin the pane the keyboard is currently on to the active project's wall
+   * slot. The palette's "Pin this pane to the wall" route to `pinWallPane`,
+   * naming the active project and the active pane in the same way a click on
+   * the picker's own row would, but from the keyboard rather than a cell that
+   * has to already be on screen to click.
+   */
+  const pinActivePane = useCallback(() => {
+    if (!state.activeProjectId || !activePaneId) return
+    pinWallPane(state.activeProjectId, activePaneId, undefined)
+  }, [state.activeProjectId, activePaneId, pinWallPane])
 
   /**
    * Move the selection one pane along its tab's axis.
@@ -1940,6 +1969,18 @@ export function App() {
           case 'settings':
             setSettingsOpen(true)
             return
+          case 'toggleWall':
+            wallState.setOn(!wallState.on)
+            return
+          case 'wallColumns2':
+            wallState.setColumns(2)
+            return
+          case 'wallColumns3':
+            wallState.setColumns(3)
+            return
+          case 'wallColumns4':
+            wallState.setColumns(4)
+            return
           default: {
             // Same reasoning as `renderSlot`'s own `default`: assigning `command`
             // to `never` only typechecks once every member of `MenuCommand` has
@@ -1966,6 +2007,9 @@ export function App() {
       toggleIssues,
       toggleTodos,
       hideAllColumns,
+      wallState.on,
+      wallState.setOn,
+      wallState.setColumns,
     ],
   )
 
@@ -2519,7 +2563,12 @@ export function App() {
               // Unreachable: `slotsFromStored` resolved this list against the
               // same projects. Here because `find` says it could happen.
               if (cellProject === undefined) return null
-              const pin = cellProject.wallPin ?? null
+              // `wallPinFor`, not `cellProject.wallPin` directly: with follow
+              // on, the terminal drawn in this cell (`visibleGroupIds`, same
+              // function) is the project's active pane, and a header reading
+              // the pin on its own would name a different pane than the one
+              // showing, or none at all while the terminal shows one.
+              const pin = wallPinFor(cellProject)
               // The region test is `visibleGroupIds`' own, so a pin naming a
               // browser pane reads as no pin here too rather than putting a
               // label on a cell that has no terminal in it.
@@ -2665,6 +2714,8 @@ export function App() {
             onToggleMute={toggleMute}
             onSelectProject={(id) => dispatch({ type: 'activatedProject', id })}
             onSelectTab={(id) => dispatch({ type: 'activatedTab', id })}
+            inWall={(id) => wallState.slots.includes(id)}
+            onToggleWall={(id) => wallState.toggleSlot(id)}
             onAdd={() => setAdding(true)}
             onOpenSettings={() => setSettingsOpen(true)}
             onMoveTab={(tabId, projectId) => {
@@ -3086,6 +3137,22 @@ export function App() {
               },
             },
             { name: 'New browser pane', run: openBrowserPane },
+            {
+              name: wallState.on ? 'Turn the wall off' : 'Turn the wall on',
+              run: () => wallState.setOn(!wallState.on),
+            },
+            // Gated on there being an active project and an active pane, the
+            // way neighbouring commands gate on `canOpenSession`: there is no
+            // project to add and no pane to pin without both.
+            ...(project !== undefined && activePaneId
+              ? [
+                  {
+                    name: 'Add this project to the wall',
+                    run: () => wallState.toggleSlot(project.id),
+                  },
+                  { name: 'Pin this pane to the wall', run: pinActivePane },
+                ]
+              : []),
           ]}
           onOpenFile={openFile}
           onSelectSession={(id) => {

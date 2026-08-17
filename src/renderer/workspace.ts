@@ -732,6 +732,25 @@ export interface WallView {
 }
 
 /**
+ * Which pane a project's wall cell should show: the pane it is following,
+ * when follow-active is on, or its pin otherwise.
+ *
+ * One function for `visibleGroupIds` below and for `App.tsx`'s own read of
+ * the pin, which draws the cell's header and its empty-cell placeholder from
+ * the same answer. Two copies of this rule is how a follow-active cell would
+ * come to show one pane in its terminal and a different one, or none, in its
+ * header.
+ *
+ * A null `activeTabId` answers null rather than falling back to the pin:
+ * the whole point of the flag is that the slot tracks whatever is active
+ * now, and a project between panes is a project with nothing active, not a
+ * reason to show what it last had pinned.
+ */
+export function wallPinFor(project: ProjectDescriptor): string | null {
+  return project.wallFollowActive === true ? project.activeTabId : (project.wallPin ?? null)
+}
+
+/**
  * Which groups are on screen, in the order they are drawn.
  *
  * One entry without a wall, which is what this returned before wall mode and
@@ -767,7 +786,8 @@ function visibleGroupIds(
   const filled: { id: string; slot: number }[] = []
   for (const [slot, projectId] of wall.slots.entries()) {
     const project = state.projects.find((entry) => entry.id === projectId)
-    const pin = project?.wallPin ?? null
+    if (project === undefined) continue
+    const pin = wallPinFor(project)
     if (pin === null) continue
     const pane = state.panes.find((entry) => entry.id === pin)
     if (pane === undefined || regionOf(pane) !== 'terminal') continue

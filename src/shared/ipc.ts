@@ -95,6 +95,7 @@ export const CHANNELS = {
   gitDiff: 'pterm:gitDiff',
   openDiff: 'pterm:openDiff',
   columnsVisible: 'pterm:columnsVisible',
+  wallVisible: 'pterm:wallVisible',
   issuesList: 'pterm:issuesList',
   issuesGet: 'pterm:issuesGet',
   issuesCreate: 'pterm:issuesCreate',
@@ -144,6 +145,10 @@ export type MenuCommand =
   | 'toggleTodos'
   | 'hideAllColumns'
   | 'settings'
+  | 'toggleWall'
+  | 'wallColumns2'
+  | 'wallColumns3'
+  | 'wallColumns4'
 
 /**
  * What a tab was launched as.
@@ -1695,6 +1700,17 @@ export interface PTermApi {
    * command still asks the renderer to flip its own state.
    */
   columnsVisible(collapsed: ColumnVisibility): void
+  /**
+   * Tell main whether the wall is on and how many columns it has, so the View
+   * menu's Wall checkbox and its column-count radios can show the truth.
+   *
+   * Same trade as `columnsVisible` just above, and the same route rather than
+   * a second mechanism: fire and forget, main holds this only for display,
+   * and a dropped message costs a stale tick until the next change rather
+   * than a wrong toggle, because every menu command still asks the renderer
+   * to flip its own state.
+   */
+  wallVisible(wall: { on: boolean; columns: number }): void
   /**
    * Values the main process puts on the command line at window creation,
    * readable synchronously before the first frame.
