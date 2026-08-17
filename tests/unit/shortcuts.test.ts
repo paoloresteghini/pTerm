@@ -172,7 +172,7 @@ describe('menu accelerators', () => {
     //
     // Two more opt-outs than there are accelerators: the tabs column's item
     // and the wall's item both opt out with no accelerator to opt out of
-    // (neither has a keystroke at all — the wall's for the reason its own
+    // (neither has a keystroke at all: the wall's for the reason its own
     // comment gives, the same one `toggle-tabs` states). Exact, not `>=`:
     // with slack in the count, the first accelerator-bearing item that
     // forgets to opt out lands inside the slack and this goes quiet.

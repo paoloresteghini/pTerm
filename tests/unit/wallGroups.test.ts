@@ -71,9 +71,9 @@ import type { ProjectDescriptor, TabDescriptor } from '../../src/shared/ipc'
  * (`wallPinFor`, applied and reverted by hand):
  * 8. made `wallPinFor` ignore `wallFollowActive` and always answer the pin
  *    (`return project.wallPin ?? null`): reddened exactly the two tests that
- *    exist to prove follow-active does anything — "shows the active pane, not
+ *    exist to prove follow-active does anything ("shows the active pane, not
  *    the pin, when follow is on" and "draws an empty cell rather than falling
- *    back to the pin when the active pane is null" — and left "leaves a
+ *    back to the pin when the active pane is null"), and left "leaves a
  *    project with follow off unchanged" green, which is the correct result
  *    for that mutation: a project with follow off never reads
  *    `wallFollowActive` for anything other than "is it true", so removing the
