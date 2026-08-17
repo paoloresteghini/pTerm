@@ -740,6 +740,15 @@ export interface WallView {
  * project has no pin, or whose pin names a pane that is gone, contributes
  * nothing here and is drawn as an empty cell by the renderer instead.
  *
+ * **Each entry carries the index of its SLOT, not its position among the
+ * filled ones**, and the difference is the whole of what an empty cell is. A
+ * wall of three slots with the middle one unpinned is three cells, the middle
+ * one empty: the renderer draws a header and a placeholder there, which is the
+ * only route from "this project is on the wall" to "this project shows a pane".
+ * Numbering by filled slots instead would give that project no box to draw in,
+ * and would resize every surviving cell — fitting tmux sessions nobody touched —
+ * each time one pin came or went.
+ *
  * The active id is resolved through `tabOfPane` in both branches because it may
  * name a pane rather than a tab: the tab bar lists panes, and a pin names a
  * pane, so neither is an id a row is necessarily keyed by. Showing that pane's
@@ -749,14 +758,14 @@ function visibleGroupIds(
   state: WorkspaceState,
   region: Region,
   wall: WallView | null,
-): string[] {
+): { id: string; slot: number }[] {
   if (wall === null || region !== 'terminal') {
     const id = activeTabId(state, region)
     if (id === null) return []
-    return [tabOfPane(state, id)?.id ?? id]
+    return [{ id: tabOfPane(state, id)?.id ?? id, slot: 0 }]
   }
-  const ids: string[] = []
-  for (const projectId of wall.slots) {
+  const filled: { id: string; slot: number }[] = []
+  for (const [slot, projectId] of wall.slots.entries()) {
     const project = state.projects.find((entry) => entry.id === projectId)
     const pin = project?.wallPin ?? null
     if (pin === null) continue
@@ -764,10 +773,14 @@ function visibleGroupIds(
     if (pane === undefined || regionOf(pane) !== 'terminal') continue
     const id = tabOfPane(state, pin)?.id ?? pin
     // Two slots pinned to panes of the same tab would otherwise ask for one
-    // group in two places, and a group has one box.
-    if (!ids.includes(id)) ids.push(id)
+    // group in two places, and a group has one box. The earlier slot keeps it,
+    // and the later one is left to the renderer as an empty cell — which is
+    // wrong about that cell's pin but right about its geometry, and no state
+    // the app can reach today produces it: `slotsFromStored` gives a project
+    // one slot, and a tab belongs to one project.
+    if (!filled.some((entry) => entry.id === id)) filled.push({ id, slot })
   }
-  return ids
+  return filled
 }
 
 /**
@@ -823,7 +836,7 @@ export function paneGroups(
   const visible = visibleGroupIds(state, region, wall)
   // Index into the wall, not into `groups`: `groups` is built in `state.panes`
   // order, and a cell's place on screen is its SLOT's place.
-  const slotOf = new Map(visible.map((id, index) => [id, index]))
+  const slotOf = new Map(visible.map((entry) => [entry.id, entry.slot]))
   const groups: PaneGroup[] = []
   const seen = new Set<string>()
   const claimed = new Set<string>()
@@ -864,8 +877,12 @@ export function paneGroups(
       // is actually handed out means a caller that mistakenly passes a wall
       // into a browser-region call still cannot make this column resize with
       // it, rather than relying on every future caller keeping that promise.
+      // The grid is sized by the SLOTS, not by the filled ones, for the reason
+      // `visibleGroupIds` gives. `wall.slots` is expected to name projects that
+      // exist — `slotsFromStored` resolves it against the live list before it
+      // gets here — so a cell counted here is a cell the renderer draws.
       ...(wall !== null && region === 'terminal' && slot !== undefined
-        ? { rect: cellRect(slot, visible.length, wall.columns) }
+        ? { rect: cellRect(slot, wall.slots.length, wall.columns) }
         : {}),
       panes,
     })

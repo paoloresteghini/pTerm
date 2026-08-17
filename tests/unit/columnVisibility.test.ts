@@ -129,15 +129,45 @@ describe('showsTabBar', () => {
   }
 
   it('shows the bar when the tabs column is collapsed to its strip', () => {
-    expect(showsTabBar(allCollapsed, noneHidden)).toBe(true)
+    expect(showsTabBar(allCollapsed, noneHidden, false)).toBe(true)
   })
 
   it('shows the bar when the tabs column is hidden outright', () => {
-    expect(showsTabBar({ ...allCollapsed, tabs: false }, { ...noneHidden, tabs: true })).toBe(true)
+    expect(showsTabBar({ ...allCollapsed, tabs: false }, { ...noneHidden, tabs: true }, false)).toBe(
+      true,
+    )
   })
 
   it('hides the bar only when the tabs column is fully open', () => {
-    expect(showsTabBar({ ...allCollapsed, tabs: false }, noneHidden)).toBe(false)
+    expect(showsTabBar({ ...allCollapsed, tabs: false }, noneHidden, false)).toBe(false)
+  })
+
+  /**
+   * Sabotage-checked (2026-08-17), the mutation applied and reverted by hand.
+   * This file predates the convention, so only the parameter added here is
+   * covered rather than every rule above:
+   * 1. `showsTabBar` ignoring `wallOn` (the body back to `collapsed.tabs ||
+   *    hidden.tabs`): reddened "hides the bar whatever the columns say", both
+   *    of its assertions, and nothing else. The four tests above and the
+   *    wall-off test below stayed green, which is the point of the second
+   *    test: it is what says the new parameter did not change the old answer.
+   */
+  describe('with the wall on', () => {
+    // The bar lists ONE project's tabs. The wall is the state where this
+    // column is deliberately showing several projects at once, each cell
+    // naming its own pane in its own header, so a bar above it would be one
+    // project's tabs over a grid belonging to everybody.
+    it('hides the bar whatever the columns say', () => {
+      expect(showsTabBar(allCollapsed, noneHidden, true)).toBe(false)
+      // The one arrangement that shows the bar with the wall off, so this is
+      // the assertion that can tell "the wall wins" from "nothing changed".
+      expect(showsTabBar({ ...allCollapsed, tabs: false }, noneHidden, true)).toBe(false)
+    })
+
+    it('leaves the answer alone with the wall off', () => {
+      expect(showsTabBar(allCollapsed, noneHidden, false)).toBe(true)
+      expect(showsTabBar({ ...allCollapsed, tabs: false }, noneHidden, false)).toBe(false)
+    })
   })
 
   it('ignores every other column', () => {
@@ -152,6 +182,6 @@ describe('showsTabBar', () => {
       tabs: false, files: false, skills: false, presets: false,
       prompts: false, git: false, issues: false, notes: false, todos: false, browser: false,
     }
-    expect(showsTabBar(alsoOpen, noneHidden)).toBe(false)
+    expect(showsTabBar(alsoOpen, noneHidden, false)).toBe(false)
   })
 })

@@ -52,6 +52,20 @@ import type { ProjectDescriptor, TabDescriptor } from '../../src/shared/ipc'
  *    misroutes `p2`'s terminal-pane pin into `visible` instead of `p1`'s
  *    browser pin), a different assertion than the rect one, but proof the
  *    guard is load-bearing.
+ *
+ * Re-checked 2026-08-17 for the two cells-are-slots tests added with Task 7,
+ * same method:
+ * 6. sized the grid by the filled slots again (`cellRect(slot, visible.length,
+ *    ...)`, which is what Task 3 shipped): reddened both "leaves an empty slot
+ *    its cell rather than closing the gap" and "keeps the other cells where
+ *    they are when a pin outlives its pane", and nothing else.
+ * 7. numbered each entry by its position among the FILLED slots
+ *    (`slot: filled.length`) rather than by its slot: reddened only "keeps the
+ *    other cells where they are when a pin outlives its pane". The first test
+ *    cannot see this one, because its empty slot is the LAST of the three and
+ *    the two numberings agree on everything before it. Recorded rather than
+ *    tidied away: it is why the second test puts the hole in the MIDDLE of the
+ *    wall, and why one test would not have been enough.
  */
 
 const project = (id: string, slug: string, extra: Partial<ProjectDescriptor> = {}): ProjectDescriptor => ({
@@ -128,6 +142,39 @@ describe('paneGroups with a wall', () => {
       { id: 'a', left: '50%' },
       { id: 'b', left: '0%' },
     ])
+  })
+
+  // A cell belongs to a SLOT, not to a pane. An empty slot is still a cell,
+  // because the renderer draws the placeholder and the pane picker in one, and
+  // a slot with nothing to pick from would be a project on the wall that the
+  // wall never shows. Sizing the grid by the filled slots instead would also
+  // mean every surviving cell resized the moment one project's pin went away,
+  // which is a tmux fit on sessions nobody touched.
+  it('leaves an empty slot its cell rather than closing the gap', () => {
+    const rects = paneGroups(STATE, 'terminal', WALL)
+      .filter((group) => group.visible)
+      .map((group) => group.rect)
+    expect(rects).toEqual([
+      { left: '0%', top: '0%', width: '33.3333%', height: '100%' },
+      { left: '33.3333%', top: '0%', width: '33.3333%', height: '100%' },
+    ])
+  })
+
+  // The same rule at the moment it matters most: a pinned session dying must
+  // not reshuffle the two cells the user is still reading. The third slot keeps
+  // its place on the right rather than sliding into the hole.
+  it('keeps the other cells where they are when a pin outlives its pane', () => {
+    const state = {
+      ...STATE,
+      projects: STATE.projects.map((entry) =>
+        entry.id === 'p3' ? { ...entry, wallPin: 'c' } : entry,
+      ),
+      panes: [pane('a', 'one'), pane('c', 'three')],
+    }
+    const lefts = paneGroups(state, 'terminal', WALL)
+      .filter((group) => group.visible)
+      .map((group) => group.rect?.left)
+    expect(lefts).toEqual(['0%', '66.6667%'])
   })
 
   it('gives every visible group a rect and every hidden group none', () => {

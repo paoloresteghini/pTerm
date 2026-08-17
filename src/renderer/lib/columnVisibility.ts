@@ -90,12 +90,21 @@ export function restore(state: ColumnVisibility, remembered: ColumnId[]): Column
  * (collapsed to its strip, or hidden by the View menu) puts the bar back, so
  * there is no combination in which the workspace has no tab surface at all.
  *
+ * The WALL is the one state that overrides even that. It is the state where
+ * this column deliberately shows several projects at once, and each cell names
+ * its own project's pane in its own header, so the bar would be a strip of one
+ * project's tabs standing above a grid belonging to everybody. The rule above
+ * survives it: the wall's headers ARE the tab surface while it is on, and every
+ * project on the wall reaches its panes through its cell's picker.
+ *
  * Remember that `ColumnVisibility`'s booleans mean COLLAPSED, not visible, so
  * open is `!collapsed.tabs && !hidden.tabs`.
  */
 export function showsTabBar(
   collapsed: ColumnVisibility,
   hidden: Record<ColumnId, boolean>,
+  wallOn: boolean,
 ): boolean {
+  if (wallOn) return false
   return collapsed.tabs || hidden.tabs
 }

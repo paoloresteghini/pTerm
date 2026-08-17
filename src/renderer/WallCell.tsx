@@ -9,12 +9,18 @@ import { tabLabel } from './lib/tabLabel'
  * One wall cell's chrome: the header that names what the cell is showing, and
  * the picker that changes it.
  *
- * Drawn OVER the pane group rather than around it. A group is positioned by
- * `paneGroups` and measured by `Terminal.tsx`'s `ResizeObserver`, so a header
- * that took part in the group's layout would make the pane's box smaller than
- * the rect and drive tmux to a size the wall never asked for. The header is
- * absolutely positioned at the top of the same rect instead, and the group's
- * own `p-2` is what keeps the terminal clear of it.
+ * Drawn OVER the pane group rather than around it. A group is a flex container
+ * whose items are its panes, dividing the axis by `paneGroups`'s shares, and a
+ * header among them would be one more item taking a share of an axis it is not
+ * part of. The header is absolutely positioned at the top of the same rect
+ * instead.
+ *
+ * It is opaque, so the group has to leave room for it, and **`p-2` is not that
+ * room**: this comment said it was until Task 7 put the two on screen together
+ * and measured 8px of padding against a 22px header, with the top two rows of
+ * every wall terminal behind it. `App.tsx` gives a group with a rect `pt-6`,
+ * which is this header's height plus the waiting strip above it. A change to
+ * either height has to move with the other.
  */
 export function WallCell({
   project,
