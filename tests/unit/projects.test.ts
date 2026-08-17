@@ -11,7 +11,7 @@ import {
 import { DEFAULT_NOTIFICATIONS, type PTermConfig } from '../../src/main/state/store'
 
 const EMPTY: PTermConfig = {
-  version: 9,
+  version: 10,
   projects: [],
   activeProjectId: null,
   panes: [],

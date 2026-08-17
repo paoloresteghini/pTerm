@@ -50,6 +50,8 @@ export function addProject(
     presets: [],
     activeTabId: null,
     activeBrowserTabId: null,
+    wallPin: null,
+    wallFollowActive: false,
   }
   return {
     config: {

@@ -45,7 +45,7 @@ async function storeWith(raw: unknown): Promise<ConfigStore> {
 }
 
 const sampleConfig: PTermConfig = {
-  version: 9,
+  version: 10,
   activeProjectId: 'p1',
   projects: [
     {
@@ -56,6 +56,8 @@ const sampleConfig: PTermConfig = {
       presets: [{ id: 'pr1', label: 'dev', command: 'npm run dev' }],
       activeTabId: 'a1b2c3d4e5f60718',
       activeBrowserTabId: null,
+      wallPin: null,
+      wallFollowActive: false,
     },
   ],
   panes: [
@@ -81,7 +83,7 @@ const sampleConfig: PTermConfig = {
 
 /** Two panes side by side under one tab — the shape v4 could not express. */
 const splitConfig: PTermConfig = {
-  version: 9,
+  version: 10,
   activeProjectId: null,
   projects: [],
   panes: [
@@ -114,7 +116,7 @@ const splitConfig: PTermConfig = {
 
 /** What `read()` answers with when it has nothing it can trust. */
 const EMPTY_CONFIG: PTermConfig = {
-  version: 9,
+  version: 10,
   activeProjectId: null,
   projects: [],
   panes: [],
@@ -382,10 +384,10 @@ describe('ConfigStore migration', () => {
     ],
   }
 
-  it('reads a v2 file as v9, keeping tab order', async () => {
+  it('reads a v2 file as v10, keeping tab order', async () => {
     await writeFile(file, JSON.stringify(v2), 'utf8')
     const config = await new ConfigStore(file).read()
-    expect(config.version).toBe(9)
+    expect(config.version).toBe(10)
     expect(config.panes.map((pane) => pane.id)).toEqual([
       'a1b2c3d4e5f60718',
       '00000000000000ff',
@@ -411,7 +413,7 @@ describe('ConfigStore migration', () => {
   it('still reads a v1 file, three versions back', async () => {
     await writeFile(file, JSON.stringify(v1), 'utf8')
     const config = await new ConfigStore(file).read()
-    expect(config.version).toBe(9)
+    expect(config.version).toBe(10)
     expect(config.panes.map((pane) => pane.id)).toEqual(['a1b2c3d4e5f60718'])
     expect(config.projects).toEqual([])
   })
@@ -485,20 +487,20 @@ describe('ConfigStore migration', () => {
     await expect(new ConfigStore(file).read()).resolves.toEqual(EMPTY_CONFIG)
   })
 
-  // The next version up, not a distant one: v10 is the file a build one step
+  // The next version up, not a distant one: v11 is the file a build one step
   // ahead of this one leaves behind, and it is the version this build is most
   // likely to actually meet. Reading its `panes` as if the shape had not moved
   // is exactly the guess `write()`'s refusal exists to keep off disk.
   //
-  // Moved from v9 to v10 when the theme id landed. v9 is now a version this
-  // build understands, so leaving this at 9 would have kept a green test that
+  // Moved from v10 to v11 when the wall pin landed. v10 is now a version this
+  // build understands, so leaving this at 10 would have kept a green test that
   // asserted the opposite of the code.
-  it('refuses to guess at a v10 file, one version ahead', async () => {
-    await writeFile(file, JSON.stringify({ ...splitConfig, version: 10 }), 'utf8')
+  it('refuses to guess at a v11 file, one version ahead', async () => {
+    await writeFile(file, JSON.stringify({ ...splitConfig, version: 11 }), 'utf8')
     await expect(new ConfigStore(file).read()).resolves.toEqual(EMPTY_CONFIG)
   })
 
-  it('migrates a v3 config to v9, typing tabs by whether they carry a command', async () => {
+  it('migrates a v3 config to v10, typing tabs by whether they carry a command', async () => {
     const store = await storeWith({
       version: 3,
       projects: [],
@@ -517,7 +519,7 @@ describe('ConfigStore migration', () => {
 
     const config = await store.read()
 
-    expect(config.version).toBe(9)
+    expect(config.version).toBe(10)
     // A v3 tab cannot say whether it was running Claude, and it does not need
     // to: hooks decide. Only the launch command is knowable from the record.
     expect(config.panes[0]?.type).toBe('shell')
@@ -635,7 +637,7 @@ describe('ConfigStore migration', () => {
       tabs: [],
     })
     const config = await store.read()
-    expect(config.version).toBe(9)
+    expect(config.version).toBe(10)
     expect(config.panes[0].title).toBe('payments api')
   })
 
@@ -710,7 +712,7 @@ describe('ConfigStore migration', () => {
   // v5 is the shape this feature was added to. A row from it was never named,
   // which is exactly what an absent title already means, so the migration has
   // nothing to invent.
-  it('migrates a v5 config to v9, leaving panes unnamed and uncoloured', async () => {
+  it('migrates a v5 config to v10, leaving panes unnamed and uncoloured', async () => {
     const store = await storeWith({
       version: 5,
       projects: [],
@@ -727,7 +729,7 @@ describe('ConfigStore migration', () => {
       tabs: [],
     })
     const config = await store.read()
-    expect(config.version).toBe(9)
+    expect(config.version).toBe(10)
     expect(config.panes).toHaveLength(1)
     expect(config.panes[0].id).toBe('a'.repeat(16))
     expect(config.panes[0].title).toBeUndefined()
@@ -810,7 +812,7 @@ describe('ConfigStore migration, v7 to v8', () => {
     expect(config.panes[0]?.filePath).toBeUndefined()
   })
 
-  it('reads a v7 file as v9 without converting anything', async () => {
+  it('reads a v7 file as v10 without converting anything', async () => {
     const store = await storeWith({
       version: 7,
       projects: [],
@@ -823,7 +825,7 @@ describe('ConfigStore migration, v7 to v8', () => {
 
     const config = await store.read()
 
-    expect(config.version).toBe(9)
+    expect(config.version).toBe(10)
     expect(config.panes[0]?.tmuxSession).toBe('pterm-demo-p1')
     expect(config.panes[0]?.filePath).toBeUndefined()
   })
@@ -894,7 +896,7 @@ describe('ConfigStore migration, v4 to v5', () => {
   it('keeps every v4 tab row as a pane, in order and field for field', async () => {
     const config = await (await storeWith(v4)).read()
 
-    expect(config.version).toBe(9)
+    expect(config.version).toBe(10)
     expect(config.panes).toHaveLength(2)
     // Pane by pane rather than by id alone: a migration that dropped `command`
     // or `type` would keep both ids and still cost the user a preset tab.

@@ -56,7 +56,17 @@ async function configWith(config: {
 }
 
 function project(name: string, slug: string, cwd: string, activeTabId: string | null = null) {
-  return { id: `id-${slug}`, name, slug, cwd, presets: [], activeTabId, activeBrowserTabId: null }
+  return {
+    id: `id-${slug}`,
+    name,
+    slug,
+    cwd,
+    presets: [],
+    activeTabId,
+    activeBrowserTabId: null,
+    wallPin: null,
+    wallFollowActive: false,
+  }
 }
 
 function tab(id: string, slug = 'lumio') {

@@ -762,6 +762,18 @@ export interface ProjectDescriptor {
    * `?? null`.
    */
   activeBrowserTabId?: string | null
+  /**
+   * The pane this project shows in wall mode, or null for an empty slot.
+   *
+   * Optional for the same reason `activeBrowserTabId` is: `grep -rln
+   * "activeTabId:" tests/` (2026-08-17) still matches 49 files building a
+   * `ProjectDescriptor` or `ProjectRecord` literal, and a required field would
+   * fail `tsc` in every one of them for no behaviour change. A reader must
+   * spell the absence as `?? null`.
+   */
+  wallPin?: string | null
+  /** Same optionality, same reason, as `wallPin`. A reader must spell the absence `=== true`. */
+  wallFollowActive?: boolean
   /** False when `cwd` is no longer a directory — renamed or deleted. */
   available: boolean
 }

@@ -29,8 +29,8 @@ describe('reading the theme out of a config file', () => {
     expect(migrate({ version: 9, theme: null }).theme).toBe('classic')
   })
 
-  it('writes version 9', () => {
-    expect(migrate({ version: 8 }).version).toBe(9)
-    expect(migrate({ version: 9, theme: 'slate' }).version).toBe(9)
+  it('writes version 10', () => {
+    expect(migrate({ version: 8 }).version).toBe(10)
+    expect(migrate({ version: 9, theme: 'slate' }).version).toBe(10)
   })
 })

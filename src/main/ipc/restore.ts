@@ -56,6 +56,12 @@ export async function describeProjects(
         browsers.find((tab) => tab.id === project.activeBrowserTabId)?.id ??
         browsers[0]?.id ??
         null,
+      // Not resolved against live panes here, unlike `activeTabId` above: an
+      // unresolvable pin is a distinct state the renderer draws (an empty
+      // cell), and collapsing it to null here would lose the difference
+      // between "no pin" and "the pinned pane is gone".
+      wallPin: project.wallPin,
+      wallFollowActive: project.wallFollowActive,
       available: await isDirectory(project.cwd),
     })
   }
@@ -497,7 +503,7 @@ export async function restoreWorkspace(
     const restored = attachSavedFields(merged.panes, saved.panes)
 
     await store.write({
-      version: 9,
+      version: 10,
       // Only real projects are persisted; the Unsorted row is synthetic.
       // Matched by id rather than by index: `describeProjects` returns one row
       // per project today, but adding a `filter` or a `continue` to it would
