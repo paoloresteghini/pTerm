@@ -40,6 +40,12 @@ const CONFIG: PTermConfig = {
   panes: [
     { id: 'a', projectSlug: 'one', cwd: '/tmp/one', type: 'shell' },
     { id: 'b', projectSlug: 'two', cwd: '/tmp/two', type: 'shell' },
+    // Unsorted's own panes carry a slug no real project answers to: this is
+    // what makes `owner === undefined` (wallPin.ts:24) a reachable production
+    // path rather than a theoretical guard, now that the palette can pin one
+    // of these (App.tsx's wall commands exclude Unsorted, but the write path
+    // still has to survive a pane that slips through some other route).
+    { id: 'c', projectSlug: 'unsorted', cwd: '/tmp/unsorted', type: 'shell' },
   ],
   tabs: [],
   notifications: { rules: [], muteWhenFocused: false, quietHours: null },
@@ -61,6 +67,10 @@ describe('withWallPin', () => {
 
   it('is a no-op for a pane no project owns', () => {
     expect(withWallPin(CONFIG, 'gone', 'gone')).toEqual(CONFIG)
+  })
+
+  it('is a no-op for a pane whose project slug matches no project', () => {
+    expect(withWallPin(CONFIG, 'c', 'c')).toEqual(CONFIG)
   })
 
   it('does not mutate the config it was given', () => {

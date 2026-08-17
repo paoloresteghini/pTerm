@@ -664,7 +664,7 @@ export function App() {
   // and it is not the same as "no tabs": a tab whose kids were all boxed by an
   // earlier row emits no group at all (`workspace.ts:667`).
   //
-  // The wall, when it is on, and null when it is not — which is the value that
+  // The wall, when it is on, and null when it is not: this is the value that
   // keeps every group on `inset-0` and exactly one of them visible, as it was
   // before wall mode. It is passed HERE and nowhere else: `browserGroups` below
   // must never see a wall, which is what keeps the browser region
@@ -672,13 +672,16 @@ export function App() {
   const wallView = wallState.on ? { slots: wallState.slots, columns: wallState.columns } : null
   const groups = paneGroups(state, 'terminal', wallView)
   // "No visible group" still carries this, and a wall with no slots at all is
-  // exactly that case — but a wall that HAS cells is not an empty pane area
+  // exactly that case, but a wall that HAS cells is not an empty pane area
   // even when none of them is filled. Its placeholders already say what to do
   // and its headers already offer the pane picker, so the welcome drawn over
   // them was two answers to one question, printed on top of each other
   // (measured: the hint row landed across both cells' placeholder text).
+  // Reads `wallView.slots` rather than `wallState.slots`: the two are the same
+  // array (see `wallView` above), and reading through one object rather than
+  // two keeps this from silently drifting if that ever stops being true.
   const showWelcome =
-    !groups.some((group) => group.visible) && (wallView === null || wallState.slots.length === 0)
+    !groups.some((group) => group.visible) && (wallView === null || wallView.slots.length === 0)
   // The other region's two lists, derived exactly as the terminal region's
   // are above. `paneGroups` reads every pane, so a browser pane belonging to
   // another project keeps its box (and its page) here while the bar, which is
@@ -1457,7 +1460,7 @@ export function App() {
    *
    * The early return is the point of the gate. With the wall off this is
    * `selectPane` and nothing else, so normal mode dispatches exactly what it
-   * dispatched before — a click on a pane belonging to some other project (a
+   * dispatched before: a click on a pane belonging to some other project (a
    * state the terminal column cannot reach without a wall) would otherwise
    * start switching projects under the user.
    */
@@ -1474,7 +1477,7 @@ export function App() {
    * Change one project's row here and now, so a wall cell repaints before the
    * config write lands.
    *
-   * Painted first, stored second, the trade `onThemeChange` states — but here
+   * Painted first, stored second, the trade `onThemeChange` states, but here
    * it is not only about latency. `setWallPin` and `setWallFollow` are fire and
    * forget and nothing pushes the written config back into this window, so
    * without this the cell would not change until the next launch.
@@ -2152,7 +2155,7 @@ export function App() {
       // branch beside it: wall focus IS the active project (see `choosePane`),
       // so ⌘1-9 moves the outline and every project-scoped column with it by
       // dispatching exactly what it dispatched before the wall existed. A
-      // project not on the wall is still selectable this way, which is right —
+      // project not on the wall is still selectable this way, which is right:
       // it is what the columns and a wall turned off would then show.
       const target = state.projects[index]
       if (target) {
@@ -2229,8 +2232,8 @@ export function App() {
    * Which project a group belongs to, a question only the wall asks: which cell
    * carries the focus outline, and which project a click in one focuses.
    *
-   * `panes[0]` is safe because `paneGroups` never emits an empty group — it
-   * `continue`s on one rather than pushing it — and `projectIdForTab` is the
+   * `panes[0]` is safe because `paneGroups` never emits an empty group (it
+   * `continue`s on one rather than pushing it), and `projectIdForTab` is the
    * route every other reader of a pane's project in this file takes.
    */
   const projectOfGroup = (group: PaneGroup): string =>
@@ -2284,7 +2287,14 @@ export function App() {
         </pre>
       ) : null}
       <div className="relative min-h-0 flex-1">
-        {showWelcome ? <Welcome hint={welcomeHint(state)} /> : null}
+        {/* `showWelcome` is only ever true with `wallView !== null` when the wall
+            is on and has no slots at all: the ordinary hints ("press Cmd+T",
+            "select a project") describe a keystroke that would open a session
+            off the wall, invisible until the wall is turned off again. This
+            line names the actual next step instead. */}
+        {showWelcome ? (
+          <Welcome hint={wallView !== null ? 'add a project to the wall to get started' : welcomeHint(state)} />
+        ) : null}
         {/* Every terminal stays mounted, across every project and every tab:
             both maps below are unconditional, and neither list is filtered
             down to what is on screen. Unmounting would dispose an xterm and
@@ -2327,7 +2337,7 @@ export function App() {
               group.rect ? '' : 'inset-0',
               // Room for the cell's header, which is drawn over this box by
               // `WallCell` and is opaque. Its own comment says the group's
-              // `p-2` keeps the terminal clear of it; measured, it does not —
+              // `p-2` keeps the terminal clear of it; measured, it does not:
               // the header is 22px tall (24 with the waiting strip above it)
               // against 8px of padding, and the top two rows of every wall
               // terminal sat behind it. The pane box shrinking by 16px is the
@@ -2541,8 +2551,8 @@ export function App() {
           </div>
         ))}
         {/* The wall's chrome, one box per SLOT rather than one per group.
-            An empty slot is a real state — a project put on the wall before
-            anything was pinned, or a pin whose pane has since gone — and its
+            An empty slot is a real state (a project put on the wall before
+            anything was pinned, or a pin whose pane has since gone), and its
             header's picker is the only place a pane can be chosen for it, so a
             slot that drew nothing would be a project on the wall that the wall
             never shows.
@@ -2551,7 +2561,7 @@ export function App() {
             reason `WallCell` gives: a header inside a group's flex layout would
             be one more item dividing the axis with the panes, which is not what
             it is. What keeps the terminal clear of it is the `pt-6` on a group
-            with a rect, measured against the header's real height — NOT the
+            with a rect, measured against the header's real height: NOT the
             `p-2` `WallCell`'s own comment credits, which is 8px against 22.
 
             `cellRect` with the same three arguments `paneGroups` passes, so a
@@ -2589,7 +2599,7 @@ export function App() {
                     <div
                       data-testid={`wall-empty-${cellProject.id}`}
                       // The group's own padding written again, so an empty cell
-                      // frames exactly where its terminal would be — `top-6`
+                      // frames exactly where its terminal would be: `top-6`
                       // included, which is the room the header takes.
                       className="absolute top-6 right-2 bottom-2 left-2 flex items-center justify-center border border-dashed border-border px-2 text-center text-[11px] text-faint"
                     >
@@ -3141,16 +3151,21 @@ export function App() {
               name: wallState.on ? 'Turn the wall off' : 'Turn the wall on',
               run: () => wallState.setOn(!wallState.on),
             },
-            // Gated on there being an active project and an active pane, the
-            // way neighbouring commands gate on `canOpenSession`: there is no
-            // project to add and no pane to pin without both.
-            ...(project !== undefined && activePaneId
+            // Gated on there being an active project that is not Unsorted, the
+            // way `canOpenSession` already gates neighbouring commands: Unsorted
+            // is a synthetic row with no matching config entry, so a pin against
+            // it takes effect in the renderer and silently no-ops in main (see
+            // `wallPin.ts`). "Add this project to the wall" needs no active
+            // pane beyond that: a project with no terminals yet is exactly the
+            // empty-cell state the wall supports. "Pin this pane" names a pane,
+            // so it also needs one.
+            ...(project !== undefined && project.id !== UNSORTED_ID
               ? [
                   {
                     name: 'Add this project to the wall',
                     run: () => wallState.toggleSlot(project.id),
                   },
-                  { name: 'Pin this pane to the wall', run: pinActivePane },
+                  ...(activePaneId ? [{ name: 'Pin this pane to the wall', run: pinActivePane }] : []),
                 ]
               : []),
           ]}

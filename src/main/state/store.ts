@@ -463,7 +463,8 @@ export function migrate(value: unknown): PTermConfig {
   // kind, v9 an optional theme id, and v10 a per-project wall pin and follow
   // flag. In every case an older file not having the field is exactly what
   // "never set" already means, so there is nothing to convert and one branch
-  // reads all six.
+  // reads all six. A v7 row is a terminal row by construction, because no
+  // version before v8 could express a pane without a session.
   if (
     value.version === 5 ||
     value.version === 6 ||

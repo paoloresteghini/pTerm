@@ -765,7 +765,7 @@ export function wallPinFor(project: ProjectDescriptor): string | null {
  * one empty: the renderer draws a header and a placeholder there, which is the
  * only route from "this project is on the wall" to "this project shows a pane".
  * Numbering by filled slots instead would give that project no box to draw in,
- * and would resize every surviving cell — fitting tmux sessions nobody touched —
+ * and would resize every surviving cell (fitting tmux sessions nobody touched)
  * each time one pin came or went.
  *
  * The active id is resolved through `tabOfPane` in both branches because it may
@@ -794,7 +794,7 @@ function visibleGroupIds(
     const id = tabOfPane(state, pin)?.id ?? pin
     // Two slots pinned to panes of the same tab would otherwise ask for one
     // group in two places, and a group has one box. The earlier slot keeps it,
-    // and the later one is left to the renderer as an empty cell — which is
+    // and the later one is left to the renderer as an empty cell, which is
     // wrong about that cell's pin but right about its geometry, and no state
     // the app can reach today produces it: `slotsFromStored` gives a project
     // one slot, and a tab belongs to one project.
@@ -899,8 +899,8 @@ export function paneGroups(
       // it, rather than relying on every future caller keeping that promise.
       // The grid is sized by the SLOTS, not by the filled ones, for the reason
       // `visibleGroupIds` gives. `wall.slots` is expected to name projects that
-      // exist — `slotsFromStored` resolves it against the live list before it
-      // gets here — so a cell counted here is a cell the renderer draws.
+      // exist (`slotsFromStored` resolves it against the live list before it
+      // gets here), so a cell counted here is a cell the renderer draws.
       ...(wall !== null && region === 'terminal' && slot !== undefined
         ? { rect: cellRect(slot, wall.slots.length, wall.columns) }
         : {}),

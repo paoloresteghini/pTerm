@@ -112,7 +112,7 @@ describe('App.tsx terminal area', () => {
     // wall: the anchor names the whole call because what it is guarding is the
     // gap AFTER it, and a bare `paneGroups\(` prefix would let a `.filter(`
     // sit inside the argument list. `wallView` is named for the same reason
-    // `group` is named above — this is a text assertion, and renaming it here
+    // `group` is named above: this is a text assertion, and renaming it here
     // is the price of it being able to say anything at all.
     expect(app).toMatch(/const groups = paneGroups\(state, 'terminal', wallView\) const showWelcome\b/)
   })
@@ -151,8 +151,8 @@ describe('App.tsx terminal area', () => {
     // `inset-0` left the static string in wall mode and became conditional on
     // the group having no rect, so this is now two claims rather than one.
     // Both are the same property: a group fills the pane area unless the wall
-    // gave it a cell to fill instead, and a group WITHOUT a cell — which every
-    // hidden group is, wall or no wall — still fills the whole column. A hidden
+    // gave it a cell to fill instead, and a group WITHOUT a cell (which every
+    // hidden group is, wall or no wall) still fills the whole column. A hidden
     // group that shrank to a cell would be measured at that size by the next
     // fit that reached it, which is the tmux-resize hazard this file exists for.
     expect(classes).not.toContain('inset-0')

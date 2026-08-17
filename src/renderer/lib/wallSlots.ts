@@ -18,6 +18,27 @@ export const WALL_COLUMNS_DEFAULT = 3
 const WALL_COLUMNS_MAX = 4
 
 /**
+ * `WALL_COLUMNS_MAX` bounds columns, not the WebGL budget `claimRenderer`
+ * enforces per pane on screen (`WEBGL_PANE_BUDGET_DEFAULT`, twelve, against a
+ * measured Chromium cap of 16 live contexts per renderer process; see
+ * `wall.spec.ts`'s header). Measured: four projects at two columns, each cell
+ * holding a split tab, put eight of eight panes on screen and all eight kept a
+ * context, comfortably under budget.
+ *
+ * What that measurement does not cover, and what no test or cap enforces
+ * today: the real ceiling is `slots.length` times panes per slot, not column
+ * count. Eight slots at two panes each is sixteen on-screen panes whatever the
+ * column count, past the budget, and a pane past the budget falls to the DOM
+ * renderer, where Claude Code's block characters draw as slivers. Nothing
+ * here caps `slots.length` (a slot is one project, and there is no ceiling on
+ * how many projects can hold one); that was ruled out deliberately, on the
+ * grounds that the measured case sits well inside budget and a cap is scope
+ * this plan never asked for. Recording it here rather than leaving it to be
+ * rediscovered: raising `WALL_COLUMNS_MAX` is not what would trip this, more
+ * projects on the wall is.
+ */
+
+/**
  * The stored slot list, resolved against the projects that exist.
  *
  * Degrades rather than throwing, the rule `orderFromStored` follows: junk,

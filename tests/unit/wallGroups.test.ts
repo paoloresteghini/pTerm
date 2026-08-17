@@ -58,7 +58,11 @@ import type { ProjectDescriptor, TabDescriptor } from '../../src/shared/ipc'
  * 6. sized the grid by the filled slots again (`cellRect(slot, visible.length,
  *    ...)`, which is what Task 3 shipped): reddened both "leaves an empty slot
  *    its cell rather than closing the gap" and "keeps the other cells where
- *    they are when a pin outlives its pane", and nothing else.
+ *    they are when a pin outlives its pane", and nothing else, because those
+ *    are the only two WALL tests that assert a rect VALUE rather than group
+ *    ids or rect presence. The one other test that asserts values, "orders
+ *    the visible groups by slot, not by pane order", uses a separate,
+ *    fully-filled two-slot wall, where the two numbering rules agree.
  * 7. numbered each entry by its position among the FILLED slots
  *    (`slot: filled.length`) rather than by its slot: reddened only "keeps the
  *    other cells where they are when a pin outlives its pane". The first test

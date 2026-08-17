@@ -24,7 +24,7 @@ export interface CellRect {
  *
  * Lossy on purpose, and the loss is bounded: a rounded row of three cells
  * covers 99.9999% of the column rather than 100%, which is a thousandth of a
- * pixel on any window this app can be opened at. `workspace.ts:557` accepts
+ * pixel on any window this app can be opened at. `workspace.ts:559-561` accepts
  * the same give-away for a pane's flex basis, and a wall cell holding a
  * different rule would leave two halves of one layout rounding differently.
  */
