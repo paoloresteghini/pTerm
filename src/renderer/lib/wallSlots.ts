@@ -91,3 +91,37 @@ export function toggleSlot(slots: readonly string[], projectId: string): string[
     ? slots.filter((id) => id !== projectId)
     : [...slots, projectId]
 }
+
+/**
+ * Whether the wall is what the terminal column should DRAW right now, which is
+ * not the same as whether the user has it switched on.
+ *
+ * A wall only shows the projects holding its slots, so with the wall on and a
+ * project that holds none selected, every group belonging to that project is
+ * invisible and the column is a grid of other people's terminals with no route
+ * to the one just clicked. Suspending the wall for exactly that case is what
+ * makes the sidebar keep working while the wall is on: an off-wall project
+ * opens as it always did, and selecting a project that IS on the wall brings
+ * the wall straight back.
+ *
+ * Derived rather than stored, and that is the whole point: there is no
+ * "suspended" state to get out of sync, no second toggle to write, and nothing
+ * to repair if a project is added to or removed from the wall while one is
+ * selected. The stored toggle stays what the user set, so the View menu's
+ * checkbox and the palette's label keep telling the truth while a suspension
+ * is on screen.
+ *
+ * A wall with no slots at all is deliberately still active: that is the state
+ * whose placeholder tells the user how to put a project on the wall, and
+ * suspending it would take the instructions away from the only person who
+ * needs them.
+ */
+export function wallActive(
+  on: boolean,
+  slots: readonly string[],
+  activeProjectId: string | null,
+): boolean {
+  if (!on) return false
+  if (slots.length === 0) return true
+  return activeProjectId !== null && slots.includes(activeProjectId)
+}

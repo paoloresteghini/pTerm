@@ -6,6 +6,7 @@ import '@xterm/xterm/css/xterm.css'
 import type { PaneColor } from '../shared/paneColors'
 import type { ThemeId } from '../shared/themes'
 import { findLinks, followsLink, linkRange } from './lib/terminalLinks'
+import { imageOnlyPaste } from './lib/terminalPaste'
 import { findPaths, toRelative } from './lib/terminalPaths'
 import { dropText } from './lib/shellQuote'
 import { symbolFontReady } from './lib/symbolFont'
@@ -819,6 +820,32 @@ export function Terminal({
        * everywhere else for that same reason; this is the one place a drop
        * does something.
        */
+      /*
+       * ⌘V with nothing but an image on the clipboard sends `Ctrl+V` to the
+       * program instead of pasting nothing.
+       *
+       * CAPTURE, not the bubble phase, and that is load-bearing: xterm's own
+       * paste handler calls `stopPropagation` (`handlePasteEvent`, read in
+       * `node_modules/@xterm/xterm/lib/xterm.js` on 2026-08-18), so a handler
+       * on this container never runs after it. Capture also lets this take the
+       * event away from xterm entirely, which matters because xterm's answer
+       * to an empty text flavour is not "do nothing": it pastes the empty
+       * string, and under bracketed-paste mode that is a bare `ESC[200~
+       * ESC[201~` sent to whatever is running in the pane.
+       *
+       * See `lib/terminalPaste.ts` for why only an image WITHOUT text is
+       * taken, and for what the program on the other side does with `0x16`.
+       */
+      onPasteCapture={(event) => {
+        const data = event.clipboardData
+        const types = [...data.items].map((item) => item.type)
+        if (!imageOnlyPaste(data.getData('text/plain'), types)) return
+        event.preventDefault()
+        event.stopPropagation()
+        // Written to the pty rather than through xterm, which has no way to
+        // send input it did not synthesise. Same route Shift+Return takes.
+        window.pterm.input(tabId, '\x16')
+      }}
       onDragOver={(event) => {
         event.preventDefault()
         event.dataTransfer.dropEffect = 'copy'

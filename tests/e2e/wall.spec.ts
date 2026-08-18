@@ -13,7 +13,8 @@
  * again, and how many of the panes a wall puts on screen at once can still hold
  * a WebGL context.
  *
- * Seven tests. The first six drive the feature; the seventh is a MEASUREMENT
+ * Eight tests. Six drive the feature and a seventh drives the suspension a
+ * project holding no slot puts the wall into; the WebGL one is a MEASUREMENT
  * (see its own comment), and its number is the answer the plan wanted, not a
  * threshold to tune until it is green.
  *
@@ -640,6 +641,85 @@ test('every pane of a 2x2 wall of splits keeps a WebGL renderer', async () => {
     onScreen.map((pane) => `${pane}: webgl`),
   )
   expect(webgl.length).toBe(Math.min(onScreen.length, WEBGL_PANE_BUDGET_DEFAULT))
+
+  await app.close()
+})
+
+/*
+ * The wall is a view of the projects holding its slots, so a project holding
+ * none has to be able to take the column back.
+ *
+ * Before `wallActive`, selecting such a project left the wall on screen showing
+ * everyone else's terminals: its own group was mounted, invisible and
+ * unreachable, and the only way to see it was to turn the wall off by hand and
+ * turn it back on afterwards. This drives the whole round trip, because a
+ * suspension that did not come back would pass half of it: out to an off-wall
+ * project, back to a wall one, both cells where they were.
+ *
+ * `pterm:wall` is asserted directly because that is the claim the derivation
+ * rests on: the user's toggle is untouched by a suspension, which is what keeps
+ * the View menu's checkbox and the palette's label honest while one is up.
+ */
+test('a project with no slot takes the column, and the wall comes back', async () => {
+  test.setTimeout(180_000)
+  await seedProjects(3)
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  // The third project's terminal is deliberately NOT pinned and its project is
+  // not on the wall: this is the pane the bug hid. It is opened FIRST so that
+  // the project left active is one holding a slot: `enterWall` reloads, and a
+  // reload landing on an off-wall project restores straight into the very
+  // suspension this test has not set up yet.
+  const loose = await openPaneIn(window, 'id-3')
+  await expect
+    .poll(async () => (await sessionNames(SOCKET)).length, { timeout: 30_000 })
+    .toBe(1)
+
+  const pinned: string[] = []
+  for (const n of [1, 2]) {
+    pinned.push(await openPaneIn(window, `id-${n}`))
+    await expect
+      .poll(async () => (await sessionNames(SOCKET)).length, { timeout: 30_000 })
+      .toBe(n + 1)
+    await pinActive(window)
+  }
+  await pinsLanded({ 'id-1': pinned[0], 'id-2': pinned[1] })
+
+  await enterWall(window, ['id-1', 'id-2'], 2)
+  await expect(window.locator('[data-testid="terminal-active"]')).toHaveCount(2, {
+    timeout: 30_000,
+  })
+  const onTheWall = byPanes(await visibleGroups(window))
+
+  await window.getByTestId('project-id-3').click()
+
+  // One group, and it is the off-wall project's own pane. A count alone would
+  // pass for any single cell, including a wall cell belonging to someone else.
+  await expect(window.locator('[data-testid="terminal-active"]')).toHaveCount(1, {
+    timeout: 30_000,
+  })
+  const suspended = await visibleGroups(window)
+  expect(suspended[0].panes).toEqual([loose])
+  // No cell chrome, and the box is the whole column rather than one of the two
+  // half-width cells the wall drew: this is the ordinary column back, not a
+  // one-cell wall. The tab bar is back with it, which is the other half of
+  // "ordinary" and also why the box is SHORTER than a cell was, because a wall hides
+  // the bar, so its cells get the height the bar was using.
+  await expect(window.locator('[data-testid^="wall-cell-"]')).toHaveCount(0)
+  await expect(window.getByTestId('tabbar')).toBeVisible()
+  expect(suspended[0].box.width).toBeGreaterThan(onTheWall[pinned[0]].width)
+  expect(suspended[0].box.height).toBeLessThan(onTheWall[pinned[0]].height)
+
+  // The user never turned the wall off, and the state that says so is untouched.
+  expect(await window.evaluate(() => localStorage.getItem('pterm:wall'))).toBe('1')
+
+  await window.getByTestId('project-id-2').click()
+  await expect(window.locator('[data-testid="terminal-active"]')).toHaveCount(2, {
+    timeout: 30_000,
+  })
+  await expect(window.locator('[data-testid^="wall-cell-"]')).toHaveCount(2)
+  expect(byPanes(await visibleGroups(window))).toEqual(onTheWall)
 
   await app.close()
 })
