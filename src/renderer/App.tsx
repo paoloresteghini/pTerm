@@ -55,7 +55,7 @@ import {
 } from './lib/columnVisibility'
 import { moveColumn, orderFromStored, resizerSideFor, type ColumnSlot } from './lib/columnOrder'
 import { cellRect } from './lib/wallLayout'
-import { columnsFromStored, slotsFromStored, toggleSlot } from './lib/wallSlots'
+import { columnsFromStored, slotsFromStored, toggleSlot, wallActive } from './lib/wallSlots'
 import {
   INITIAL_WORKSPACE_STATE,
   activeProject,
@@ -669,7 +669,17 @@ export function App() {
   // before wall mode. It is passed HERE and nowhere else: `browserGroups` below
   // must never see a wall, which is what keeps the browser region
   // single-visible (`paneGroups` repeats the region test for the same reason).
-  const wallView = wallState.on ? { slots: wallState.slots, columns: wallState.columns } : null
+  //
+  // Whether the wall is what this column DRAWS, which is not `wallState.on`:
+  // a wall shows only the projects holding its slots, so selecting one that
+  // holds none suspends it and gives that project the whole column, exactly as
+  // it had before the wall existed. `wallSlots.ts`'s `wallActive` carries the
+  // argument for deriving this rather than storing a third piece of state.
+  // Everything the USER'S toggle drives (the View menu's checkbox, the
+  // palette's label) keeps reading `wallState.on`, so a suspension never lies
+  // about what is switched on.
+  const wallOn = wallActive(wallState.on, wallState.slots, state.activeProjectId)
+  const wallView = wallOn ? { slots: wallState.slots, columns: wallState.columns } : null
   const groups = paneGroups(state, 'terminal', wallView)
   // "No visible group" still carries this, and a wall with no slots at all is
   // exactly that case, but a wall that HAS cells is not an empty pane area
@@ -1462,15 +1472,18 @@ export function App() {
    * `selectPane` and nothing else, so normal mode dispatches exactly what it
    * dispatched before: a click on a pane belonging to some other project (a
    * state the terminal column cannot reach without a wall) would otherwise
-   * start switching projects under the user.
+   * start switching projects under the user. A wall SUSPENDED for an off-wall
+   * project counts as off here, and has to: the column is showing that one
+   * project's panes, so there is no other project's pane to click and nothing
+   * for a dispatch to correct.
    */
   const choosePane = useCallback(
     (pane: TabDescriptor) => {
       selectPane(pane.id)
-      if (!wallState.on) return
+      if (!wallOn) return
       dispatch({ type: 'activatedProject', id: projectIdForTab(state.projects, pane) })
     },
-    [selectPane, wallState.on, state.projects],
+    [selectPane, wallOn, state.projects],
   )
 
   /**
@@ -2255,7 +2268,7 @@ export function App() {
     // helper's drop targets cost the row) should not have to spawn a tmux
     // session to ask for it.
     <div data-testid="terminal-column" className="flex min-w-0 flex-1 flex-col">
-      {showsTabBar(collapsedColumns, hiddenColumns, wallState.on) ? (
+      {showsTabBar(collapsedColumns, hiddenColumns, wallOn) ? (
         <TabBar
           tabs={tabEntries}
           activeId={currentTabId}
