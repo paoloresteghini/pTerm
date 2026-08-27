@@ -290,10 +290,18 @@ html[data-theme="workspaceLight"] [data-testid="tabbar"] {
 }
 
 html:not([data-theme="workspaceLight"])
-  [data-sidebar="menu-button"][data-active="true"],
-html:not([data-theme="workspaceLight"])
-  [data-sidebar="menu-sub-button"][data-active="true"] {
+  [data-sidebar="menu-button"][data-active="true"] {
   background: color-mix(in srgb, var(--color-raised) 88%, var(--color-fg));
+}
+
+/* A selected tab is a child of the selected project, not a second competing
+   project-level selection. Keep its surface flat and mark it with a quiet
+   inset rail instead of stacking another filled row underneath the project. */
+[data-sidebar="menu-sub-button"][data-active="true"] {
+  background: transparent;
+  color: var(--sidebar-foreground);
+  font-weight: 500;
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--sidebar-foreground) 55%, transparent);
 }
 
 html:not([data-theme="workspaceLight"])
