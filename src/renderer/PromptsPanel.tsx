@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Plus, X } from 'lucide-react'
 import type { PromptEntry } from '../shared/ipc'
 import { useColumnWidth } from './lib/columnWidth'
 import { cn } from './lib/cn'
@@ -88,7 +90,7 @@ export function PromptsPanel({
       embedded={embedded}
       side={side}
       className={cn(
-        'utility-panel utility-panel-prompts font-mono text-[11px] select-none',
+        'utility-panel utility-panel-prompts select-none',
       )}
       style={embedded ? undefined : { width }}
     >
@@ -101,14 +103,17 @@ export function PromptsPanel({
           onClick={onToggle}
           onDragStart={onDragStart}
         />
-        <button
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
           data-testid="prompts-new"
           aria-label="New prompt"
           onClick={() => setAdding(true)}
-          className="utility-add cursor-default border-none bg-transparent p-0 text-[13px] leading-none text-faint hover:text-fg"
+          className="utility-add mr-1.5 cursor-default text-muted hover:text-fg"
         >
-          +
-        </button>
+          <Plus />
+        </Button>
       </div>
 
       <div data-testid="scroll-prompts" className="utility-list scroll-thin min-h-0 flex-1 overflow-y-auto">
@@ -121,21 +126,27 @@ export function PromptsPanel({
         ) : (
           prompts.map((prompt) => (
             <div key={prompt.id} className="utility-prompt-row group flex items-baseline gap-1 pr-1.5">
-              <button
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
                 data-testid={`prompt-${prompt.id}`}
                 disabled={!canInsert}
                 onClick={() => onInsert(prompt.body)}
                 // The body, so a one-word label is still identifiable without
                 // opening anything.
                 title={prompt.body}
-                className="utility-row flex-1 cursor-default truncate border-none bg-transparent px-2.5 py-1 text-left text-muted hover:text-fg disabled:opacity-40"
+                className="utility-row flex-1 justify-start cursor-default truncate border-none bg-transparent px-2.5 py-1 text-left text-muted hover:text-fg disabled:opacity-40"
               >
                 {prompt.label}
-              </button>
+              </Button>
               {/* `pdelete-`, not `prompt-delete-`: `[data-testid^="prompt-"]`
                   counts the rows in this list, and a delete button under that
                   prefix would be counted as a second prompt. */}
-              <button
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
                 data-testid={`pdelete-${prompt.id}`}
                 aria-label={`Delete ${prompt.label}`}
                 onClick={() => {
@@ -149,17 +160,17 @@ export function PromptsPanel({
                       setError(reason instanceof Error ? reason.message : String(reason))
                     })
                 }}
-                className="utility-delete cursor-default border-none bg-transparent px-0.5 text-faint hover:text-danger"
+                className="utility-delete cursor-default text-faint hover:text-danger"
               >
-                ✕
-              </button>
+                <X />
+              </Button>
             </div>
           ))
         )}
       </div>
 
       {error ? (
-        <p data-testid="prompts-error" className="px-2.5 py-1 text-[11px] text-danger">
+        <p data-testid="prompts-error" className="px-3 py-2 text-xs text-danger">
           {error}
         </p>
       ) : null}

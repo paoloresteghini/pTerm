@@ -51,38 +51,44 @@ function Row({
   return (
     <div
       data-testid={`gitpanel-${section}-${change.path}`}
-      className="group flex w-full items-baseline gap-2 px-2.5 py-1 text-left text-muted"
+      className="group mx-2 flex w-auto items-baseline gap-2 rounded-md px-2 py-2 text-left text-muted hover:bg-secondary"
     >
       <span className="w-3 shrink-0 text-faint">{letter}</span>
       <button
         onClick={() => onOpen(change.path, section === 'staged' ? 'staged' : 'worktree')}
         className="flex min-w-0 flex-1 items-baseline gap-2 cursor-default border-none bg-transparent p-0 text-left text-muted hover:text-fg"
       >
-        <span className="truncate">{baseOf(change.path)}</span>
+        <span className="truncate font-medium text-fg">{baseOf(change.path)}</span>
         {dir === '' ? null : <span className="truncate text-faint">{dir}</span>}
       </button>
       {/* Revealed on hover so a resting list reads as file names rather than
           as a wall of controls. `group-hover` needs the `group` class above. */}
       {section === 'unstaged' ? (
-        <button
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
           data-testid={`gitpanel-discard-${change.path}`}
           disabled={busy}
           onClick={() => onDiscard(change.path)}
           title="Discard"
-          className="shrink-0 cursor-default border-none bg-transparent px-1 text-faint opacity-0 group-hover:opacity-100 hover:text-danger disabled:opacity-40"
+          className="cursor-default text-faint opacity-0 group-hover:opacity-100 hover:text-danger disabled:opacity-40"
         >
           ↺
-        </button>
+        </Button>
       ) : null}
-      <button
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-xs"
         data-testid={`gitpanel-${section === 'staged' ? 'unstage' : 'stage'}-${change.path}`}
         disabled={busy}
         onClick={() => (section === 'staged' ? onUnstage(change.path) : onStage(change.path))}
         title={section === 'staged' ? 'Unstage' : 'Stage'}
-        className="shrink-0 cursor-default border-none bg-transparent px-1 text-faint opacity-0 group-hover:opacity-100 hover:text-fg disabled:opacity-40"
+        className="cursor-default text-faint opacity-0 group-hover:opacity-100 hover:text-fg disabled:opacity-40"
       >
         {section === 'staged' ? '−' : '+'}
-      </button>
+      </Button>
     </div>
   )
 }
@@ -327,7 +333,7 @@ export function GitPanel({
       embedded={embedded}
       side={side}
       className={cn(
-        'font-mono text-[11px] select-none',
+        'select-none',
       )}
       style={embedded ? undefined : { width }}
     >
@@ -343,7 +349,7 @@ export function GitPanel({
             detached head has no branch to show, and the repository is then
             the whole line. */}
         {changes ? (
-          <p className="flex gap-2 px-2.5 py-1 text-faint">
+          <p className="flex gap-2 px-3 pb-1 text-xs text-faint">
             <span data-testid="gitpanel-repo" className="truncate text-muted">
               {changes.repo}
             </span>
@@ -355,7 +361,7 @@ export function GitPanel({
           </p>
         ) : null}
 
-        <div className="flex flex-col gap-1 px-2.5 py-2">
+        <div className="flex flex-col gap-2 px-3 py-2">
           <Textarea
             data-testid="gitpanel-message"
             // Every text field in the app carries this: without it ⌘W typed
@@ -375,16 +381,16 @@ export function GitPanel({
             }}
             rows={2}
             placeholder="Message (⌘Enter to commit)"
-            className="scroll-thin resize-none border-border bg-raised px-1.5 py-1 font-mono text-[11px] text-fg placeholder:text-faint"
+            className="scroll-thin resize-none border-border bg-background px-2 py-1.5 text-[13px] text-fg placeholder:text-faint"
           />
           <Button
             type="button"
-            variant="secondary"
+            variant="outline"
             size="sm"
             data-testid="gitpanel-commit"
             disabled={busy || message.trim() === '' || changes === null}
             onClick={onCommit}
-            className="cursor-default border-border px-2 py-1 text-muted hover:text-fg disabled:opacity-40"
+            className="cursor-default text-muted hover:text-fg disabled:opacity-40"
           >
             Commit
           </Button>
@@ -410,7 +416,7 @@ export function GitPanel({
 
         {changes && changes.staged.length > 0 ? (
           <>
-            <p className="flex justify-between px-2.5 pt-3 pb-1 text-[10px] uppercase tracking-wider text-label">
+            <p className="flex justify-between px-3 pt-3 pb-1 text-xs font-medium text-label">
               <span>Staged Changes</span>
               <span data-testid="gitpanel-staged-count">{changes.staged.length}</span>
             </p>
@@ -424,18 +430,21 @@ export function GitPanel({
 
         {changes && changes.unstaged.length > 0 ? (
           <>
-            <p className="flex justify-between px-2.5 pt-3 pb-1 text-[10px] uppercase tracking-wider text-label">
+            <p className="flex justify-between px-3 pt-3 pb-1 text-xs font-medium text-label">
               <span>Changes</span>
               <span className="flex items-center gap-2">
-                <button
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
                   data-testid="gitpanel-stash"
                   disabled={busy}
                   onClick={() => mutate((id) => window.pterm.gitStash(id))}
                   title="Stash all changes"
-                  className="cursor-default border-none bg-transparent px-1 text-faint hover:text-fg disabled:opacity-40"
+                  className="cursor-default text-muted hover:text-fg disabled:opacity-40"
                 >
                   Stash
-                </button>
+                </Button>
                 <span data-testid="gitpanel-unstaged-count">{changes.unstaged.length}</span>
               </span>
             </p>

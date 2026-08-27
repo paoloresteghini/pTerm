@@ -82,7 +82,7 @@ export function NotesPanel({
       embedded={embedded}
       side={side}
       className={cn(
-        'font-mono text-[11px] select-none',
+        'select-none',
       )}
       style={embedded ? undefined : { width }}
     >
@@ -112,7 +112,7 @@ export function NotesPanel({
           onBlur={() => saver.flush()}
           placeholder="Notes for this project"
           spellCheck={false}
-          className="scroll-thin m-2.5 mt-1 min-h-0 flex-1 resize-none border-border bg-transparent p-1.5 text-[11px] text-fg select-text placeholder:text-faint"
+          className="scroll-thin m-3 mt-0 min-h-0 flex-1 resize-none border-border bg-background p-2 text-[13px] text-fg select-text placeholder:text-faint"
         />
       )}
       {!embedded ? (

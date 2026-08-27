@@ -40,7 +40,7 @@ export function PanelSurface({
   return (
     <Card
       className={cn(
-        'relative flex flex-col gap-0 rounded-none border-border bg-surface py-0 text-fg shadow-none',
+        'workspace-panel relative flex flex-col gap-0 rounded-none border-border bg-surface py-0 text-fg shadow-none',
         embedded ? 'workspace-utility-card min-h-0 w-full border' : 'shrink-0',
         !embedded && (side === 'left' ? 'border-r' : 'border-l'),
         className,
@@ -137,7 +137,7 @@ export function PanelHeading({
         draggable={onDragStart !== undefined}
         onDragStart={onDragStart}
         title={`Hide ${label.toLowerCase()}`}
-        className="min-w-0 flex-1 justify-start rounded-none px-2.5 pb-1 pt-3 text-left font-sans text-[13px] font-semibold normal-case tracking-normal text-label shadow-none hover:bg-transparent hover:text-fg"
+        className="h-10 min-w-0 flex-1 justify-start rounded-none px-3 py-0 text-left font-sans text-[13px] font-semibold normal-case tracking-normal text-label shadow-none hover:bg-transparent hover:text-fg"
       >
         {label}
       </Button>

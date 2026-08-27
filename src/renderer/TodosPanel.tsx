@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Check, Plus, RefreshCw, RotateCcw } from 'lucide-react'
 import type { TodoRecord } from '../shared/ipc'
 import {
   filterTodos,
@@ -30,8 +33,8 @@ function StateButton({
       data-testid={`todos-state-${filter}`}
       onClick={onClick}
       className={cn(
-        'cursor-default border-none bg-transparent px-1.5 py-0.5 text-faint hover:text-fg',
-        active && 'text-fg',
+        'h-7 cursor-default rounded-md px-2 text-xs font-medium text-muted hover:bg-secondary hover:text-fg',
+        active && 'bg-secondary text-fg shadow-sm',
       )}
     >
       {label}
@@ -54,8 +57,8 @@ function PriorityButton({
       data-testid={`todos-priority-${filter}`}
       onClick={onClick}
       className={cn(
-        'flex items-center gap-1 cursor-default border-none bg-transparent px-1.5 py-0.5 text-faint hover:text-fg',
-        active && 'text-fg',
+        'flex h-7 cursor-default items-center gap-1 rounded-md px-2 text-xs font-medium text-muted hover:bg-secondary hover:text-fg',
+        active && 'bg-secondary text-fg shadow-sm',
       )}
     >
       {filter !== 'all' ? <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', PRIORITY_DOT[filter])} /> : null}
@@ -76,30 +79,33 @@ function Row({
   return (
     // `group` so the done button below can stay invisible until the row is
     // hovered.
-    <div className="group relative flex w-full items-start">
+    <div className="group relative mx-2 flex items-start rounded-md hover:bg-secondary">
       <button
         data-testid={`todo-row-${todo.id}`}
         onClick={() => onSelect(todo.id)}
-        className="flex w-full cursor-default items-baseline gap-1.5 border-none bg-transparent px-2.5 py-1 text-left text-muted hover:text-fg"
+        className="flex w-full cursor-default items-baseline gap-1.5 border-none bg-transparent px-2 py-2 text-left text-muted hover:text-fg"
       >
         <span
           data-testid={`todo-dot-${todo.id}`}
           className={cn('mt-1 h-1.5 w-1.5 shrink-0 rounded-full', PRIORITY_DOT[todo.priority])}
         />
-        <span className={cn('truncate', todo.done && 'text-faint line-through')}>{todo.title}</span>
+        <span className={cn('truncate font-medium text-fg', todo.done && 'text-faint line-through')}>{todo.title}</span>
       </button>
       {/*
         Marks DONE, not deleted: a destructive action revealed by hover is one
         mis-click away at all times, so deleting is the modal's job.
       */}
-      <button
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-xs"
         data-testid={`todo-done-${todo.id}`}
         onClick={() => onToggleDone(todo.id, !todo.done)}
         title={todo.done ? 'Mark as not done' : 'Mark as done'}
-        className="absolute right-1 top-1 shrink-0 cursor-default border-none bg-transparent px-1 text-faint opacity-0 group-hover:opacity-100 hover:text-fg"
+        className="absolute right-1 top-1 cursor-default text-faint opacity-0 group-hover:opacity-100 hover:text-fg"
       >
-        {todo.done ? '↺' : '✓'}
-      </button>
+        {todo.done ? <RotateCcw /> : <Check />}
+      </Button>
     </div>
   )
 }
@@ -248,7 +254,7 @@ export function TodosPanel({
       embedded={embedded}
       side={side}
       className={cn(
-        'font-mono text-[11px] select-none',
+        'select-none',
       )}
       style={embedded ? undefined : { width }}
     >
@@ -257,31 +263,37 @@ export function TodosPanel({
           column. */}
       <div className="flex items-center justify-between pr-2.5">
         <PanelHeading testid="todos-toggle" label="Todos" onClick={onToggle} onDragStart={onDragStart} />
-        <button
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
           data-testid="todos-new"
           aria-label="New todo"
           onClick={() => onCreatingChange(true)}
-          className="cursor-default border-none bg-transparent p-0 text-[13px] leading-none text-faint hover:text-fg"
+          className="mr-1.5 cursor-default text-muted hover:text-fg"
         >
-          +
-        </button>
+          <Plus />
+        </Button>
       </div>
-      <div className="flex items-center justify-between gap-2 px-2.5 pb-1 text-faint">
+      <div className="flex items-center justify-between gap-2 px-3 pb-2 text-xs text-faint">
         <span data-testid="todos-count" className="shrink-0">
           {todos === null ? '' : `${openCount} open`}
         </span>
         {/* Re-runs the same read the mount does. Every in-app edit arrives on
             its own, so this is here for a list changed outside the app. */}
-        <button
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
           data-testid="todos-refresh"
           onClick={load}
           title="Refresh"
-          className="shrink-0 cursor-default border-none bg-transparent px-1 text-faint hover:text-fg"
+          className="cursor-default text-muted hover:text-fg"
         >
-          ↻
-        </button>
+          <RefreshCw />
+        </Button>
       </div>
-      <input
+      <Input
         data-testid="todos-search"
         // Load-bearing, same as every text field in this app: without it ⌘W
         // typed while searching closes a pane and destroys its session.
@@ -290,24 +302,27 @@ export function TodosPanel({
         onChange={(event) => setQuery(event.target.value)}
         placeholder="Search todos"
         spellCheck={false}
-        className="mx-2.5 mb-1 border border-border bg-transparent px-1.5 py-1 text-[11px] text-fg placeholder:text-faint focus:outline-none"
+        className="mx-3 mb-2 h-8 w-[calc(100%-1.5rem)] border-border bg-background px-2 text-[13px] text-fg placeholder:text-faint"
       />
-      <div className="flex items-center justify-between gap-1 px-2 pb-1">
-        <div className="flex items-center gap-1">
+      <div className="flex items-center justify-between gap-1 px-3 pb-1.5">
+        <div className="flex items-center gap-1 rounded-lg bg-secondary p-0.5">
           <StateButton filter="open" active={state === 'open'} onClick={() => setState('open')} />
           <StateButton filter="done" active={state === 'done'} onClick={() => setState('done')} />
           <StateButton filter="all" active={state === 'all'} onClick={() => setState('all')} />
         </div>
-        <button
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
           data-testid="todos-sort"
           onClick={() => setSort(nextTodoSort(sort))}
           title="Change sort"
-          className="cursor-default border-none bg-transparent px-1.5 py-0.5 text-faint hover:text-fg"
+          className="cursor-default text-muted hover:text-fg"
         >
           {SORT_LABEL[sort]}
-        </button>
+        </Button>
       </div>
-      <div className="flex items-center gap-0.5 px-2 pb-1.5">
+      <div className="mx-3 mb-2 flex w-fit items-center gap-0.5 rounded-lg bg-secondary p-0.5">
         <PriorityButton filter="all" active={priority === 'all'} onClick={() => setPriority('all')} />
         <PriorityButton filter="high" active={priority === 'high'} onClick={() => setPriority('high')} />
         <PriorityButton filter="medium" active={priority === 'medium'} onClick={() => setPriority('medium')} />

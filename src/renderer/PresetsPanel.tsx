@@ -52,7 +52,7 @@ export function PresetsPanel({
       embedded={embedded}
       side={side}
       className={cn(
-        'utility-panel utility-panel-presets font-mono text-[11px] select-none',
+        'utility-panel utility-panel-presets select-none',
       )}
       style={embedded ? undefined : { width }}
     >

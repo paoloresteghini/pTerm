@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Plus, RefreshCw, X } from 'lucide-react'
 import type { IssueRepo, IssueStateFilter, IssueSummary, IssuesFailure, ProjectDescriptor } from '../shared/ipc'
 import { filterIssues, shouldRefetchOnFocus, sortIssues, type IssueSort } from './lib/issueList'
 import { historyAgo } from './lib/historyAgo'
@@ -54,8 +57,8 @@ function StateButton({
       data-testid={`issues-state-${filter}`}
       onClick={onClick}
       className={cn(
-        'cursor-default border-none bg-transparent px-1.5 py-0.5 text-faint hover:text-fg',
-        active && 'text-fg',
+        'h-7 cursor-default rounded-md px-2 text-xs font-medium text-muted hover:bg-secondary hover:text-fg',
+        active && 'bg-secondary text-fg shadow-sm',
       )}
     >
       {label}
@@ -79,15 +82,15 @@ function Row({
   return (
     // `group` for the quick-close button's hover reveal, the same pattern
     // `GitPanel`'s own row uses for its stage/unstage/discard buttons.
-    <div className="group relative flex w-full items-start">
+    <div className="group relative mx-2 flex items-start rounded-md hover:bg-secondary">
       <button
         data-testid={`issue-row-${row.number}`}
         onClick={() => onSelect(row.number)}
-        className="flex w-full cursor-default flex-col items-start gap-0.5 border-none bg-transparent px-2.5 py-1 text-left text-muted hover:text-fg"
+        className="flex w-full cursor-default flex-col items-start gap-0.5 border-none bg-transparent px-2 py-2 text-left text-muted hover:text-fg"
       >
         <span className="flex w-full items-baseline gap-1.5">
           <span className="shrink-0 text-faint">#{row.number}</span>
-          <span className="truncate">{row.title}</span>
+          <span className="truncate font-medium text-fg">{row.title}</span>
         </span>
         <span className="flex w-full items-center gap-1.5 text-faint">
           <span className="shrink-0">{historyAgo(updatedSeconds, now)}</span>
@@ -106,14 +109,17 @@ function Row({
         </span>
       </button>
       {onQuickClose ? (
-        <button
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
           data-testid={`issue-quick-close-${row.number}`}
           onClick={() => onQuickClose(row.number)}
           title="Close as completed"
-          className="absolute right-1 top-1 shrink-0 cursor-default border-none bg-transparent px-1 text-faint opacity-0 group-hover:opacity-100 hover:text-fg"
+          className="absolute right-1 top-1 cursor-default text-faint opacity-0 group-hover:opacity-100 hover:text-fg"
         >
-          ✕
-        </button>
+          <X />
+        </Button>
       ) : null}
     </div>
   )
@@ -289,7 +295,7 @@ export function IssuesPanel({
       embedded={embedded}
       side={side}
       className={cn(
-        'font-mono text-[11px] select-none',
+        'select-none',
       )}
       style={embedded ? undefined : { width }}
     >
@@ -304,14 +310,17 @@ export function IssuesPanel({
           onDragStart={onDragStart}
         />
         {project ? (
-          <button
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
             data-testid="issues-new"
             aria-label="New issue"
             onClick={() => setCreating(true)}
-            className="cursor-default border-none bg-transparent p-0 text-[13px] leading-none text-faint hover:text-fg"
+            className="mr-1.5 cursor-default text-muted hover:text-fg"
           >
-            +
-          </button>
+            <Plus />
+          </Button>
         ) : null}
       </div>
       {!project ? (
@@ -320,7 +329,7 @@ export function IssuesPanel({
         </p>
       ) : (
         <>
-          <div className="flex items-center justify-between gap-2 px-2.5 pb-1 text-faint">
+          <div className="flex items-center justify-between gap-2 px-3 pb-2 text-xs text-faint">
             {current?.ok ? (
               // The slug truncates on its own and the count sits outside it
               // with `shrink-0`. Both inside one truncating span, an ordinary
@@ -344,17 +353,20 @@ export function IssuesPanel({
             ) : (
               <span />
             )}
-            <button
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
               data-testid="issues-refresh"
               disabled={loading}
               onClick={() => load()}
               title="Refresh"
-              className="shrink-0 cursor-default border-none bg-transparent px-1 text-faint hover:text-fg disabled:opacity-40"
+              className="cursor-default text-muted hover:text-fg disabled:opacity-40"
             >
-              ↻
-            </button>
+              <RefreshCw />
+            </Button>
           </div>
-          <input
+          <Input
             data-testid="issues-search"
             // Load-bearing, same as every text field in this app: without it
             // ⌘W typed while searching closes a pane and destroys its session.
@@ -363,22 +375,25 @@ export function IssuesPanel({
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search issues"
             spellCheck={false}
-            className="mx-2.5 mb-1 border border-border bg-transparent px-1.5 py-1 text-[11px] text-fg placeholder:text-faint focus:outline-none"
+            className="mx-3 mb-2 h-8 w-[calc(100%-1.5rem)] border-border bg-background px-2 text-[13px] text-fg placeholder:text-faint"
           />
-          <div className="flex items-center justify-between gap-1 px-2 pb-1.5">
-            <div className="flex items-center gap-1">
+          <div className="flex items-center justify-between gap-1 px-3 pb-2">
+            <div className="flex items-center gap-1 rounded-lg bg-secondary p-0.5">
               <StateButton filter="open" active={state === 'open'} onClick={() => setState('open')} />
               <StateButton filter="closed" active={state === 'closed'} onClick={() => setState('closed')} />
               <StateButton filter="all" active={state === 'all'} onClick={() => setState('all')} />
             </div>
-            <button
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
               data-testid="issues-sort"
               onClick={() => setSort(nextSort(sort))}
               title="Change sort"
-              className="cursor-default border-none bg-transparent px-1.5 py-0.5 text-faint hover:text-fg"
+              className="cursor-default text-muted hover:text-fg"
             >
               {SORT_LABEL[sort]}
-            </button>
+            </Button>
           </div>
           {current !== null && !current.ok ? (
             <div data-testid={`issues-empty-${current.reason}`} className="px-2.5 py-2 text-faint">

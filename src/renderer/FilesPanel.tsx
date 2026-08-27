@@ -1,7 +1,7 @@
 import { FileTree } from './FileTree'
 import { useColumnWidth } from './lib/columnWidth'
 import { cn } from './lib/cn'
-import { ColumnResizer, PanelStrip, type PanelSide } from './ui/Panel'
+import { ColumnResizer, PanelStrip, PanelSurface, type PanelSide } from './ui/Panel'
 
 /**
  * The file tree's column. Draggable to any position in the row now, so
@@ -50,14 +50,12 @@ export function FilesPanel({
   }
 
   return (
-    <div
+    <PanelSurface
       data-testid="files-panel"
       // `relative` for the resizer, which is absolutely positioned over this
       // column's border and takes no space in the flex row.
-      className={cn(
-        'relative flex shrink-0 flex-col border-border bg-surface text-sm select-none',
-        side === 'left' ? 'border-r' : 'border-l',
-      )}
+      side={side}
+      className={cn('text-sm select-none')}
       style={{ width }}
     >
       <FileTree
@@ -73,6 +71,6 @@ export function FilesPanel({
         onResize={set}
         onCommit={commit}
       />
-    </div>
+    </PanelSurface>
   )
 }

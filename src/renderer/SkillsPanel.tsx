@@ -89,7 +89,7 @@ export function SkillsPanel({
       side={side}
       // `relative` for the resizer, positioned off `side`.
       className={cn(
-        'utility-panel utility-panel-skills font-mono text-[11px] select-none',
+        'utility-panel utility-panel-skills select-none',
       )}
       style={embedded ? undefined : { width }}
     >
@@ -109,7 +109,7 @@ export function SkillsPanel({
         onChange={(event) => setQuery(event.target.value)}
         placeholder="Filter skills"
         spellCheck={false}
-        className="utility-filter mx-2.5 mb-1 border-border bg-transparent px-1.5 py-1 text-[11px] text-fg placeholder:text-faint"
+        className="utility-filter mx-3 mb-2 h-8 border-border bg-background px-2 text-[13px] text-fg placeholder:text-faint"
       />
       {/* `scroll-`, not `skills-`: every prefix locator in the e2e suite is
           listed in `tests/e2e/`, and `[data-testid^="skill-"]` counts the rows

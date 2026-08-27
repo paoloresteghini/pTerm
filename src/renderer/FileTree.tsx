@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactElement } from 'rea
 import type { FileEntry } from '../shared/ipc'
 import { readExpanded, writeExpanded, toggled } from './lib/treeState'
 import { PanelHeading } from './ui/Panel'
+import { Button } from '@/components/ui/button'
 import { FileTreeMenu, type FileTreeAction } from './FileTreeMenu'
 import { FileIcon } from './ui/FileIcon'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -294,7 +295,10 @@ export function FileTree({
         return [field(`rename-${relPath}`, editing.initial, 'tree-rename')]
       }
       const row = (
-        <button
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
           data-testid={`tree-row-${relPath}`}
           onClick={entry.dir ? undefined : () => toggle(entry, relPath)}
           onContextMenu={(event) => {
@@ -305,7 +309,7 @@ export function FileTree({
             setEditing(null)
             setMenu({ relPath, isDir: entry.dir, left: box.left, top: box.bottom })
           }}
-          className="group/tree flex h-8 w-full cursor-default items-center rounded-md px-2 text-left text-sm text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          className="group/tree flex h-8 w-full justify-start cursor-default items-center rounded-md px-2 text-left text-sm text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
         >
           {entry.dir ? (
             <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[state=open]/tree:rotate-90" />
@@ -316,7 +320,7 @@ export function FileTree({
           <span data-testid={`tree-name-${relPath}`} className="truncate">
             {entry.name}
           </span>
-        </button>
+        </Button>
       )
 
       if (!entry.dir) return [<div key={relPath}>{row}</div>]
@@ -344,14 +348,17 @@ export function FileTree({
           onClick={onToggle}
           onDragStart={onDragStart}
         />
-        <button
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
           data-testid="tree-refresh"
           aria-label="Refresh files"
           onClick={reload}
-          className="cursor-default rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+          className="mr-1.5 cursor-default text-muted-foreground hover:text-accent-foreground"
         >
           <RefreshCw className="size-3.5" />
-        </button>
+        </Button>
       </div>
       <div
         data-testid="tree-scroll"
