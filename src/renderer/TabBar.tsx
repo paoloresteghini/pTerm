@@ -183,10 +183,10 @@ export function TabBar({
       value={activeId ?? undefined}
       onValueChange={onActivate}
       data-testid={`${testIdPrefix}bar`}
-      className="h-10 min-w-0 select-none border-b border-border bg-background px-2"
+      className="h-11 min-w-0 select-none border-b border-border bg-background px-2"
     >
       <TabsList
-        className="mt-1 h-8 w-full min-w-0 justify-start gap-1 overflow-hidden rounded-lg bg-secondary px-1.5"
+        className="mt-1 h-9 w-full min-w-0 justify-start gap-1 overflow-hidden rounded-lg bg-secondary px-1.5"
       >
         <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden">
         {tabs.map((entry) => {
