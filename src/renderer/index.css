@@ -333,13 +333,6 @@ html[data-theme="workspaceLight"] .wall-cell[data-focused="true"] {
     0 2px 6px rgb(31 41 55 / 0.06);
 }
 
-html[data-theme="workspaceLight"] .wall-cell-picker {
-  margin: 4px 0 0 8px;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgb(31 41 55 / 0.12);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-
 /* The optional utility columns are a shelf of short actions, not terminal
    panes. A denser system face, contained search field and quiet row hover let
    them stay useful without competing with the live workspace. */
