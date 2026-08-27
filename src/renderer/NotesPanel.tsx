@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
+import { Textarea } from '@/components/ui/textarea'
 import type { ProjectDescriptor } from '../shared/ipc'
 import { createNoteSaver } from './lib/noteSaver'
 import { useColumnWidth } from './lib/columnWidth'
 import { cn } from './lib/cn'
-import { ColumnResizer, PanelHeading, PanelStrip, type PanelSide } from './ui/Panel'
+import { ColumnResizer, PanelHeading, PanelStrip, PanelSurface, type PanelSide } from './ui/Panel'
 
 export function NotesPanel({
   project,
@@ -11,6 +12,7 @@ export function NotesPanel({
   onToggle,
   onDragStart,
   side,
+  embedded = false,
 }: {
   project: ProjectDescriptor | undefined
   collapsed: boolean
@@ -18,6 +20,8 @@ export function NotesPanel({
   /** Grabs this column to move it. See `PanelHeading`'s doc comment. */
   onDragStart: () => void
   side: PanelSide
+  /** Renders beneath Environment in Workspace Light instead of in the row. */
+  embedded?: boolean
 }) {
   // null is "loading": the textarea is disabled so keystrokes cannot land in a
   // note that is about to be replaced by the fetch result.
@@ -67,22 +71,20 @@ export function NotesPanel({
         side={side}
         onClick={onToggle}
         onDragStart={onDragStart}
+        embedded={embedded}
       />
     )
   }
 
   return (
-    <div
+    <PanelSurface
       data-testid="notes-panel"
+      embedded={embedded}
+      side={side}
       className={cn(
-        'relative flex shrink-0 flex-col border-border bg-surface font-mono text-[11px] select-none',
-        // The seam faces the terminal either way, same rule `PanelStrip`
-        // follows: a left column drawing `border-l` puts its only border
-        // against the window frame, which is how this shipped with no
-        // visible edge at all before every panel container read `side`.
-        side === 'left' ? 'border-r' : 'border-l',
+        'font-mono text-[11px] select-none',
       )}
-      style={{ width }}
+      style={embedded ? undefined : { width }}
     >
       <PanelHeading
         testid="notes-toggle"
@@ -95,7 +97,7 @@ export function NotesPanel({
           No project selected.
         </p>
       ) : (
-        <textarea
+        <Textarea
           data-testid="notes-textarea"
           // Load-bearing, same as the skills filter: without it ⌘W typed
           // mid-note closes a pane and destroys its tmux session.
@@ -110,16 +112,18 @@ export function NotesPanel({
           onBlur={() => saver.flush()}
           placeholder="Notes for this project"
           spellCheck={false}
-          className="scroll-thin m-2.5 mt-1 min-h-0 flex-1 resize-none border border-border bg-transparent p-1.5 text-[11px] text-fg select-text placeholder:text-faint focus:outline-none"
+          className="scroll-thin m-2.5 mt-1 min-h-0 flex-1 resize-none border-border bg-transparent p-1.5 text-[11px] text-fg select-text placeholder:text-faint"
         />
       )}
-      <ColumnResizer
-        testid="resize-notes"
-        side={side}
-        width={width}
-        onResize={set}
-        onCommit={commit}
-      />
-    </div>
+      {!embedded ? (
+        <ColumnResizer
+          testid="resize-notes"
+          side={side}
+          width={width}
+          onResize={set}
+          onCommit={commit}
+        />
+      ) : null}
+    </PanelSurface>
   )
 }

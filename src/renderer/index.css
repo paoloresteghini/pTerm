@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:is(.dark *));
+
 /* The app's symbol face, and the only @font-face in it.
 
    `fonts/pterm-symbols.woff2` is an 8KB subset of JuliaMono covering exactly
@@ -44,8 +46,8 @@
    `loaded` by the third); captures at each end of it were pixel-identical, so
    no unstyled frame was observed. */
 @font-face {
-  font-family: 'pTerm Symbols';
-  src: url('./fonts/pterm-symbols.woff2') format('woff2');
+  font-family: "pTerm Symbols";
+  src: url("./fonts/pterm-symbols.woff2") format("woff2");
   font-display: block;
 }
 
@@ -105,17 +107,379 @@
      one. */
   --color-inset: #00000000;
 
+  /* shadcn/ui semantic surfaces. They deliberately map to the app's existing
+     palette so components inherit each theme instead of introducing a second
+     visual system. `--color-muted` is already a foreground token here, so
+     shadcn components that need a muted surface use `raised` explicitly. */
+  --color-card: var(--color-surface);
+  --color-card-foreground: var(--color-fg);
+  --color-popover: var(--color-overlay);
+  --color-popover-foreground: var(--color-fg);
+  --color-primary: var(--color-accent);
+  --color-primary-foreground: #09090b;
+  --color-background: var(--color-bg);
+  --color-foreground: var(--color-fg);
+  --color-muted-foreground: var(--color-muted);
+  --color-accent-foreground: var(--color-fg);
+  --color-secondary: var(--color-raised);
+  --color-secondary-foreground: var(--color-fg);
+  --color-destructive: var(--color-danger);
+  --color-destructive-foreground: #09090b;
+  --color-input: var(--color-border);
+  --color-ring: var(--color-accent);
+
   /* `pTerm Symbols` after `Menlo`, matching the terminal's stack and for the
      same reason: it answers only for characters the real monospace faces
      above it do not cover. Measured in a DOM span at 11px, ordinary text is
      untouched (M, x, ❯, ✳, ●, █, ╭, ⚠ all 6.6234px with and without it) while
      U+23F4-23F7 go from 0.835 of a cell to 0.996, U+23F8-23FA from 1.046, and
      the braille block from 1.135. */
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, 'pTerm Symbols', monospace;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, "pTerm Symbols", monospace;
 }
 
-html, body, #root {
+html,
+body,
+#root {
   height: 100%;
+}
+
+/* Native controls and Chromium's page-level rendering need the same hint as
+   the token palette. Without it, a light window can still receive dark system
+   form chrome before a component's own styles take over. */
+html[data-theme="workspaceLight"] {
+  color-scheme: light;
+  --workspace-chrome: #eef1f4;
+  --workspace-paper: #ffffff;
+  --workspace-well: #f7f9fb;
+  --workspace-hover: #eaf0f6;
+  --workspace-selected: #dfeaf5;
+  --workspace-line: #d7e0e9;
+  --workspace-ink: #263548;
+  --workspace-muted: #66758a;
+  --color-card: var(--workspace-paper);
+  --color-card-foreground: var(--workspace-ink);
+  --color-popover: var(--workspace-paper);
+  --color-popover-foreground: var(--workspace-ink);
+  --color-primary: var(--workspace-ink);
+  --color-primary-foreground: var(--workspace-paper);
+  --color-background: var(--workspace-paper);
+  --color-foreground: var(--workspace-ink);
+  --color-muted-foreground: var(--workspace-muted);
+  --color-accent-foreground: var(--workspace-ink);
+  --color-secondary: var(--workspace-well);
+  --color-secondary-foreground: var(--workspace-ink);
+  --color-input: var(--workspace-line);
+  --color-ring: #7d97b2;
+  --sidebar: #fafafa;
+  --sidebar-foreground: hsl(240 5.3% 26.1%);
+  --sidebar-primary: hsl(240 5.9% 10%);
+  --sidebar-primary-foreground: hsl(0 0% 98%);
+  --sidebar-accent: hsl(240 4.8% 95.9%);
+  --sidebar-accent-foreground: hsl(240 5.9% 10%);
+  --sidebar-border: hsl(220 13% 91%);
+  --sidebar-ring: hsl(217.2 91.2% 59.8%);
+}
+
+/* Workspace light is a layout treatment as well as a palette. The terminal
+   keeps its own monospace rendering, while the navigation and workspace
+   chrome switch to the calmer system UI face and flatter planes approved for
+   this theme. */
+html[data-theme="workspaceLight"] .pterm-titlebar {
+  height: 46px;
+  justify-content: flex-start;
+  padding: 0 20px 0 276px;
+  background: var(--workspace-paper);
+  border-color: var(--workspace-line);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+html[data-theme="workspaceLight"] .pterm-titlebar img {
+  display: none;
+}
+
+html[data-theme="workspaceLight"] [data-testid="tabs-panel"],
+html[data-theme="workspaceLight"] [data-testid$="-panel"] {
+  background: var(--workspace-paper);
+  border-color: var(--workspace-line);
+  color: var(--workspace-ink);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+}
+
+html[data-theme="workspaceLight"] [data-testid$="-panel"] .text-muted {
+  color: var(--workspace-muted);
+}
+
+html[data-theme="workspaceLight"] [data-testid$="-panel"] .text-faint {
+  color: #98a2b3;
+}
+
+html[data-theme="workspaceLight"] [data-testid$="-heading"],
+html[data-theme="workspaceLight"] .workspace-section-heading,
+html[data-theme="workspaceLight"] [data-testid$="-panel"] .text-label {
+  color: var(--workspace-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+html[data-theme="workspaceLight"] [data-testid$="-toggle"] {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+html[data-theme="workspaceLight"] .utility-row,
+html[data-theme="workspaceLight"] [data-testid^="gitpanel-"] {
+  border-radius: 6px;
+  color: var(--workspace-muted);
+}
+
+html[data-theme="workspaceLight"] .utility-row:hover:not(:disabled),
+html[data-theme="workspaceLight"] .utility-prompt-row:hover,
+html[data-theme="workspaceLight"] [data-testid^="gitpanel-"]:hover {
+  background: var(--workspace-hover);
+  color: var(--workspace-ink);
+}
+
+html[data-theme="workspaceLight"] [data-testid="tabbar"] {
+  background: var(--workspace-paper);
+  border-color: var(--workspace-line);
+}
+
+html:not([data-theme="workspaceLight"])
+  [data-sidebar="menu-button"][data-active="true"] {
+  background: color-mix(in srgb, var(--color-raised) 88%, var(--color-fg));
+}
+
+html:not([data-theme="workspaceLight"])
+  [data-testid="tabs-panel"]
+  [data-slot="tabs-trigger"][data-state="active"],
+html:not([data-theme="workspaceLight"])
+  [data-testid="tabbar"]
+  [data-slot="tabs-trigger"][data-state="active"] {
+  background: color-mix(in srgb, var(--color-raised) 88%, var(--color-fg));
+}
+
+html[data-theme="workspaceLight"] [data-testid="terminal-column"] {
+  background: var(--workspace-paper);
+}
+
+html[data-theme="workspaceLight"] .workspace-terminal-canvas {
+  gap: 10px;
+  padding: 10px;
+  background: var(--workspace-paper);
+}
+
+html[data-theme="workspaceLight"] .workspace-terminal-surface {
+  border-color: var(--workspace-line);
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgb(31 41 55 / 0.06);
+}
+
+html[data-theme="workspaceLight"] [data-testid="status-bar"] {
+  height: 26px;
+  padding: 0 12px;
+  background: var(--workspace-chrome);
+  border-color: var(--workspace-line);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 11px;
+}
+
+html[data-theme="workspaceLight"] [data-testid="hooks-bar"],
+html[data-theme="workspaceLight"] [data-testid="update-bar"] {
+  height: 24px;
+  border-color: var(--workspace-line);
+  background: var(--workspace-paper);
+  color: var(--workspace-muted);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 11px;
+}
+
+html[data-theme="workspaceLight"] [data-testid="hooks-bar-message"] {
+  color: #8a5a00;
+  font-weight: 600;
+}
+
+html[data-theme="workspaceLight"] [data-testid="hooks-bar-install"],
+html[data-theme="workspaceLight"] [data-testid="update-download"] {
+  color: var(--workspace-ink);
+  font-weight: 600;
+  text-decoration-color: var(--workspace-line);
+}
+
+/* Wall mode uses the same quiet planes as the workspace, but each cell gets
+   its own frame. This makes an empty or duplicated project read as a chosen
+   workspace rather than a blank stretch of terminal canvas. */
+html[data-theme="workspaceLight"] .wall-cell {
+  border: 1px solid var(--workspace-line);
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgb(31 41 55 / 0.06);
+}
+
+html[data-theme="workspaceLight"] .wall-cell-header {
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 9px 9px 0 0;
+  background: var(--workspace-paper);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 12px;
+}
+
+html[data-theme="workspaceLight"] .wall-cell[data-focused="true"] {
+  border-color: var(--color-accent);
+  box-shadow:
+    0 0 0 1px rgb(37 99 235 / 0.14),
+    0 2px 6px rgb(31 41 55 / 0.06);
+}
+
+html[data-theme="workspaceLight"] .wall-cell-picker {
+  margin: 4px 0 0 8px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgb(31 41 55 / 0.12);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+/* The optional utility columns are a shelf of short actions, not terminal
+   panes. A denser system face, contained search field and quiet row hover let
+   them stay useful without competing with the live workspace. */
+html[data-theme="workspaceLight"] .utility-panel {
+  background: var(--workspace-paper);
+  border-color: var(--workspace-line);
+  color: var(--workspace-ink);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  font-size: 12px;
+}
+
+html[data-theme="workspaceLight"] .utility-panel [data-testid$="-toggle"] {
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+html[data-theme="workspaceLight"] .utility-filter {
+  height: 30px;
+  margin: 0 8px 8px;
+  border-color: var(--workspace-line) !important;
+  border-radius: 6px;
+  background: var(--workspace-well) !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 12px;
+}
+
+html[data-theme="workspaceLight"] .utility-list {
+  padding: 0 4px 8px;
+}
+
+html[data-theme="workspaceLight"] .utility-row {
+  min-height: 29px;
+  border-radius: 6px;
+  padding: 5px 8px;
+  color: var(--workspace-muted);
+  font-size: 12px;
+  line-height: 1.35;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+html[data-theme="workspaceLight"] .utility-empty {
+  margin: 6px 4px;
+  border: 1px dashed var(--workspace-line);
+  border-radius: 6px;
+  padding: 10px;
+  color: var(--workspace-muted);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+html[data-theme="workspaceLight"] .utility-add {
+  display: flex;
+  height: 24px;
+  width: 24px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--workspace-line);
+  border-radius: 6px;
+  background: var(--workspace-well);
+  color: var(--workspace-muted);
+}
+
+html[data-theme="workspaceLight"] .utility-add:hover {
+  background: var(--workspace-hover);
+  color: var(--workspace-ink);
+}
+
+html[data-theme="workspaceLight"] .utility-delete {
+  height: 24px;
+  width: 24px;
+  border-radius: 6px;
+}
+
+html[data-theme="workspaceLight"] [data-testid="workspace-context"] {
+  color: var(--workspace-ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  padding: 0 10px 0 0;
+}
+
+html[data-theme="workspaceLight"] .workspace-utility-card,
+html[data-theme="workspaceLight"] .workspace-utility-strip {
+  border-color: var(--workspace-line);
+  border-radius: 8px;
+  background: var(--workspace-paper);
+  box-shadow: 0 1px 2px rgb(31 41 55 / 0.04);
+}
+
+html[data-theme="workspaceLight"] .workspace-utility-card {
+  max-height: 320px;
+  overflow: hidden;
+}
+
+html[data-theme="workspaceLight"] .workspace-utility-card > :first-child {
+  border-bottom: 1px solid var(--workspace-line);
+}
+
+html[data-theme="workspaceLight"] .workspace-utility-strip {
+  min-height: 36px;
+  padding: 0 10px;
+  color: var(--workspace-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+html[data-theme="workspaceLight"] .workspace-utility-strip:hover {
+  border-color: #c6d2de;
+  background: var(--workspace-hover);
+  color: var(--workspace-ink);
+}
+
+html[data-theme="workspaceLight"] [data-testid="workspace-utilities"] {
+  gap: 8px;
+}
+
+html[data-theme="workspaceLight"] [data-testid="gitpanel-message"],
+html[data-theme="workspaceLight"] [data-testid="gitpanel-commit"] {
+  border-color: var(--workspace-line);
+  border-radius: 6px;
+  background: var(--workspace-well);
+  color: var(--workspace-muted);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+html[data-theme="workspaceLight"]
+  [data-testid="gitpanel-commit"]:enabled:hover {
+  background: var(--workspace-hover);
+  color: var(--workspace-ink);
+}
+
+html[data-theme="workspaceLight"] .workspace-utility-drop-over {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 /* What lets the user move the window. `src/main/index.ts` opens it with
@@ -206,4 +570,26 @@ html, body, #root {
    branching on the theme. */
 .lip {
   box-shadow: inset 0 1px 0 var(--color-inset);
+}
+
+:root {
+  --sidebar: var(--color-surface);
+  --sidebar-foreground: var(--color-fg);
+  --sidebar-primary: var(--color-accent);
+  --sidebar-primary-foreground: var(--color-primary-foreground);
+  --sidebar-accent: var(--color-raised);
+  --sidebar-accent-foreground: var(--color-fg);
+  --sidebar-border: var(--color-border);
+  --sidebar-ring: var(--color-ring);
+}
+
+@theme inline {
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
 }

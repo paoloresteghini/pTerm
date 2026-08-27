@@ -24,7 +24,7 @@ export const PRIORITY_RANK: Record<TodoPriority, number> = { high: 0, medium: 1,
  *
  * Tokens rather than literals, so the dot follows the active palette like
  * everything else in the window: `themeCss.test.ts` and `themes.test.ts` are
- * what keep these three readable in all five themes.
+ * what keep these three readable in all six themes.
  *
  * Here rather than in `TodosPanel.tsx`, which is where it is drawn: the panel
  * imports the modal and the modal draws the same mark, so exporting it from

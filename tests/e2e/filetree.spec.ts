@@ -197,7 +197,7 @@ test('lists the active project at the top level, folders first', async () => {
 })
 
 /*
- * Every row draws an icon, and a directory draws a twist.
+ * Every row draws its file icon, and a directory also draws a collapse control.
  *
  * Asserted on the SVG's presence rather than on which shape it is: the mapping
  * from a name to a kind is `tests/unit/fileIcon.test.ts`'s job, and duplicating
@@ -205,15 +205,16 @@ test('lists the active project at the top level, folders first', async () => {
  * cannot see is whether the icon is the right one — only that a row is not
  * silently drawing nothing, which is what a broken import would look like.
  */
-test('every row draws an icon, and only directories draw a twist', async () => {
+test('every row draws an icon, and only directories draw a collapse control', async () => {
   const dir = page.getByTestId('tree-row-src')
   const file = page.getByTestId('tree-row-README.md')
-  await expect(dir.locator('svg')).toHaveCount(1)
+  await expect(dir.locator('svg')).toHaveCount(2)
   await expect(file.locator('svg')).toHaveCount(1)
 
-  // The twist is text, so it is read rather than counted. A file's slot is
-  // there but empty, which is what keeps every name starting at the same x.
-  expect((await dir.innerText()).startsWith('▸')).toBe(true)
+  // The shadcn collapse trigger carries open state. A file is a plain row,
+  // so it never receives that state or an extra chevron icon.
+  await expect(dir).toHaveAttribute('data-state', 'closed')
+  await expect(file).not.toHaveAttribute('data-state')
   expect((await file.innerText()).trim()).toBe('README.md')
 })
 

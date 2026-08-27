@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { PromptEntry } from '../shared/ipc'
 import { useColumnWidth } from './lib/columnWidth'
 import { cn } from './lib/cn'
-import { ColumnResizer, PanelHeading, PanelStrip, type PanelSide } from './ui/Panel'
+import { ColumnResizer, PanelHeading, PanelStrip, PanelSurface, type PanelSide } from './ui/Panel'
 import { NewPromptDialog } from './NewPromptDialog'
 
 /**
@@ -25,6 +25,7 @@ export function PromptsPanel({
   onToggle,
   onDragStart,
   side,
+  embedded = false,
 }: {
   /** Types a prompt's body into the active pane. Never submits it. */
   onInsert: (body: string) => void
@@ -35,6 +36,8 @@ export function PromptsPanel({
   /** Grabs this column to move it. See `PanelHeading`'s doc comment. */
   onDragStart: () => void
   side: PanelSide
+  /** Renders beneath Environment in Workspace Light instead of in the row. */
+  embedded?: boolean
 }) {
   // null is "still reading", which renders as an ellipsis rather than as the
   // empty-state text: "no prompts yet" during the first read would be wrong on
@@ -74,18 +77,20 @@ export function PromptsPanel({
         side={side}
         onClick={onToggle}
         onDragStart={onDragStart}
+        embedded={embedded}
       />
     )
   }
 
   return (
-    <div
+    <PanelSurface
       data-testid="prompts-panel"
+      embedded={embedded}
+      side={side}
       className={cn(
-        'relative flex shrink-0 flex-col border-border bg-surface font-mono text-[11px] select-none',
-        side === 'left' ? 'border-r' : 'border-l',
+        'utility-panel utility-panel-prompts font-mono text-[11px] select-none',
       )}
-      style={{ width }}
+      style={embedded ? undefined : { width }}
     >
       {/* Heading and `+` as siblings: a button inside a button is invalid HTML
           and the inner click would bubble out and collapse the column. */}
@@ -100,22 +105,22 @@ export function PromptsPanel({
           data-testid="prompts-new"
           aria-label="New prompt"
           onClick={() => setAdding(true)}
-          className="cursor-default border-none bg-transparent p-0 text-[13px] leading-none text-faint hover:text-fg"
+          className="utility-add cursor-default border-none bg-transparent p-0 text-[13px] leading-none text-faint hover:text-fg"
         >
           +
         </button>
       </div>
 
-      <div data-testid="scroll-prompts" className="scroll-thin min-h-0 flex-1 overflow-y-auto">
+      <div data-testid="scroll-prompts" className="utility-list scroll-thin min-h-0 flex-1 overflow-y-auto">
         {prompts === null ? (
-          <p className="px-2.5 py-1 text-faint">…</p>
+          <p className="utility-empty px-2.5 py-1 text-faint">…</p>
         ) : prompts.length === 0 ? (
-          <p data-testid="prompts-empty" className="px-2.5 py-1 text-muted">
+          <p data-testid="prompts-empty" className="utility-empty px-2.5 py-1 text-muted">
             No prompts yet. Add one with +.
           </p>
         ) : (
           prompts.map((prompt) => (
-            <div key={prompt.id} className="group flex items-baseline gap-1 pr-1.5">
+            <div key={prompt.id} className="utility-prompt-row group flex items-baseline gap-1 pr-1.5">
               <button
                 data-testid={`prompt-${prompt.id}`}
                 disabled={!canInsert}
@@ -123,7 +128,7 @@ export function PromptsPanel({
                 // The body, so a one-word label is still identifiable without
                 // opening anything.
                 title={prompt.body}
-                className="flex-1 cursor-default truncate border-none bg-transparent px-2.5 py-1 text-left text-muted hover:text-fg disabled:opacity-40"
+                className="utility-row flex-1 cursor-default truncate border-none bg-transparent px-2.5 py-1 text-left text-muted hover:text-fg disabled:opacity-40"
               >
                 {prompt.label}
               </button>
@@ -144,7 +149,7 @@ export function PromptsPanel({
                       setError(reason instanceof Error ? reason.message : String(reason))
                     })
                 }}
-                className="cursor-default border-none bg-transparent px-0.5 text-faint hover:text-danger"
+                className="utility-delete cursor-default border-none bg-transparent px-0.5 text-faint hover:text-danger"
               >
                 ✕
               </button>
@@ -167,13 +172,15 @@ export function PromptsPanel({
         onOpenChange={setAdding}
         onSave={(label, body) => window.pterm.promptsAdd(label, body).then(setPrompts)}
       />
-      <ColumnResizer
-        testid="resize-prompts"
-        side={side}
-        width={width}
-        onResize={set}
-        onCommit={commit}
-      />
-    </div>
+      {!embedded ? (
+        <ColumnResizer
+          testid="resize-prompts"
+          side={side}
+          width={width}
+          onResize={set}
+          onCommit={commit}
+        />
+      ) : null}
+    </PanelSurface>
   )
 }

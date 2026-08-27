@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
 import type {
   DiffSide,
   GitChanges,
@@ -9,7 +11,7 @@ import type {
 import { useColumnWidth } from './lib/columnWidth'
 import { createMutationGuard } from './lib/mutationGuard'
 import { cn } from './lib/cn'
-import { ColumnResizer, PanelHeading, PanelStrip, type PanelSide } from './ui/Panel'
+import { ColumnResizer, PanelHeading, PanelStrip, PanelSurface, type PanelSide } from './ui/Panel'
 import { ConfirmGitDiscard } from './ConfirmGitDiscard'
 
 /** How often the list is re-read while the column is open. */
@@ -118,6 +120,7 @@ export function GitPanel({
   onDragStart,
   onOpenDiff,
   side,
+  embedded = false,
 }: {
   project: ProjectDescriptor | undefined
   collapsed: boolean
@@ -126,6 +129,8 @@ export function GitPanel({
   onDragStart: () => void
   onOpenDiff: (relPath: string, side: DiffSide) => void
   side: PanelSide
+  /** Renders beneath Environment in Workspace Light instead of in the row. */
+  embedded?: boolean
 }) {
   const { width, set, commit } = useColumnWidth('pterm:gitWidth')
   const [changes, setChanges] = useState<GitChanges | null>(null)
@@ -305,6 +310,7 @@ export function GitPanel({
         side={side}
         onClick={onToggle}
         onDragStart={onDragStart}
+        embedded={embedded}
       />
     )
   }
@@ -316,13 +322,14 @@ export function GitPanel({
   const pendingUntracked = new Set(pendingDiscard?.untracked ?? [])
 
   return (
-    <div
+    <PanelSurface
       data-testid="git-panel"
+      embedded={embedded}
+      side={side}
       className={cn(
-        'relative flex shrink-0 flex-col border-border bg-surface font-mono text-[11px] select-none',
-        side === 'left' ? 'border-r' : 'border-l',
+        'font-mono text-[11px] select-none',
       )}
-      style={{ width }}
+      style={embedded ? undefined : { width }}
     >
       <PanelHeading
         testid="git-toggle"
@@ -349,7 +356,7 @@ export function GitPanel({
         ) : null}
 
         <div className="flex flex-col gap-1 px-2.5 py-2">
-          <textarea
+          <Textarea
             data-testid="gitpanel-message"
             // Every text field in the app carries this: without it ⌘W typed
             // into the box closes a pane and destroys its session, taking the
@@ -368,16 +375,19 @@ export function GitPanel({
             }}
             rows={2}
             placeholder="Message (⌘Enter to commit)"
-            className="scroll-thin resize-none rounded border border-border bg-raised px-1.5 py-1 font-mono text-[11px] text-fg placeholder:text-faint focus:outline-none"
+            className="scroll-thin resize-none border-border bg-raised px-1.5 py-1 font-mono text-[11px] text-fg placeholder:text-faint"
           />
-          <button
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
             data-testid="gitpanel-commit"
             disabled={busy || message.trim() === '' || changes === null}
             onClick={onCommit}
-            className="cursor-default rounded border border-border bg-transparent px-2 py-1 text-muted hover:text-fg disabled:opacity-40"
+            className="cursor-default border-border px-2 py-1 text-muted hover:text-fg disabled:opacity-40"
           >
             Commit
-          </button>
+          </Button>
         </div>
 
         {error ? (
@@ -444,13 +454,15 @@ export function GitPanel({
         onCancel={() => setPendingDiscard(null)}
         onDiscard={confirmDiscard}
       />
-      <ColumnResizer
-        testid="resize-git"
-        side={side}
-        width={width}
-        onResize={set}
-        onCommit={commit}
-      />
-    </div>
+      {!embedded ? (
+        <ColumnResizer
+          testid="resize-git"
+          side={side}
+          width={width}
+          onResize={set}
+          onCommit={commit}
+        />
+      ) : null}
+    </PanelSurface>
   )
 }

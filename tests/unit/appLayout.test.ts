@@ -322,4 +322,12 @@ describe('Terminal.tsx fitToContainer', () => {
     expect(laidOut).toBeLessThan(fit)
     expect(hasBox).toBeLessThan(fit)
   })
+
+  it('redraws after a fit whose pixel size changes without changing its grid', () => {
+    // FitAddon clears and redraws only when its proposed row or column count
+    // changes. Wall cells can move by pixels while retaining the same grid,
+    // so this redraw is what prevents a stale WebGL frame from remaining on
+    // screen until the user resizes the window.
+    expect(terminal).toMatch(/const grid = \{ cols: term\.cols, rows: term\.rows \} fit\.fit\(\) if \(term\.cols === grid\.cols && term\.rows === grid\.rows\) \{ term\.refresh\(0, term\.rows - 1\) \}/)
+  })
 })

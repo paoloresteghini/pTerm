@@ -170,19 +170,17 @@ describe('menu accelerators', () => {
     // belongs to which accelerator. `\b` keeps this off `registerAccelerator`,
     // whose own capital A cannot match a lowercase one.
     //
-    // Two more opt-outs than there are accelerators: the tabs column's item
-    // and the wall's item both opt out with no accelerator to opt out of
-    // (neither has a keystroke at all: the wall's for the reason its own
-    // comment gives, the same one `toggle-tabs` states). Exact, not `>=`:
+    // One more opt-out than there are accelerators: the wall item opts out
+    // without a keystroke. Exact, not `>=`:
     // with slack in the count, the first accelerator-bearing item that
     // forgets to opt out lands inside the slack and this goes quiet.
     // Measured 2026-08-17 against this file, after Task 8 added the wall's
-    // View menu item: 17 `accelerator: '` and 19 `registerAccelerator:
+    // View menu item: 18 `accelerator: '` and 19 `registerAccelerator:
     // false`.
     const declared = main.match(/\baccelerator: '/g) ?? []
     const unregistered = main.match(/registerAccelerator: false/g) ?? []
     expect(declared).not.toHaveLength(0)
-    expect(unregistered).toHaveLength(declared.length + 2)
+    expect(unregistered).toHaveLength(declared.length + 1)
     expect(main).not.toMatch(/registerAccelerator: true/)
   })
 })

@@ -14,7 +14,6 @@ import { Terminal, paneGrid, focusTerminal } from './Terminal'
 import { HistoryOverlay } from './HistoryOverlay'
 import { PaneDivider } from './PaneDivider'
 import { TabBar } from './TabBar'
-import { TabsPanel } from './TabsPanel'
 import { DeadPane } from './DeadPane'
 import { Sidebar } from './Sidebar'
 import { FilesPanel } from './FilesPanel'
@@ -31,6 +30,7 @@ import { AddProjectDialog } from './AddProjectDialog'
 import { ConfirmClosePane } from './ConfirmClosePane'
 import { SettingsPane } from './settings/SettingsPane'
 import { TitleBar } from './TitleBar'
+import { WorkspaceContextCard } from './WorkspaceContextCard'
 import { UpdateBar } from './UpdateBar'
 import { HooksBar } from './HooksBar'
 import { StatusBar } from './StatusBar'
@@ -49,13 +49,22 @@ import {
   anyOpen,
   hideAll,
   restore,
-  showsTabBar,
   type ColumnId,
   type ColumnVisibility,
 } from './lib/columnVisibility'
 import { moveColumn, orderFromStored, resizerSideFor, type ColumnSlot } from './lib/columnOrder'
 import { cellRect } from './lib/wallLayout'
-import { columnsFromStored, slotsFromStored, toggleSlot, wallActive } from './lib/wallSlots'
+import {
+  addSlot,
+  columnsFromStored,
+  pinSlot,
+  removeProjectSlots,
+  removeSlot,
+  newSlot,
+  slotsFromStored,
+  wallActive,
+  type WallSlot,
+} from './lib/wallSlots'
 import {
   INITIAL_WORKSPACE_STATE,
   activeProject,
@@ -77,11 +86,17 @@ import {
   type PaneDirection,
   type PaneGroup,
 } from './workspace'
-import { groupedTabs, tabTree } from './lib/tabGroups'
+import { groupedTabs } from './lib/tabGroups'
 import { projectMuted, toggleProjectMute } from './mute'
 import { PANE_COLOR_DEFAULT, type PaneColor } from '../shared/paneColors'
 import type { ThemeId } from '../shared/themes'
 import { applyTheme, bootTheme } from './theme'
+import {
+  DEFAULT_EDITOR_FONT,
+  DEFAULT_TERMINAL_FONT,
+  isFontChoice,
+  type FontChoice,
+} from './fonts'
 import { ColorSwatches } from './ColorSwatches'
 import {
   UNSORTED_ID,
@@ -136,9 +151,27 @@ const TODOS_KEY = 'pterm:todosCollapsed'
 const NOTES_KEY = 'pterm:notesCollapsed'
 const TABS_KEY = 'pterm:tabsCollapsed'
 const BROWSER_KEY = 'pterm:browserCollapsed'
+const EDITOR_FONT_KEY = 'pterm:editorFont'
+const TERMINAL_FONT_KEY = 'pterm:terminalFont'
 
 /** Where the row's left-to-right order is kept, once a drag has changed it. */
 const ORDER_KEY = 'pterm:columnOrder'
+
+/** These Workspace Light panels live in the Environment rail. */
+type WorkspaceUtilitySlot = 'tabs' | 'skills' | 'presets' | 'prompts' | 'git' | 'issues' | 'notes' | 'todos'
+
+function isWorkspaceUtilitySlot(slot: ColumnSlot): slot is WorkspaceUtilitySlot {
+  return (
+    slot === 'tabs' ||
+    slot === 'skills' ||
+    slot === 'presets' ||
+    slot === 'prompts' ||
+    slot === 'git' ||
+    slot === 'issues' ||
+    slot === 'notes' ||
+    slot === 'todos'
+  )
+}
 
 /*
  * A column has THREE states, and these keys hold the second of the two flags.
@@ -201,12 +234,15 @@ const WALL_COLUMNS_KEY = 'pterm:wallColumns'
 /** What `useWallState` hands back. The setters are the routes Task 8 wires. */
 interface WallState {
   on: boolean
-  /** Project ids in slot order, resolved against the projects that exist. */
-  slots: string[]
+  /** Independently configurable cells in display order. */
+  slots: WallSlot[]
   columns: number
   setOn: (on: boolean) => void
   setColumns: (count: number) => void
-  toggleSlot: (projectId: string) => void
+  addSlot: (projectId: string) => void
+  removeProjectSlots: (projectId: string) => void
+  removeSlot: (slotId: string) => void
+  pinSlot: (slotId: string, pin: string | null) => void
 }
 
 /**
@@ -223,7 +259,7 @@ interface WallState {
  * launch. Held raw, it fills in as `restore` lands, and a project removed later
  * leaves the wall on its own with nothing written.
  *
- * That is also why the write only ever happens in `toggleSlot`: persisting the
+ * That is also why the write only ever happens through `updateSlots`: persisting the
  * resolved read would take a launch's momentarily-empty answer and make it the
  * stored truth.
  */
@@ -253,10 +289,10 @@ function useWallState(projects: ProjectDescriptor[]): WallState {
   // idempotent, so StrictMode's double invocation costs nothing. This is the
   // one moment the stored list is allowed to lose an id naming a project that
   // is gone, because it is the one moment a user asked for a change.
-  const toggle = useCallback(
-    (projectId: string) => {
+  const updateSlots = useCallback(
+    (update: (slots: WallSlot[]) => WallSlot[]) => {
       setStored((was) => {
-        const next = JSON.stringify(toggleSlot(slotsFromStored(was, projects), projectId))
+        const next = JSON.stringify(update(slotsFromStored(was, projects)))
         localStorage.setItem(WALL_SLOTS_KEY, next)
         return next
       })
@@ -264,7 +300,25 @@ function useWallState(projects: ProjectDescriptor[]): WallState {
     [projects],
   )
 
-  return { on, slots, columns, setOn, setColumns, toggleSlot: toggle }
+  const add = useCallback(
+    (projectId: string) => {
+      const slot = newSlot(projectId)
+      updateSlots((slots) => addSlot(slots, slot))
+    },
+    [updateSlots],
+  )
+
+  return {
+    on,
+    slots,
+    columns,
+    setOn,
+    setColumns,
+    addSlot: add,
+    removeProjectSlots: (projectId) => updateSlots((slots) => removeProjectSlots(slots, projectId)),
+    removeSlot: (slotId) => updateSlots((slots) => removeSlot(slots, slotId)),
+    pinSlot: (slotId, pin) => updateSlots((slots) => pinSlot(slots, slotId, pin)),
+  }
 }
 
 export function App() {
@@ -280,7 +334,7 @@ export function App() {
   const [issuesCollapsed, setIssuesCollapsed] = useState(() => storedCollapsed(ISSUES_KEY, true))
   const [todosCollapsed, setTodosCollapsed] = useState(() => storedCollapsed(TODOS_KEY, true))
   const [notesCollapsed, setNotesCollapsed] = useState(() => storedCollapsed(NOTES_KEY, true))
-  const [tabsCollapsed, setTabsCollapsed] = useState(() => storedCollapsed(TABS_KEY, true))
+  const [, setTabsCollapsed] = useState(() => storedCollapsed(TABS_KEY, true))
   // Open, where every other column defaults to collapsed. The browser column
   // is DRAWN only while the active project has a browser pane (`renderSlot`
   // mounts it whenever the workspace has one anywhere, and hides it where the
@@ -340,6 +394,7 @@ export function App() {
   // themselves from rendering, see `gap` below.
   const [dragging, setDragging] = useState<ColumnSlot | null>(null)
   const [over, setOver] = useState<number | null>(null)
+  const [workspaceUtilityOver, setWorkspaceUtilityOver] = useState<WorkspaceUtilitySlot | 'end' | null>(null)
 
   // A drag released outside any gap (dropped on a pane, or cancelled with
   // Escape) never reaches a gap's own `onDrop`, so nothing there would clear
@@ -352,6 +407,7 @@ export function App() {
     const end = (): void => {
       setDragging(null)
       setOver(null)
+      setWorkspaceUtilityOver(null)
     }
     window.addEventListener('dragend', end)
     return () => window.removeEventListener('dragend', end)
@@ -372,6 +428,14 @@ export function App() {
   // disagree with what is on screen. This state is what React renders from,
   // and what carries a change into every live terminal.
   const [theme, setTheme] = useState<ThemeId>(() => bootTheme())
+  const [editorFont, setEditorFont] = useState<FontChoice>(() => {
+    const stored = localStorage.getItem(EDITOR_FONT_KEY)
+    return isFontChoice(stored) ? stored : DEFAULT_EDITOR_FONT
+  })
+  const [terminalFont, setTerminalFont] = useState<FontChoice>(() => {
+    const stored = localStorage.getItem(TERMINAL_FONT_KEY)
+    return isFontChoice(stored) ? stored : DEFAULT_TERMINAL_FONT
+  })
   // Which editor panes have unsaved edits, renderer-only and never persisted
   // (see `dirtyPanes.ts`). Keyed by pane id rather than tab id: `TabBar` maps
   // a tab to its one pane before reading this.
@@ -412,6 +476,16 @@ export function App() {
     setTheme(id)
     applyTheme(id)
     window.pterm.updateTheme(id).catch(() => undefined)
+  }, [])
+
+  const onEditorFontChange = useCallback((font: FontChoice) => {
+    setEditorFont(font)
+    localStorage.setItem(EDITOR_FONT_KEY, font)
+  }, [])
+
+  const onTerminalFontChange = useCallback((font: FontChoice) => {
+    setTerminalFont(font)
+    localStorage.setItem(TERMINAL_FONT_KEY, font)
   }, [])
 
   const onDirtyChange = useCallback((paneId: string, isDirty: boolean) => {
@@ -511,13 +585,6 @@ export function App() {
     // Collapsing to the strip is the heading's job, not this one's.
     setColumnHidden('notes', !hiddenColumns.notes)
   }, [hiddenColumns.notes, setColumnHidden])
-  const toggleTabs = useCallback(() => {
-    // The View menu's item lands here, and means presence: show the column,
-    // or take it off screen entirely. There is no shortcut for this one, so
-    // unlike its siblings only the menu ever calls it.
-    setColumnHidden('tabs', !hiddenColumns.tabs)
-  }, [hiddenColumns.tabs, setColumnHidden])
-
   // What was open when hide-all last closed everything. A ref, not state:
   // nothing renders from it, and it must not be persisted, because it answers
   // "what did I have open a moment ago" and a set restored from last week is
@@ -633,20 +700,6 @@ export function App() {
   useEffect(() => {
     window.pterm.wallVisible({ on: wallState.on, columns: wallState.columns })
   }, [wallState.on, wallState.columns])
-
-  // The *Collapsed booleans as one ColumnVisibility, for showsTabBar.
-  const collapsedColumns: ColumnVisibility = {
-    tabs: tabsCollapsed,
-    files: filesCollapsed,
-    skills: skillsCollapsed,
-    presets: presetsCollapsed,
-    prompts: promptsCollapsed,
-    git: gitCollapsed,
-    issues: issuesCollapsed,
-    todos: todosCollapsed,
-    notes: notesCollapsed,
-    browser: browserCollapsed,
-  }
 
   const project = activeProject(state)
   const currentTabId = activeTabId(state)
@@ -998,9 +1051,8 @@ export function App() {
    * the id up in, and both states that fail that test are reachable from a
    * bar that is on screen:
    *
-   * - no project at all, since `showsTabBar` reads column visibility and
-   *   nothing else, so the bar renders on the welcome page too. The press
-   *   would hit the early return below and do nothing at all;
+   * - no project at all, since the bar renders on the welcome page too. The
+   *   press would hit the early return below and do nothing at all;
    * - Unsorted, which the renderer holds as a project (`withUnsorted`, in
    *   `ipc/restore.ts`) while config has no row for it. The press would reach
    *   main, come back null and raise an error banner.
@@ -1398,8 +1450,8 @@ export function App() {
 
   /**
    * Whether dragging `from` onto `to` would do anything. Passed to both
-   * `TabsPanel` and `TabBar` so the two surfaces refuse identically: neither
-   * of them knows about tab rows or projects, so the rule lives here once
+   * `TabBar` and the project navigator so both surfaces refuse identically.
+   * Neither knows about tab rows or projects, so the rule lives here once
    * instead of being derived twice.
    */
   const canJoin = useCallback(
@@ -1529,13 +1581,14 @@ export function App() {
    * `WallCell` only draws the row that sends `null` while there is one.
    */
   const pinWallPane = useCallback(
-    (projectId: string, paneId: string | null, current: string | undefined) => {
+    (slotId: string, projectId: string, paneId: string | null, current: string | undefined) => {
       const named = paneId ?? current
       if (named === undefined) return
       window.pterm.setWallPin(named, paneId)
+      wallState.pinSlot(slotId, paneId)
       patchProject(projectId, { wallPin: paneId })
     },
-    [patchProject],
+    [patchProject, wallState],
   )
 
   /**
@@ -1555,16 +1608,23 @@ export function App() {
   )
 
   /**
-   * Pin the pane the keyboard is currently on to the active project's wall
-   * slot. The palette's "Pin this pane to the wall" route to `pinWallPane`,
-   * naming the active project and the active pane in the same way a click on
-   * the picker's own row would, but from the keyboard rather than a cell that
-   * has to already be on screen to click.
+   * Pin the pane the keyboard is currently on to the active project's latest
+   * wall cell. Before a cell has been added, preserve the project's pin too:
+   * a stored legacy slot intentionally falls back to that pin on its first
+   * wall launch, and the command remains useful before wall mode is enabled.
    */
   const pinActivePane = useCallback(() => {
     if (!state.activeProjectId || !activePaneId) return
-    pinWallPane(state.activeProjectId, activePaneId, undefined)
-  }, [state.activeProjectId, activePaneId, pinWallPane])
+    const slot = [...wallState.slots]
+      .reverse()
+      .find((entry) => entry.projectId === state.activeProjectId)
+    if (slot) {
+      pinWallPane(slot.id, state.activeProjectId, activePaneId, undefined)
+      return
+    }
+    window.pterm.setWallPin(activePaneId, activePaneId)
+    patchProject(state.activeProjectId, { wallPin: activePaneId })
+  }, [state.activeProjectId, activePaneId, patchProject, pinWallPane, wallState.slots])
 
   /**
    * Move the selection one pane along its tab's axis.
@@ -1955,9 +2015,6 @@ export function App() {
           case 'toggleFiles':
             toggleFiles()
             return
-          case 'toggleTabs':
-            toggleTabs()
-            return
           case 'toggleSkills':
             toggleSkills()
             return
@@ -2014,7 +2071,6 @@ export function App() {
       splitActive,
       focusPane,
       toggleFiles,
-      toggleTabs,
       toggleSkills,
       togglePresets,
       togglePrompts,
@@ -2241,21 +2297,161 @@ export function App() {
     }
   })
 
-  /**
-   * Which project a group belongs to, a question only the wall asks: which cell
-   * carries the focus outline, and which project a click in one focuses.
-   *
-   * `panes[0]` is safe because `paneGroups` never emits an empty group (it
-   * `continue`s on one rather than pushing it), and `projectIdForTab` is the
-   * route every other reader of a pane's project in this file takes.
-   */
   const projectOfGroup = (group: PaneGroup): string =>
     projectIdForTab(state.projects, group.panes[0].pane)
 
-  // Which slots have a pane in them, read off the groups rather than by asking
-  // the pin rule a second time here: the placeholder then appears exactly where
-  // no group was drawn, whatever the reason one was not.
-  const filledSlots = new Set(groups.filter((group) => group.visible).map(projectOfGroup))
+  const workspaceRailActive = theme === 'workspaceLight' && !wallView
+
+  const renderWorkspaceUtility = (slot: WorkspaceUtilitySlot, embedded: boolean): ReactNode => {
+    switch (slot) {
+      case 'tabs':
+        return null
+      case 'skills':
+        return hiddenColumns.skills ? null : (
+          <SkillsPanel
+            project={project}
+            collapsed={skillsCollapsed}
+            onToggle={() => toggleColumnCollapsed('skills')}
+            onDragStart={() => setDragging('skills')}
+            onInsert={(name) => {
+              if (activePaneId) window.pterm.input(activePaneId, `/${name}`)
+            }}
+            side={resizerSideFor(columnOrder, 'skills')}
+            embedded={embedded}
+          />
+        )
+      case 'presets':
+        return hiddenColumns.presets ? null : (
+          <PresetsPanel
+            project={project}
+            collapsed={presetsCollapsed}
+            onToggle={() => toggleColumnCollapsed('presets')}
+            onDragStart={() => setDragging('presets')}
+            onRun={(command, type) => launch(command, type)}
+            side={resizerSideFor(columnOrder, 'presets')}
+            embedded={embedded}
+          />
+        )
+      case 'prompts':
+        return hiddenColumns.prompts ? null : (
+          <PromptsPanel
+            collapsed={promptsCollapsed}
+            onToggle={() => toggleColumnCollapsed('prompts')}
+            onDragStart={() => setDragging('prompts')}
+            canInsert={activePaneId !== null}
+            onInsert={(body) => {
+              if (activePaneId) window.pterm.input(activePaneId, body)
+            }}
+            side={resizerSideFor(columnOrder, 'prompts')}
+            embedded={embedded}
+          />
+        )
+      case 'git':
+        return hiddenColumns.git ? null : (
+          <GitPanel
+            project={project}
+            collapsed={gitCollapsed}
+            onToggle={() => toggleColumnCollapsed('git')}
+            onDragStart={() => setDragging('git')}
+            onOpenDiff={openDiff}
+            side={resizerSideFor(columnOrder, 'git')}
+            embedded={embedded}
+          />
+        )
+      case 'issues':
+        return hiddenColumns.issues ? null : (
+          <IssuesPanel
+            project={project}
+            collapsed={issuesCollapsed}
+            onToggle={() => toggleColumnCollapsed('issues')}
+            onDragStart={() => setDragging('issues')}
+            side={resizerSideFor(columnOrder, 'issues')}
+            embedded={embedded}
+          />
+        )
+      case 'notes':
+        return hiddenColumns.notes ? null : (
+          <NotesPanel
+            project={project}
+            collapsed={notesCollapsed}
+            onToggle={() => toggleColumnCollapsed('notes')}
+            onDragStart={() => setDragging('notes')}
+            side={resizerSideFor(columnOrder, 'notes')}
+            embedded={embedded}
+          />
+        )
+      case 'todos':
+        return hiddenColumns.todos ? null : (
+          <TodosPanel
+            collapsed={todosCollapsed}
+            onToggle={() => toggleColumnCollapsed('todos')}
+            onDragStart={() => setDragging('todos')}
+            side={resizerSideFor(columnOrder, 'todos')}
+            creating={creatingTodo}
+            onCreatingChange={setCreatingTodo}
+            embedded={embedded}
+          />
+        )
+    }
+  }
+
+  const workspaceUtilitySlots = workspaceRailActive
+    ? columnOrder.filter((slot): slot is WorkspaceUtilitySlot =>
+        slot !== 'tabs' && isWorkspaceUtilitySlot(slot) && !hiddenColumns[slot],
+      )
+    : []
+
+  const dropWorkspaceUtility = (index: number): void => {
+    if (dragging === null || !isWorkspaceUtilitySlot(dragging)) return
+    moveColumnTo(dragging, index)
+    setDragging(null)
+    setWorkspaceUtilityOver(null)
+  }
+
+  const workspaceUtilities =
+    workspaceUtilitySlots.length === 0
+      ? undefined
+      : workspaceUtilitySlots.map((slot, index) => (
+          <div
+            key={slot}
+            data-testid={`workspace-utility-${slot}`}
+            onDragOver={(event) => {
+              if (dragging === null || !isWorkspaceUtilitySlot(dragging)) return
+              event.preventDefault()
+              setWorkspaceUtilityOver(slot)
+            }}
+            onDragLeave={() => setWorkspaceUtilityOver((was) => (was === slot ? null : was))}
+            onDrop={(event) => {
+              event.preventDefault()
+              dropWorkspaceUtility(columnOrder.indexOf(slot))
+            }}
+            className={cn(
+              'workspace-utility-drop',
+              workspaceUtilityOver === slot && dragging !== slot && 'workspace-utility-drop-over',
+            )}
+          >
+            {renderWorkspaceUtility(slot, true)}
+            {index === workspaceUtilitySlots.length - 1 && dragging !== null ? (
+              <div
+                data-testid="workspace-utility-drop-end"
+                onDragOver={(event) => {
+                  if (!isWorkspaceUtilitySlot(dragging)) return
+                  event.preventDefault()
+                  setWorkspaceUtilityOver('end')
+                }}
+                onDragLeave={() => setWorkspaceUtilityOver((was) => (was === 'end' ? null : was))}
+                onDrop={(event) => {
+                  event.preventDefault()
+                  dropWorkspaceUtility(columnOrder.indexOf(slot) + 1)
+                }}
+                className={cn(
+                  'h-2',
+                  workspaceUtilityOver === 'end' && 'workspace-utility-drop-over',
+                )}
+              />
+            ) : null}
+          </div>
+        ))
 
   // Cut, not rewritten, from the row it used to sit in directly: this is the
   // one slot `renderSlot` cannot build inline, since a fragment case that
@@ -2268,7 +2464,7 @@ export function App() {
     // helper's drop targets cost the row) should not have to spawn a tmux
     // session to ask for it.
     <div data-testid="terminal-column" className="flex min-w-0 flex-1 flex-col">
-      {showsTabBar(collapsedColumns, hiddenColumns, wallOn) ? (
+      {!wallOn ? (
         <TabBar
           tabs={tabEntries}
           activeId={currentTabId}
@@ -2299,7 +2495,22 @@ export function App() {
           {error}
         </pre>
       ) : null}
-      <div className="relative min-h-0 flex-1">
+      <div
+        className={cn(
+          'min-h-0 flex-1',
+          theme === 'workspaceLight' && !wallView && 'workspace-terminal-canvas flex gap-3 bg-surface p-3',
+          !(theme === 'workspaceLight' && !wallView) && 'relative',
+        )}
+      >
+        <div
+          className={cn(
+            'relative min-h-0 flex-1',
+            theme === 'workspaceLight' &&
+              !wallView &&
+              'workspace-terminal-surface overflow-hidden border border-border bg-bg',
+            !(theme === 'workspaceLight' && !wallView) && 'absolute inset-0',
+          )}
+        >
         {/* `showWelcome` is only ever true with `wallView !== null` when the wall
             is on and has no slots at all: the ordinary hints ("press Cmd+T",
             "select a project") describe a keystroke that would open a session
@@ -2340,7 +2551,8 @@ export function App() {
               // A background paints the padding box by default, which would
               // turn the `p-2` frame into an 8px border around every tab
               // instead of a hairline between panes.
-              'absolute flex gap-px bg-border bg-clip-content p-2',
+              'absolute flex gap-px bg-border bg-clip-content',
+              theme === 'workspaceLight' && group.rect ? 'p-3 pt-11' : 'p-2',
               // No rect means the whole column, which is every group without a
               // wall and every HIDDEN group with one. That second half is the
               // load-bearing one: a hidden group is `invisible`, not
@@ -2357,7 +2569,7 @@ export function App() {
               // right answer rather than a cost: the header IS part of the
               // cell, and a terminal measured at a box it does not really have
               // is the one thing this column must never hand tmux.
-              group.rect ? 'pt-6' : '',
+              group.rect && theme !== 'workspaceLight' ? 'pt-9' : '',
               group.visible ? 'visible z-10' : 'invisible z-0 pointer-events-none',
               // Which cell the keyboard and the columns are talking about, said
               // out loud. An outline rather than a border, for the reason the
@@ -2450,6 +2662,7 @@ export function App() {
                     relPath={editorRelPath(box.pane)}
                     paneColor={box.pane.color}
                     theme={theme}
+                    font={editorFont}
                     paneId={box.pane.id}
                     onDirtyChange={onDirtyChange}
                   />
@@ -2462,6 +2675,7 @@ export function App() {
                     // substitute the current canvas for it.
                     paneColor={box.pane.color}
                     theme={theme}
+                    font={terminalFont}
                     visible={group.visible}
                     // Never for a tab that is off screen: taking focus into one
                     // would move typing to a terminal the user cannot see.
@@ -2544,7 +2758,12 @@ export function App() {
                 visible group. */}
             <div
               data-testid={`dividers-${group.id}`}
-              className="pointer-events-none absolute inset-2 z-20"
+              className={cn(
+                'pointer-events-none absolute z-20',
+                theme === 'workspaceLight' && group.rect
+                  ? 'top-11 right-3 bottom-3 left-3'
+                  : 'inset-2',
+              )}
             >
               {group.panes.map((box, index) =>
                 index > 0 ? (
@@ -2573,16 +2792,16 @@ export function App() {
             Drawn after the groups, and positioned rather than laid out, for the
             reason `WallCell` gives: a header inside a group's flex layout would
             be one more item dividing the axis with the panes, which is not what
-            it is. What keeps the terminal clear of it is the `pt-6` on a group
+            it is. What keeps the terminal clear of it is the `pt-9` on a group
             with a rect, measured against the header's real height: NOT the
-            `p-2` `WallCell`'s own comment credits, which is 8px against 22.
+            `p-2` `WallCell`'s own comment credits, which is 8px against 32.
 
             `cellRect` with the same three arguments `paneGroups` passes, so a
             header and the terminal under it cannot disagree about where the
             cell is. */}
         {wallView
-          ? wallState.slots.map((projectId, index) => {
-              const cellProject = state.projects.find((entry) => entry.id === projectId)
+          ? wallState.slots.map((slot, index) => {
+              const cellProject = state.projects.find((entry) => entry.id === slot.projectId)
               // Unreachable: `slotsFromStored` resolved this list against the
               // same projects. Here because `find` says it could happen.
               if (cellProject === undefined) return null
@@ -2591,7 +2810,7 @@ export function App() {
               // function) is the project's active pane, and a header reading
               // the pin on its own would name a different pane than the one
               // showing, or none at all while the terminal shows one.
-              const pin = wallPinFor(cellProject)
+              const pin = wallPinFor(cellProject, slot)
               // The region test is `visibleGroupIds`' own, so a pin naming a
               // browser pane reads as no pin here too rather than putting a
               // label on a cell that has no terminal in it.
@@ -2600,7 +2819,7 @@ export function App() {
               )
               return (
                 <div
-                  key={cellProject.id}
+                  key={slot.id}
                   // `pointer-events-none` so this box is invisible to the mouse
                   // everywhere its header is not: what is under it is a live
                   // terminal, and clicks belong to that. `WallCell` opts its
@@ -2608,18 +2827,24 @@ export function App() {
                   className="pointer-events-none absolute"
                   style={cellRect(index, wallState.slots.length, wallState.columns)}
                 >
-                  {filledSlots.has(cellProject.id) ? null : (
+                  {pinned === undefined ? (
                     <div
-                      data-testid={`wall-empty-${cellProject.id}`}
+                      data-testid={`wall-empty-${slot.id}`}
                       // The group's own padding written again, so an empty cell
                       // frames exactly where its terminal would be: `top-6`
                       // included, which is the room the header takes.
-                      className="absolute top-6 right-2 bottom-2 left-2 flex items-center justify-center border border-dashed border-border px-2 text-center text-[11px] text-faint"
+                      className={cn(
+                        'absolute flex items-center justify-center border border-dashed border-border px-2 text-center text-[11px] text-faint',
+                        theme === 'workspaceLight'
+                          ? 'top-11 right-3 bottom-3 left-3 rounded-lg bg-raised/30'
+                          : 'top-6 right-2 bottom-2 left-2',
+                      )}
                     >
                       {pin === null ? 'nothing pinned yet' : 'the pinned pane is gone'}
                     </div>
-                  )}
+                  ) : null}
                   <WallCell
+                    slotId={slot.id}
                     project={cellProject}
                     pinned={pinned}
                     choices={tabsOfProject(state, cellProject.id, 'terminal')}
@@ -2628,15 +2853,20 @@ export function App() {
                     now={now}
                     focused={cellProject.id === state.activeProjectId}
                     onFocus={() => focusWallCell(cellProject.id, pinned?.id)}
-                    onPin={(paneId) => pinWallPane(cellProject.id, paneId, pinned?.id)}
+                    onPin={(paneId) => pinWallPane(slot.id, cellProject.id, paneId, pinned?.id)}
                     onToggleFollow={() =>
                       toggleWallFollow(cellProject.id, cellProject.wallFollowActive !== true)
                     }
+                    onRemove={() => wallState.removeSlot(slot.id)}
                   />
                 </div>
               )
             })
           : null}
+        </div>
+        {workspaceRailActive && workspaceUtilities ? (
+          <WorkspaceContextCard utilities={workspaceUtilities} />
+        ) : null}
       </div>
     </div>
   )
@@ -2724,8 +2954,6 @@ export function App() {
             }
             activeTabId={currentTabId}
             status={state.status}
-            since={state.since}
-            now={now}
             projectStateOf={(id) => stateOfProject(state, id)}
             needsYou={needsYou(state)}
             onSelectNeedy={(tab) => {
@@ -2737,8 +2965,9 @@ export function App() {
             onToggleMute={toggleMute}
             onSelectProject={(id) => dispatch({ type: 'activatedProject', id })}
             onSelectTab={(id) => dispatch({ type: 'activatedTab', id })}
-            inWall={(id) => wallState.slots.includes(id)}
-            onToggleWall={(id) => wallState.toggleSlot(id)}
+            inWall={(id) => wallState.slots.some((slot) => slot.projectId === id)}
+            onAddToWall={(id) => wallState.addSlot(id)}
+            onRemoveFromWall={(id) => wallState.removeProjectSlots(id)}
             onAdd={() => setAdding(true)}
             onOpenSettings={() => setSettingsOpen(true)}
             onMoveTab={(tabId, projectId) => {
@@ -2751,6 +2980,7 @@ export function App() {
                 .then(({ projects, panes }) => dispatch({ type: 'movedTab', panes, projects }))
                 .catch(fail)
             }}
+            onCloseTab={requestClosePane}
             onRename={(id, name) => {
               window.pterm
                 .updateProject(id, { name })
@@ -2792,122 +3022,29 @@ export function App() {
           />
         )
       case 'tabs':
-        return hiddenColumns.tabs ? null : (
-          <TabsPanel
-            nodes={tabTree(tabEntries.map((entry) => entry.pane), state.tabs)}
-            activeId={activePaneId}
-            status={state.status}
-            since={state.since}
-            now={now}
-            dead={state.dead}
-            collapsed={tabsCollapsed}
-            onToggle={() => toggleColumnCollapsed('tabs')}
-            onDragStart={() => setDragging('tabs')}
-            onSelect={selectPane}
-            onClose={requestClosePane}
-            onRename={renameTab}
-            // The same pair the terminal tab bar is given. That bar is hidden
-            // while this column is open, so without these the gesture is
-            // unreachable rather than merely elsewhere.
-            onOpenBrowser={openDevServer}
-            canOpenBrowser={canOpenDevServer}
-            onJoin={joinPanes}
-            canJoin={canJoin}
-            side={resizerSideFor(columnOrder, 'tabs')}
-          />
-        )
+        return null
       // Six independently collapsible columns (Files, above, is the
       // seventh). Each renders its own vertical strip when collapsed, so
       // none of them can vanish without leaving a way back.
       case 'skills':
-        return hiddenColumns.skills ? null : (
-          <SkillsPanel
-            project={project}
-            collapsed={skillsCollapsed}
-            onToggle={() => toggleColumnCollapsed('skills')}
-            onDragStart={() => setDragging('skills')}
-            // No trailing `\r`: this types the invocation and leaves the user
-            // to decide, per the spec. A submitted `/name` would run a skill
-            // nobody had finished choosing.
-            onInsert={(name) => {
-              if (activePaneId) window.pterm.input(activePaneId, `/${name}`)
-            }}
-            side={resizerSideFor(columnOrder, 'skills')}
-          />
-        )
+        return workspaceRailActive ? null : renderWorkspaceUtility('skills', false)
       case 'presets':
-        return hiddenColumns.presets ? null : (
-          <PresetsPanel
-            project={project}
-            collapsed={presetsCollapsed}
-            onToggle={() => toggleColumnCollapsed('presets')}
-            onDragStart={() => setDragging('presets')}
-            onRun={(command, type) => launch(command, type)}
-            side={resizerSideFor(columnOrder, 'presets')}
-          />
-        )
+        return workspaceRailActive ? null : renderWorkspaceUtility('presets', false)
       case 'prompts':
         // Global, unlike every other column here: the prompts a user keeps
         // are ways of working rather than facts about a repository, so this
         // takes no project.
-        return hiddenColumns.prompts ? null : (
-          <PromptsPanel
-            collapsed={promptsCollapsed}
-            onToggle={() => toggleColumnCollapsed('prompts')}
-            onDragStart={() => setDragging('prompts')}
-            canInsert={activePaneId !== null}
-            // Typed, never submitted, exactly like a skill. `input` is the same
-            // channel the skills list uses.
-            onInsert={(body) => {
-              if (activePaneId) window.pterm.input(activePaneId, body)
-            }}
-            side={resizerSideFor(columnOrder, 'prompts')}
-          />
-        )
+        return workspaceRailActive ? null : renderWorkspaceUtility('prompts', false)
       case 'git':
-        return hiddenColumns.git ? null : (
-          <GitPanel
-            project={project}
-            collapsed={gitCollapsed}
-            onToggle={() => toggleColumnCollapsed('git')}
-            onDragStart={() => setDragging('git')}
-            onOpenDiff={openDiff}
-            side={resizerSideFor(columnOrder, 'git')}
-          />
-        )
+        return workspaceRailActive ? null : renderWorkspaceUtility('git', false)
       case 'issues':
-        return hiddenColumns.issues ? null : (
-          <IssuesPanel
-            project={project}
-            collapsed={issuesCollapsed}
-            onToggle={() => toggleColumnCollapsed('issues')}
-            onDragStart={() => setDragging('issues')}
-            side={resizerSideFor(columnOrder, 'issues')}
-          />
-        )
+        return workspaceRailActive ? null : renderWorkspaceUtility('issues', false)
       case 'todos':
         // Global, like `prompts`: a todo is the user's own list rather than a
         // fact about a repository, so this takes no project.
-        return hiddenColumns.todos ? null : (
-          <TodosPanel
-            collapsed={todosCollapsed}
-            onToggle={() => toggleColumnCollapsed('todos')}
-            onDragStart={() => setDragging('todos')}
-            side={resizerSideFor(columnOrder, 'todos')}
-            creating={creatingTodo}
-            onCreatingChange={setCreatingTodo}
-          />
-        )
+        return workspaceRailActive ? null : renderWorkspaceUtility('todos', false)
       case 'notes':
-        return hiddenColumns.notes ? null : (
-          <NotesPanel
-            project={project}
-            collapsed={notesCollapsed}
-            onToggle={() => toggleColumnCollapsed('notes')}
-            onDragStart={() => setDragging('notes')}
-            side={resizerSideFor(columnOrder, 'notes')}
-          />
-        )
+        return workspaceRailActive ? null : renderWorkspaceUtility('notes', false)
       default: {
         const unreachable: never = slot
         return unreachable
@@ -2969,7 +3106,7 @@ export function App() {
     )
 
   return (
-    <div className="flex h-screen w-screen flex-col bg-bg">
+    <div className="pterm-app-shell flex h-screen w-screen flex-col bg-bg">
       {/* Above the sidebar rather than beside it, so the strip spans the
           window and the traffic lights get a band that belongs to them. */}
       <TitleBar />
@@ -3176,7 +3313,7 @@ export function App() {
               ? [
                   {
                     name: 'Add this project to the wall',
-                    run: () => wallState.toggleSlot(project.id),
+                    run: () => wallState.addSlot(project.id),
                   },
                   ...(activePaneId ? [{ name: 'Pin this pane to the wall', run: pinActivePane }] : []),
                 ]
@@ -3229,6 +3366,10 @@ export function App() {
           onNotificationsChange={setNotifications}
           theme={theme}
           onThemeChange={onThemeChange}
+          editorFont={editorFont}
+          onEditorFontChange={onEditorFontChange}
+          terminalFont={terminalFont}
+          onTerminalFontChange={onTerminalFontChange}
         />
 
         <ConfirmClosePane open={pendingClose !== null} onCancel={cancelClose} onDiscard={discardClose} />
@@ -3240,4 +3381,3 @@ export function App() {
     </div>
   )
 }
-

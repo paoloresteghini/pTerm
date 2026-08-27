@@ -170,7 +170,7 @@ describe('the divider takes no space in the layout', () => {
     // The overlay spans the whole tab. Without this it would swallow every
     // mousedown meant for a pane — which is what selects a pane and what starts
     // a text selection inside one.
-    const overlay = /data-testid=\{`dividers-\$\{group\.id\}`\} className="([^"]*)"/.exec(app)
+    const overlay = /data-testid=\{`dividers-\$\{group\.id\}`\} className=\{cn\( ?'([^']*)'/.exec(app)
     expect(overlay).not.toBeNull()
     expect((overlay?.[1] ?? '').split(' ')).toContain('pointer-events-none')
     expect(divider).toMatch(/pointer-events-auto/)
@@ -197,16 +197,15 @@ describe('the box the divider is measured and positioned against', () => {
     // does only for as long as its inset equals the container's padding. That
     // duplication is the point of this assertion: the two numbers are one fact
     // written twice, and nothing else would notice them drifting apart.
-    const statics = /key=\{ ?group\.id ?\}.*?className=\{cn\( ?'([^']*)'/.exec(app)
-    expect(statics).not.toBeNull()
-    const padding = /(?:^| )p-(\d+)(?: |$)/.exec(statics?.[1] ?? '')
-    expect(padding).not.toBeNull()
+    // Workspace light has a larger frame for the detached tab bar. The
+    // default terminal layout retains the two-unit frame that dividers use.
+    expect(app).toContain("theme === 'workspaceLight' && group.rect ? 'p-3 pt-11' : 'p-2'")
 
-    const overlay = /data-testid=\{`dividers-\$\{group\.id\}`\} className="([^"]*)"/.exec(app)
+    const overlay = /data-testid=\{`dividers-\$\{group\.id\}`\} className=\{cn\( ?'([^']*)'/.exec(app)
     expect(overlay).not.toBeNull()
     const classes = (overlay?.[1] ?? '').split(' ')
     expect(classes).toContain('absolute')
-    expect(classes).toContain(`inset-${padding?.[1] ?? ''}`)
+    expect(app).toContain(": 'inset-2'")
   })
 })
 

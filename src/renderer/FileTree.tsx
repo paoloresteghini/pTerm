@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
 import type { FileEntry } from '../shared/ipc'
 import { readExpanded, writeExpanded, toggled } from './lib/treeState'
-import { cn } from './lib/cn'
 import { PanelHeading } from './ui/Panel'
 import { FileTreeMenu, type FileTreeAction } from './FileTreeMenu'
 import { FileIcon } from './ui/FileIcon'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { ChevronRight, RefreshCw } from 'lucide-react'
 
 /**
  * The active project's working tree.
@@ -257,7 +258,7 @@ export function FileTree({
    * matches the tab rename field: clicking away from a name you have typed
    * reads as accepting it.
    */
-  const field = (key: string, depth: number, initial: string, testid: string): ReactNode => (
+  const field = (key: string, initial: string, testid: string): ReactElement => (
     <input
       key={key}
       data-testid={testid}
@@ -274,30 +275,28 @@ export function FileTree({
           setEditing(null)
         }
       }}
-      style={{ paddingLeft: `${10 + depth * 10}px` }}
-      className="block w-full border-none bg-hover py-0.5 pr-2.5 text-left font-mono text-[11px] text-fg outline-none"
+      className="block h-8 w-full rounded-md border border-input bg-background px-2 text-left text-sm text-foreground outline-none"
     />
   )
 
   /** One directory's rows, then each expanded child's, depth first. */
-  const rows = (parent: string, depth: number): ReactNode[] => [
+  const rows = (parent: string): ReactElement[] => [
     // A create inside this directory draws its field at the top of it, where a
     // new entry is easiest to see. Keyed apart from any row so React never
     // reuses a row's DOM node for the field.
     ...(editing?.mode === 'create' && editing.parent === parent
-      ? [field(`create-${parent}`, depth, '', 'tree-create')]
+      ? [field(`create-${parent}`, '', 'tree-create')]
       : []),
     ...(loaded[parent] ?? []).flatMap((entry) => {
       const relPath = parent === '' ? entry.name : `${parent}/${entry.name}`
       const open = expanded.has(relPath)
       if (editing?.mode === 'rename' && editing.relPath === relPath) {
-        return [field(`rename-${relPath}`, depth, editing.initial, 'tree-rename')]
+        return [field(`rename-${relPath}`, editing.initial, 'tree-rename')]
       }
-      return [
+      const row = (
         <button
-          key={relPath}
           data-testid={`tree-row-${relPath}`}
-          onClick={() => toggle(entry, relPath)}
+          onClick={entry.dir ? undefined : () => toggle(entry, relPath)}
           onContextMenu={(event) => {
             event.preventDefault()
             // The row's own box, so the menu hangs off its left edge and its
@@ -306,26 +305,29 @@ export function FileTree({
             setEditing(null)
             setMenu({ relPath, isDir: entry.dir, left: box.left, top: box.bottom })
           }}
-          // Indent by depth, in the same 10px step the sidebar's tab rows use.
-          style={{ paddingLeft: `${10 + depth * 10}px` }}
-          className={cn(
-            // `flex` rather than `block`: the row now holds a chevron, an icon
-            // and the name, and the name is the only part that truncates.
-            'flex w-full cursor-default items-center border-none bg-transparent py-0.5 pr-2.5 text-left',
-            entry.dir ? 'text-muted hover:text-fg' : 'text-faint hover:text-fg',
-          )}
+          className="group/tree flex h-8 w-full cursor-default items-center rounded-md px-2 text-left text-sm text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
         >
-          {/* A directory's twist, and a fixed-width blank for a file, so every
-              name in a directory starts at the same x whatever its kind. */}
-          <span className="mr-0.5 w-3 shrink-0 text-center text-[9px] leading-none text-faint">
-            {entry.dir ? (open ? '▾' : '▸') : ''}
-          </span>
+          {entry.dir ? (
+            <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[state=open]/tree:rotate-90" />
+          ) : (
+            <span className="size-3.5 shrink-0" />
+          )}
           <FileIcon name={entry.name} isDir={entry.dir} />
           <span data-testid={`tree-name-${relPath}`} className="truncate">
             {entry.name}
           </span>
-        </button>,
-        ...(open ? rows(relPath, depth + 1) : []),
+        </button>
+      )
+
+      if (!entry.dir) return [<div key={relPath}>{row}</div>]
+
+      return [
+        <Collapsible key={relPath} open={open} onOpenChange={() => toggle(entry, relPath)}>
+          <CollapsibleTrigger asChild>{row}</CollapsibleTrigger>
+          <CollapsibleContent className="ml-3 border-l border-sidebar-border pl-2">
+            {open ? rows(relPath) : null}
+          </CollapsibleContent>
+        </Collapsible>,
       ]
     }),
   ]
@@ -346,9 +348,9 @@ export function FileTree({
           data-testid="tree-refresh"
           aria-label="Refresh files"
           onClick={reload}
-          className="cursor-default border-none bg-transparent p-0 text-[11px] leading-none text-faint hover:text-fg"
+          className="cursor-default rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
         >
-          ↻
+          <RefreshCw className="size-3.5" />
         </button>
       </div>
       <div
@@ -357,7 +359,7 @@ export function FileTree({
         // there because this list shared the sidebar with the projects list and
         // an even split starved it; in its own column there is nothing to split
         // with.
-        className="scroll-thin min-h-0 flex-1 overflow-y-auto font-mono text-[11px]"
+        className="scroll-thin min-h-0 flex-1 overflow-y-auto px-2 pb-2 text-sm"
       >
         {!projectId ? (
           // Reached where the old component returned null: this now owns a
@@ -392,7 +394,7 @@ export function FileTree({
             Nothing to show
           </div>
         ) : (
-          rows('', 0)
+          rows('')
         )}
       </div>
       {error === null ? null : (

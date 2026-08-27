@@ -17,6 +17,14 @@
 export const WALL_COLUMNS_DEFAULT = 3
 const WALL_COLUMNS_MAX = 4
 
+/** One independently configurable cell in the wall. */
+export interface WallSlot {
+  id: string
+  projectId: string
+  /** Absent only on layouts stored before per-slot pins existed. */
+  pin?: string | null
+}
+
 /**
  * `WALL_COLUMNS_MAX` bounds columns, not the WebGL budget `claimRenderer`
  * enforces per pane on screen (`WEBGL_PANE_BUDGET_DEFAULT`, twelve, against a
@@ -50,7 +58,7 @@ const WALL_COLUMNS_MAX = 4
 export function slotsFromStored(
   raw: string | null,
   projects: readonly { id: string }[],
-): string[] {
+): WallSlot[] {
   if (raw === null) return []
   let parsed: unknown
   try {
@@ -61,12 +69,34 @@ export function slotsFromStored(
   if (!Array.isArray(parsed)) return []
 
   const known = new Set(projects.map((project) => project.id))
-  const slots: string[] = []
+  const slots: WallSlot[] = []
   const seen = new Set<string>()
-  for (const entry of parsed) {
-    if (typeof entry !== 'string' || !known.has(entry) || seen.has(entry)) continue
-    seen.add(entry)
-    slots.push(entry)
+  for (const [index, entry] of parsed.entries()) {
+    if (typeof entry === 'string') {
+      if (!known.has(entry) || seen.has(entry)) continue
+      seen.add(entry)
+      slots.push({ id: entry, projectId: entry })
+      continue
+    }
+    if (
+      entry === null ||
+      typeof entry !== 'object' ||
+      !('id' in entry) ||
+      !('projectId' in entry) ||
+      typeof entry.id !== 'string' ||
+      typeof entry.projectId !== 'string' ||
+      !known.has(entry.projectId) ||
+      seen.has(entry.id) ||
+      ('pin' in entry && entry.pin !== null && typeof entry.pin !== 'string')
+    ) {
+      continue
+    }
+    seen.add(entry.id)
+    slots.push({
+      id: entry.id || `${entry.projectId}-${index}`,
+      projectId: entry.projectId,
+      ...('pin' in entry ? { pin: entry.pin } : {}),
+    })
   }
   return slots
 }
@@ -86,10 +116,28 @@ export function columnsFromStored(raw: string | null): number {
  * canonical order to restore something to, unlike `COLUMN_ORDER_DEFAULT`, so
  * the honest place for a newly added project is the end.
  */
-export function toggleSlot(slots: readonly string[], projectId: string): string[] {
-  return slots.includes(projectId)
-    ? slots.filter((id) => id !== projectId)
-    : [...slots, projectId]
+export function newSlot(projectId: string): WallSlot {
+  return { id: `${projectId}-${crypto.randomUUID()}`, projectId, pin: null }
+}
+
+/** Add one particular slot exactly once, including across StrictMode replays. */
+export function addSlot(slots: readonly WallSlot[], slot: WallSlot): WallSlot[] {
+  return slots.some((entry) => entry.id === slot.id) ? [...slots] : [...slots, slot]
+}
+
+/** Remove every wall cell belonging to a project. */
+export function removeProjectSlots(slots: readonly WallSlot[], projectId: string): WallSlot[] {
+  return slots.filter((slot) => slot.projectId !== projectId)
+}
+
+/** Replace the independent pin belonging to one wall cell. */
+export function pinSlot(slots: readonly WallSlot[], slotId: string, pin: string | null): WallSlot[] {
+  return slots.map((slot) => (slot.id === slotId ? { ...slot, pin } : slot))
+}
+
+/** Remove one wall cell. */
+export function removeSlot(slots: readonly WallSlot[], slotId: string): WallSlot[] {
+  return slots.filter((slot) => slot.id !== slotId)
 }
 
 /**
@@ -118,10 +166,10 @@ export function toggleSlot(slots: readonly string[], projectId: string): string[
  */
 export function wallActive(
   on: boolean,
-  slots: readonly string[],
+  slots: readonly WallSlot[],
   activeProjectId: string | null,
 ): boolean {
   if (!on) return false
   if (slots.length === 0) return true
-  return activeProjectId !== null && slots.includes(activeProjectId)
+  return activeProjectId !== null && slots.some((slot) => slot.projectId === activeProjectId)
 }

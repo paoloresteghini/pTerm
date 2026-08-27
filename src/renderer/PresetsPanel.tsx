@@ -1,7 +1,7 @@
 import type { ProjectDescriptor, TabType } from '../shared/ipc'
 import { useColumnWidth } from './lib/columnWidth'
 import { cn } from './lib/cn'
-import { ColumnResizer, PanelHeading, PanelStrip, type PanelSide } from './ui/Panel'
+import { ColumnResizer, PanelHeading, PanelStrip, PanelSurface, type PanelSide } from './ui/Panel'
 
 /**
  * Was the bottom half of `RightPanel`, sharing a column (and a collapse) with
@@ -19,6 +19,7 @@ export function PresetsPanel({
   onToggle,
   onDragStart,
   side,
+  embedded = false,
 }: {
   project: ProjectDescriptor | undefined
   onRun: (command: string, type: TabType) => void
@@ -27,6 +28,8 @@ export function PresetsPanel({
   /** Grabs this column to move it. See `PanelHeading`'s doc comment. */
   onDragStart: () => void
   side: PanelSide
+  /** Renders beneath Environment in Workspace Light instead of in the row. */
+  embedded?: boolean
 }) {
   const { width, set, commit } = useColumnWidth('pterm:presetsWidth')
 
@@ -38,18 +41,20 @@ export function PresetsPanel({
         side={side}
         onClick={onToggle}
         onDragStart={onDragStart}
+        embedded={embedded}
       />
     )
   }
 
   return (
-    <div
+    <PanelSurface
       data-testid="presets-panel"
+      embedded={embedded}
+      side={side}
       className={cn(
-        'relative flex shrink-0 flex-col border-border bg-surface font-mono text-[11px] select-none',
-        side === 'left' ? 'border-r' : 'border-l',
+        'utility-panel utility-panel-presets font-mono text-[11px] select-none',
       )}
-      style={{ width }}
+      style={embedded ? undefined : { width }}
     >
       <PanelHeading
         testid="presets-toggle"
@@ -57,14 +62,14 @@ export function PresetsPanel({
         onClick={onToggle}
         onDragStart={onDragStart}
       />
-      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
+      <div className="utility-list scroll-thin min-h-0 flex-1 overflow-y-auto">
         {/* Not `preset-claude`: a repository declaring a preset labelled
             `claude` would otherwise produce two elements with that testid. */}
         <button
           data-testid="preset-default-claude"
           disabled={!project || !project.available}
           onClick={() => onRun('claude', 'claude')}
-          className="w-full cursor-default border-none bg-transparent px-2.5 py-1 text-left text-muted hover:text-fg disabled:opacity-40"
+          className="utility-row w-full cursor-default border-none bg-transparent px-2.5 py-1 text-left text-muted hover:text-fg disabled:opacity-40"
         >
           claude
         </button>
@@ -75,7 +80,7 @@ export function PresetsPanel({
             disabled={!project?.available}
             onClick={() => onRun(preset.command, 'preset')}
             title={preset.command}
-            className="flex w-full cursor-default items-baseline gap-2 border-none bg-transparent px-2.5 py-1 text-left text-muted hover:text-fg disabled:opacity-40"
+            className="utility-row flex w-full cursor-default items-baseline gap-2 border-none bg-transparent px-2.5 py-1 text-left text-muted hover:text-fg disabled:opacity-40"
           >
             <span className="flex-1 truncate">{preset.label}</span>
             {/* Provenance, so it is obvious which came from the repository. */}
@@ -85,18 +90,20 @@ export function PresetsPanel({
         {/* "declared": the `claude` button above is always there, so the panel
             is never actually empty. */}
         {project && project.presets.length === 0 ? (
-          <p className="px-2.5 py-1 text-faint">
+          <p className="utility-empty px-2.5 py-1 text-faint">
             No declared presets. Add a .pterm.json to the repository.
           </p>
         ) : null}
       </div>
-      <ColumnResizer
-        testid="resize-presets"
-        side={side}
-        width={width}
-        onResize={set}
-        onCommit={commit}
-      />
-    </div>
+      {!embedded ? (
+        <ColumnResizer
+          testid="resize-presets"
+          side={side}
+          width={width}
+          onResize={set}
+          onCommit={commit}
+        />
+      ) : null}
+    </PanelSurface>
   )
 }

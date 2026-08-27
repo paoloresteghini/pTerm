@@ -1,5 +1,3 @@
-import logo from '../images/logo.png'
-
 /**
  * The strip that makes the window movable, and the only thing in the app that
  * does.
@@ -25,14 +23,7 @@ export function TitleBar() {
   return (
     <div
       data-testid="titlebar"
-      className="drag-region flex h-[38px] shrink-0 items-center justify-center border-b border-border bg-surface"
-    >
-      {/* Centred rather than set after the traffic lights: the lights already
-          occupy the left, and a small mark trailing them reads as though it
-          failed to line up with anything. Empty alt because the strip is
-          decoration, and the app is named in the window's own title and on the
-          welcome page. */}
-      <img src={logo} alt="" className="h-[15px] w-auto opacity-80" />
-    </div>
+      className="pterm-titlebar drag-region flex h-[38px] shrink-0 items-center justify-center border-b border-border bg-surface"
+    />
   )
 }

@@ -726,8 +726,8 @@ function isDead(state: WorkspaceState, pane: TabDescriptor): boolean {
 
 /** The wall as `paneGroups` needs to read it: slot order, and cells per row. */
 export interface WallView {
-  /** Project ids, in slot order. */
-  slots: readonly string[]
+  /** Independently configurable cells, in slot order. */
+  slots: readonly { id: string; projectId: string; pin?: string | null }[]
   columns: number
 }
 
@@ -746,8 +746,12 @@ export interface WallView {
  * now, and a project between panes is a project with nothing active, not a
  * reason to show what it last had pinned.
  */
-export function wallPinFor(project: ProjectDescriptor): string | null {
-  return project.wallFollowActive === true ? project.activeTabId : (project.wallPin ?? null)
+export function wallPinFor(
+  project: ProjectDescriptor,
+  slot?: { pin?: string | null },
+): string | null {
+  if (project.wallFollowActive === true) return project.activeTabId
+  return slot?.pin === undefined ? (project.wallPin ?? null) : slot.pin
 }
 
 /**
@@ -784,10 +788,10 @@ function visibleGroupIds(
     return [{ id: tabOfPane(state, id)?.id ?? id, slot: 0 }]
   }
   const filled: { id: string; slot: number }[] = []
-  for (const [slot, projectId] of wall.slots.entries()) {
-    const project = state.projects.find((entry) => entry.id === projectId)
+  for (const [slot, wallSlot] of wall.slots.entries()) {
+    const project = state.projects.find((entry) => entry.id === wallSlot.projectId)
     if (project === undefined) continue
-    const pin = wallPinFor(project)
+    const pin = wallPinFor(project, wallSlot)
     if (pin === null) continue
     const pane = state.panes.find((entry) => entry.id === pin)
     if (pane === undefined || regionOf(pane) !== 'terminal') continue

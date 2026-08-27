@@ -47,10 +47,11 @@
  *   WebGL or DOM; `webgl.spec.ts` owns that.
  */
 import { test, expect, type ElectronApplication } from '@playwright/test'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchApp, killServer } from './harness'
+import { DEFAULT_TERMINAL_FONT, terminalFontFamily } from '../../src/renderer/fonts'
 
 // This file's own tmux server. Nothing here touches the user's default socket.
 const SOCKET = 'pterm-e2e-font'
@@ -67,18 +68,11 @@ const launch = (): Promise<ElectronApplication> =>
   launchApp({ socket: SOCKET, configDir, projectsRoot, claudeSettings: claudeSettingsPath, claudeHome, userDataDir })
 
 /**
- * The terminal's font stack, read off the source rather than duplicated.
- *
- * Matches the string literal `Terminal.tsx` hands xterm's `fontFamily`. If
- * that line is reformatted past this pattern the read throws, which is the
- * intended failure: a silent fallback to a copied constant is exactly the
- * drift this exists to prevent.
+ * The default terminal stack, derived through the same helper `Terminal.tsx`
+ * uses to configure xterm.
  */
 async function shippedStack(): Promise<string> {
-  const source = await readFile(join(__dirname, '../../src/renderer/Terminal.tsx'), 'utf8')
-  const match = source.match(/fontFamily:\s*\n?\s*"([^"]*ui-monospace[^"]*)"/)
-  if (!match) throw new Error("could not read the fontFamily literal out of Terminal.tsx")
-  return match[1]
+  return terminalFontFamily(DEFAULT_TERMINAL_FONT)
 }
 
 /** The advance of each character as a fraction of the advance of `M`. */

@@ -47,12 +47,12 @@ describe('the section-label colour', () => {
     expect(onSurface(token('label'))).toBeGreaterThan(onSurface(token('faint')))
   })
 
-  // One home for the colour. Three columns render these headings and each used
-  // to spell the class out itself, which is how one of them drifting is a bug
-  // nobody notices.
+  // One home for the colour. The standard heading and both forms of the
+  // collapsible control share this token, so a utility card cannot drift from
+  // its vertical-sidebar counterpart.
   it('is applied in one place, `ui/Panel.tsx`', () => {
     const panel = readFileSync(new URL('../../src/renderer/ui/Panel.tsx', import.meta.url), 'utf8')
-    expect(panel.match(/text-label/g)).toHaveLength(2)
+    expect(panel.match(/text-label/g)).toHaveLength(3)
     // `FileTree` rather than `FilesPanel`: the files column's heading sits
     // beside the refresh control, so it is the tree that renders it.
     for (const file of ['NotesPanel', 'SkillsPanel', 'PresetsPanel', 'FileTree']) {
@@ -60,11 +60,6 @@ describe('the section-label colour', () => {
       expect(source).toContain('PanelHeading')
       expect(source).not.toContain('uppercase tracking-wider')
     }
-    // The one heading that is not a `PanelHeading` (its column does not
-    // collapse) still has to be drawn in the label colour.
-    const sidebar = readFileSync(new URL('../../src/renderer/Sidebar.tsx', import.meta.url), 'utf8')
-    expect(sidebar).toContain('uppercase tracking-wider text-label')
-    expect(sidebar).not.toContain('uppercase tracking-wider text-faint')
   })
 
   // The settings pane drew its section headings in `text-faint` on

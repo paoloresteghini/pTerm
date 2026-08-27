@@ -120,3 +120,26 @@ test('settings names the version and answers a check', async () => {
   // nothing to skip without a named release.
   await expect(page.getByTestId('update-skip-settings')).toHaveCount(expectedCount)
 })
+
+test('appearance keeps editor and terminal font choices independent', async () => {
+  await expect(page.getByTestId('titlebar')).toBeVisible()
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0].webContents.send('pterm:menuCommand', 'settings')
+  })
+  await expect(page.getByTestId('settings-pane')).toBeVisible()
+  await page.getByTestId('settings-tab-appearance').click()
+
+  await page.getByTestId('editor-font').selectOption('jetbrains')
+  await page.getByTestId('terminal-font').selectOption('fira')
+
+  await expect(page.getByTestId('editor-font')).toHaveValue('jetbrains')
+  await expect(page.getByTestId('terminal-font')).toHaveValue('fira')
+  await expect
+    .poll(() =>
+      page.evaluate(() => ({
+        editor: localStorage.getItem('pterm:editorFont'),
+        terminal: localStorage.getItem('pterm:terminalFont'),
+      })),
+    )
+    .toEqual({ editor: 'jetbrains', terminal: 'fira' })
+})

@@ -40,14 +40,8 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchApp, killServer } from './harness'
-import { CHANNELS, type MenuCommand } from '../../src/shared/ipc'
 
 const SOCKET = 'pterm-e2e-browsermcp'
-
-// A typed assignment, not a bare string, for the reason `settingsTabs.spec.ts`
-// gives: a renamed variant fails to compile here rather than sending a command
-// nothing listens for.
-const SETTINGS_COMMAND: MenuCommand = 'settings'
 
 /**
  * The key the app owns inside `mcpServers`, spelled out rather than imported
@@ -275,24 +269,12 @@ async function openSessionPane(window: Page): Promise<string> {
   return ids[0]!
 }
 
-/**
- * Opens Settings on the Hooks tab, which is where the browser bridge's switch
- * lives, and waits for the switch to have read its own state.
- *
- * The menu command is sent to the renderer directly, the way
- * `settingsTabs.spec.ts` does it: the accelerator cannot be driven from
- * Playwright (a synthetic keypress arrives below the layer Electron matches
- * accelerators at) and the menu bar is not in the DOM.
- */
-async function openBridgeSwitch(app: ElectronApplication, window: Page): Promise<void> {
-  expect(CHANNELS.menuCommand).toBe('pterm:menuCommand')
-  expect(SETTINGS_COMMAND).toBe('settings')
-  await app.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows()[0].webContents.send('pterm:menuCommand', 'settings')
-  })
-  await expect(window.getByTestId('settings-pane')).toBeVisible({ timeout: 20_000 })
-  await window.getByTestId('settings-tab-hooks').click()
-  await expect(window.getByTestId('mcp-status')).toBeVisible()
+async function bridgeState(window: Page) {
+  return window.evaluate(() => (globalThis as unknown as Window).pterm.mcpBridgeState())
+}
+
+async function setBridgeEnabled(window: Page, enabled: boolean) {
+  return window.evaluate((next) => (globalThis as unknown as Window).pterm.setMcpBridgeEnabled(next), enabled)
 }
 
 /**
@@ -514,7 +496,7 @@ test('browser_navigate opens a browser pane for the calling session and reuses i
  * because "immediate in both directions" is the claim: no relaunch happens
  * between the last two calls.
  */
-test('the Settings switch stops the socket serving, and turning it back on rebinds it', async () => {
+test('the browser bridge preference stops the socket serving, and turning it back on rebinds it', async () => {
   const { app, window } = await launch()
   const sessionId = await openSessionPane(window)
 
@@ -522,15 +504,8 @@ test('the Settings switch stops the socket serving, and turning it back on rebin
   expect(await registered()).toBe(true)
   expect((await callNavigate(sessionId, baseUrl)).isError).toBe(false)
 
-  await openBridgeSwitch(app, window)
-  await expect(window.getByTestId('mcp-status')).toHaveText('on')
-  // The mount read probes the socket rather than only reporting the stored
-  // setting, so this silence is a second witness that the bridge really is
-  // serving, from inside the app. `mcpSwitch.test.ts` is where the note it
-  // would carry instead is shown to appear.
-  await expect(window.getByTestId('mcp-warning')).toHaveCount(0)
-  await window.getByTestId('mcp-disable').click()
-  await expect(window.getByTestId('mcp-status')).toHaveText('off')
+  expect((await bridgeState(window)).enabled).toBe(true)
+  expect((await setBridgeEnabled(window, false)).enabled).toBe(false)
 
   expect(await registered()).toBe(false)
   const denied = await callNavigate(sessionId, baseUrl)
@@ -539,8 +514,7 @@ test('the Settings switch stops the socket serving, and turning it back on rebin
   // what the model reads, and it is the difference between denied and hung.
   expect(denied.text).toContain('pTerm is not running')
 
-  await window.getByTestId('mcp-enable').click()
-  await expect(window.getByTestId('mcp-status')).toHaveText('on')
+  expect((await setBridgeEnabled(window, true)).enabled).toBe(true)
 
   expect(await registered()).toBe(true)
   const again = await callNavigate(sessionId, `${baseUrl}next`)
@@ -566,24 +540,16 @@ test('the Settings switch stops the socket serving, and turning it back on rebin
  */
 test('the off state survives a relaunch, which does not put the registration back', async () => {
   const first = await launch()
-  await openBridgeSwitch(first.app, first.window)
-  await expect(first.window.getByTestId('mcp-status')).toHaveText('on')
+  expect((await bridgeState(first.window)).enabled).toBe(true)
   expect(await registered()).toBe(true)
 
-  await first.window.getByTestId('mcp-disable').click()
-  await expect(first.window.getByTestId('mcp-status')).toHaveText('off')
+  expect((await setBridgeEnabled(first.window, false)).enabled).toBe(false)
   await first.app.close()
 
   const { app, window, stderr } = await launch()
 
-  await openBridgeSwitch(app, window)
-  await expect(window.getByTestId('mcp-status')).toHaveText('off')
+  expect((await bridgeState(window)).enabled).toBe(false)
   expect(await registered()).toBe(false)
-
-  // The dialog draws a full-screen overlay that swallows clicks, so it has to
-  // go before a tab can be opened underneath it.
-  await window.keyboard.press('Escape')
-  await expect(window.getByTestId('settings-pane')).toHaveCount(0)
 
   const sessionId = await openSessionPane(window)
   const denied = await callNavigate(sessionId, baseUrl)

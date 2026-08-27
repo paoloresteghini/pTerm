@@ -678,14 +678,9 @@ test('install and uninstall leave an unrelated hook untouched', async () => {
   const app = await launch()
   const window = await app.firstWindow()
 
-  await window.getByTestId('settings-open').click()
-  // The hooks rows moved behind a tab. Notifications is what the pane opens
-  // on, so nothing under Hooks is in the DOM until this click.
-  await window.getByTestId('settings-tab-hooks').click()
-  await expect(window.getByTestId('hooks-status')).toHaveText('not installed')
+  expect((await window.evaluate(() => (globalThis as unknown as Window).pterm.hooksState())).installed).toBe(false)
 
-  await window.getByTestId('hooks-install').click()
-  await expect(window.getByTestId('hooks-status')).toHaveText('installed')
+  expect((await window.evaluate(() => (globalThis as unknown as Window).pterm.installHooks())).installed).toBe(true)
 
   const afterInstall = JSON.parse(await readFile(claudeSettingsPath, 'utf8')) as HookFile
   const installedHooks = afterInstall.hooks ?? {}
@@ -698,8 +693,7 @@ test('install and uninstall leave an unrelated hook untouched', async () => {
     expect(hasPTermHook(installedHooks[event])).toBe(true)
   }
 
-  await window.getByTestId('hooks-uninstall').click()
-  await expect(window.getByTestId('hooks-status')).toHaveText('not installed')
+  expect((await window.evaluate(() => (globalThis as unknown as Window).pterm.uninstallHooks())).installed).toBe(false)
 
   const afterUninstall = JSON.parse(await readFile(claudeSettingsPath, 'utf8')) as unknown
   // Byte-for-byte in effect: uninstall restores exactly the object that was

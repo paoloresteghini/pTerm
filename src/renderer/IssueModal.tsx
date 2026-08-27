@@ -5,8 +5,16 @@ import { defaultKeymap, history, historyKeymap, insertNewlineAndIndent } from '@
 import { markdown } from '@codemirror/lang-markdown'
 import { syntaxHighlighting } from '@codemirror/language'
 import type { IssueDetail } from '../shared/ipc'
-import { Dialog, DialogContent, DialogTitle } from './ui/Dialog'
-import { Button } from './ui/Button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { MarkdownView } from './ui/MarkdownView'
 import { ConfirmClosePane } from './ConfirmClosePane'
 import { issueStateLabel } from './lib/issueList'
@@ -511,29 +519,31 @@ export function IssueModal({
         <DialogContent
           data-testid="issue-modal"
           onKeyDown={onKeyDown}
-          className="scroll-thin max-h-[85vh] w-[720px] max-w-[90vw] overflow-y-auto"
+          className="flex max-h-[85vh] w-[min(720px,calc(100%-2rem))] max-w-none flex-col gap-0 overflow-hidden p-0 font-sans sm:max-w-none"
         >
-          {/* Always rendered, even while loading or failed: Radix warns about
-              a `DialogContent` with no `DialogTitle`. */}
-          <DialogTitle className="mb-3 text-sm text-fg">
-            {mode === 'create' ? (
-              'New issue'
-            ) : (
-              <>
-                <span className="text-faint">#{number}</span>
-                {detail ? ` ${detail.title}` : ''}
-              </>
-            )}
+          <DialogHeader className="shrink-0 border-b border-border px-6 py-4 pr-12 text-left">
+            <DialogTitle>
+              {mode === 'create' ? (
+                'New issue'
+              ) : (
+                <>
+                  <span className="text-muted-foreground">#{number}</span>
+                  {detail ? ` ${detail.title}` : ''}
+                </>
+              )}
+            </DialogTitle>
             {repoSlug !== null ? (
-              <span data-testid="issue-repo" className="mt-0.5 block text-[11px] font-normal text-faint">
+              <DialogDescription data-testid="issue-repo">
                 {repoSlug}
-              </span>
+              </DialogDescription>
             ) : null}
-          </DialogTitle>
+          </DialogHeader>
+
+          <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-6 py-5">
 
           {mode === 'create' ? (
             <>
-              <input
+              <Input
                 data-testid="issue-title-input"
                 data-shortcuts="off"
                 autoFocus
@@ -541,7 +551,7 @@ export function IssueModal({
                 onChange={(event) => setTitle(event.target.value)}
                 placeholder="Title"
                 spellCheck={false}
-                className="mb-2 w-full border border-border bg-transparent px-1.5 py-1 text-[11px] text-fg placeholder:text-faint focus:outline-none"
+                className="mb-3"
               />
               <BodyEditor value={body} onChange={setBody} />
               {mutationError ? (
@@ -570,14 +580,14 @@ export function IssueModal({
             <>
               {mode === 'edit' ? (
                 <>
-                  <input
+                  <Input
                     data-testid="issue-title-input"
                     data-shortcuts="off"
                     value={title}
                     onChange={(event) => setTitle(event.target.value)}
                     placeholder="Title"
                     spellCheck={false}
-                    className="mb-2 w-full border border-border bg-transparent px-1.5 py-1 text-[11px] text-fg placeholder:text-faint focus:outline-none"
+                    className="mb-3"
                   />
                   <BodyEditor value={body} onChange={setBody} />
                 </>
@@ -642,7 +652,7 @@ export function IssueModal({
                   ) : null}
 
                   <div className="mt-4 border-t border-border pt-3">
-                    <textarea
+                    <Textarea
                       data-testid="issue-comment-input"
                       data-shortcuts="off"
                       value={comment}
@@ -650,7 +660,7 @@ export function IssueModal({
                       placeholder="Leave a comment (⌘Enter to submit)"
                       spellCheck={false}
                       rows={3}
-                      className="scroll-thin mb-2 w-full resize-none border border-border bg-transparent p-1.5 text-[11px] text-fg placeholder:text-faint focus:outline-none"
+                      className="scroll-thin mb-2 min-h-24 resize-none"
                     />
                     <div className="flex justify-end">
                       <Button
@@ -720,6 +730,7 @@ export function IssueModal({
               </div>
             </>
           )}
+          </div>
         </DialogContent>
       </Dialog>
       <ConfirmClosePane

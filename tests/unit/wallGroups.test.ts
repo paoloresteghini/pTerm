@@ -115,7 +115,14 @@ const STATE = {
   activeProjectId: 'p1',
 }
 
-const WALL: WallView = { slots: ['p1', 'p2', 'p3'], columns: 3 }
+const WALL: WallView = {
+  slots: [
+    { id: 'p1', projectId: 'p1' },
+    { id: 'p2', projectId: 'p2' },
+    { id: 'p3', projectId: 'p3' },
+  ],
+  columns: 3,
+}
 
 describe('paneGroups without a wall', () => {
   it('marks exactly one group visible', () => {
@@ -150,7 +157,10 @@ describe('paneGroups with a wall', () => {
   })
 
   it('orders the visible groups by slot, not by pane order', () => {
-    const wall: WallView = { slots: ['p2', 'p1'], columns: 2 }
+    const wall: WallView = {
+      slots: [{ id: 'p2', projectId: 'p2' }, { id: 'p1', projectId: 'p1' }],
+      columns: 2,
+    }
     const rects = paneGroups(STATE, 'terminal', wall)
       .filter((group) => group.visible)
       .map((group) => ({ id: group.id, left: group.rect?.left }))
@@ -158,6 +168,19 @@ describe('paneGroups with a wall', () => {
       { id: 'a', left: '50%' },
       { id: 'b', left: '0%' },
     ])
+  })
+
+  it('shows independently pinned cells from the same project', () => {
+    const state = { ...STATE, panes: [...STATE.panes, pane('d', 'one')] }
+    const wall: WallView = {
+      slots: [
+        { id: 'first', projectId: 'p1', pin: 'a' },
+        { id: 'second', projectId: 'p1', pin: 'd' },
+      ],
+      columns: 2,
+    }
+    const visible = paneGroups(state, 'terminal', wall).filter((group) => group.visible)
+    expect(visible.map((group) => group.id)).toEqual(['a', 'd'])
   })
 
   // A cell belongs to a SLOT, not to a pane. An empty slot is still a cell,

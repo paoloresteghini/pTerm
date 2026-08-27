@@ -1,6 +1,17 @@
 import { useEffect, useState } from 'react'
 import type { SkillEntry } from '../shared/ipc'
-import { Dialog, DialogContent, DialogTitle } from './ui/Dialog'
+import { FileText, Sparkles, Terminal } from 'lucide-react'
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+  CommandShortcut,
+} from '@/components/ui/command'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { filterEntries, rankFiles, rankSessions } from './lib/match'
 
 /** One switchable pane, flattened by `App` so this component holds no state. */
@@ -115,6 +126,11 @@ export function CommandPalette({
   // reason: an empty query is the session switcher, not a list of things to
   // run.
   const matchedCommands = query.length === 0 ? [] : filterEntries(query, commands)
+  const hasResults =
+    matchedSessions.length > 0 ||
+    matchedFiles.length > 0 ||
+    matchedCommands.length > 0 ||
+    matchedActions.length > 0
 
   const choose = (run: () => void): void => {
     run()
@@ -123,88 +139,110 @@ export function CommandPalette({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent data-testid="command-palette">
-        <DialogTitle className="mb-2 text-xs uppercase tracking-wider text-faint">
-          Go to
-        </DialogTitle>
-        <input
-          data-testid="palette-input"
-          // Same reason as the panel's filter: without this, ⌘W typed here
-          // closes a pane and destroys its session.
-          data-shortcuts="off"
-          autoFocus
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search sessions, files, then skills"
-          spellCheck={false}
-          className="mb-2 w-full border border-border bg-transparent px-2 py-1 text-[12px] text-fg placeholder:text-faint focus:outline-none"
-        />
-        <div className="scroll-thin max-h-72 overflow-y-auto text-[11px]">
-          {matchedSessions.map((session) => (
-            <button
-              key={session.id}
-              data-testid={`palette-session-${session.id}`}
-              onClick={() => choose(() => onSelectSession(session.id))}
-              className="flex w-full cursor-default border-none bg-transparent px-1 py-1 text-left text-muted hover:bg-border hover:text-fg"
-            >
-              <span className="flex-1 truncate">{session.name}</span>
-            </button>
-          ))}
-          {matchedFiles.map((file) => (
-            <button
-              key={file.path}
-              data-testid={`palette-file-${file.path}`}
-              onClick={() => choose(() => onOpenFile(file.path))}
-              title={file.path}
-              className="flex w-full cursor-default border-none bg-transparent px-1 py-1 text-left text-muted hover:bg-border hover:text-fg"
-            >
-              {/* Basename first and the directory after it, dimmed: the name is
-                  what was typed and what is being looked for, and the path is
-                  how two files of the same name are told apart. */}
-              <span className="truncate">{file.name}</span>
-              <span className="ml-2 flex-1 truncate text-faint">{file.path}</span>
-            </button>
-          ))}
-          {matchedCommands.map((entry) => (
-            <button
-              key={entry.name}
-              data-testid={`palette-command-${entry.name}`}
-              onClick={() => choose(entry.run)}
-              className="flex w-full cursor-default border-none bg-transparent px-1 py-1 text-left text-muted hover:bg-border hover:text-fg"
-            >
-              <span className="flex-1 truncate">{entry.name}</span>
-            </button>
-          ))}
-          {matchedActions.map((entry) => (
-            // Composite key for the same reason the panel uses one: `name` is
-            // unique across today's entries but nothing guarantees it.
-            <button
-              key={`${entry.kind}:${entry.source.kind}:${entry.name}`}
-              data-testid={`palette-action-${entry.name}`}
-              onClick={() => choose(() => onInsert(entry.name))}
-              title={entry.description}
-              className="flex w-full cursor-default border-none bg-transparent px-1 py-1 text-left text-muted hover:bg-border hover:text-fg"
-            >
-              <span className="flex-1 truncate">/{entry.name}</span>
-            </button>
-          ))}
-          {matchedSessions.length === 0 &&
-          matchedActions.length === 0 &&
-          matchedFiles.length === 0 &&
-          matchedCommands.length === 0 ? (
-            <p data-testid="palette-empty" className="px-1 py-2 text-faint">
-              Nothing matches.
-            </p>
-          ) : null}
-          {truncated && query.length > 0 ? (
-            // Said out loud rather than swallowed: past the cap this list is
-            // incomplete, and a file that is missing for that reason looks
-            // exactly like a file that does not exist.
-            <p data-testid="palette-truncated" className="px-1 py-1 text-faint">
-              Showing part of a very large project.
-            </p>
-          ) : null}
-        </div>
+      <DialogContent data-testid="command-palette" className="max-w-xl gap-0 overflow-hidden p-0 font-sans">
+        <DialogHeader className="sr-only">
+          <DialogTitle>Command palette</DialogTitle>
+          <DialogDescription>Search for a session, file, skill, or command.</DialogDescription>
+        </DialogHeader>
+        <Command shouldFilter={false}>
+          <CommandInput
+            data-testid="palette-input"
+            // Same reason as the panel's filter: without this, ⌘W typed here
+            // closes a pane and destroys its session.
+            data-shortcuts="off"
+            autoFocus
+            value={query}
+            onValueChange={setQuery}
+            placeholder="Search sessions, files, skills, and commands"
+            spellCheck={false}
+          />
+          <CommandList className="scroll-thin">
+            {matchedSessions.length > 0 ? (
+              <CommandGroup heading={query.length === 0 ? 'Open sessions' : 'Sessions'}>
+                {matchedSessions.map((session) => (
+                  <CommandItem
+                    key={session.id}
+                    value={session.id}
+                    data-testid={`palette-session-${session.id}`}
+                    onSelect={() => choose(() => onSelectSession(session.id))}
+                  >
+                    <Terminal />
+                    <span className="min-w-0 flex-1 truncate">{session.name}</span>
+                    {session.severity === 0 ? <CommandShortcut>Needs attention</CommandShortcut> : null}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ) : null}
+            {matchedFiles.length > 0 ? (
+              <>
+                {matchedSessions.length > 0 ? <CommandSeparator /> : null}
+                <CommandGroup heading="Files">
+                  {matchedFiles.map((file) => (
+                    <CommandItem
+                      key={file.path}
+                      value={file.path}
+                      data-testid={`palette-file-${file.path}`}
+                      onSelect={() => choose(() => onOpenFile(file.path))}
+                      title={file.path}
+                    >
+                      <FileText />
+                      <span className="min-w-0 flex-1 truncate">{file.name}</span>
+                      <CommandShortcut className="max-w-[45%] truncate">{file.path}</CommandShortcut>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </>
+            ) : null}
+            {matchedCommands.length > 0 ? (
+              <>
+                {matchedSessions.length > 0 || matchedFiles.length > 0 ? <CommandSeparator /> : null}
+                <CommandGroup heading="Commands">
+                  {matchedCommands.map((entry) => (
+                    <CommandItem
+                      key={entry.name}
+                      value={`command:${entry.name}`}
+                      data-testid={`palette-command-${entry.name}`}
+                      onSelect={() => choose(entry.run)}
+                    >
+                      <Terminal />
+                      <span className="flex-1 truncate">{entry.name}</span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </>
+            ) : null}
+            {matchedActions.length > 0 ? (
+              <>
+                {matchedSessions.length > 0 || matchedFiles.length > 0 || matchedCommands.length > 0 ? (
+                  <CommandSeparator />
+                ) : null}
+                <CommandGroup heading="Skills">
+                  {matchedActions.map((entry) => (
+                    <CommandItem
+                      key={`${entry.kind}:${entry.source.kind}:${entry.name}`}
+                      value={`${entry.kind}:${entry.source.kind}:${entry.name}`}
+                      data-testid={`palette-action-${entry.name}`}
+                      onSelect={() => choose(() => onInsert(entry.name))}
+                      title={entry.description}
+                    >
+                      <Sparkles />
+                      <span className="flex-1 truncate">/{entry.name}</span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </>
+            ) : null}
+            {!hasResults ? <CommandEmpty data-testid="palette-empty">Nothing matches.</CommandEmpty> : null}
+            {truncated && query.length > 0 ? (
+              // Said out loud rather than swallowed: past the cap this list is
+              // incomplete, and a file that is missing for that reason looks
+              // exactly like a file that does not exist.
+              <p data-testid="palette-truncated" className="px-3 py-2 text-xs text-muted-foreground">
+                Showing part of a very large project.
+              </p>
+            ) : null}
+          </CommandList>
+        </Command>
       </DialogContent>
     </Dialog>
   )

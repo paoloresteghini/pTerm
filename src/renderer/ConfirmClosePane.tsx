@@ -1,5 +1,11 @@
-import { Dialog, DialogContent, DialogTitle } from './ui/Dialog'
-import { Button } from './ui/Button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
 
 /**
  * Asks before something with unsaved edits is closed.
@@ -26,18 +32,18 @@ export function ConfirmClosePane({
 }) {
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onCancel() }}>
-      <DialogContent data-testid="confirm-close">
-        <DialogTitle className="mb-2 text-xs uppercase tracking-wider text-faint">
-          Unsaved changes
-        </DialogTitle>
-        <p className="mb-3 text-[11px] text-muted">
-          This {subject} has edits that were never saved. Closing it now throws them away.
-        </p>
-        <div className="flex justify-end gap-2">
+      <DialogContent data-testid="confirm-close" className="max-w-md gap-0 overflow-hidden p-0 font-sans">
+        <DialogHeader className="border-b border-border px-6 py-4 pr-12 text-left">
+          <DialogTitle>Unsaved changes</DialogTitle>
+          <DialogDescription>
+            This {subject} has edits that were never saved. Closing it now throws them away.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex justify-end gap-2 px-6 py-4">
           <Button data-testid="confirm-close-cancel" variant="ghost" onClick={onCancel}>
             Cancel
           </Button>
-          <Button data-testid="confirm-close-discard" onClick={onDiscard}>
+          <Button data-testid="confirm-close-discard" variant="destructive" onClick={onDiscard}>
             Close and lose my edits
           </Button>
         </div>

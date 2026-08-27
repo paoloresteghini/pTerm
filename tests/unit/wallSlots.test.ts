@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import {
   WALL_COLUMNS_DEFAULT,
+  addSlot,
   columnsFromStored,
+  pinSlot,
+  removeProjectSlots,
+  removeSlot,
   slotsFromStored,
-  toggleSlot,
   wallActive,
 } from '../../src/renderer/lib/wallSlots'
 
@@ -29,8 +32,11 @@ import {
 const PROJECTS = [{ id: 'p1' }, { id: 'p2' }, { id: 'p3' }]
 
 describe('slotsFromStored', () => {
-  it('reads a clean list', () => {
-    expect(slotsFromStored('["p2","p1"]', PROJECTS)).toEqual(['p2', 'p1'])
+  it('reads a clean legacy list', () => {
+    expect(slotsFromStored('["p2","p1"]', PROJECTS)).toEqual([
+      { id: 'p2', projectId: 'p2' },
+      { id: 'p1', projectId: 'p1' },
+    ])
   })
 
   it('starts empty when nothing is stored', () => {
@@ -48,15 +54,29 @@ describe('slotsFromStored', () => {
   // A project removed from the sidebar leaves the wall by itself, which is why
   // membership is stored by id and resolved against the live list.
   it('drops an id no project answers to', () => {
-    expect(slotsFromStored('["p1","gone","p3"]', PROJECTS)).toEqual(['p1', 'p3'])
+    expect(slotsFromStored('["p1","gone","p3"]', PROJECTS)).toEqual([
+      { id: 'p1', projectId: 'p1' },
+      { id: 'p3', projectId: 'p3' },
+    ])
   })
 
-  it('collapses a duplicated id to its first appearance', () => {
-    expect(slotsFromStored('["p2","p1","p2"]', PROJECTS)).toEqual(['p2', 'p1'])
+  it('reads independently pinned cells for the same project', () => {
+    expect(
+      slotsFromStored(
+        '[{"id":"first","projectId":"p1","pin":"one"},{"id":"second","projectId":"p1","pin":"two"}]',
+        PROJECTS,
+      ),
+    ).toEqual([
+      { id: 'first', projectId: 'p1', pin: 'one' },
+      { id: 'second', projectId: 'p1', pin: 'two' },
+    ])
   })
 
-  it('drops an entry that is not a string', () => {
-    expect(slotsFromStored('["p1",7,null,"p3"]', PROJECTS)).toEqual(['p1', 'p3'])
+  it('drops malformed entries', () => {
+    expect(slotsFromStored('["p1",7,null,"p3"]', PROJECTS)).toEqual([
+      { id: 'p1', projectId: 'p1' },
+      { id: 'p3', projectId: 'p3' },
+    ])
   })
 })
 
@@ -86,38 +106,59 @@ describe('columnsFromStored', () => {
   })
 })
 
-describe('toggleSlot', () => {
-  it('appends a project that is not on the wall', () => {
-    expect(toggleSlot(['p1'], 'p2')).toEqual(['p1', 'p2'])
+describe('wall slot mutations', () => {
+  it('appends another independently configurable cell for a project', () => {
+    const before = [{ id: 'first', projectId: 'p1', pin: 'one' }]
+    const next = addSlot(before, { id: 'second', projectId: 'p1', pin: null })
+    expect(next).toHaveLength(2)
+    expect(next[1]).toMatchObject({ projectId: 'p1', pin: null })
+    expect(next[1]?.id).not.toBe('first')
+    expect(addSlot(next, { id: 'second', projectId: 'p1', pin: null })).toEqual(next)
+    expect(before).toEqual([{ id: 'first', projectId: 'p1', pin: 'one' }])
   })
 
-  it('removes a project that is', () => {
-    expect(toggleSlot(['p1', 'p2', 'p3'], 'p2')).toEqual(['p1', 'p3'])
+  it('changes and removes one cell without affecting another from the same project', () => {
+    const slots = [
+      { id: 'first', projectId: 'p1', pin: 'one' },
+      { id: 'second', projectId: 'p1', pin: 'two' },
+    ]
+    expect(pinSlot(slots, 'second', 'three')).toEqual([
+      { id: 'first', projectId: 'p1', pin: 'one' },
+      { id: 'second', projectId: 'p1', pin: 'three' },
+    ])
+    expect(removeSlot(slots, 'first')).toEqual([{ id: 'second', projectId: 'p1', pin: 'two' }])
   })
 
-  it('hands back a new array rather than mutating', () => {
-    const before = ['p1']
-    expect(toggleSlot(before, 'p2')).not.toBe(before)
-    expect(before).toEqual(['p1'])
+  it('removes every cell when a project leaves the wall', () => {
+    expect(
+      removeProjectSlots(
+        [
+          { id: 'first', projectId: 'p1', pin: 'one' },
+          { id: 'second', projectId: 'p2', pin: 'two' },
+          { id: 'third', projectId: 'p1', pin: 'three' },
+        ],
+        'p1',
+      ),
+    ).toEqual([{ id: 'second', projectId: 'p2', pin: 'two' }])
   })
 })
 
 describe('wallActive', () => {
   it('is off whenever the user has it off', () => {
-    expect(wallActive(false, ['p1'], 'p1')).toBe(false)
+    expect(wallActive(false, [{ id: 'one', projectId: 'p1' }], 'p1')).toBe(false)
   })
 
   it('is on for a project holding a slot', () => {
-    expect(wallActive(true, ['p1', 'p2'], 'p2')).toBe(true)
+    expect(wallActive(true, [{ id: 'one', projectId: 'p1' }, { id: 'two', projectId: 'p2' }], 'p2')).toBe(true)
   })
 
   // The whole feature: the sidebar keeps working while the wall is on.
   it('suspends for a project holding no slot', () => {
-    expect(wallActive(true, ['p1', 'p2'], 'p3')).toBe(false)
+    expect(wallActive(true, [{ id: 'one', projectId: 'p1' }, { id: 'two', projectId: 'p2' }], 'p3')).toBe(false)
   })
 
   it('suspends when nothing is selected at all', () => {
-    expect(wallActive(true, ['p1'], null)).toBe(false)
+    expect(wallActive(true, [{ id: 'one', projectId: 'p1' }], null)).toBe(false)
   })
 
   // An empty wall is the state whose placeholder says how to fill it.

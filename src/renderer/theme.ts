@@ -1,7 +1,7 @@
 import { THEMES, THEME_DEFAULT, cssVarName, isThemeId, type ThemeId, type ThemeTokens } from '../shared/themes'
 
 /**
- * Painting the window in one of the five palettes.
+ * Painting the window in one of the six palettes.
  *
  * Set as inline custom properties on `documentElement` rather than by swapping
  * a stylesheet: an inline property beats `@theme`'s `:root` on specificity

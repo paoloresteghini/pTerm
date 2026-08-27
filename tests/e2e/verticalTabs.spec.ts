@@ -95,6 +95,184 @@ test('opening the column takes the horizontal bar away, and closing it brings it
   await expect(window.getByTestId('tabbar')).toBeVisible()
 })
 
+test('workspace light places Tabs at the top of the Context rail', async () => {
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0].webContents.send('pterm:menuCommand', 'settings')
+  })
+  await expect(window.getByTestId('settings-pane')).toBeVisible()
+  await window.getByTestId('theme-workspaceLight').click()
+  await window.keyboard.press('Escape')
+  await expect(window.getByTestId('settings-pane')).toHaveCount(0)
+
+  await clickMenuItem('toggle-tabs')
+  const context = window.getByTestId('workspace-context')
+  const tabs = context.getByTestId('tabs-panel')
+
+  await expect(tabs).toBeVisible()
+  await expect(context.getByTestId('tabs-heading')).toHaveCSS('text-transform', 'none')
+  await expect(context.getByTestId('tabs-heading')).toHaveCSS('font-size', '12px')
+
+  const [contextBox, tabsBox] = await Promise.all([
+    context.boundingBox(),
+    tabs.boundingBox(),
+  ])
+  expect(tabsBox!.y).toBeCloseTo(contextBox!.y, 1)
+})
+
+test('workspace light omits the Environment card', async () => {
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0].webContents.send('pterm:menuCommand', 'settings')
+  })
+  await expect(window.getByTestId('settings-pane')).toBeVisible()
+  await window.getByTestId('theme-workspaceLight').click()
+  await window.keyboard.press('Escape')
+  await clickMenuItem('toggle-skills')
+
+  const context = window.getByTestId('workspace-context')
+  await expect(context.getByTestId('skills-panel')).toBeVisible()
+  await expect(context.getByTestId('workspace-environment')).toHaveCount(0)
+})
+
+test('workspace light places collapsed utility panes in the Context rail', async () => {
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0].webContents.send('pterm:menuCommand', 'settings')
+  })
+  await expect(window.getByTestId('settings-pane')).toBeVisible()
+  await window.getByTestId('theme-workspaceLight').click()
+  await window.keyboard.press('Escape')
+
+  await clickMenuItem('toggle-skills')
+  await clickMenuItem('toggle-git')
+
+  const context = window.getByTestId('workspace-context')
+  await context.getByTestId('skills-toggle').click()
+  await context.getByTestId('git-toggle').click()
+  const skills = context.getByTestId('skills-toggle')
+  const git = context.getByTestId('git-toggle')
+
+  await expect(skills).toBeVisible()
+  await expect(git).toBeVisible()
+  await expect(skills).toHaveCSS('writing-mode', 'horizontal-tb')
+  await expect(git).toHaveCSS('writing-mode', 'horizontal-tb')
+
+  const [contextBox, skillsBox, gitBox] = await Promise.all([
+    context.boundingBox(),
+    skills.boundingBox(),
+    git.boundingBox(),
+  ])
+  expect(skillsBox!.y).toBeCloseTo(contextBox!.y, 1)
+  expect(gitBox!.y).toBeGreaterThan(skillsBox!.y)
+})
+
+test('workspace light places Issues, Notes, and Todos in the Context rail', async () => {
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0].webContents.send('pterm:menuCommand', 'settings')
+  })
+  await expect(window.getByTestId('settings-pane')).toBeVisible()
+  await window.getByTestId('theme-workspaceLight').click()
+  await window.keyboard.press('Escape')
+  await clickMenuItem('toggle-issues')
+  await clickMenuItem('toggle-notes')
+  await clickMenuItem('toggle-todos')
+
+  const context = window.getByTestId('workspace-context')
+  const issues = context.getByTestId('issues-panel')
+  const notes = context.getByTestId('notes-panel')
+  const todos = context.getByTestId('todos-panel')
+
+  await expect(issues).toBeVisible()
+  await expect(notes).toBeVisible()
+  await expect(todos).toBeVisible()
+
+  const [contextBox, issuesBox, notesBox, todosBox] = await Promise.all([
+    context.boundingBox(),
+    issues.boundingBox(),
+    notes.boundingBox(),
+    todos.boundingBox(),
+  ])
+  expect(issuesBox!.y).toBeCloseTo(contextBox!.y, 1)
+  expect(notesBox!.y).toBeGreaterThan(issuesBox!.y)
+  expect(todosBox!.y).toBeGreaterThan(notesBox!.y)
+})
+
+test('workspace light can reorder Issues, Notes, and Todos with the context cards', async () => {
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0].webContents.send('pterm:menuCommand', 'settings')
+  })
+  await expect(window.getByTestId('settings-pane')).toBeVisible()
+  await window.getByTestId('theme-workspaceLight').click()
+  await window.keyboard.press('Escape')
+  await clickMenuItem('toggle-issues')
+  await clickMenuItem('toggle-notes')
+
+  const context = window.getByTestId('workspace-context')
+  await context.getByTestId('notes-toggle').dragTo(context.getByTestId('issues-toggle'))
+
+  await expect.poll(() =>
+    context.locator('[data-testid^="workspace-utility-"]').evaluateAll((cards) =>
+      cards.map((card) => card.getAttribute('data-testid')),
+    ),
+  ).toEqual(['workspace-utility-notes', 'workspace-utility-issues'])
+})
+
+test('workspace light utility cards can still be reordered', async () => {
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0].webContents.send('pterm:menuCommand', 'settings')
+  })
+  await expect(window.getByTestId('settings-pane')).toBeVisible()
+  await window.getByTestId('theme-workspaceLight').click()
+  await window.keyboard.press('Escape')
+  await clickMenuItem('toggle-skills')
+  await clickMenuItem('toggle-git')
+
+  const context = window.getByTestId('workspace-context')
+  await context.getByTestId('git-toggle').dragTo(context.getByTestId('skills-toggle'))
+
+  await expect.poll(() =>
+    context.locator('[data-testid^="workspace-utility-"]').evaluateAll((cards) =>
+      cards.map((card) => card.getAttribute('data-testid')),
+    ),
+  ).toEqual(['workspace-utility-git', 'workspace-utility-skills'])
+})
+
+test('workspace light can reorder Tabs with the context cards', async () => {
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0].webContents.send('pterm:menuCommand', 'settings')
+  })
+  await expect(window.getByTestId('settings-pane')).toBeVisible()
+  await window.getByTestId('theme-workspaceLight').click()
+  await window.keyboard.press('Escape')
+  await clickMenuItem('toggle-tabs')
+  await clickMenuItem('toggle-skills')
+
+  const context = window.getByTestId('workspace-context')
+  await context.getByTestId('skills-toggle').dragTo(context.getByTestId('tabs-heading'))
+
+  await expect.poll(() =>
+    context.locator('[data-testid^="workspace-utility-"]').evaluateAll((cards) =>
+      cards.map((card) => card.getAttribute('data-testid')),
+    ),
+  ).toEqual(['workspace-utility-skills', 'workspace-utility-tabs'])
+})
+
+test('workspace light utility cards retain their collapse controls', async () => {
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0].webContents.send('pterm:menuCommand', 'settings')
+  })
+  await expect(window.getByTestId('settings-pane')).toBeVisible()
+  await window.getByTestId('theme-workspaceLight').click()
+  await window.keyboard.press('Escape')
+  await clickMenuItem('toggle-skills')
+
+  const context = window.getByTestId('workspace-context')
+  await expect(context.getByTestId('skills-panel')).toBeVisible()
+  await context.getByTestId('skills-toggle').click()
+  await expect(context.getByTestId('skills-panel')).toHaveCount(0)
+  await expect(context.getByTestId('skills-toggle')).toBeVisible()
+  await context.getByTestId('skills-toggle').click()
+  await expect(context.getByTestId('skills-panel')).toBeVisible()
+})
+
 test('collapsing the column to its strip also brings the bar back', async () => {
   await clickMenuItem('toggle-tabs')
   await expect(window.getByTestId('tabbar')).toHaveCount(0)
@@ -303,4 +481,3 @@ test('clicking a split\'s other pane moves the keyboard to it', async () => {
   // "landed in the right pane" rather than just "landed somewhere".
   await expect.poll(async () => terminalTextOf(window, first)).not.toContain('vtabs-target')
 })
-

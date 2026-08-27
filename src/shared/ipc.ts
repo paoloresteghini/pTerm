@@ -135,7 +135,6 @@ export type MenuCommand =
   | 'focusUp'
   | 'focusDown'
   | 'toggleFiles'
-  | 'toggleTabs'
   | 'toggleSkills'
   | 'togglePresets'
   | 'togglePrompts'

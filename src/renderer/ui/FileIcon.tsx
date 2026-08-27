@@ -191,10 +191,10 @@ export function FileIcon({ name, isDir = false }: { name: string; isDir?: boolea
   return (
     <svg
       viewBox="0 0 16 16"
-      width="12"
-      height="12"
+      width="14"
+      height="14"
       aria-hidden="true"
-      className="mr-1.5 shrink-0"
+      className="mr-2 shrink-0"
       style={{ display: 'block' }}
     >
       <Glyph kind={kind} color={color} />

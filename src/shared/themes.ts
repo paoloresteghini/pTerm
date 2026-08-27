@@ -1,5 +1,5 @@
 /**
- * Every colour the app draws, five ways.
+ * Every colour the app draws, six ways.
  *
  * In TypeScript rather than five `:root[data-theme]` blocks in `index.css` for
  * a reason the stylesheet already states: xterm renders to a canvas and cannot
@@ -18,7 +18,7 @@
  * copy that can disagree about what a config file may contain.
  */
 
-export const THEME_IDS = ['classic', 'stepped', 'lifted', 'slate', 'lineled'] as const
+export const THEME_IDS = ['classic', 'stepped', 'lifted', 'slate', 'lineled', 'workspaceLight'] as const
 
 export type ThemeId = (typeof THEME_IDS)[number]
 
@@ -55,7 +55,7 @@ export interface ThemeTokens {
   /** The tab bar's split-group strip. Blended, never picked. */
   group: string
   danger: string
-  /** The medium-priority mark in the Todos column. Takes one value in all five themes. */
+  /** The medium-priority mark in the Todos column. Takes one value in all six themes. */
   warn: string
   ok: string
   /** xterm's foreground. Read in JS because a canvas cannot read CSS. */
@@ -206,6 +206,30 @@ export const THEMES: Record<ThemeId, Theme> = {
       ok: '#4ade80',
       termFg: '#d4d4d8',
       inset: '#ffffff0e',
+    },
+  },
+  workspaceLight: {
+    id: 'workspaceLight',
+    name: 'Workspace light',
+    separates: 'fill',
+    tokens: {
+      bg: '#ffffff',
+      surface: '#eef1f4',
+      raised: '#e1e5e9',
+      overlay: '#ffffff',
+      border: '#e2e6ea',
+      borderStrong: '#cbd2d9',
+      fg: '#1f2937',
+      muted: '#4b5563',
+      faint: '#9ca3af',
+      label: '#374151',
+      accent: '#2563eb',
+      group: '#87a9f4',
+      danger: '#b91c1c',
+      warn: '#92400e',
+      ok: '#166534',
+      termFg: '#1f2937',
+      inset: '#00000000',
     },
   },
 }

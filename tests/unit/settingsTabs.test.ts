@@ -8,11 +8,10 @@ describe('SETTINGS_TABS', () => {
   // leads the rest for the reason it used to lead outright, being the only one
   // of those a user returns to. tests/e2e/settingsTabs.spec.ts navigates by
   // arrow key through exactly this order.
-  it('runs Appearance, Notifications, Hooks, Shell history, Updates', () => {
+  it('runs Appearance, Notifications, Shell history, Updates', () => {
     expect(SETTINGS_TABS.map((tab) => tab.id)).toEqual([
       'appearance',
       'notifications',
-      'hooks',
       'shell-history',
       'updates',
     ])

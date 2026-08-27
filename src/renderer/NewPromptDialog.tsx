@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react'
-import { Dialog, DialogContent, DialogTitle } from './ui/Dialog'
-import { Button } from './ui/Button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 
 /**
  * Writes one saved prompt. The same Radix dialog the ⌘K palette and the
@@ -66,12 +74,17 @@ export function NewPromptDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent data-testid="prompts-dialog">
-        <DialogTitle className="mb-2 text-xs uppercase tracking-wider text-label">
-          New prompt
-        </DialogTitle>
+      <DialogContent
+        data-testid="prompts-dialog"
+        className="flex max-h-[85vh] w-[min(640px,calc(100%-2rem))] max-w-none flex-col gap-0 overflow-hidden p-0 font-sans sm:max-w-none"
+      >
+        <DialogHeader className="shrink-0 border-b border-border px-6 py-4 pr-12 text-left">
+          <DialogTitle>New prompt</DialogTitle>
+          <DialogDescription>Save reusable instructions for your sessions.</DialogDescription>
+        </DialogHeader>
 
-        <input
+        <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-6 py-5">
+        <Input
           data-testid="prompts-label"
           // Load-bearing, like the skills filter and the notes textarea:
           // without it a ⌘W typed in here closes a pane and destroys its tmux
@@ -88,10 +101,10 @@ export function NewPromptDialog({
           }}
           placeholder="Name"
           spellCheck={false}
-          className="mb-2 w-full border border-border bg-transparent px-1.5 py-1 text-[11px] text-fg placeholder:text-faint focus:outline-none"
+          className="mb-3"
         />
 
-        <textarea
+        <Textarea
           data-testid="prompts-body"
           data-shortcuts="off"
           value={body}
@@ -99,18 +112,21 @@ export function NewPromptDialog({
           placeholder="The prompt itself"
           spellCheck={false}
           rows={8}
-          className="scroll-thin mb-3 w-full resize-none border border-border bg-transparent p-1.5 text-[11px] text-fg select-text placeholder:text-faint focus:outline-none"
+          className="scroll-thin min-h-48 resize-none select-text"
         />
 
         {error ? (
-          <p data-testid="prompts-error" className="mb-2 text-[11px] text-danger">
+          <p data-testid="prompts-error" className="mt-3 text-sm text-destructive">
             Not saved: {error}
           </p>
         ) : null}
+        </div>
 
-        <Button data-testid="prompts-save" disabled={!ready} onClick={save}>
-          {saving ? 'Saving…' : 'Save'}
-        </Button>
+        <div className="flex shrink-0 justify-end border-t border-border px-6 py-4">
+          <Button data-testid="prompts-save" disabled={!ready} onClick={save}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
   )

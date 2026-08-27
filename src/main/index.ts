@@ -348,16 +348,6 @@ function installMenu(): void {
         },
         { type: 'separator' },
         {
-          id: 'toggle-tabs',
-          label: 'Tabs',
-          type: 'checkbox',
-          // No accelerator. The lettered columns below have spent the mnemonic keys, and
-          // this one replaces the tab bar rather than merely appearing beside it, which
-          // is not a change to make by a keystroke a hand can land on by accident.
-          registerAccelerator: false,
-          click: () => sendMenuCommand('toggleTabs'),
-        },
-        {
           id: 'toggle-files',
           label: 'Files',
           type: 'checkbox',

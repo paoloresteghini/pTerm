@@ -12,7 +12,7 @@ import {
 } from './lib/todoList'
 import { useColumnWidth } from './lib/columnWidth'
 import { cn } from './lib/cn'
-import { ColumnResizer, PanelHeading, PanelStrip, type PanelSide } from './ui/Panel'
+import { ColumnResizer, PanelHeading, PanelStrip, PanelSurface, type PanelSide } from './ui/Panel'
 import { TodoModal } from './TodoModal'
 
 function StateButton({
@@ -120,6 +120,7 @@ export function TodosPanel({
   side,
   creating,
   onCreatingChange,
+  embedded = false,
 }: {
   collapsed: boolean
   onToggle: () => void
@@ -133,6 +134,8 @@ export function TodosPanel({
    */
   creating: boolean
   onCreatingChange: (creating: boolean) => void
+  /** Renders beneath Environment in Workspace Light instead of in the row. */
+  embedded?: boolean
 }) {
   // No `fallback` argument, so this column takes `useColumnWidth`'s own
   // default: what is on screen is a list of short titles, not the prose a note
@@ -228,6 +231,7 @@ export function TodosPanel({
           side={side}
           onClick={onToggle}
           onDragStart={onDragStart}
+          embedded={embedded}
         />
         {modal}
       </>
@@ -239,15 +243,14 @@ export function TodosPanel({
   const openCount = rows.filter((todo) => !todo.done).length
 
   return (
-    <div
+    <PanelSurface
       data-testid="todos-panel"
+      embedded={embedded}
+      side={side}
       className={cn(
-        'relative flex shrink-0 flex-col border-border bg-surface font-mono text-[11px] select-none',
-        // The seam faces the terminal either way: a left column drawing
-        // `border-l` would put its only border against the window frame.
-        side === 'left' ? 'border-r' : 'border-l',
+        'font-mono text-[11px] select-none',
       )}
-      style={{ width }}
+      style={embedded ? undefined : { width }}
     >
       {/* Heading and `+` as siblings, not nested: a button inside a button is
           invalid HTML, and the inner click would bubble out and collapse the
@@ -351,7 +354,9 @@ export function TodosPanel({
         </p>
       ) : null}
       {modal}
-      <ColumnResizer testid="resize-todos" side={side} width={width} onResize={set} onCommit={commit} />
-    </div>
+      {!embedded ? (
+        <ColumnResizer testid="resize-todos" side={side} width={width} onResize={set} onCommit={commit} />
+      ) : null}
+    </PanelSurface>
   )
 }

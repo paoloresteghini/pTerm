@@ -18,11 +18,12 @@ import { tabLabel } from './lib/tabLabel'
  * It is opaque, so the group has to leave room for it, and **`p-2` is not that
  * room**: this comment said it was until Task 7 put the two on screen together
  * and measured 8px of padding against a 22px header, with the top two rows of
- * every wall terminal behind it. `App.tsx` gives a group with a rect `pt-6`,
+ * every wall terminal behind it. `App.tsx` gives a group with a rect `pt-9`,
  * which is this header's height plus the waiting strip above it. A change to
  * either height has to move with the other.
  */
 export function WallCell({
+  slotId,
   project,
   pinned,
   choices,
@@ -33,7 +34,9 @@ export function WallCell({
   onFocus,
   onPin,
   onToggleFollow,
+  onRemove,
 }: {
+  slotId: string
   project: ProjectDescriptor
   /** The pinned pane, or undefined for an empty cell. */
   pinned: TabDescriptor | undefined
@@ -46,6 +49,7 @@ export function WallCell({
   onFocus: () => void
   onPin: (paneId: string | null) => void
   onToggleFollow: () => void
+  onRemove: () => void
 }): ReactElement {
   const [open, setOpen] = useState(false)
   const box = useRef<HTMLDivElement>(null)
@@ -88,9 +92,9 @@ export function WallCell({
   return (
     <div
       ref={box}
-      data-testid={`wall-cell-${project.id}`}
+      data-testid={`wall-cell-${slotId}`}
       data-focused={focused ? 'true' : 'false'}
-      className="pointer-events-none absolute inset-x-0 top-0 z-20"
+      className="wall-cell pointer-events-none absolute inset-0 z-20"
     >
       {/* The state that means YOU are the blocker, promoted to something
           readable from across a desk. The dot says the same thing at 6px, and
@@ -104,15 +108,15 @@ export function WallCell({
       <div
         onMouseDown={onFocus}
         className={cn(
-          'pointer-events-auto flex h-[22px] items-center gap-1.5 overflow-hidden border-b border-border px-2 text-[10.5px] whitespace-nowrap',
+          'wall-cell-header pointer-events-auto flex h-8 items-center gap-2 overflow-hidden border-b border-border px-3 text-[13px] whitespace-nowrap',
           focused ? 'bg-raised text-fg' : 'bg-surface text-muted',
         )}
       >
-        <span className={cn('font-semibold', focused ? 'text-accent' : 'text-label')}>
+        <span className={cn('shrink-0 font-medium', focused ? 'text-accent' : 'text-label')}>
           {project.name}
         </span>
         <span className="text-faint">/</span>
-        <span className={cn('truncate', pinned ? '' : 'text-faint')}>
+        <span className={cn('min-w-0 flex-1 truncate', pinned ? '' : 'text-faint')}>
           {pinned ? tabLabel(pinned) : 'choose a pane'}
         </span>
         <button
@@ -123,7 +127,7 @@ export function WallCell({
             event.stopPropagation()
             setOpen((was) => !was)
           }}
-          className="shrink-0 px-0.5 text-[9px] text-faint hover:text-fg focus-visible:text-fg focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+          className="shrink-0 px-1 text-[11px] text-faint hover:text-fg focus-visible:text-fg focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
         >
           ▾
         </button>
@@ -141,8 +145,8 @@ export function WallCell({
 
       {open ? (
         <div
-          data-testid={`wall-picker-${project.id}`}
-          className="pointer-events-auto w-[250px] border border-border-strong bg-overlay py-0.5 text-[11px]"
+          data-testid={`wall-picker-${slotId}`}
+          className="wall-cell-picker pointer-events-auto w-[250px] border border-border-strong bg-overlay py-0.5 text-[11px]"
         >
           {choices.length === 0 ? (
             <div className="px-2 py-1 text-faint">No terminals in this project</div>
@@ -191,6 +195,16 @@ export function WallCell({
                 comment requires the absence be read this way rather than by
                 truthiness. */}
             <span className="ml-auto">{project.wallFollowActive === true ? 'on' : 'off'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onRemove()
+              setOpen(false)
+            }}
+            className="mt-0.5 flex w-full items-center gap-1.5 border-t border-border px-2 py-1 text-left text-[10px] text-faint hover:text-fg"
+          >
+            Remove this wall cell
           </button>
         </div>
       ) : null}

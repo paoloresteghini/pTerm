@@ -1,12 +1,18 @@
 import { useEffect, useState } from 'react'
 import type { NotificationConfig } from '../../shared/ipc'
 import type { ThemeId } from '../../shared/themes'
-import { Dialog, DialogContent, DialogTitle } from '../ui/Dialog'
+import type { FontChoice } from '../fonts'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Tabs, TabsContent } from '@/components/ui/tabs'
 import { SettingsTabs } from './SettingsTabs'
 import { SETTINGS_TABS, type SettingsTabId } from './tabs'
 import { AppearanceSection } from './AppearanceSection'
-import { HooksSection } from './HooksSection'
-import { McpSection } from './McpSection'
 import { ShellHistorySection } from './ShellHistorySection'
 import { NotificationsSection } from './NotificationsSection'
 import { UpdatesSection } from './UpdatesSection'
@@ -18,6 +24,10 @@ export function SettingsPane({
   onNotificationsChange,
   theme,
   onThemeChange,
+  editorFont,
+  onEditorFontChange,
+  terminalFont,
+  onTerminalFontChange,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -26,6 +36,10 @@ export function SettingsPane({
   /** The palette in force, so the picker can mark the chosen card. */
   theme: ThemeId
   onThemeChange: (id: ThemeId) => void
+  editorFont: FontChoice
+  onEditorFontChange: (font: FontChoice) => void
+  terminalFont: FontChoice
+  onTerminalFontChange: (font: FontChoice) => void
 }) {
   const [tab, setTab] = useState<SettingsTabId>(SETTINGS_TABS[0].id)
   const [version, setVersion] = useState<string | null>(null)
@@ -51,32 +65,36 @@ export function SettingsPane({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      {/* Bounded and scrollable, which it was not until the shell-history row
-          grew its disclosure paragraph. `DialogContent` centres itself with a
-          -50% translate and sets no height, so a dialog taller than the window
-          hangs off both ends with no way to reach either: measured 2026-08-06,
-          the Updates row's `Check now` button went out of the viewport and
-          Playwright's own scroll-into-view could not bring it back, because
-          there was no scroll container to scroll. One tab's body is far
-          shorter than the four stacked sections that provoked this, but a
-          short window is still a short window. */}
-      <DialogContent data-testid="settings-pane" className="scroll-thin max-h-[85vh] overflow-y-auto">
-        <DialogTitle className="mb-3 text-xs uppercase tracking-wider text-label">
-          Settings
-        </DialogTitle>
-
-        <SettingsTabs active={tab} onSelect={setTab} />
-
-        {/* Only the selected section is mounted. Hooks, shell history and
-            Updates each read their own file on mount, so selecting one of
-            those tabs is what gives it a fresh read. Notifications takes its
-            data as a prop instead, fetched once at app startup, so it has no
-            mount read to trigger; it still unmounts and remounts with the
-            others, which just costs it nothing since there is no listener or
-            timer on it to clean up either. */}
-        <div role="tabpanel" id={`settings-panel-${tab}`} aria-labelledby={`settings-tab-${tab}`}>
+      <DialogContent
+        data-testid="settings-pane"
+        className="flex max-h-[85vh] w-[min(720px,calc(100%-2rem))] max-w-none flex-col gap-0 overflow-hidden p-0 font-sans sm:max-w-none"
+      >
+        <DialogHeader className="shrink-0 border-b border-border px-6 py-4 pr-12 text-left">
+          <DialogTitle>Settings</DialogTitle>
+          <DialogDescription>Personalize pTerm and manage its integrations.</DialogDescription>
+        </DialogHeader>
+        <Tabs
+          value={tab}
+          onValueChange={(value) => setTab(value as SettingsTabId)}
+          className="min-h-0 flex-1 gap-0"
+        >
+          <div className="shrink-0 border-b border-border px-4 py-2">
+            <SettingsTabs onValueChange={setTab} />
+          </div>
+          {/* Only the selected section is mounted. Shell history and Updates
+              each read their own file on mount, so selecting one of those tabs
+              gives it a fresh read. Notifications takes its data as a prop
+              instead, fetched once at app startup. */}
+          <TabsContent value={tab} className="scroll-thin m-0 min-h-0 flex-1 overflow-y-auto px-6 py-5">
           {tab === 'appearance' ? (
-            <AppearanceSection theme={theme} onThemeChange={onThemeChange} />
+            <AppearanceSection
+              theme={theme}
+              onThemeChange={onThemeChange}
+              editorFont={editorFont}
+              onEditorFontChange={onEditorFontChange}
+              terminalFont={terminalFont}
+              onTerminalFontChange={onTerminalFontChange}
+            />
           ) : null}
           {tab === 'notifications' ? (
             <NotificationsSection
@@ -84,21 +102,11 @@ export function SettingsPane({
               onNotificationsChange={onNotificationsChange}
             />
           ) : null}
-          {/* Two sections on one tab, which is what the user ruled for: the
-              switch lives beside Hooks rather than in a tab of its own,
-              because both are about what pTerm writes into a Claude session's
-              world and neither is big enough to be a screen. */}
-          {tab === 'hooks' ? (
-            <>
-              <HooksSection />
-              <McpSection />
-            </>
-          ) : null}
           {tab === 'shell-history' ? <ShellHistorySection /> : null}
           {tab === 'updates' ? <UpdatesSection /> : null}
-        </div>
-
-        <div className="mt-4 border-t border-border pt-2 text-[11px] text-label">
+          </TabsContent>
+        </Tabs>
+        <div className="shrink-0 border-t border-border px-6 py-3 text-xs text-muted-foreground">
           pTerm <span data-testid="update-current-version">{version ?? '…'}</span>
         </div>
       </DialogContent>

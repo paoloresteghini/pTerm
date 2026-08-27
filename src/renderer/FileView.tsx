@@ -9,6 +9,7 @@ import { GUTTER_TEXT, syntaxColorStyle } from './lib/syntaxColors'
 import type { PaneColor } from '../shared/paneColors'
 import type { ThemeId } from '../shared/themes'
 import { xtermTheme } from './lib/xtermTheme'
+import { editorFontFamily, type FontChoice } from './fonts'
 
 /**
  * Every mounted editor pane's save function, by pane id.
@@ -60,10 +61,10 @@ export function saveEditorPane(paneId: string): Promise<void> {
  * so an editor pane and a terminal pane in one row read as the same surface.
  * That used to be a hardcoded `#d4d4d8` matching a literal in `Terminal.tsx`;
  * both now read the theme instead, which is what lets the pair stay in step
- * across five palettes rather than only in the one they were written against.
- * `PANE_COLORS` were chosen against that foreground, and the requirement did
- * not go away: `tests/unit/themes.test.ts` holds every theme's foreground
- * above 7:1 on every one of the six.
+ * across six palettes rather than only in the one they were written against.
+ * `PANE_COLORS` are dark by design, so `xtermTheme` keeps pale ink whenever a
+ * pane explicitly uses one. Its tests hold that ink above 7:1 on every pane
+ * colour, while `themes.test.ts` holds each palette's own ink on its canvas.
  *
  * `backgroundColor` on `.cm-gutters`, and NOT on `&`. The pane box in
  * `App.tsx` already paints itself `pane.color`, so `&` needs nothing: measured
@@ -117,7 +118,7 @@ export function saveEditorPane(paneId: string): Promise<void> {
  * opens `rgb(245, 245, 245)` with black text. Under `&dark` those are
  * `rgb(255, 255, 255)` and `rgb(51, 51, 56)` with white text.
  */
-function themeFor(theme: ThemeId, paneColor: PaneColor | undefined): Extension {
+function themeFor(theme: ThemeId, paneColor: PaneColor | undefined, font: FontChoice): Extension {
   // The pane's own colour when it has one, the theme's canvas when it does
   // not, and the theme's foreground either way. CodeMirror needs real values
   // here rather than `var(--color-bg)`, because these are written into a
@@ -127,7 +128,7 @@ function themeFor(theme: ThemeId, paneColor: PaneColor | undefined): Extension {
     {
       '&': { color: foreground, height: '100%' },
       '.cm-scroller': {
-        fontFamily: "ui-monospace, SFMono-Regular, Menlo, 'pTerm Symbols', monospace",
+        fontFamily: editorFontFamily(font),
         fontSize: '11px',
       },
       '.cm-gutters': { backgroundColor: background, color: GUTTER_TEXT, border: 'none' },
@@ -163,6 +164,7 @@ export function FileView({
   relPath,
   paneColor,
   theme,
+  font,
   paneId,
   onDirtyChange,
 }: {
@@ -172,6 +174,8 @@ export function FileView({
   paneColor?: PaneColor
   /** The palette in force. Supplies the gutter ground and the text colour. */
   theme: ThemeId
+  /** The editor font selected in Appearance settings. */
+  font: FontChoice
   paneId: string
   onDirtyChange: (paneId: string, dirty: boolean) => void
 }) {
@@ -289,7 +293,7 @@ export function FileView({
         syntaxHighlighting(syntaxColorStyle, { fallback: true }),
         keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
         ...languageForPath(relPath ?? ''),
-        themes.current.of(themeFor(theme, paneColor)),
+        themes.current.of(themeFor(theme, paneColor, font)),
         // The baseline is the document the view was created with, so dirty is
         // "differs from what was read", not "was typed in". Typing a
         // character and deleting it again leaves the pane clean, which is
@@ -325,8 +329,8 @@ export function FileView({
    * recolours the pane, or the palette changes under it.
    */
   useEffect(() => {
-    view.current?.dispatch({ effects: themes.current.reconfigure(themeFor(theme, paneColor)) })
-  }, [theme, paneColor])
+    view.current?.dispatch({ effects: themes.current.reconfigure(themeFor(theme, paneColor, font)) })
+  }, [theme, paneColor, font])
 
   const save = useCallback(async () => {
     const current = view.current

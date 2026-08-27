@@ -88,7 +88,7 @@ test('opens on Appearance and mounts only that section', async () => {
   await expect(page.getByTestId('settings-tab-appearance')).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByTestId('theme-picker')).toBeVisible()
 
-  // The other four sections are not in the DOM at all.
+  // The other three sections are not in the DOM at all.
   await expect(page.getByTestId('mute-when-focused')).toHaveCount(0)
   await expect(page.getByTestId('hooks-status')).toHaveCount(0)
   await expect(page.getByTestId('shell-history-status')).toHaveCount(0)
@@ -96,13 +96,9 @@ test('opens on Appearance and mounts only that section', async () => {
 })
 
 test('selecting a tab mounts its section and unmounts the last', async () => {
-  await page.getByTestId('settings-tab-hooks').click()
-  await expect(page.getByTestId('hooks-status')).toBeVisible()
-  await expect(page.getByTestId('mute-when-focused')).toHaveCount(0)
-
   await page.getByTestId('settings-tab-shell-history').click()
   await expect(page.getByTestId('shell-history-status')).toBeVisible()
-  await expect(page.getByTestId('hooks-status')).toHaveCount(0)
+  await expect(page.getByTestId('mute-when-focused')).toHaveCount(0)
 
   await page.getByTestId('settings-tab-updates').click()
   await expect(page.getByTestId('update-check-now')).toBeVisible()
@@ -113,7 +109,7 @@ test('the version footer is on every tab', async () => {
   // Still on Updates from the test above. The footer belongs to the shell, so
   // it must survive every selection, including the tab it used to live on.
   await expect(page.getByTestId('update-current-version')).toHaveText(/^\d+\.\d+\.\d+$/)
-  for (const id of ['notifications', 'hooks', 'shell-history']) {
+  for (const id of ['notifications', 'shell-history']) {
     await page.getByTestId(`settings-tab-${id}`).click()
     // Proves the click actually moved the selection, not just that the
     // footer's text (identical on every tab) happened to match again.
@@ -136,13 +132,11 @@ test('the arrow keys move the selection', async () => {
   // `toBeFocused` right after it is what confirms the component moved focus
   // there itself (`buttons.current[...].focus()` in SettingsTabs.tsx).
   await page.getByTestId('settings-tab-notifications').press('ArrowRight')
-  await expect(page.getByTestId('settings-tab-hooks')).toHaveAttribute('aria-selected', 'true')
-  await expect(page.getByTestId('settings-tab-hooks')).toBeFocused()
-  await expect(page.getByTestId('hooks-status')).toBeVisible()
+  await expect(page.getByTestId('settings-tab-shell-history')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByTestId('settings-tab-shell-history')).toBeFocused()
+  await expect(page.getByTestId('shell-history-status')).toBeVisible()
 
-  // Wrapping backwards off the first tab reaches the last. Three presses, not
-  // two: Appearance sits ahead of Notifications now, so the walk from Hooks is
-  // Notifications, Appearance, then the wrap.
+  // Two presses reach Appearance, then a third wraps to Updates.
   await page.keyboard.press('ArrowLeft')
   await page.keyboard.press('ArrowLeft')
   await expect(page.getByTestId('settings-tab-appearance')).toHaveAttribute('aria-selected', 'true')

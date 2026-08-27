@@ -51,7 +51,7 @@ export function FileTreeMenu({
         event.stopPropagation()
         onChoose(action)
       }}
-      className="block w-full cursor-default border-none bg-transparent px-2.5 py-1 text-left text-fg hover:bg-hover"
+      className="block w-full cursor-default rounded-sm px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground"
     >
       {label}
     </button>
@@ -66,17 +66,17 @@ export function FileTreeMenu({
       onMouseDown={(event) => event.stopPropagation()}
       style={{ left, top }}
       className={cn(
-        'fixed z-50 min-w-[160px] rounded border border-border-strong bg-overlay py-1 font-sans text-[12px] shadow-lg',
+        'fixed z-50 min-w-[160px] rounded-md border border-input bg-popover p-1 text-sm text-popover-foreground shadow-md',
       )}
     >
       {isDir ? null : item('open', 'Open')}
       {item('rename', 'Rename…')}
       {item('delete', 'Move to Trash')}
-      <div className="my-1 border-t border-border" />
+      <div className="my-1 border-t border-input" />
       {item('reveal', 'Show in Finder')}
       {item('copy-path', 'Copy path')}
       {item('copy-relative', 'Copy relative path')}
-      <div className="my-1 border-t border-border" />
+      <div className="my-1 border-t border-input" />
       {item('new-file', 'New file…')}
       {item('new-folder', 'New folder…')}
     </div>

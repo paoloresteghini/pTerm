@@ -1,9 +1,10 @@
 import { useRef } from 'react'
 import { cn } from '../lib/cn'
 import { THEMES, THEME_IDS, type ThemeId } from '../../shared/themes'
+import { FONT_CHOICES, type FontChoice } from '../fonts'
 
 /**
- * The theme picker: five cards, applied on click.
+ * The theme picker: six cards, applied on click.
  *
  * No Save button and no preview thumbnail, because the app is the preview. A
  * click repaints the whole window, and this pane is itself a dialog over the
@@ -20,9 +21,17 @@ import { THEMES, THEME_IDS, type ThemeId } from '../../shared/themes'
 export function AppearanceSection({
   theme,
   onThemeChange,
+  editorFont,
+  onEditorFontChange,
+  terminalFont,
+  onTerminalFontChange,
 }: {
   theme: ThemeId
   onThemeChange: (id: ThemeId) => void
+  editorFont: FontChoice
+  onEditorFontChange: (font: FontChoice) => void
+  terminalFont: FontChoice
+  onTerminalFontChange: (font: FontChoice) => void
 }) {
   // Keyed by theme id so an arrow key can move focus to the card it selects.
   // Without this the checked state moves and the focus ring stays behind, the
@@ -77,7 +86,7 @@ export function AppearanceSection({
               role="radio"
               aria-checked={chosen}
               // Roving tabIndex: the group is one tab stop and the arrows move
-              // within it, so Tab does not walk five cards to leave the tab.
+              // within it, so Tab does not walk six cards to leave the tab.
               tabIndex={chosen ? 0 : -1}
               data-testid={`theme-${id}`}
               onClick={() => onThemeChange(id)}
@@ -103,6 +112,38 @@ export function AppearanceSection({
       <p className="mt-2 text-[11px] text-label">
         Applies straight away. Terminals keep any colour you set on them.
       </p>
+      <div className="mt-5 grid max-w-sm gap-3">
+        <label className="grid gap-1 text-[11px] text-label">
+          Editor font
+          <select
+            data-testid="editor-font"
+            value={editorFont}
+            onChange={(event) => onEditorFontChange(event.target.value as FontChoice)}
+            className="rounded border border-border bg-raised px-2 py-1.5 text-xs text-fg"
+          >
+            {FONT_CHOICES.map((choice) => (
+              <option key={choice.id} value={choice.id}>
+                {choice.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="grid gap-1 text-[11px] text-label">
+          Terminal font
+          <select
+            data-testid="terminal-font"
+            value={terminalFont}
+            onChange={(event) => onTerminalFontChange(event.target.value as FontChoice)}
+            className="rounded border border-border bg-raised px-2 py-1.5 text-xs text-fg"
+          >
+            {FONT_CHOICES.map((choice) => (
+              <option key={choice.id} value={choice.id}>
+                {choice.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
     </div>
   )
 }

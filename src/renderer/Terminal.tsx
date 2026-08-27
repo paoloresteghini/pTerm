@@ -10,6 +10,7 @@ import { imageOnlyPaste } from './lib/terminalPaste'
 import { findPaths, toRelative } from './lib/terminalPaths'
 import { dropText } from './lib/shellQuote'
 import { symbolFontReady } from './lib/symbolFont'
+import { terminalFontFamily, type FontChoice } from './fonts'
 import { leastRecentlyUsed, webglPaneBudget } from './lib/webglBudget'
 import { xtermTheme } from './lib/xtermTheme'
 
@@ -357,11 +358,13 @@ export function Terminal({
    * Undefined-able on purpose, and the caller must not resolve it first: a
    * pane with no colour of its own follows the theme's canvas, and collapsing
    * the absence into a hex at the call site is what would leave every default
-   * pane painting one palette's canvas under all five.
+   * pane painting one palette's canvas under all six.
    */
   paneColor,
   /** The palette in force. Its canvas is the fallback for an uncoloured pane. */
   theme,
+  /** The terminal font selected in Appearance settings. */
+  font,
   /**
    * Offer this pane's Up to the history overlay. `true` means the overlay took
    * it and xterm must not also send `\x1b[A`; `false` means it declined and
@@ -385,6 +388,7 @@ export function Terminal({
   focused: boolean
   paneColor: PaneColor | undefined
   theme: ThemeId
+  font: FontChoice
   onHistoryRequested: (paneId: string) => boolean
   pathLinks:
     | {
@@ -454,8 +458,7 @@ export function Terminal({
        * 1.135 above. Kept because it is still the better answer than the
        * generic for symbols outside the subset.
        */
-      fontFamily:
-        "ui-monospace, SFMono-Regular, Menlo, 'pTerm Symbols', 'Apple Symbols', monospace",
+      fontFamily: terminalFontFamily(font),
       fontSize: 13,
       allowProposedApi: true,
       // Bounded per-pane so twelve live panes cannot grow without limit.
@@ -699,7 +702,15 @@ export function Terminal({
       // waving it through. The ResizeObserver below re-fits the moment the
       // box is real, so skipping here costs nothing.
       if (container.clientWidth === 0 || container.clientHeight === 0) return
+      // FitAddon clears and redraws only when its integer grid changes. A wall
+      // cell can settle to a different pixel size while retaining the same
+      // rows and columns, which leaves a WebGL frame painted for its earlier
+      // geometry until the next real window resize. Refresh that one case.
+      const grid = { cols: term.cols, rows: term.rows }
       fit.fit()
+      if (term.cols === grid.cols && term.rows === grid.rows) {
+        term.refresh(0, term.rows - 1)
+      }
       window.pterm.resize(tabId, term.cols, term.rows)
     }
     fitRef.current = fitToContainer
@@ -759,6 +770,13 @@ export function Terminal({
     if (!term) return
     term.options.theme = { ...term.options.theme, ...xtermTheme(theme, paneColor) }
   }, [theme, paneColor])
+
+  useEffect(() => {
+    const term = termRef.current
+    if (!term) return
+    term.options.fontFamily = terminalFontFamily(font)
+    fitRef.current?.()
+  }, [font])
 
   // A tab coming back on screen is what makes its panes recently used, and the
   // moment to take a WebGL context back for them: a pane that gave one up

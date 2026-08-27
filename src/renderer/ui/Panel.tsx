@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, type ComponentProps, type ReactNode } from 'react'
+import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
 import { cn } from '../lib/cn'
 
 /**
@@ -22,6 +24,32 @@ import { cn } from '../lib/cn'
  */
 export type PanelSide = 'left' | 'right'
 
+/**
+ * The shared surface for every auxiliary panel. Using the shadcn Card here
+ * keeps panel elevation, borders and corners from drifting as panels grow.
+ */
+export function PanelSurface({
+  embedded = false,
+  side,
+  className,
+  ...props
+}: ComponentProps<'div'> & {
+  embedded?: boolean
+  side: PanelSide
+}) {
+  return (
+    <Card
+      className={cn(
+        'relative flex flex-col gap-0 rounded-none border-border bg-surface py-0 text-fg shadow-none',
+        embedded ? 'workspace-utility-card min-h-0 w-full border' : 'shrink-0',
+        !embedded && (side === 'left' ? 'border-r' : 'border-l'),
+        className,
+      )}
+      {...props}
+    />
+  )
+}
+
 /** The collapsed form of a column: a vertical label, clicked to bring it back. */
 
 export function PanelStrip({
@@ -30,6 +58,7 @@ export function PanelStrip({
   side = 'right',
   onClick,
   onDragStart,
+  embedded = false,
 }: {
   testid: string
   label: string
@@ -39,9 +68,14 @@ export function PanelStrip({
    *  so a caller with nothing to reorder need not pass `draggable={false}`
    *  on top of it. */
   onDragStart?: () => void
+  /** A compact card in the Workspace Light context rail, not a side strip. */
+  embedded?: boolean
 }) {
   return (
-    <button
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
       data-testid={testid}
       onClick={onClick}
       draggable={onDragStart !== undefined}
@@ -52,16 +86,18 @@ export function PanelStrip({
       // text, so `justify-*` is the vertical one here. `py-3` alone (what this
       // replaced) pinned every label to the top of its column.
       className={cn(
-        'flex w-6 shrink-0 cursor-default items-center justify-center border-y-0 border-solid border-border bg-surface py-3 font-mono text-[10px] uppercase tracking-wider text-label hover:text-fg',
+        embedded
+          ? 'workspace-utility-strip flex min-h-10 w-full cursor-default items-center justify-start border border-border bg-surface px-3 py-2 text-left text-label shadow-none hover:bg-raised hover:text-fg'
+          : 'flex h-auto w-6 shrink-0 self-stretch cursor-default items-center justify-center rounded-none border-y-0 border-solid border-border bg-surface py-3 font-sans text-[13px] font-semibold normal-case tracking-normal text-label shadow-none hover:bg-raised hover:text-fg',
         // The seam faces the terminal either way. A left column drawing
         // `border-l` puts its only border against the window frame, which is
         // how the Files strip shipped with no visible edge at all.
-        side === 'left' ? 'border-l-0 border-r' : 'border-l border-r-0',
+        !embedded && (side === 'left' ? 'border-l-0 border-r' : 'border-l border-r-0'),
       )}
-      style={{ writingMode: 'vertical-rl' }}
+      style={embedded ? undefined : { writingMode: 'vertical-rl' }}
     >
       {label}
-    </button>
+    </Button>
   )
 }
 
@@ -92,16 +128,19 @@ export function PanelHeading({
 }) {
   return (
     <div className="flex items-center">
-      <button
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
         data-testid={testid}
         onClick={onClick}
         draggable={onDragStart !== undefined}
         onDragStart={onDragStart}
         title={`Hide ${label.toLowerCase()}`}
-        className="min-w-0 flex-1 cursor-default border-none bg-transparent px-2.5 pb-1 pt-3 text-left text-[10px] uppercase tracking-wider text-label hover:text-fg"
+        className="min-w-0 flex-1 justify-start rounded-none px-2.5 pb-1 pt-3 text-left font-sans text-[13px] font-semibold normal-case tracking-normal text-label shadow-none hover:bg-transparent hover:text-fg"
       >
         {label}
-      </button>
+      </Button>
       {action}
     </div>
   )

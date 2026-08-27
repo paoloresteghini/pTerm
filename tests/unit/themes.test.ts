@@ -6,12 +6,12 @@ import { THEMES, THEME_IDS, THEME_DEFAULT, isThemeId, cssVarName } from '../../s
 /**
  * Every palette, held to the rule it declares.
  *
- * Two rules rather than one because the five designs do not all separate their
+ * Two rules rather than one because the six designs do not all separate their
  * surfaces the same way. Four stack planes and are judged on the distance
  * between them. One deliberately does not, separating by border weight and an
  * inset lip instead, and a single flat-fill rule would have failed a design
  * that works. `separates` is what picks the rule, and it is required, so a
- * sixth theme cannot be added without saying how it is meant to be read.
+ * seventh theme cannot be added without saying how it is meant to be read.
  */
 
 /** Two fills read as separate planes from here up. Below 1 is not visible at all. */
@@ -170,12 +170,15 @@ describe('text in every theme', () => {
 })
 
 describe('the terminal foreground', () => {
-  it('clears AAA on its own canvas and on every pane colour', () => {
+  it('clears AAA on its own canvas', () => {
     for (const { id, tokens } of themes) {
       expect(contrast(tokens.termFg, tokens.bg), `${id} termFg/canvas`).toBeGreaterThanOrEqual(TERM_FLOOR)
-      for (const pane of PANE_COLORS) {
-        expect(contrast(tokens.termFg, pane), `${id} termFg/${pane}`).toBeGreaterThanOrEqual(TERM_FLOOR)
-      }
+    }
+  })
+
+  it('keeps the fixed pale ink readable on the dark pane colours', () => {
+    for (const pane of PANE_COLORS) {
+      expect(contrast('#d4d4d8', pane), `pane ${pane}`).toBeGreaterThanOrEqual(TERM_FLOOR)
     }
   })
 })

@@ -1,5 +1,11 @@
-import { Dialog, DialogContent, DialogTitle } from './ui/Dialog'
-import { Button } from './ui/Button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
 
 /**
  * The confirm before an irreversible discard.
@@ -34,18 +40,20 @@ export function ConfirmGitDiscard({
           `App.tsx`, so without this ⌘1-⌘9 switches project while the confirm
           is open. Defence in depth: `GitPanel` also drops the pending discard
           on a switch. */}
-      <DialogContent data-testid="confirm-discard" data-shortcuts="off">
-        <DialogTitle className="mb-2 text-xs uppercase tracking-wider text-faint">
-          Discard {total === 1 ? 'change' : 'changes'}?
-        </DialogTitle>
+      <DialogContent data-testid="confirm-discard" data-shortcuts="off" className="max-w-md gap-0 overflow-hidden p-0 font-sans">
+        <DialogHeader className="border-b border-border px-6 py-4 pr-12 text-left">
+          <DialogTitle>Discard {total === 1 ? 'change' : 'changes'}?</DialogTitle>
+          <DialogDescription>This cannot be undone.</DialogDescription>
+        </DialogHeader>
+        <div className="px-6 py-5">
         {tracked.length > 0 ? (
           <div className="mb-2">
             {/* "the staged version", not "the last commit": `git restore`
                 with no `--source` takes the worktree back to the INDEX, so
                 for a file with staged changes the last commit is not where
                 it lands. With nothing staged the two are the same content. */}
-            <p className="mb-1 text-[11px] text-muted">Restored to the staged version:</p>
-            <ul className="m-0 list-none p-0 font-mono text-[11px] text-fg">
+            <p className="mb-1 text-sm text-muted-foreground">Restored to the staged version:</p>
+            <ul className="m-0 list-none p-0 font-mono text-xs text-foreground">
               {tracked.map((path) => (
                 <li key={path} className="truncate">
                   {path}
@@ -56,8 +64,8 @@ export function ConfirmGitDiscard({
         ) : null}
         {untracked.length > 0 ? (
           <div className="mb-2">
-            <p className="mb-1 text-[11px] text-danger">Deleted from disk:</p>
-            <ul className="m-0 list-none p-0 font-mono text-[11px] text-fg">
+            <p className="mb-1 text-sm text-destructive">Deleted from disk:</p>
+            <ul className="m-0 list-none p-0 font-mono text-xs text-foreground">
               {untracked.map((path) => (
                 <li key={path} className="truncate">
                   {path}
@@ -66,12 +74,12 @@ export function ConfirmGitDiscard({
             </ul>
           </div>
         ) : null}
-        <p className="mb-3 text-[11px] text-muted">This cannot be undone.</p>
-        <div className="flex justify-end gap-2">
+        </div>
+        <div className="flex justify-end gap-2 border-t border-border px-6 py-4">
           <Button data-testid="confirm-discard-cancel" variant="ghost" onClick={onCancel}>
             Cancel
           </Button>
-          <Button data-testid="confirm-discard-go" onClick={onDiscard}>
+          <Button data-testid="confirm-discard-go" variant="destructive" onClick={onDiscard}>
             Discard and lose this work
           </Button>
         </div>

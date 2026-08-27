@@ -9,6 +9,9 @@ import { ColorSwatches } from './ColorSwatches'
 import { PANE_COLOR_DEFAULT, type PaneColor } from '../shared/paneColors'
 import type { TabGroupEntry } from './lib/tabGroups'
 import { BrowserWindowIcon } from './ui/BrowserWindowIcon'
+import { Button } from '@/components/ui/button'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Plus, RotateCcw, X } from 'lucide-react'
 
 export function TabBar({
   tabs,
@@ -176,11 +179,17 @@ export function TabBar({
   }, [menu])
 
   return (
-    <div
+    <Tabs
+      value={activeId ?? undefined}
+      onValueChange={onActivate}
       data-testid={`${testIdPrefix}bar`}
-      className="flex h-8 select-none items-stretch overflow-x-auto border-b border-border bg-surface font-mono text-[11px]"
+      className="h-11 min-w-0 select-none border-b border-border bg-background px-2"
     >
-      {tabs.map((entry) => {
+      <TabsList
+        className="mt-1 h-9 w-full min-w-0 justify-start gap-1 overflow-hidden rounded-lg bg-secondary px-1.5"
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden">
+        {tabs.map((entry) => {
         const tab = entry.pane
         const active = tab.id === activeId
         // `paneGroups`'s `isDead`, applied to the other surface that offers a
@@ -220,6 +229,11 @@ export function TabBar({
         // of a tab is dirty, and this line does not change.
         const unsaved = dirty[tab.id] === true
         return (
+          <TabsTrigger
+            asChild
+            value={tab.id}
+            className="w-auto flex-none shrink-0 cursor-default px-3 text-[13px]"
+          >
           <div
             key={tab.id}
             data-testid={`${testIdPrefix}-${tab.id}`}
@@ -256,7 +270,6 @@ export function TabBar({
               boxShadow:
                 [
                   entry.pos === null ? null : 'inset 0 2px 0 var(--color-group)',
-                  active ? 'inset 0 -1px 0 var(--color-accent)' : null,
                   drag.over === tab.id ? 'inset 0 0 0 1px var(--color-accent)' : null,
                 ]
                   .filter((inset): inset is string => inset !== null)
@@ -271,13 +284,12 @@ export function TabBar({
             // after showing a ghost that says otherwise.
             draggable={joinAllowed}
             className={cn(
-              'flex cursor-default items-center gap-1.5 whitespace-nowrap px-2.5',
+              'cursor-default',
               // Kept on the group's LAST member and on every ungrouped tab, so
               // a split's run of tabs reads as one box. The strip alone is not
               // enough: a divider through the middle of it would say the
               // opposite of what the strip says.
-              entry.pos === 'first' || entry.pos === 'middle' ? null : 'border-r border-border',
-              active ? 'bg-bg text-fg' : 'text-muted',
+              entry.pos === 'first' || entry.pos === 'middle' ? null : 'border-r border-border/60',
             )}
           >
             <StatusDot state={status[tab.id] ?? null} testid={`dot-${tab.id}`} />
@@ -321,7 +333,7 @@ export function TabBar({
                 // Stops the click that lands in the field from also
                 // re-activating the tab underneath it.
                 onClick={(event) => event.stopPropagation()}
-                className="min-w-0 flex-1 border border-border bg-raised px-1 text-fg outline-none"
+                className="min-w-0 flex-1 rounded-sm border border-input bg-background px-1 text-foreground outline-none"
               />
             ) : (
               <span
@@ -345,7 +357,7 @@ export function TabBar({
                 // the button) bubbles to the tab container and activates it.
                 onClick={(event) => event.stopPropagation()}
                 style={{ left: menu.left, top: menu.top }}
-                className="fixed z-20 flex flex-col border border-border-strong bg-overlay py-0.5 text-[11px]"
+                className="fixed z-20 flex min-w-36 flex-col rounded-md border border-input bg-popover p-1 text-sm text-popover-foreground shadow-md"
               >
                 <button
                   data-testid={`trename-${tab.id}`}
@@ -354,7 +366,7 @@ export function TabBar({
                     setMenu(null)
                     startRename(tab)
                   }}
-                  className="cursor-default border-none bg-transparent px-2.5 py-1 text-left text-muted hover:text-fg"
+                  className="cursor-default rounded-sm px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground"
                 >
                   Rename…
                 </button>
@@ -395,9 +407,9 @@ export function TabBar({
                       event.stopPropagation()
                       onRestart(tab)
                     }}
-                    className="cursor-default border-none bg-transparent p-0 text-[10px] text-muted hover:text-fg"
+                    className="cursor-default rounded-sm p-0.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                   >
-                    ↻
+                    <RotateCcw className="size-3.5" />
                   </button>
                 ) : null}
                 {capabilities?.dismiss !== false ? (
@@ -408,9 +420,9 @@ export function TabBar({
                       event.stopPropagation()
                       onDismiss(tab.id)
                     }}
-                    className="cursor-default border-none bg-transparent p-0 text-xs leading-none text-muted hover:text-fg"
+                    className="cursor-default rounded-sm p-0.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                   >
-                    ×
+                    <X className="size-3.5" />
                   </button>
                 ) : null}
               </>
@@ -425,15 +437,17 @@ export function TabBar({
                   event.stopPropagation()
                   onClose(tab.id)
                 }}
-                className="cursor-default border-none bg-transparent p-0 text-xs leading-none text-inherit"
+                className="cursor-default rounded-sm p-0.5 text-inherit hover:bg-accent"
               >
-                ×
+                <X className="size-3.5" />
               </button>
             )}
           </div>
+          </TabsTrigger>
         )
-      })}
-      <button
+        })}
+        <Button
+          type="button"
         // `new-${prefix}`, so the default prefix still spells `new-tab` and
         // every e2e locator on that id keeps pointing at this bar's button.
         // There are dozens of them: count them with
@@ -445,12 +459,16 @@ export function TabBar({
         aria-label={newLabel}
         onClick={onNew}
         disabled={!canOpen}
-        className="cursor-default border-none bg-transparent px-3 text-sm text-faint disabled:opacity-40 enabled:hover:text-muted"
+        variant="ghost"
+        size="icon-xs"
+        className="ml-1 shrink-0 cursor-default text-muted-foreground"
       >
-        +
-      </button>
+        <Plus />
+      </Button>
+      </div>
       {onOpenBrowser ? (
-        <button
+        <Button
+          type="button"
           // Fixed rather than derived from `testIdPrefix` the way `new-` above
           // is, because this button exists only where `onOpenBrowser` is
           // passed. Two bars offering it at once would put two elements under
@@ -460,15 +478,12 @@ export function TabBar({
           // counts tabs with a `[data-testid^="tab-"]` prefix match, and an
           // element under that prefix inflates every one of those counts while
           // each assertion still passes.
-          // The tabs column draws the same control, under this same id. The
-          // two are alternatives, never neighbours: `App.tsx` renders this bar
-          // only while that column's full list is closed (`showsTabBar`), so
-          // one of them is on screen at a time and a locator on this id always
-          // resolves to whichever is up. A THIRD home, or a second bar passing
-          // `onOpenBrowser`, would break that and has to derive its own id.
+          // This is the terminal bar's one browser action. A second bar passing
+          // `onOpenBrowser` would create a duplicate id, so a future caller
+          // must derive a distinct one here first.
           data-testid="open-devserver"
-          aria-label="Open the dev server in a browser pane"
-          title="Open the dev server in a browser pane"
+          aria-label="Launch browser"
+          title="Launch browser"
           onClick={onOpenBrowser}
           // Off where there is no project for main to hang a pane on. Both of
           // those states are reachable and neither is quiet if this is left
@@ -481,21 +496,17 @@ export function TabBar({
           // opens a blank pane on purpose: detection is a bonus here, never a
           // precondition.
           disabled={!canOpenBrowser}
-          // `px-2.5` rather than the `px-3` on the `+` beside it: a 12px icon
-          // in the room a ~7px glyph had would otherwise widen the button, and
-          // this one is the last thing in the bar, so its width is where the
-          // bar's content ends. Its LEFT edge is pinned by the `+` in front of
-          // it and does not move with the width, which is why the bare
-          // centre-of-element click that `tests/e2e/editor.spec.ts` dismisses a
-          // menu with kept the exact margin it had. Both measured either side
-          // of this change rather than argued.
-          className="flex cursor-default items-center border-none bg-transparent px-2.5 text-faint disabled:opacity-40 enabled:hover:text-muted"
+          variant="outline"
+          size="xs"
+          className="mr-0.5 shrink-0 border-border bg-background/50 text-muted-foreground"
         >
           {/* Its own component since the tabs column draws it too. See
               `ui/BrowserWindowIcon.tsx` for what it is and why it is drawn. */}
           <BrowserWindowIcon />
-        </button>
+          <span>Launch browser</span>
+        </Button>
       ) : null}
-    </div>
+      </TabsList>
+    </Tabs>
   )
 }

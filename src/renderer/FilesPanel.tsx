@@ -55,7 +55,7 @@ export function FilesPanel({
       // `relative` for the resizer, which is absolutely positioned over this
       // column's border and takes no space in the flex row.
       className={cn(
-        'relative flex shrink-0 flex-col border-border bg-surface font-mono text-[11px] select-none',
+        'relative flex shrink-0 flex-col border-border bg-surface text-sm select-none',
         side === 'left' ? 'border-r' : 'border-l',
       )}
       style={{ width }}

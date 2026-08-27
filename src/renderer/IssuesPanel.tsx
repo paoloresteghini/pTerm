@@ -4,7 +4,7 @@ import { filterIssues, shouldRefetchOnFocus, sortIssues, type IssueSort } from '
 import { historyAgo } from './lib/historyAgo'
 import { useColumnWidth } from './lib/columnWidth'
 import { cn } from './lib/cn'
-import { ColumnResizer, PanelHeading, PanelStrip, type PanelSide } from './ui/Panel'
+import { ColumnResizer, PanelHeading, PanelStrip, PanelSurface, type PanelSide } from './ui/Panel'
 import { IssueModal } from './IssueModal'
 
 const SORT_ORDER: IssueSort[] = ['updated', 'newest']
@@ -129,6 +129,7 @@ export function IssuesPanel({
   onToggle,
   onDragStart,
   side,
+  embedded = false,
 }: {
   project: ProjectDescriptor | undefined
   collapsed: boolean
@@ -136,6 +137,8 @@ export function IssuesPanel({
   /** Grabs this column to move it. See `PanelHeading`'s doc comment. */
   onDragStart: () => void
   side: PanelSide
+  /** Renders beneath Environment in Workspace Light instead of in the row. */
+  embedded?: boolean
 }) {
   // 208, not the 256 `NotesPanel` uses: that width is justified there because
   // a note is prose. This column is a list of short titles, the same shape as
@@ -266,6 +269,7 @@ export function IssuesPanel({
         side={side}
         onClick={onToggle}
         onDragStart={onDragStart}
+        embedded={embedded}
       />
     )
   }
@@ -280,16 +284,14 @@ export function IssuesPanel({
   const now = Date.now()
 
   return (
-    <div
+    <PanelSurface
       data-testid="issues-panel"
+      embedded={embedded}
+      side={side}
       className={cn(
-        'relative flex shrink-0 flex-col border-border bg-surface font-mono text-[11px] select-none',
-        // The seam faces the terminal either way, the same rule every panel
-        // container in this row follows: a left column drawing `border-l`
-        // would put its only border against the window frame.
-        side === 'left' ? 'border-r' : 'border-l',
+        'font-mono text-[11px] select-none',
       )}
-      style={{ width }}
+      style={embedded ? undefined : { width }}
     >
       {/* Heading and `+` as siblings, the same layout `PromptsPanel` uses and
           for the same reason: a button inside a button is invalid HTML, and
@@ -433,13 +435,15 @@ export function IssuesPanel({
           />
         </>
       )}
-      <ColumnResizer
-        testid="resize-issues"
-        side={side}
-        width={width}
-        onResize={set}
-        onCommit={commit}
-      />
-    </div>
+      {!embedded ? (
+        <ColumnResizer
+          testid="resize-issues"
+          side={side}
+          width={width}
+          onResize={set}
+          onCommit={commit}
+        />
+      ) : null}
+    </PanelSurface>
   )
 }

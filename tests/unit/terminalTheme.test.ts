@@ -36,6 +36,13 @@ describe('the theme xterm is constructed with', () => {
     expect(xtermTheme('slate', '#232326').background).toBe('#232326')
   })
 
+  it('keeps pale terminal ink on an explicitly dark pane in the light theme', () => {
+    expect(xtermTheme('workspaceLight', '#232326')).toEqual({
+      background: '#232326',
+      foreground: '#d4d4d8',
+    })
+  })
+
   it('takes the foreground from the theme rather than a constant', () => {
     expect(xtermTheme('slate', undefined).foreground).toBe(THEMES.slate.tokens.termFg)
     expect(xtermTheme('classic', undefined).foreground).toBe('#d4d4d8')

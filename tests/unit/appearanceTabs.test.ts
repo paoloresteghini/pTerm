@@ -45,8 +45,8 @@ describe('the settings tab strip', () => {
 })
 
 describe('the theme picker', () => {
-  // A hardcoded list would still render five cards today and silently omit
-  // the sixth theme somebody adds later.
+  // A hardcoded list would still render six cards today and silently omit
+  // the seventh theme somebody adds later.
   it('offers every theme from the registry rather than a list of its own', () => {
     expect(SECTION).toContain('THEME_IDS')
     for (const id of THEME_IDS) {

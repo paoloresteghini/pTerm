@@ -10,7 +10,7 @@ import { describe, it, expect } from 'vitest'
  * block U+2800-U+28FF) and added it to the terminal's own stack. `6f202ff`
  * carried it to every other monospace surface: the `--font-mono` Tailwind
  * token in `index.css` (which the `font-mono` class resolves through, across
- * many components) and the four editor panes that set `fontFamily` directly
+ * many components) and the editor surfaces that set `fontFamily` directly
  * because CodeMirror does not read Tailwind tokens. That second commit
  * shipped with no test: deleting the family from any of the five lines below
  * left the whole suite green.
@@ -51,10 +51,6 @@ const STACKS: { path: string; find: (source: string) => string }[] = [
   {
     path: '../../src/renderer/index.css',
     find: (source) => declarationValue(source, /--font-mono:\s*([^;]+);/, '--font-mono in index.css'),
-  },
-  {
-    path: '../../src/renderer/FileView.tsx',
-    find: (source) => declarationValue(source, /fontFamily:\s*"([^"]+)"/, 'fontFamily in FileView.tsx'),
   },
   {
     path: '../../src/renderer/TodoModal.tsx',

@@ -170,6 +170,18 @@ test('lifting the chrome separates the side columns from the terminal ground', a
   expect(lightnessGap(panel, canvas)).toBeGreaterThanOrEqual(FILL_FLOOR)
 })
 
+test('workspace light gives the sidebar a pale chrome plane over a white canvas', async () => {
+  await chooseTheme('workspaceLight')
+
+  const panel = await fillOf(page.getByTestId('sidebar'))
+  const canvas = await tokenOf('--color-bg')
+
+  expect(panel).toBe(THEMES.workspaceLight.tokens.surface)
+  expect(canvas).toBe(THEMES.workspaceLight.tokens.bg)
+  expect(lightnessGap(panel, canvas)).toBeGreaterThanOrEqual(FILL_FLOOR)
+  await expect(page.getByTestId('workspace-context')).toHaveCount(0)
+})
+
 test('the choice reaches the config file', async () => {
   await chooseTheme('slate')
 

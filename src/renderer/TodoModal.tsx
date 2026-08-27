@@ -5,8 +5,15 @@ import { defaultKeymap, history, historyKeymap, insertNewlineAndIndent } from '@
 import { markdown } from '@codemirror/lang-markdown'
 import { syntaxHighlighting } from '@codemirror/language'
 import type { TodoPriority, TodoRecord } from '../shared/ipc'
-import { Dialog, DialogContent, DialogTitle } from './ui/Dialog'
-import { Button } from './ui/Button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { MarkdownView } from './ui/MarkdownView'
 import { ConfirmClosePane } from './ConfirmClosePane'
 import { PRIORITY_DOT, PRIORITY_LABEL } from './lib/todoList'
@@ -366,17 +373,20 @@ export function TodoModal({
       >
         <DialogContent
           data-testid="todo-modal"
-          className="scroll-thin max-h-[85vh] w-[560px] max-w-[90vw] overflow-y-auto"
+          className="flex max-h-[85vh] w-[min(560px,calc(100%-2rem))] max-w-none flex-col gap-0 overflow-hidden p-0 font-sans sm:max-w-none"
         >
-          {/* Always rendered: Radix warns about a `DialogContent` with no
-              `DialogTitle`. */}
-          <DialogTitle className="mb-3 text-sm text-fg">
-            {mode === 'create' ? 'New todo' : (todo?.title ?? '')}
-          </DialogTitle>
+          <DialogHeader className="shrink-0 border-b border-border px-6 py-4 pr-12 text-left">
+            <DialogTitle>{mode === 'create' ? 'New todo' : (todo?.title ?? '')}</DialogTitle>
+            <DialogDescription>
+              {mode === 'create' ? 'Capture a task for this project.' : 'Review and update this task.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-6 py-5">
 
           {mode === 'create' || mode === 'edit' ? (
             <>
-              <input
+              <Input
                 data-testid="todo-title-input"
                 data-shortcuts="off"
                 autoFocus={mode === 'create'}
@@ -384,7 +394,7 @@ export function TodoModal({
                 onChange={(event) => setTitle(event.target.value)}
                 placeholder="Title"
                 spellCheck={false}
-                className="mb-2 w-full border border-border bg-transparent px-1.5 py-1 text-[11px] text-fg placeholder:text-faint focus:outline-none"
+                className="mb-3"
               />
               <div className="mb-2 flex items-center gap-1">
                 {LEVELS.map((level) => (
@@ -498,6 +508,7 @@ export function TodoModal({
               )}
             </>
           )}
+          </div>
         </DialogContent>
       </Dialog>
       <ConfirmClosePane
