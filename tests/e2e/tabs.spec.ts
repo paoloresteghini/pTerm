@@ -611,6 +611,26 @@ test('a renamed tab shows its name in the bar and survives a relaunch', async ()
   await second.close()
 })
 
+test('a sidebar tab label opens the same inline rename field on double-click', async () => {
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  await window.getByTestId('new-tab').click()
+  await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
+  const testid = await window.locator(ACTIVE_TAB).getAttribute('data-testid')
+  const id = (testid ?? '').replace('tab-', '')
+  const sidebarTab = window.getByTestId(`stab-${id}`)
+
+  await sidebarTab.locator('span').last().dblclick()
+  const field = window.getByTestId(`stabinput-${id}`)
+  await field.fill('sidebar name')
+  await field.press('Enter')
+
+  await expect(sidebarTab).toContainText('sidebar name')
+  await expect(window.getByTestId(`tab-${id}`)).toContainText('sidebar name')
+  await app.close()
+})
+
 test('the context menu reaches the same rename field', async () => {
   const app = await launch()
   const window = await app.firstWindow()

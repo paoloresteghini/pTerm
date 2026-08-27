@@ -78,6 +78,7 @@ export function Sidebar({
   onSelectProject,
   onSelectTab,
   onRename,
+  onRenameTab,
   onMove,
   onRemove,
   onMoveTab,
@@ -103,6 +104,7 @@ export function Sidebar({
   onSelectProject: (id: string) => void
   onSelectTab: (id: string) => void
   onRename: (id: string, name: string) => void
+  onRenameTab: (id: string, title: string) => void
   onMove: (id: string, direction: -1 | 1) => void
   onRemove: (id: string) => void
   onMoveTab: (tabId: string, projectId: string) => void
@@ -130,12 +132,15 @@ export function Sidebar({
   // keyboard-driven app better than a modal.
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
+  const [renamingTabId, setRenamingTabId] = useState<string | null>(null)
+  const [tabDraft, setTabDraft] = useState('')
   // Which edit is still open, readable synchronously so that whichever of the
   // two commit paths arrives second is a no-op. Enter and Escape both unmount
   // the input, which today's Chromium does not follow with a blur — but the
   // handlers must not depend on that to avoid committing twice, or committing
   // what Escape discarded.
   const editing = useRef<string | null>(null)
+  const tabEditing = useRef<string | null>(null)
 
   /** A project plus its position in `projects`, so move controls and keyboard
    *  shortcuts continue to resolve against the stored order. */
@@ -153,6 +158,19 @@ export function Sidebar({
     setRenamingId(null)
     const name = draft.trim()
     if (commit && name) onRename(id, name)
+  }
+
+  const startRenameTab = (tab: TabDescriptor): void => {
+    tabEditing.current = tab.id
+    setTabDraft(tab.title ?? '')
+    setRenamingTabId(tab.id)
+  }
+
+  const finishRenameTab = (id: string, commit: boolean): void => {
+    if (tabEditing.current !== id) return
+    tabEditing.current = null
+    setRenamingTabId(null)
+    if (commit) onRenameTab(id, tabDraft.trim())
   }
 
   // Grouped, not sorted: the projects you have sessions open in sit together at
@@ -344,7 +362,32 @@ export function Sidebar({
                       state={status[tab.id] ?? (canHaveSession(tab) ? 'idle' : null)}
                       testid={`sdot-${tab.id}`}
                     />
-                    <span className="min-w-0 flex-1 truncate">{tabLabel(tab)}</span>
+                    {renamingTabId === tab.id ? (
+                      <input
+                        autoFocus
+                        data-testid={`stabinput-${tab.id}`}
+                        value={tabDraft}
+                        aria-label={`Rename ${tabLabel(tab)}`}
+                        onChange={(event) => setTabDraft(event.target.value)}
+                        onBlur={() => finishRenameTab(tab.id, true)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') finishRenameTab(tab.id, true)
+                          if (event.key === 'Escape') finishRenameTab(tab.id, false)
+                        }}
+                        onClick={(event) => event.stopPropagation()}
+                        className="min-w-0 flex-1 rounded-sm border border-input bg-background px-1 text-sidebar-foreground outline-none"
+                      />
+                    ) : (
+                      <span
+                        onDoubleClick={(event) => {
+                          event.stopPropagation()
+                          startRenameTab(tab)
+                        }}
+                        className="min-w-0 flex-1 truncate"
+                      >
+                        {tabLabel(tab)}
+                      </span>
+                    )}
                     {synthetic && canHaveSession(tab) ? (
                       <>
                         <select

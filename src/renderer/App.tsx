@@ -2965,6 +2965,7 @@ export function App() {
             onToggleMute={toggleMute}
             onSelectProject={(id) => dispatch({ type: 'activatedProject', id })}
             onSelectTab={(id) => dispatch({ type: 'activatedTab', id })}
+            onRenameTab={renameTab}
             inWall={(id) => wallState.slots.some((slot) => slot.projectId === id)}
             onAddToWall={(id) => wallState.addSlot(id)}
             onRemoveFromWall={(id) => wallState.removeProjectSlots(id)}
