@@ -294,14 +294,12 @@ html:not([data-theme="workspaceLight"])
   background: color-mix(in srgb, var(--color-raised) 88%, var(--color-fg));
 }
 
-/* A selected tab is a child of the selected project, not a second competing
-   project-level selection. Keep its surface flat and mark it with a quiet
-   inset rail instead of stacking another filled row underneath the project. */
+/* Keep the selected sub-tab visibly distinct from the split-tree connector. */
 [data-sidebar="menu-sub-button"][data-active="true"] {
-  background: transparent;
-  color: var(--sidebar-foreground);
+  background: var(--sidebar-accent);
+  color: var(--sidebar-accent-foreground);
   font-weight: 500;
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--sidebar-foreground) 55%, transparent);
+  box-shadow: none;
 }
 
 html:not([data-theme="workspaceLight"])

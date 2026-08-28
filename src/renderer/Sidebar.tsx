@@ -9,6 +9,7 @@ import {
 import { NeedsYou } from './NeedsYou'
 import { StatusDot } from './StatusDot'
 import { tabLabel } from './lib/tabLabel'
+import type { TabTreeNode } from './lib/tabGroups'
 import { useColumnWidth } from './lib/columnWidth'
 import { ColumnResizer, type PanelSide } from './ui/Panel'
 import {
@@ -66,7 +67,7 @@ const MAX_VISIBLE_INACTIVE_PROJECTS = 5
 export function Sidebar({
   projects,
   activeProjectId,
-  tabsOf,
+  tabNodesOf,
   activeTabId,
   status,
   projectStateOf,
@@ -92,7 +93,7 @@ export function Sidebar({
 }: {
   projects: ProjectDescriptor[]
   activeProjectId: string | null
-  tabsOf: (projectId: string) => TabDescriptor[]
+  tabNodesOf: (projectId: string) => TabTreeNode[]
   activeTabId: string | null
   status: Record<string, TabState>
   projectStateOf: (projectId: string) => TabState | null
@@ -144,7 +145,7 @@ export function Sidebar({
 
   /** A project plus its position in `projects`, so move controls and keyboard
    *  shortcuts continue to resolve against the stored order. */
-  type Row = { project: ProjectDescriptor; index: number; tabs: TabDescriptor[] }
+  type Row = { project: ProjectDescriptor; index: number; nodes: TabTreeNode[]; tabs: TabDescriptor[] }
 
   const startRename = (project: ProjectDescriptor): void => {
     editing.current = project.id
@@ -177,11 +178,10 @@ export function Sidebar({
   // the top, the dormant ones in a section of their own pinned above the
   // footer. Within each group the manual order from "Move up"/"Move down" is
   // untouched, so the list a user arranged is still the list they get.
-  const rows: Row[] = projects.map((project, index) => ({
-    project,
-    index,
-    tabs: tabsOf(project.id),
-  }))
+  const rows: Row[] = projects.map((project, index) => {
+    const nodes = tabNodesOf(project.id)
+    return { project, index, nodes, tabs: nodes.flatMap((node) => node.panes) }
+  })
   const live = rows.filter((row) => row.tabs.length > 0)
   const dormant = rows.filter((row) => row.tabs.length === 0)
   const orderedRows = [...live, ...dormant]
@@ -195,7 +195,7 @@ export function Sidebar({
   /** One project row, its open tabs, and its menu. A function rather than an
    *  inline map body, because the scroll area and the pinned Inactive section
    *  below both draw it. */
-  const projectRow = ({ project, index, tabs }: Row, onSelected?: () => void): ReactElement => {
+  const projectRow = ({ project, index, nodes, tabs }: Row, onSelected?: () => void): ReactElement => {
     const active = project.id === activeProjectId
     const synthetic = project.id === UNSORTED_ID
     const isMuted = muted(project.id)
@@ -344,89 +344,115 @@ export function Sidebar({
 
         {tabs.length > 0 ? (
           <SidebarMenuSub className="ml-6 mr-2 mt-0.5">
-            {tabs.map((tab) => (
-              <SidebarMenuSubItem key={tab.id}>
-                <SidebarMenuSubButton
-                  asChild
-                  isActive={tab.id === activeTabId}
-                  className="h-7 cursor-default px-2 text-[13px]"
-                >
-                  <div
-                    data-testid={`stab-${tab.id}`}
-                    onClick={() => {
-                      onSelectProject(project.id)
-                      onSelectTab(tab.id)
-                    }}
-                  >
-                    <StatusDot
-                      state={status[tab.id] ?? (canHaveSession(tab) ? 'idle' : null)}
-                      testid={`sdot-${tab.id}`}
-                    />
-                    {renamingTabId === tab.id ? (
-                      <input
-                        autoFocus
-                        data-testid={`stabinput-${tab.id}`}
-                        value={tabDraft}
-                        aria-label={`Rename ${tabLabel(tab)}`}
-                        onChange={(event) => setTabDraft(event.target.value)}
-                        onBlur={() => finishRenameTab(tab.id, true)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter') finishRenameTab(tab.id, true)
-                          if (event.key === 'Escape') finishRenameTab(tab.id, false)
+            {nodes.flatMap((node) =>
+              node.panes.map((tab, paneIndex) => {
+                const splitPeer = node.panes.length > 1
+                const firstSplitPeer = paneIndex === 0
+                const lastSplitPeer = paneIndex === node.panes.length - 1
+                return (
+                  <SidebarMenuSubItem key={tab.id}>
+                    <SidebarMenuSubButton
+                      asChild
+                      isActive={tab.id === activeTabId}
+                      className={`h-7 cursor-default px-2 text-[13px]${splitPeer ? ' pl-6' : ''}`}
+                    >
+                      <div
+                        data-testid={`stab-${tab.id}`}
+                        data-split-peer={splitPeer || undefined}
+                        onClick={() => {
+                          onSelectProject(project.id)
+                          onSelectTab(tab.id)
                         }}
-                        onClick={(event) => event.stopPropagation()}
-                        className="min-w-0 flex-1 rounded-sm border border-input bg-background px-1 text-sidebar-foreground outline-none"
-                      />
-                    ) : (
-                      <span
-                        onDoubleClick={(event) => {
-                          event.stopPropagation()
-                          startRenameTab(tab)
-                        }}
-                        className="min-w-0 flex-1 truncate"
                       >
-                        {tabLabel(tab)}
-                      </span>
-                    )}
-                    {synthetic && canHaveSession(tab) ? (
-                      <>
-                        <select
-                          data-testid={`smove-${tab.id}`}
-                          aria-label={`Move ${tab.id.slice(0, 6)} to a project`}
-                          value=""
-                          onClick={(event) => event.stopPropagation()}
-                          onChange={(event) => {
-                            if (event.target.value) onMoveTab(tab.id, event.target.value)
-                          }}
-                          className="cursor-default rounded-sm border border-sidebar-border bg-background px-1 text-xs text-sidebar-foreground/70"
-                        >
-                          <option value="">move…</option>
-                          {projects
-                            .filter((candidate) => candidate.id !== UNSORTED_ID)
-                            .map((candidate) => (
-                              <option key={candidate.id} value={candidate.id}>
-                                {candidate.name}
-                              </option>
-                            ))}
-                        </select>
-                        <button
-                          type="button"
-                          data-testid={`sclose-${tab.id}`}
-                          aria-label={`Close ${tabLabel(tab)}`}
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            onCloseTab(tab.id)
-                          }}
-                          className="shrink-0 rounded-sm p-0.5 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                        >
-                          <X className="size-3.5" />
-                        </button>
-                      </>
-                    ) : null}
-                  </div>
-                </SidebarMenuSubButton>
-              </SidebarMenuSubItem>
-            ))}
+                        {splitPeer ? (
+                          <>
+                            <span
+                              aria-hidden
+                              className={`absolute left-2 border-l border-sidebar-border ${
+                                firstSplitPeer
+                                  ? 'top-1/2 h-1/2'
+                                  : lastSplitPeer
+                                    ? 'top-0 h-1/2'
+                                    : 'top-0 h-full'
+                              }`}
+                            />
+                            <span
+                              aria-hidden
+                              className="absolute left-2 top-1/2 w-3 border-t border-sidebar-border"
+                            />
+                          </>
+                        ) : null}
+                        <StatusDot
+                          state={status[tab.id] ?? (canHaveSession(tab) ? 'idle' : null)}
+                          testid={`sdot-${tab.id}`}
+                        />
+                        {renamingTabId === tab.id ? (
+                          <input
+                            autoFocus
+                            data-testid={`stabinput-${tab.id}`}
+                            value={tabDraft}
+                            aria-label={`Rename ${tabLabel(tab)}`}
+                            onChange={(event) => setTabDraft(event.target.value)}
+                            onBlur={() => finishRenameTab(tab.id, true)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') finishRenameTab(tab.id, true)
+                              if (event.key === 'Escape') finishRenameTab(tab.id, false)
+                            }}
+                            onClick={(event) => event.stopPropagation()}
+                            className="min-w-0 flex-1 rounded-sm border border-input bg-background px-1 text-sidebar-foreground outline-none"
+                          />
+                        ) : (
+                          <span
+                            onDoubleClick={(event) => {
+                              event.stopPropagation()
+                              startRenameTab(tab)
+                            }}
+                            className="min-w-0 flex-1 truncate"
+                          >
+                            {tabLabel(tab)}
+                          </span>
+                        )}
+                        {synthetic && canHaveSession(tab) ? (
+                          <>
+                            <select
+                              data-testid={`smove-${tab.id}`}
+                              aria-label={`Move ${tab.id.slice(0, 6)} to a project`}
+                              value=""
+                              onClick={(event) => event.stopPropagation()}
+                              onChange={(event) => {
+                                if (event.target.value) onMoveTab(tab.id, event.target.value)
+                              }}
+                              className="cursor-default rounded-sm border border-sidebar-border bg-background px-1 text-xs text-sidebar-foreground/70"
+                            >
+                              <option value="">move…</option>
+                              {projects
+                                .filter((candidate) => candidate.id !== UNSORTED_ID)
+                                .map((candidate) => (
+                                  <option key={candidate.id} value={candidate.id}>
+                                    {candidate.name}
+                                  </option>
+                                ))}
+                            </select>
+                            <button
+                              type="button"
+                              data-testid={`sclose-${tab.id}`}
+                              aria-label={`Close ${tabLabel(tab)}`}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                onCloseTab(tab.id)
+                              }}
+                              className="shrink-0 rounded-sm p-0.5 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                            >
+                              <X className="size-3.5" />
+                            </button>
+                          </>
+                        ) : null}
+                      </div>
+                    </SidebarMenuSubButton>
+                  </SidebarMenuSubItem>
+                )
+              }),
+            )}
           </SidebarMenuSub>
         ) : null}
       </SidebarMenuItem>

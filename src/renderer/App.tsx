@@ -86,7 +86,7 @@ import {
   type PaneDirection,
   type PaneGroup,
 } from './workspace'
-import { groupedTabs } from './lib/tabGroups'
+import { groupedTabs, tabTree } from './lib/tabGroups'
 import { projectMuted, toggleProjectMute } from './mute'
 import { PANE_COLOR_DEFAULT, type PaneColor } from '../shared/paneColors'
 import type { ThemeId } from '../shared/themes'
@@ -2464,7 +2464,8 @@ export function App() {
     // helper's drop targets cost the row) should not have to spawn a tmux
     // session to ask for it.
     <div data-testid="terminal-column" className="flex min-w-0 flex-1 flex-col">
-      {!wallOn ? (
+      {/* Temporary: the left-side tab list is the active navigation surface. */}
+      {false && !wallOn ? (
         <TabBar
           tabs={tabEntries}
           activeId={currentTabId}
@@ -2946,12 +2947,7 @@ export function App() {
             side="left"
             projects={state.projects}
             activeProjectId={state.activeProjectId}
-            // Grouped, same as the bar: the sidebar draws the same panes in the
-            // same window, and a split reading contiguous in one list and torn
-            // apart in the other is the kind of thing a user notices at once.
-            tabsOf={(id) =>
-              groupedTabs(tabsOfProject(state, id, 'terminal'), state.tabs).map((entry) => entry.pane)
-            }
+            tabNodesOf={(id) => tabTree(tabsOfProject(state, id, 'terminal'), state.tabs)}
             activeTabId={currentTabId}
             status={state.status}
             projectStateOf={(id) => stateOfProject(state, id)}
