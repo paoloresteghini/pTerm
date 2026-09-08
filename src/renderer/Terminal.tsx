@@ -9,6 +9,7 @@ import { findLinks, followsLink, linkRange } from './lib/terminalLinks'
 import { imageOnlyPaste } from './lib/terminalPaste'
 import { findPaths, toRelative } from './lib/terminalPaths'
 import { dropText } from './lib/shellQuote'
+import { createFontAtlasRepair } from './lib/atlasRepaint'
 import { symbolFontReady } from './lib/symbolFont'
 import { terminalFontFamily, type FontChoice } from './fonts'
 import { leastRecentlyUsed, webglPaneBudget } from './lib/webglBudget'
@@ -85,6 +86,13 @@ const fits = new Map<string, () => void>()
  */
 const lossRecoveries = new Map<string, number>()
 const MAX_LOSS_RECOVERIES = 3
+
+/**
+ * The one atlas repair this app performs, shared by every pane's mount effect
+ * so that the twelve promises they each hang off the one font load add up to
+ * a single clear.
+ */
+const repairFontAtlas = createFontAtlasRepair()
 
 function markUsed(tabId: string): void {
   lastUsed.set(tabId, ++useTick)
@@ -520,18 +528,19 @@ export function Terminal({
     // file, and only clearing the atlas changed it. See
     // `lib/symbolFont.ts` for both measurements.
     //
-    // `clearTextureAtlas` throws the cached rasterisations away; `refresh`
-    // redraws the viewport, since clearing alone leaves already-drawn rows as
-    // they are. Once per pane, on a promise that is shared across panes.
+    // Once for the app and across every mounted pane, not once per pane on
+    // its own terminal. xterm shares one texture atlas between every pane
+    // whose font, colours and cell size match, so a clear taken by one pane
+    // leaves the others holding texture coordinates into cleared space and
+    // nothing tells them: the next `refresh` on such a pane draws it mostly
+    // blank. `lib/atlasRepaint.ts` carries the measurements.
     //
-    // `disposed` rather than checking `termRef`: a pane closed while the font
-    // is still in flight would otherwise call into a disposed terminal, and
-    // `tabId` can be remounted onto a different terminal in the meantime.
+    // Not gated on `disposed`: a pane closed while the font is still in
+    // flight has already been taken out of `mounted`, and the panes that are
+    // still there are the ones with something to repair.
     let disposed = false
     void symbolFontReady().then(() => {
-      if (disposed) return
-      term.clearTextureAtlas()
-      term.refresh(0, term.rows - 1)
+      repairFontAtlas(mounted.values())
     })
 
     // The two keys this app takes off xterm, each only when there is
