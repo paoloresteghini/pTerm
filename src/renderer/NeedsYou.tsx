@@ -2,6 +2,12 @@ import type { ProjectDescriptor, TabDescriptor } from '../shared/ipc'
 import type { TabState } from '../shared/status'
 import { StatusDot } from './StatusDot'
 import { projectIdForTab } from './workspace'
+import {
+  SidebarGroupLabel,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+} from '@/components/ui/sidebar'
 
 /**
  * The global list of everything blocking a human, pinned above the project
@@ -10,6 +16,11 @@ import { projectIdForTab } from './workspace'
  *
  * Absent entirely when nothing needs you — an empty "Needs you" heading is a
  * thing to check, and the point is not having to.
+ *
+ * Drawn with the same sidebar primitives as the project tree below, rather
+ * than sizes of its own: it sat a size larger than every row under it and its
+ * heading a size smaller than "Projects", which read as a different component
+ * bolted above the list instead of the top of one list.
  */
 export function NeedsYou({
   tabs,
@@ -26,40 +37,41 @@ export function NeedsYou({
 }) {
   if (tabs.length === 0) return null
   return (
-    <div data-testid="needs-you" className="border-b border-border pb-1">
-      <div className="flex items-center gap-1.5 px-2.5 pb-1 pt-3 text-[10px] uppercase tracking-wider text-faint">
+    <div data-testid="needs-you" className="border-b border-sidebar-border pb-2">
+      <SidebarGroupLabel>
         <span>Needs you</span>
-        <span data-testid="needs-you-count" className="text-amber-400">
+        <span data-testid="needs-you-count" className="ml-1.5 text-amber-400">
           {tabs.length}
         </span>
-      </div>
-      {tabs.map((tab) => {
-        const project = projects.find(
-          (candidate) => candidate.id === projectIdForTab(projects, tab),
-        )
-        return (
-          <div key={tab.id} className="flex w-full items-center">
-            <button
-              data-testid={`needs-${tab.id}`}
-              onClick={() => onSelect(tab)}
-              className="flex min-w-0 flex-1 cursor-default items-center gap-1.5 border-none bg-transparent px-2.5 py-0.5 text-left text-muted hover:text-fg"
-            >
-              <StatusDot state={status[tab.id] ?? null} testid={`ndot-${tab.id}`} />
-              <span className="truncate">{project?.name ?? 'Unsorted'}</span>
-              <span className="shrink-0">· {tab.id.slice(0, 6)}</span>
-            </button>
-            <button
-              data-testid={`ack-${tab.id}`}
-              aria-label="Mark actioned"
-              title="Mark actioned"
-              onClick={() => onAcknowledge(tab)}
-              className="shrink-0 cursor-default border-none bg-transparent px-1.5 py-0.5 text-muted hover:text-fg"
-            >
-              ✓
-            </button>
-          </div>
-        )
-      })}
+      </SidebarGroupLabel>
+      <SidebarMenu>
+        {tabs.map((tab) => {
+          const project = projects.find(
+            (candidate) => candidate.id === projectIdForTab(projects, tab),
+          )
+          return (
+            <SidebarMenuItem key={tab.id}>
+              <SidebarMenuButton
+                type="button"
+                data-testid={`needs-${tab.id}`}
+                // Going to look at the prompt is the acknowledgement. The row
+                // used to only jump, leaving the tick as the one way off the
+                // list, so a tab you had read and answered stayed on the board
+                // until you came back and cleared it by hand.
+                onClick={() => {
+                  onSelect(tab)
+                  onAcknowledge(tab)
+                }}
+                className="cursor-default"
+              >
+                <StatusDot state={status[tab.id] ?? null} testid={`ndot-${tab.id}`} />
+                <span className="min-w-0 truncate">{project?.name ?? 'Unsorted'}</span>
+                <span className="shrink-0">· {tab.id.slice(0, 6)}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          )
+        })}
+      </SidebarMenu>
     </div>
   )
 }

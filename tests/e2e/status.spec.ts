@@ -358,7 +358,7 @@ test('Needs You lists it, and clicking it lands on the tab', async () => {
   await app.close()
 })
 
-test('the tick clears a waiting tab, out of the list and off the badge', async () => {
+test('clicking a row clears a waiting tab, out of the list and off the badge', async () => {
   const alpha = await candidate('alpha')
   await seed(
     [{ id: 'id-alpha', name: 'Alpha', slug: 'alpha', cwd: alpha, presets: [], activeTabId: null }],
@@ -375,7 +375,7 @@ test('the tick clears a waiting tab, out of the list and off the badge', async (
     .poll(async () => app.evaluate(({ app: electronApp }) => electronApp.dock?.getBadge()))
     .toBe('1')
 
-  await window.getByTestId(`ack-${id}`).click()
+  await window.getByTestId(`needs-${id}`).click()
 
   // The dot is the assertion that separates this from a `forget`: the tab
   // keeps a state, and that state is `idle`.
@@ -393,7 +393,7 @@ test('the tick clears a waiting tab, out of the list and off the badge', async (
 // `Notification` roughly once a minute while a prompt sits unanswered, so
 // without the acknowledged-tab memo, the row came back with a toast, a sound
 // and the badge for a prompt the user had already read and left alone.
-test('a re-fire behind the tick does not bring the row back', async () => {
+test('a re-fire behind a cleared row does not bring it back', async () => {
   const alpha = await candidate('alpha')
   await seed(
     [{ id: 'id-alpha', name: 'Alpha', slug: 'alpha', cwd: alpha, presets: [], activeTabId: null }],
@@ -406,7 +406,7 @@ test('a re-fire behind the tick does not bring the row back', async () => {
   await injectHook(id, 'Notification')
   await expect(window.getByTestId(`dot-${id}`)).toHaveAttribute('data-state', 'waiting')
 
-  await window.getByTestId(`ack-${id}`).click()
+  await window.getByTestId(`needs-${id}`).click()
   await expect(window.getByTestId(`dot-${id}`)).toHaveAttribute('data-state', 'idle')
   await expect(window.getByTestId('needs-you')).toHaveCount(0)
 
@@ -423,10 +423,11 @@ test('a re-fire behind the tick does not bring the row back', async () => {
   await app.close()
 })
 
-// The row and the tick are two buttons in one container now. A click handler
-// on the container, or a tick that does not stop at itself, would make one of
-// these two do the other's job.
-test('clicking the row still only jumps, and does not acknowledge', async () => {
+// The row is the only control on the board now, and it has to do both jobs:
+// going to look at the prompt is what clears it. A handler that only
+// navigated left a read-and-answered prompt sitting on the list until the
+// user came back and cleared it by hand, which was the whole complaint.
+test('clicking the row jumps to the tab and clears it off the board', async () => {
   const alpha = await candidate('alpha')
   const beta = await candidate('beta')
   await seed(
@@ -449,9 +450,11 @@ test('clicking the row still only jumps, and does not acknowledge', async () => 
   await window.getByTestId(`needs-${needy}`).click()
 
   await expect(window.getByTestId(`tab-${needy}`)).toHaveAttribute('data-active', 'true')
-  // Still listed, still waiting: a jump is not an acknowledgement.
-  await expect(window.getByTestId('needs-you-count')).toHaveText('1')
-  await expect(window.getByTestId(`dot-${needy}`)).toHaveAttribute('data-state', 'waiting')
+  // Both halves, because either one alone is a passing build with the bug in
+  // it: the section is gone, and the tab kept a state rather than being
+  // forgotten, which is what separates this from a `forget`.
+  await expect(window.getByTestId('needs-you')).toHaveCount(0)
+  await expect(window.getByTestId(`dot-${needy}`)).toHaveAttribute('data-state', 'idle')
 
   await app.close()
 })
