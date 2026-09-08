@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { languageIdForPath } from '../../src/renderer/lib/languageForPath'
+import { isMarkdownPath, languageIdForPath } from '../../src/renderer/lib/languageForPath'
 
 describe('languageIdForPath', () => {
   it('names javascript for the js and ts family', () => {
@@ -63,5 +63,55 @@ describe('languageIdForPath', () => {
   it('ignores dots in the directories above the file', () => {
     expect(languageIdForPath('src.ts/Makefile')).toBe(null)
     expect(languageIdForPath('a.md/b.ts')).toBe('javascript')
+  })
+})
+
+/**
+ * `isMarkdownPath` decides whether a pane opens rendered or as source.
+ *
+ * It is here rather than in a file of its own because it must never disagree
+ * with `languageIdForPath` about what markdown is: one answer colours the
+ * source, the other decides whether the source is shown at all, and a file
+ * that highlights as markdown but refuses to preview (or the reverse) is a
+ * defect with no sensible explanation for the user.
+ */
+describe('isMarkdownPath', () => {
+  it('accepts the extensions markdown source is highlighted for', () => {
+    expect(isMarkdownPath('README.md')).toBe(true)
+    expect(isMarkdownPath('docs/a.markdown')).toBe(true)
+    expect(isMarkdownPath('README.MD')).toBe(true)
+  })
+
+  it('refuses anything that is not one of them', () => {
+    for (const path of ['a.ts', 'a.mdx', 'Makefile', 'notes.md.bak', '.md']) {
+      expect(isMarkdownPath(path)).toBe(false)
+    }
+  })
+
+  /**
+   * The anti-divergence assertion, and the reason this block is worth having
+   * beyond the two above.
+   *
+   * Both cases would still pass if `isMarkdownPath` grew an extension list of
+   * its own that drifted from `languageIdForPath`'s. This one compares the two
+   * answers directly across a mixed fixture, so a second list that admits (or
+   * drops) an extension fails here even when both functions look right in
+   * isolation.
+   */
+  it('agrees with the grammar on every path', () => {
+    for (const path of [
+      'README.md',
+      'a.markdown',
+      'A.MD',
+      'a.mdx',
+      'a.ts',
+      'a.js',
+      '.md',
+      'notes.md.bak',
+      'Makefile',
+      'a.md/b.ts',
+    ]) {
+      expect(isMarkdownPath(path)).toBe(languageIdForPath(path) === 'markdown')
+    }
   })
 })

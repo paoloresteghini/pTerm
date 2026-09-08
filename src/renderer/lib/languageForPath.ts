@@ -51,3 +51,19 @@ export function languageForPath(path: string): Extension[] {
       return []
   }
 }
+
+/**
+ * Whether a path is markdown, for the pane that decides between the rendered
+ * view and the source editor.
+ *
+ * Derived from `languageIdForPath` rather than carrying an extension list of
+ * its own, and that is the whole design of this function. The two answers must
+ * never disagree: one picks the grammar the source is coloured with, the other
+ * decides whether the source is what gets shown, and a file that highlights as
+ * markdown but has no preview toggle (or the reverse) has no explanation a
+ * user could accept. `tests/unit/languageForPath.test.ts` compares the two
+ * across a mixed fixture so a second list cannot quietly appear here.
+ */
+export function isMarkdownPath(path: string): boolean {
+  return languageIdForPath(path) === 'markdown'
+}

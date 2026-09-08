@@ -4,11 +4,14 @@ import { EditorView, keymap, lineNumbers, highlightActiveLine } from '@codemirro
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { syntaxHighlighting } from '@codemirror/language'
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
-import { languageForPath } from './lib/languageForPath'
+import { Code2, Eye } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { isMarkdownPath, languageForPath } from './lib/languageForPath'
 import { GUTTER_TEXT, syntaxColorStyle } from './lib/syntaxColors'
 import type { PaneColor } from '../shared/paneColors'
 import type { ThemeId } from '../shared/themes'
 import { xtermTheme } from './lib/xtermTheme'
+import { MarkdownDoc } from './ui/MarkdownDoc'
 import { editorFontFamily, type FontChoice } from './fonts'
 
 /**
@@ -181,6 +184,32 @@ export function FileView({
 }) {
   const [text, setText] = useState<string | null>(null)
   const [missing, setMissing] = useState(false)
+  /**
+   * Which half of a markdown pane is on screen. Ignored for every other file.
+   *
+   * `'preview'` initially because reading is what opening a `.md` from the
+   * tree usually means; the source is a click away and ⌘S still belongs to it.
+   * Component state rather than anything persisted: a pane's mode does not
+   * survive a relaunch, which is a deliberate omission and not an oversight:
+   * `restore` reattaches only the fields `attachSavedFields` names, so
+   * persisting this would mean threading it through the pane row, and nothing
+   * has asked for that.
+   */
+  const [mode, setMode] = useState<'preview' | 'source'>('preview')
+  /**
+   * The string the rendered view is painting.
+   *
+   * Snapshotted rather than read live, because the document lives in
+   * CodeMirror and a ref is not something a render can react to. It is taken
+   * at the two moments the rendered view can become visible with new content
+   * behind it: when a file's text first arrives, and when the toggle flips
+   * back to preview. Between those the editor is on screen instead, so there
+   * is no stale frame to see.
+   *
+   * The snapshot comes from the DOCUMENT, not from `text`, so preview shows
+   * unsaved edits rather than the copy that was read from disk.
+   */
+  const [previewSrc, setPreviewSrc] = useState('')
   // The mtime the text on screen was read at, and what a save was refused
   // for. Both null together outside a refusal: `mtime` starts null until the
   // first `fsRead` resolves, and a save before then has nothing to compare
@@ -215,6 +244,11 @@ export function FileView({
     setMissing(false)
     setText(null)
     setRefused(null)
+    // A new file opens rendered, the same as the first one did. Without this a
+    // pane that had been flipped to source would show the NEXT file's source
+    // too, which is a mode the user chose for a document they have finished
+    // with.
+    setMode('preview')
     mtime.current = null
     let live = true
     window.pterm
@@ -224,6 +258,9 @@ export function FileView({
         if (found === null) setMissing(true)
         else {
           setText(found.text)
+          // The first of the two snapshot points. Nothing has been typed yet,
+          // so what was read is what preview should show.
+          setPreviewSrc(found.text)
           mtime.current = found.mtimeMs
         }
       })
@@ -395,6 +432,12 @@ export function FileView({
         // pane dirty for the one tick between the two.
         baseline.current = found.text
         mtime.current = found.mtimeMs
+        // The rendered view is reachable during a refusal (the banner sits
+        // above whichever half is showing), and this is the one path that
+        // replaces the document without the toggle being touched. Without
+        // this line, discarding your edits would leave preview still painting
+        // them.
+        setPreviewSrc(found.text)
         const current = view.current
         if (current !== null) {
           current.dispatch({
@@ -411,6 +454,49 @@ export function FileView({
       .catch(() => setRefused('missing'))
   }, [projectId, relPath, paneId, onDirtyChange])
 
+  /**
+   * Flip between the rendered document and its source.
+   *
+   * Going TO preview takes the snapshot, from the live document rather than
+   * from `text`, so anything typed and not yet saved is what gets rendered.
+   *
+   * The measure that source mode needs is NOT done here: see the effect below
+   * this one. `setMode` has not reached the DOM yet at this point, so a
+   * measure taken now would still be measuring a hidden element.
+   */
+  const toggleMode = useCallback(() => {
+    if (mode === 'source') {
+      setPreviewSrc(view.current?.state.doc.toString() ?? text ?? '')
+      setMode('preview')
+    } else {
+      setMode('source')
+    }
+  }, [mode, text])
+
+  /**
+   * Re-measure the editor when it becomes visible.
+   *
+   * The view is built and kept mounted behind `display: none` while preview is
+   * up (the render below says why it is not unmounted instead), so it has
+   * measured itself inside a box with no height and cached that.
+   *
+   * **Measured 2026-09-08 on an 800-line markdown file, by reading the real
+   * elements in a running window with this effect present and then removed.**
+   * With it, `.cm-content` is 12327px tall and 76 lines are in the DOM; that
+   * height is the document's real one (799 lines at the ~15.4px this pane sets).
+   * Without it, the same pane reports 11258px and 36 lines: a scrollbar sized
+   * for a document about a thousand pixels shorter than the one behind it.
+   * Both states show the right TEXT, which is why no assertion about content
+   * catches this and why the numbers are written down here.
+   *
+   * An effect rather than the click handler, because this has to run AFTER
+   * React has shown the host: at the click, `setMode` has not reached the DOM
+   * and the measurement would be taken against the hidden box again.
+   */
+  useEffect(() => {
+    if (mode === 'source') view.current?.requestMeasure()
+  }, [mode])
+
   // Registered and deregistered here rather than inside the view-build
   // effect above: `save` closes over `projectId`, which is not one of that
   // effect's dependencies (a pane's project never changes), so tying
@@ -425,6 +511,11 @@ export function FileView({
       if (mounted.get(paneId) === save) mounted.delete(paneId)
     }
   }, [paneId, save])
+
+  // A null `relPath` is a pane whose file could not be located at all, which
+  // the `missing` branch below draws; `isMarkdownPath('')` is false, so the
+  // toggle never appears for one.
+  const isMarkdown = isMarkdownPath(relPath ?? '')
 
   if (missing) {
     return (
@@ -475,7 +566,51 @@ export function FileView({
           )}
         </div>
       )}
-      {/* `editor-content` is on the host rather than on anything CodeMirror
+      {/* The one control markdown panes get, and only markdown panes. Under
+          the refused banner rather than above it: the banner reports that
+          text is at risk, which outranks a view control.
+
+          `md-toggle` does not begin with `tab-` or `pane-`. Both prefixes are
+          counted by `[data-testid^="..."]` matches across the e2e suite, and
+          an element under either one inflates every count while each
+          assertion still passes. */}
+      {isMarkdown && (
+        <div className="flex shrink-0 justify-end border-b border-border px-1.5 py-1">
+          <Button
+            data-testid="md-toggle"
+            aria-label={mode === 'preview' ? 'Show markdown source' : 'Show rendered markdown'}
+            title={mode === 'preview' ? 'Show markdown source' : 'Show rendered markdown'}
+            onClick={toggleMode}
+            variant="ghost"
+            size="xs"
+            className="text-muted-foreground"
+          >
+            {mode === 'preview' ? <Code2 /> : <Eye />}
+            <span>{mode === 'preview' ? 'Source' : 'Preview'}</span>
+          </Button>
+        </div>
+      )}
+      {isMarkdown && mode === 'preview' && (
+        <div data-testid="markdown-scroll" className="scroll-thin min-h-0 flex-1 overflow-auto">
+          <MarkdownDoc source={previewSrc} theme={theme} paneColor={paneColor} />
+        </div>
+      )}
+      {/* **Hidden, never unmounted.** Everything this pane can do lives in the
+          `EditorView` inside this host: the document the user has typed into,
+          the undo history, the dirty flag `App.tsx`'s close prompt reads, and
+          the `save` closure ⌘S arrives through. Rendering the host
+          conditionally would destroy all of it on the way into preview and
+          rebuild it from `text` on the way back, so a flip to preview and back
+          would silently discard unsaved edits, the exact loss the build
+          effect above already documents `paneColor` causing before it moved
+          into a compartment.
+
+          `hidden` rather than a class, because CodeMirror writes inline styles
+          into this subtree and the attribute's `display: none` is one the app
+          sets on the host itself. The cost is a view that measures zero while
+          it is off screen, which the effect above corrects when it comes back.
+
+          `editor-content` is on the host rather than on anything CodeMirror
           makes, because CodeMirror owns everything under here and replaces
           it freely. The testid is the same one the `<pre>` carried and B1's
           e2e still reads text off it: measured 2026-08-05, `textContent`
@@ -488,6 +623,7 @@ export function FileView({
       <div
         data-testid="editor-content"
         ref={host}
+        hidden={isMarkdown && mode === 'preview'}
         className="scroll-thin min-h-0 flex-1 overflow-auto"
       />
     </div>

@@ -148,8 +148,36 @@ test('clicking a file opens a tab named for it', async () => {
 // is actually looking at, not merely somewhere in the DOM.
 const visiblePane = (): ReturnType<Page['getByTestId']> => page.getByTestId('terminal-active')
 
+/**
+ * Put the visible markdown pane into source mode, whichever mode it is in.
+ *
+ * A `.md` pane opens rendered, so every test below that drives the editor
+ * itself has to ask for it first. Written to be idempotent rather than as a
+ * bare click, because this file shares ONE page across all its tests: a pane
+ * reached again through its tab is in whatever mode the last test left it, and
+ * a blind click would then flip it the wrong way and leave the following
+ * assertions reading a rendered document.
+ *
+ * The button's label names the mode it would switch TO, so `Source` on it
+ * means preview is showing. The closing assertion is what makes this helper
+ * self-verifying: after it returns, the button offers `Preview`, which is only
+ * true when the source is the half on screen.
+ */
+async function showSource(): Promise<void> {
+  const toggle = visiblePane().getByTestId('md-toggle')
+  await expect(toggle).toBeVisible({ timeout: 10_000 })
+  if ((await toggle.innerText()).includes('Source')) await toggle.click()
+  await expect(toggle).toContainText('Preview')
+}
+
+// Rendered, because a `.md` pane opens in preview. `# demo` is a heading, so
+// what reaches the screen is `demo` inside an `<h1>` and the `#` is gone: an
+// assertion for the raw `# demo` here would be one that only passes while the
+// rendering does not happen.
 test('the pane shows the file contents', async () => {
-  await expect(visiblePane().getByTestId('editor-content')).toContainText('# demo')
+  await expect(visiblePane().getByTestId('markdown-doc').locator('h1')).toHaveText('demo', {
+    timeout: 10_000,
+  })
 })
 
 // The fourth caller of `tabLabel`, alongside the bar, the sidebar and a dead
@@ -228,6 +256,7 @@ test('the editor takes typing', async () => {
 test('typing marks the tab dirty and undoing marks it clean', async () => {
   const paneId = await tabIdFor('README.md')
   await page.getByTestId(`tab-${paneId}`).click()
+  await showSource()
   const content = visiblePane().getByTestId('editor-content')
   await expect(content).toContainText('# demo', { timeout: 10_000 })
 
@@ -523,6 +552,7 @@ test('closing an editor tab kills no session, and says nothing', async () => {
  */
 test('closing a dirty editor pane asks first, and cancelling keeps it', async () => {
   await page.getByTestId('tree-row-README.md').click()
+  await showSource()
   const content = visiblePane().getByTestId('editor-content')
   await expect(content).toContainText('# demo', { timeout: 10_000 })
   const tabId = await page.locator('[data-testid^="tab-"]').last().getAttribute('data-testid')
@@ -553,6 +583,10 @@ test('closing a clean editor pane does not ask', async () => {
   // The control. Without it, a prompt that appeared for every pane would pass
   // both tests above.
   await page.getByTestId('tree-row-README.md').click()
+  // Through the toggle, which also says something this test would otherwise
+  // leave unsaid: flipping a pane's view does not make it dirty. If it did,
+  // the assertion below would find a prompt and this control would fail.
+  await showSource()
   await expect(visiblePane().getByTestId('editor-content')).toContainText('# demo', {
     timeout: 10_000,
   })
@@ -583,6 +617,7 @@ test('closing a terminal pane does not ask', async () => {
  */
 test('Cmd+S writes the file and clears the dot', async () => {
   await page.getByTestId('tree-row-README.md').click()
+  await showSource()
   const content = visiblePane().getByTestId('editor-content')
   await expect(content).toContainText('# demo', { timeout: 10_000 })
   const paneId = await tabIdFor('README.md')
@@ -612,6 +647,7 @@ test('Cmd+S writes the file and clears the dot', async () => {
 test('a file changed underneath the pane refuses the save and offers a reload', async () => {
   const paneId = await tabIdFor('README.md')
   await page.getByTestId(`tab-${paneId}`).click()
+  await showSource()
   const content = visiblePane().getByTestId('editor-content')
   await content.locator('.cm-content').click()
   await page.keyboard.type('Y')
