@@ -9,6 +9,7 @@ import {
 import { NeedsYou } from './NeedsYou'
 import { StatusDot } from './StatusDot'
 import { tabLabel } from './lib/tabLabel'
+import { scoreEntry } from './lib/match'
 import type { TabTreeNode } from './lib/tabGroups'
 import { useColumnWidth } from './lib/columnWidth'
 import { ColumnResizer, type PanelSide } from './ui/Panel'
@@ -29,6 +30,7 @@ import {
 } from 'lucide-react'
 import logo from '../images/logo.png'
 import { Kbd } from '@/components/ui/kbd'
+import { Input } from '@/components/ui/input'
 import {
   Sidebar as ShadcnSidebar,
   SidebarContent,
@@ -127,6 +129,15 @@ export function Sidebar({
   // project list is a window with nothing to do.
   const { width, set, commit } = useColumnWidth('pterm:sidebarWidth', 256)
   const [inactiveDialogOpen, setInactiveDialogOpen] = useState(false)
+  const [inactiveQuery, setInactiveQuery] = useState('')
+  // Both ways out of the dialog go through here. A stale query would otherwise
+  // be the first thing the next open shows, over a list that looks half
+  // missing: picking a project closes the dialog by setting the flag directly,
+  // which never reaches `onOpenChange`.
+  const closeInactiveDialog = (): void => {
+    setInactiveDialogOpen(false)
+    setInactiveQuery('')
+  }
   // Renaming happens in the row itself. `window.prompt` is not implemented in
   // Electron — it *throws* ("prompt() is not supported."), so the rename it
   // used to guard never fired at all — and an inline edit suits a
@@ -461,6 +472,19 @@ export function Sidebar({
 
   const visibleDormant = dormant.slice(0, MAX_VISIBLE_INACTIVE_PROJECTS)
   const hiddenDormantCount = dormant.length - visibleDormant.length
+  // The dialog's own list, narrowed by its search box. An empty query leaves
+  // the manual "Move up"/"Move down" order untouched; a query hands ranking to
+  // the same `scoreEntry` the skills panel and ⌘K use, so one name cannot rank
+  // differently in two places. Ties keep their manual order, because sort is
+  // stable.
+  const matchedDormant =
+    inactiveQuery.length === 0
+      ? dormant
+      : dormant
+          .map((row) => ({ row, score: scoreEntry(inactiveQuery, row.project.name) }))
+          .filter((scored): scored is { row: Row; score: number } => scored.score !== null)
+          .sort((a, b) => b.score - a.score)
+          .map((scored) => scored.row)
   const projectRows = split ? live : orderedRows.slice(0, live.length + MAX_VISIBLE_INACTIVE_PROJECTS)
   const moreInactiveProjects =
     hiddenDormantCount > 0 ? (
@@ -575,7 +599,13 @@ export function Sidebar({
           onCommit={commit}
         />
       </ShadcnSidebar>
-      <Dialog open={inactiveDialogOpen} onOpenChange={setInactiveDialogOpen}>
+      <Dialog
+        open={inactiveDialogOpen}
+        onOpenChange={(open) => {
+          if (open) setInactiveDialogOpen(true)
+          else closeInactiveDialog()
+        }}
+      >
         <DialogContent data-testid="inactive-projects-dialog" className="max-w-md gap-0 p-0 font-sans">
           <DialogHeader className="border-b border-border px-5 py-4 pr-12">
             <DialogTitle>Inactive projects</DialogTitle>
@@ -583,8 +613,29 @@ export function Sidebar({
               Choose a project to make it active.
             </DialogDescription>
           </DialogHeader>
+          <div className="border-b border-border p-2">
+            <Input
+              data-testid="inactive-projects-filter"
+              // Load-bearing, not decoration: without it ⌘W typed while
+              // filtering closes a pane and destroys its tmux session.
+              data-shortcuts="off"
+              value={inactiveQuery}
+              onChange={(event) => setInactiveQuery(event.target.value)}
+              placeholder="Filter projects"
+              spellCheck={false}
+              className="h-8 border-border bg-background px-2 text-[13px] text-fg placeholder:text-faint"
+            />
+          </div>
           <div className="scroll-thin max-h-[60vh] overflow-y-auto p-2">
-            <SidebarMenu>{dormant.map((row) => projectRow(row, () => setInactiveDialogOpen(false)))}</SidebarMenu>
+            {matchedDormant.length === 0 ? (
+              <p data-testid="inactive-projects-empty" className="px-2 py-1.5 text-faint">
+                No projects match “{inactiveQuery}”.
+              </p>
+            ) : (
+              <SidebarMenu>
+                {matchedDormant.map((row) => projectRow(row, closeInactiveDialog))}
+              </SidebarMenu>
+            )}
           </div>
         </DialogContent>
       </Dialog>

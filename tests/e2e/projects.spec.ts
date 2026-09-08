@@ -2,7 +2,7 @@
  * Projects: discovering them, switching between them, renaming and removing
  * them, and what happens to their sessions when any of that occurs.
  *
- * Twelve tests on the `pterm-e2e-projects` socket: an empty workspace opens no
+ * Fourteen tests on the `pterm-e2e-projects` socket: an empty workspace opens no
  * session; a scanned candidate can be added and a tab opened under its slug;
  * the tab bar shows only the active project's tabs; ⌘1/⌘2 switch project while
  * ⌥⌘1 switches tab; a repository-declared preset launches its command; a
@@ -12,8 +12,11 @@
  * ⌘W with a terminal focused still closes its tab; a rename keeps the slug and
  * honours Escape, blur and a blank name; removing a project leaves its
  * session alive under Unsorted; the welcome page is up when a selected
- * project has no session and returns when its last pane closes; and it names
- * the missing directory when the active project's cwd is gone.
+ * project has no session and returns when its last pane closes; it names
+ * the missing directory when the active project's cwd is gone; and the
+ * Inactive projects dialog filters its list by keyword. The count above was
+ * already one short of the tests present before the filter test was added,
+ * so the list below it enumerates thirteen of the fourteen.
  *
  * **Measured, 2026-08-02, this file run alone** (`npx playwright test
  * tests/e2e/projects.spec.ts`): deleting the `if (event.altKey)` branch from
@@ -647,6 +650,73 @@ test('names the missing directory when the active project cwd is gone', async ()
 
   await expect(window.getByTestId('welcome')).toBeVisible()
   await expect(window.getByTestId('welcome-hint')).toContainText(`${gone} is missing`)
+
+  await app.close()
+})
+
+// The Inactive dialog is the one list in the app that can run to every project
+// at once, so it is the one that needs a filter. Seven dormant projects is
+// what puts "Show 2 more" in the sidebar, and that button is the only way in.
+test('the inactive projects dialog filters by keyword', async () => {
+  const names = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Golf']
+  const projects = []
+  for (const name of names) {
+    const slug = name.toLowerCase()
+    projects.push({
+      id: `id-${slug}`,
+      name,
+      slug,
+      cwd: await candidate(slug),
+      presets: [],
+      activeTabId: null,
+    })
+  }
+  await seed(projects, 'id-alpha')
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  await window.getByTestId('show-more-inactive-projects').click()
+  const dialog = window.getByTestId('inactive-projects-dialog')
+  await expect(dialog).toBeVisible()
+  // Scoped to the dialog: the sidebar behind it draws `project-` rows of its
+  // own, and an unscoped count would read both lists as one.
+  const rows = dialog.locator('[data-testid^="project-"]')
+  await expect(rows).toHaveCount(7)
+
+  const filter = dialog.getByTestId('inactive-projects-filter')
+  // The dialog opens with the box focused, so the keyword can be typed without
+  // a click. That is Radix focusing the first tabbable child rather than
+  // anything this file asks for, which is exactly why it is pinned here.
+  await expect(filter).toBeFocused()
+  // A subsequence, not a substring: the same `scoreEntry` the skills panel and
+  // ⌘K rank with. `cha` reaches Charlie and nothing else here.
+  await filter.fill('cha')
+  await expect(rows).toHaveCount(1)
+  await expect(rows.first()).toHaveAttribute('data-testid', 'project-id-charlie')
+
+  // A query nothing matches empties the list rather than falling back to all.
+  await filter.fill('zzz')
+  await expect(rows).toHaveCount(0)
+  await expect(dialog.getByTestId('inactive-projects-empty')).toBeVisible()
+
+  // Clearing brings every row back, in the order the sidebar had them.
+  await filter.fill('')
+  await expect(rows).toHaveCount(7)
+  expect(
+    await rows.evaluateAll((nodes) => nodes.map((node) => (node as HTMLElement).dataset.testid)),
+  ).toEqual(projects.map((project) => `project-${project.id}`))
+
+  // A project picked from the narrowed list still becomes the active one, and
+  // the dialog closes behind it. Asserted on the reopened dialog rather than on
+  // the sidebar: Golf is the seventh dormant project, and the sidebar draws
+  // only the first five. Reopening also shows the query was cleared on close,
+  // which is why the count is seven again and not one.
+  await filter.fill('golf')
+  await rows.first().click()
+  await expect(dialog).toHaveCount(0)
+  await window.getByTestId('show-more-inactive-projects').click()
+  await expect(rows).toHaveCount(7)
+  await expect(dialog.getByTestId('project-id-golf')).toHaveAttribute('data-active', 'true')
 
   await app.close()
 })
