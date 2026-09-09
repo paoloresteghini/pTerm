@@ -423,10 +423,84 @@ test('a re-fire behind a cleared row does not bring it back', async () => {
   await app.close()
 })
 
-// The row is the only control on the board now, and it has to do both jobs:
-// going to look at the prompt is what clears it. A handler that only
-// navigated left a read-and-answered prompt sitting on the list until the
-// user came back and cleared it by hand, which was the whole complaint.
+/**
+ * Open a tab through the File menu and return its pane id, reading the id off
+ * the project tree.
+ *
+ * `openTab` above goes through the tab bar's `+` and counts `tab-` rows, and
+ * the bar is not on screen while `App.tsx` holds it behind its temporary
+ * `false &&`. Nothing here touches either, so it works whichever tab surface
+ * is up. The id comes from a set difference rather than `last()`, because the
+ * tree's order is the project's, not the order the tabs were opened in.
+ */
+async function openTabByMenu(app: ElectronApplication, window: Page): Promise<string> {
+  const rows = window.locator('[data-testid^="stab-"]')
+  const ids = async (): Promise<string[]> =>
+    (await rows.evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute('data-testid') ?? ''),
+    )).map((testId) => testId.replace('stab-', ''))
+  // The renderer registers its menu-command listener on mount, and a command
+  // sent before that is delivered to nothing and silently lost: without this
+  // wait the click produced no tab at all and the app sat on its empty state.
+  await expect(window.getByTestId('titlebar')).toBeVisible({ timeout: 20_000 })
+  const before = await ids()
+  // Through `app.evaluate`: the menu is a main-process object, and a click
+  // driven from the window context never reaches it.
+  await app.evaluate(({ Menu }) => {
+    const item = Menu.getApplicationMenu()?.getMenuItemById('new-tab')
+    if (!item) throw new Error('no menu item with id new-tab')
+    item.click()
+  })
+  await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
+  await expect(rows).toHaveCount(before.length + 1)
+  const added = (await ids()).filter((id) => !before.includes(id))
+  expect(added).toHaveLength(1)
+  return added[0]!
+}
+
+// The other direction of the rule the row above carries: going to look at the
+// prompt is the acknowledgement, and the project tree is where a tab is
+// reached from when the user does not go through Needs You. Switching to it
+// any other way used to leave the row on the board, so a prompt that had been
+// read and answered still had to be cleared by hand from the list.
+test('switching to the tab itself clears it off the board', async () => {
+  const alpha = await candidate('alpha')
+  await seed(
+    [{ id: 'id-alpha', name: 'Alpha', slug: 'alpha', cwd: alpha, presets: [], activeTabId: null }],
+    'id-alpha',
+  )
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  const needy = await openTabByMenu(app, window)
+  // A second tab, and it is the one left active: the click below then has to
+  // be a real switch, not a click on the tab already on screen.
+  const other = await openTabByMenu(app, window)
+  expect(other).not.toBe(needy)
+
+  await injectHook(needy, 'Notification')
+  await expect(window.getByTestId(`sdot-${needy}`)).toHaveAttribute('data-state', 'waiting')
+  await expect(window.getByTestId('needs-you-count')).toHaveText('1')
+
+  // The tab's own row under its project, NOT the Needs You row above it.
+  await window.getByTestId(`stab-${needy}`).click()
+
+  // `idle`, not gone: the same distinction the Needs You row's own test draws
+  // between an acknowledgement and a `forget`.
+  await expect(window.getByTestId(`sdot-${needy}`)).toHaveAttribute('data-state', 'idle')
+  await expect(window.getByTestId('needs-you')).toHaveCount(0)
+  await expect
+    .poll(async () => app.evaluate(({ app: electronApp }) => electronApp.dock?.getBadge()))
+    .toBe('')
+
+  await app.close()
+})
+
+// The row has to do both jobs: going to look at the prompt is what clears it.
+// A handler that only navigated left a read-and-answered prompt sitting on the
+// list until the user came back and cleared it by hand, which was the whole
+// complaint. The test above is the other half of the same rule, for a tab
+// reached from its row in the project tree instead.
 test('clicking the row jumps to the tab and clears it off the board', async () => {
   const alpha = await candidate('alpha')
   const beta = await candidate('beta')

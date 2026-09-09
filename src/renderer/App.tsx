@@ -1488,6 +1488,26 @@ export function App() {
     [state.panes, state.tabs],
   )
 
+  /**
+   * Switch to `id`, and count having gone to look at it as the acknowledgement.
+   *
+   * The Needs You row has cleared itself on click since it was built, and this
+   * is that same rule from the other direction: reaching a waiting or crashed
+   * tab any other way (its row in the project tree, ⌘1-9, the palette, a click
+   * in the pane, a notification) is going to look at the prompt just as much,
+   * and leaving the row on the board afterwards asked the user to clear by
+   * hand something they had already dealt with.
+   *
+   * Unconditional because it can be: `acknowledge` in main's registry returns
+   * immediately for any tab that is not `waiting` or `crashed`, so this does
+   * not have to consult the Needs You list, and a browser pane or a tab that
+   * was never blocking anyone is untouched.
+   */
+  const visitTab = useCallback((id: string) => {
+    dispatch({ type: 'activatedTab', id })
+    window.pterm.acknowledgeTab(id)
+  }, [])
+
   /** Make `paneId` the pane the keyboard talks to, and record it on its tab. */
   const selectPane = useCallback(
     (paneId: string) => {
@@ -1506,9 +1526,9 @@ export function App() {
       if (paneId === activePaneId) return
       const row = tabOfPane(state, paneId)
       if (row) dispatch({ type: 'activatedPane', tabId: row.id, paneId })
-      dispatch({ type: 'activatedTab', id: paneId })
+      visitTab(paneId)
     },
-    [state, activePaneId],
+    [state, activePaneId, visitTab],
   )
 
   /**
@@ -1864,9 +1884,9 @@ export function App() {
         const tab = state.panes.find((candidate) => candidate.id === tabId)
         if (!tab) return
         dispatch({ type: 'activatedProject', id: projectIdForTab(state.projects, tab) })
-        dispatch({ type: 'activatedTab', id: tabId })
+        visitTab(tabId)
       }),
-    [state.panes, state.projects],
+    [state.panes, state.projects, visitTab],
   )
 
   /*
@@ -2216,7 +2236,7 @@ export function App() {
         const target = strip[index]?.pane
         if (target) {
           event.preventDefault()
-          dispatch({ type: 'activatedTab', id: target.id })
+          visitTab(target.id)
         }
         return
       }
@@ -2244,6 +2264,7 @@ export function App() {
     currentBrowserTabId,
     keyRegion,
     state.projects,
+    visitTab,
     openTab,
     requestClosePane,
     splitActive,
@@ -2474,7 +2495,7 @@ export function App() {
           now={now}
           dead={state.dead}
           dirty={dirty}
-          onActivate={(id) => dispatch({ type: 'activatedTab', id })}
+          onActivate={visitTab}
           onClose={requestClosePane}
           onRestart={restartTab}
           onDismiss={dismissTab}
@@ -2960,7 +2981,7 @@ export function App() {
             muted={muted}
             onToggleMute={toggleMute}
             onSelectProject={(id) => dispatch({ type: 'activatedProject', id })}
-            onSelectTab={(id) => dispatch({ type: 'activatedTab', id })}
+            onSelectTab={visitTab}
             onRenameTab={renameTab}
             inWall={(id) => wallState.slots.some((slot) => slot.projectId === id)}
             onAddToWall={(id) => wallState.addSlot(id)}
@@ -3332,9 +3353,12 @@ export function App() {
             // case: `needsYou` filters on `canHaveSession`, and a browser pane
             // has no session, so that list is always the terminal region's.
             setActiveRegion(regionOf(tab))
-            // The same two dispatches `onSelectNeedy` runs, in the same order.
+            // The project, then the tab, in the order `onSelectNeedy` runs them;
+            // `visitTab` also carries the acknowledgement the Needs You row makes
+            // separately through `onAcknowledgeNeedy`, so a prompt reached from
+            // here comes off the board too.
             dispatch({ type: 'activatedProject', id: projectIdForTab(state.projects, tab) })
-            dispatch({ type: 'activatedTab', id: tab.id })
+            visitTab(tab.id)
           }}
           onInsert={(name) => {
             if (activePaneId) window.pterm.input(activePaneId, `/${name}`)
