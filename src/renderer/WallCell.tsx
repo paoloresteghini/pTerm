@@ -82,7 +82,7 @@ export function WallCell({
       <div
         onMouseDown={onFocus}
         className={cn(
-          'wall-cell-header pointer-events-auto flex h-8 items-center gap-2 overflow-hidden border-b border-border px-3 text-[13px] whitespace-nowrap',
+          'wall-cell-header pointer-events-auto flex h-8 items-center gap-2 overflow-hidden border-b border-border px-3 text-[15px] whitespace-nowrap',
           focused ? 'bg-raised text-fg' : 'bg-surface text-muted',
         )}
       >

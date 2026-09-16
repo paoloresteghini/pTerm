@@ -52,6 +52,10 @@ export function addProject(
     activeBrowserTabId: null,
     wallPin: null,
     wallFollowActive: false,
+    // Never had a pane, so nothing has closed. It sorts below every project
+    // that has one in the sidebar's Inactive section, keeping its place at the
+    // end of the manual order it was just appended to.
+    lastClosedAt: null,
   }
   return {
     config: {
@@ -116,6 +120,35 @@ export function reorderProjects(config: PTermConfig, ids: string[]): PTermConfig
   // so a stale id list cannot silently delete a project.
   ordered.push(...byId.values())
   return { ...config, projects: ordered }
+}
+
+/**
+ * Stamp `lastClosedAt` on `slug`'s project when the pane that just closed was
+ * its last one.
+ *
+ * `config` is the config as it is about to be written, panes already removed,
+ * so "its last one" is read off what survives rather than off a count the
+ * caller has to keep. A slug that still owns a pane, or that matches no
+ * project (every tab in Unsorted has one), is a no-op, which is why both
+ * callers can hand it whatever the closed pane's row said without checking.
+ *
+ * `at` is passed rather than read from the clock here so a test can order two
+ * closes without sleeping between them.
+ */
+export function markProjectClosed(
+  config: PTermConfig,
+  slug: string | undefined,
+  at: number,
+): PTermConfig {
+  if (slug === undefined) return config
+  if (config.panes.some((pane) => pane.projectSlug === slug)) return config
+  if (!config.projects.some((project) => project.slug === slug)) return config
+  return {
+    ...config,
+    projects: config.projects.map((project) =>
+      project.slug === slug ? { ...project, lastClosedAt: at } : project,
+    ),
+  }
 }
 
 export function projectForSlug(config: PTermConfig, slug: string): ProjectRecord | undefined {

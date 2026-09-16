@@ -66,6 +66,7 @@ function project(name: string, slug: string, cwd: string, activeTabId: string | 
     activeBrowserTabId: null,
     wallPin: null,
     wallFollowActive: false,
+    lastClosedAt: null,
   }
 }
 

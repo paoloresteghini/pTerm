@@ -54,10 +54,22 @@ export interface ProjectRecord {
    * being actively driven while the others are watched.
    */
   wallFollowActive: boolean
+  /**
+   * When this project's last pane closed, epoch milliseconds, or null while it
+   * still has one, and null for a project whose panes have never closed
+   * through this app.
+   *
+   * Written only by the two handlers that remove a pane row, and only on the
+   * transition to none left. It is what the sidebar's Inactive section sorts
+   * by, so a project whose panes went away with the app closed (a reboot takes
+   * every tmux session with it) keeps whatever stamp it had rather than every
+   * such project sharing one launch-time stamp and ordering by nothing.
+   */
+  lastClosedAt: number | null
 }
 
 export interface PTermConfig {
-  version: 10
+  version: 11
   /** Array order is sidebar order, and the order ⌘1–9 follows. */
   projects: ProjectRecord[]
   activeProjectId: string | null
@@ -93,7 +105,7 @@ export const DEFAULT_NOTIFICATIONS: NotificationConfig = {
 }
 
 const EMPTY: PTermConfig = {
-  version: 10,
+  version: 11,
   projects: [],
   activeProjectId: null,
   panes: [],
@@ -389,6 +401,7 @@ function normaliseProject(project: ProjectRecord): ProjectRecord {
       typeof project.activeBrowserTabId === 'string' ? project.activeBrowserTabId : null,
     wallPin: typeof project.wallPin === 'string' ? project.wallPin : null,
     wallFollowActive: project.wallFollowActive === true,
+    lastClosedAt: typeof project.lastClosedAt === 'number' ? project.lastClosedAt : null,
   }
 }
 
@@ -458,24 +471,26 @@ export function migrate(value: unknown): PTermConfig {
   const activeProjectId =
     typeof candidate.activeProjectId === 'string' ? candidate.activeProjectId : null
 
-  // 5 through 10 share a shape. v6 added an optional pane title, v7 an optional
+  // 5 through 11 share a shape. v6 added an optional pane title, v7 an optional
   // pane colour, v8 an optional file path plus a session that is optional per
-  // kind, v9 an optional theme id, and v10 a per-project wall pin and follow
-  // flag. In every case an older file not having the field is exactly what
-  // "never set" already means, so there is nothing to convert and one branch
-  // reads all six. A v7 row is a terminal row by construction, because no
-  // version before v8 could express a pane without a session.
+  // kind, v9 an optional theme id, v10 a per-project wall pin and follow flag,
+  // and v11 a per-project last-closed stamp. In every case an older file not
+  // having the field is exactly what "never set" already means, so there is
+  // nothing to convert and one branch reads all seven. A v7 row is a terminal
+  // row by construction, because no version before v8 could express a pane
+  // without a session.
   if (
     value.version === 5 ||
     value.version === 6 ||
     value.version === 7 ||
     value.version === 8 ||
     value.version === 9 ||
-    value.version === 10
+    value.version === 10 ||
+    value.version === 11
   ) {
     const panes = paneRows(candidate.panes)
     return {
-      version: 10,
+      version: 11,
       projects,
       activeProjectId,
       panes,
@@ -489,7 +504,7 @@ export function migrate(value: unknown): PTermConfig {
     // and a tab holding just that pane, full width and necessarily selected.
     const panes = paneRows(candidate.tabs)
     return {
-      version: 10,
+      version: 11,
       projects,
       activeProjectId,
       panes,

@@ -2433,6 +2433,37 @@ describe('project channels', () => {
     ])
   })
 
+  // The half no unit test can see: the slot fill is applied by the handler
+  // before the write, so the order the sidebar was dragged into is the order
+  // the next launch reads. A third pane in another project is opened first and
+  // asserted to have stayed put, because that is the whole reason the handler
+  // fills slots instead of concatenating: tab order is a position in one flat
+  // array every project shares.
+  it('reorders one project\u2019s panes on disk and leaves the others where they sat', async () => {
+    const [lumio] = await invoke<ProjectDescriptor[]>(CHANNELS.addProject, {
+      name: 'Lumio',
+      cwd: tmpdir(),
+    })
+    expect(lumio.slug).toBe('lumio')
+    const first = await openTabIn('lumio')
+    await waitForPrompt(first.id)
+    const stray = await openTabIn('stray')
+    await waitForPrompt(stray.id)
+    const second = await openTabIn('lumio')
+    await waitForPrompt(second.id)
+
+    const before = await store.read().then((c) => c.panes.map((pane) => pane.id))
+    expect(before).toEqual([first.id, stray.id, second.id])
+
+    const after = await invoke<TabDescriptor[]>(CHANNELS.reorderPanes, [second.id, first.id])
+    expect(after.map((pane) => pane.id)).toEqual([second.id, stray.id, first.id])
+    await expect(store.read().then((c) => c.panes.map((pane) => pane.id))).resolves.toEqual([
+      second.id,
+      stray.id,
+      first.id,
+    ])
+  })
+
   // The milestone's promise: removing a project does not touch its sessions.
   // The reply has to say where they went, or they drop off the screen until the
   // next launch — which is why every mutation appends Unsorted.
@@ -2736,6 +2767,74 @@ describe('project channels', () => {
         cwd: join(tmpdir(), 'definitely-not-here-9f3a'),
       }),
     ).rejects.toThrow(/not a directory/i)
+  })
+
+  // The stamp the sidebar's Inactive section sorts by. Asserted against the
+  // file rather than the reply, because the reply a close answers with is a
+  // `TabShape` and carries no projects at all: a handler that stamped nothing
+  // would look identical from the renderer's side until the next restore.
+  it('stamps a project when its last pane closes, and not before', async () => {
+    await invoke<ProjectDescriptor[]>(CHANNELS.addProject, { name: 'Lumio', cwd: tmpdir() })
+    const first = await openTabIn('lumio')
+    const second = await openTabIn('lumio')
+    await waitForPrompt(first.id)
+    await waitForPrompt(second.id)
+
+    await killTab(first.id)
+    const mid = await written()
+    expect(mid.projects[0].lastClosedAt).toBeNull()
+
+    const before = Date.now()
+    await killTab(second.id)
+    const after = await written()
+    expect(after.projects[0].lastClosedAt).toBeGreaterThanOrEqual(before)
+  })
+
+  // The other pane-removal path. A shell that exits on its own is dropped by
+  // `forgetTab`, never by `closePane`, and a stamp on one of the two only
+  // would leave a project closed by typing `exit` sorting as though it had
+  // never been closed at all.
+  it('stamps a project when its last pane exits on its own', async () => {
+    await invoke<ProjectDescriptor[]>(CHANNELS.addProject, { name: 'Lumio', cwd: tmpdir() })
+    const before = Date.now()
+    await openTab('true')
+    await waitForSavedIds(store, [])
+
+    const config = await written()
+    expect(config.projects[0].lastClosedAt).toBeGreaterThanOrEqual(before)
+  })
+
+  // One project's close must not stamp another's: the two share a config and
+  // a single `store.write`, and the slug is the only thing separating them.
+  it('stamps only the project the closed pane belonged to', async () => {
+    // Two real directories, because `addProject` refuses a cwd another project
+    // already holds.
+    const root = await mkdtemp(join(tmpdir(), 'pterm-closed-'))
+    try {
+      await mkdir(join(root, 'lumio'), { recursive: true })
+      await mkdir(join(root, 'studio'), { recursive: true })
+      await invoke<ProjectDescriptor[]>(CHANNELS.addProject, {
+        name: 'Lumio',
+        cwd: join(root, 'lumio'),
+      })
+      await invoke<ProjectDescriptor[]>(CHANNELS.addProject, {
+        name: 'Studio',
+        cwd: join(root, 'studio'),
+      })
+      const lumio = await openTabIn('lumio')
+      const studio = await openTabIn('studio')
+      await waitForPrompt(lumio.id)
+      await waitForPrompt(studio.id)
+
+      await killTab(lumio.id)
+
+      const config = await written()
+      const stamped = Object.fromEntries(config.projects.map((p) => [p.slug, p.lastClosedAt]))
+      expect(stamped.lumio).toEqual(expect.any(Number))
+      expect(stamped.studio).toBeNull()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })
 

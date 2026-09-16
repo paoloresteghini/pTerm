@@ -205,6 +205,7 @@ const recordFor = (id: string): ProjectRecord => ({
   activeBrowserTabId: null,
   wallPin: null,
   wallFollowActive: false,
+  lastClosedAt: null,
 })
 
 describe('describeProjects', () => {

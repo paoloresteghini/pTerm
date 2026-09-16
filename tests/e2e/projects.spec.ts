@@ -164,10 +164,19 @@ async function candidate(name: string, manifest?: object): Promise<string> {
   return cwd
 }
 
-async function seed(projects: object[], activeProjectId: string | null): Promise<void> {
+async function seed(
+  projects: object[],
+  activeProjectId: string | null,
+  // v3 for every test that only needs projects on disk, because that is the
+  // oldest shape `migrate` still reads and it exercises the migration on the
+  // way in. A test seeding a field a later version introduced must name that
+  // version: `normaliseProject` would carry it through a v3 file too, which
+  // is a config no build ever wrote.
+  version = 3,
+): Promise<void> {
   await writeFile(
     join(configDir, 'config.json'),
-    JSON.stringify({ version: 3, projects, activeProjectId, tabs: [] }),
+    JSON.stringify({ version, projects, activeProjectId, tabs: [] }),
     'utf8',
   )
 }
@@ -282,12 +291,17 @@ test('⌘1 and ⌘2 switch project; ⌥⌘1 and ⌥⌘2 switch tab', async () =>
 })
 
 // The sidebar groups the projects you have sessions in above the ones you do
-// not, so a working set of two does not sit scattered through nine. The
-// grouping is display-only: `⌘n` still indexes `state.projects`, so the number
-// beside a row has to keep saying which digit reaches it even after the row
-// has moved. That coupling is the whole risk in the feature, so it is asserted
+// not, so a working set of two does not sit scattered through nine. The number
+// beside a row is its place in THAT list, not its place in `state.projects`,
+// and `⌘n` indexes the same list: `groupProjects` is derived once and read by
+// both. That coupling is the whole risk in the feature, so it is asserted
 // here rather than left to the eye.
-test('projects with sessions group above the ones without, and ⌘n still follows the number', async () => {
+//
+// It was the other way round until the sidebar started reordering rows for a
+// second reason (the dormant group sorts by when it was last closed) and the
+// numbers stopped matching anything a user could see: three consecutive rows
+// reading ⌘2, ⌘4, ⌘5 was the normal state of the app.
+test('projects with sessions group above the ones without, and ⌘n follows the row', async () => {
   const alpha = await candidate('alpha')
   const beta = await candidate('beta')
   await seed(
@@ -320,14 +334,16 @@ test('projects with sessions group above the ones without, and ⌘n still follow
   await expect(window.getByTestId('inactive-heading')).toBeVisible()
   expect(await order()).toEqual(['project-id-beta', 'project-id-alpha'])
 
-  // Beta moved to the top but is still ⌘2: the number it draws is its place in
-  // `state.projects`, not its place on screen.
-  await expect(window.getByTestId('project-id-alpha')).toContainText('1')
-  await expect(window.getByTestId('project-id-beta')).toContainText('2')
+  // Beta moved to the top, so Beta is ⌘1 and Alpha, now under the Inactive
+  // heading, is ⌘2. The numbers renumber with the rows.
+  await expect(window.getByTestId('project-id-beta')).toContainText('⌘1')
+  await expect(window.getByTestId('project-id-alpha')).toContainText('⌘2')
+  // Pressed in the order that fails loudest if the two lists ever diverge
+  // again: ⌘1 first, onto the project that is NOT first in `state.projects`.
   await window.keyboard.press('Meta+Digit1')
-  await expect(window.getByTestId('project-id-alpha')).toHaveAttribute('data-active', 'true')
-  await window.keyboard.press('Meta+Digit2')
   await expect(window.getByTestId('project-id-beta')).toHaveAttribute('data-active', 'true')
+  await window.keyboard.press('Meta+Digit2')
+  await expect(window.getByTestId('project-id-alpha')).toHaveAttribute('data-active', 'true')
 
   await app.close()
 })
@@ -650,6 +666,147 @@ test('names the missing directory when the active project cwd is gone', async ()
 
   await expect(window.getByTestId('welcome')).toBeVisible()
   await expect(window.getByTestId('welcome-hint')).toContainText(`${gone} is missing`)
+
+  await app.close()
+})
+
+// Both surfaces draw one array, so this pins one order twice: the rows the
+// sidebar shows and the full list behind "Show N more". Seeded rather than
+// closed live, because what is under test is the stamp travelling from the
+// config through `describeProjects` to the sort, and a close in the app can
+// only ever produce one ordering pair.
+test('inactive projects are ordered by when they were last closed', async () => {
+  // Manual order Alpha..Golf, so an unsorted list would come back in exactly
+  // that order and could not be mistaken for a sorted one. The stamps are
+  // small integers on purpose: any epoch reading of them is still an ordering.
+  const closed: Record<string, number | null> = {
+    alpha: null,
+    bravo: null,
+    charlie: 300,
+    delta: 100,
+    echo: 200,
+    foxtrot: null,
+    golf: null,
+  }
+  const projects = []
+  for (const name of ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Golf']) {
+    const slug = name.toLowerCase()
+    projects.push({
+      id: `id-${slug}`,
+      name,
+      slug,
+      cwd: await candidate(slug),
+      presets: [],
+      activeTabId: null,
+      lastClosedAt: closed[slug],
+    })
+  }
+  await seed(projects, 'id-alpha', 11)
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  // Most recent first, then the projects that have never had a pane close, in
+  // the manual order they were seeded in. No project has a tab here, so the
+  // sidebar draws the first five of them in its Projects group.
+  const sidebarRows = window.getByTestId('sidebar').locator('[data-testid^="project-"]')
+  await expect(sidebarRows).toHaveCount(5)
+  expect(
+    await sidebarRows.evaluateAll((nodes) =>
+      nodes.map((node) => (node as HTMLElement).dataset.testid),
+    ),
+  ).toEqual([
+    'project-id-charlie',
+    'project-id-echo',
+    'project-id-delta',
+    'project-id-alpha',
+    'project-id-bravo',
+  ])
+
+  await window.getByTestId('show-more-inactive-projects').click()
+  const dialog = window.getByTestId('inactive-projects-dialog')
+  const rows = dialog.locator('[data-testid^="project-"]')
+  await expect(rows).toHaveCount(7)
+  expect(
+    await rows.evaluateAll((nodes) => nodes.map((node) => (node as HTMLElement).dataset.testid)),
+  ).toEqual([
+    'project-id-charlie',
+    'project-id-echo',
+    'project-id-delta',
+    'project-id-alpha',
+    'project-id-bravo',
+    'project-id-foxtrot',
+    'project-id-golf',
+  ])
+
+  await app.close()
+})
+
+// The stamp main writes never reaches this window on its own: closing a pane
+// answers with a `TabShape` and no projects at all. So the project just
+// emptied would sort by the stamp it was launched with, at the BOTTOM of the
+// section it has only now joined, which is the one ordering the section exists
+// to avoid. `App.tsx` stamps the same transition locally, and this is the test
+// that would catch its removal.
+test('a project closed in this session goes to the top of Inactive', async () => {
+  const alpha = await candidate('alpha')
+  await seed(
+    [
+      { id: 'id-alpha', name: 'Alpha', slug: 'alpha', cwd: alpha, presets: [], activeTabId: null },
+      {
+        id: 'id-bravo',
+        name: 'Bravo',
+        slug: 'bravo',
+        cwd: await candidate('bravo'),
+        presets: [],
+        activeTabId: null,
+        lastClosedAt: 100,
+      },
+      {
+        id: 'id-charlie',
+        name: 'Charlie',
+        slug: 'charlie',
+        cwd: await candidate('charlie'),
+        presets: [],
+        activeTabId: null,
+        lastClosedAt: 200,
+      },
+    ],
+    'id-alpha',
+    11,
+  )
+  // A session for Alpha made before launch, so this test needs no tab bar to
+  // give a project a pane: restore adopts it by its name.
+  await run('tmux', [
+    '-L', SOCKET, 'new-session', '-d', '-s', 'pterm-alpha-abcdef0123456789', 'sleep', '600',
+  ])
+
+  const app = await launch()
+  const window = await app.firstWindow()
+
+  const rows = window.locator('[data-testid^="project-"]')
+  const order = (): Promise<(string | undefined)[]> =>
+    rows.evaluateAll((nodes) => nodes.map((node) => (node as HTMLElement).dataset.testid))
+
+  // Alpha is live and on top; the two dormant ones are below it, newest close
+  // first, which is Charlie.
+  await expect(window.getByTestId('inactive-heading')).toBeVisible()
+  await expect
+    .poll(order)
+    .toEqual(['project-id-alpha', 'project-id-charlie', 'project-id-bravo'])
+
+  // ⌘W with the terminal focused, the way `the welcome page goes when a
+  // session opens and returns when it closes` closes its last pane.
+  await expect(window.getByTestId('terminal-active')).toBeVisible({ timeout: 20_000 })
+  await window.getByTestId('terminal-active').click()
+  await window.keyboard.press('Meta+w')
+
+  // Alpha was closed seconds ago and Charlie's stamp is from 1970, so Alpha
+  // leads. Nothing is running now, so the heading goes with the split and all
+  // three are one list again.
+  await expect(window.getByTestId('inactive-heading')).toHaveCount(0)
+  await expect
+    .poll(order)
+    .toEqual(['project-id-alpha', 'project-id-charlie', 'project-id-bravo'])
 
   await app.close()
 })

@@ -47,6 +47,7 @@ const api: PTermApi = {
   pickFolder: () => ipcRenderer.invoke(CHANNELS.pickFolder),
   moveTabToProject: (tabId, projectId) =>
     ipcRenderer.invoke(CHANNELS.moveTabToProject, tabId, projectId),
+  reorderPanes: (ids) => ipcRenderer.invoke(CHANNELS.reorderPanes, ids),
   renameTab: (id, title) => ipcRenderer.invoke(CHANNELS.renameTab, id, title),
   setPaneColor: (id, color) => ipcRenderer.invoke(CHANNELS.setPaneColor, id, color),
   input: (id, data) => ipcRenderer.send(CHANNELS.input, id, data),

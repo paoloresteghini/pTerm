@@ -93,6 +93,7 @@ function project(): ProjectRecord {
     activeBrowserTabId: null,
     wallPin: null,
     wallFollowActive: false,
+    lastClosedAt: null,
   }
 }
 

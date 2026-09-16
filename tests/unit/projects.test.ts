@@ -7,11 +7,12 @@ import {
   updateProject,
   reorderProjects,
   projectForSlug,
+  markProjectClosed,
 } from '../../src/main/projects/projects'
 import { DEFAULT_NOTIFICATIONS, type PTermConfig } from '../../src/main/state/store'
 
 const EMPTY: PTermConfig = {
-  version: 10,
+  version: 11,
   projects: [],
   activeProjectId: null,
   panes: [],
@@ -191,6 +192,47 @@ describe('projectForSlug', () => {
   })
 })
 
+describe('markProjectClosed', () => {
+  const pane = (id: string, projectSlug: string): PTermConfig['panes'][number] => ({
+    id,
+    projectSlug,
+    cwd: '/tmp',
+    tmuxSession: `pterm-${projectSlug}-${id}`,
+    type: 'shell',
+  })
+
+  const withPanes = (config: PTermConfig, ...panes: PTermConfig['panes']): PTermConfig => ({
+    ...config,
+    panes,
+  })
+
+  it('stamps the project whose last pane just went', () => {
+    const config = withPanes(withProjects('Lumio', 'Adecco'), pane('b', 'adecco'))
+    const after = markProjectClosed(config, 'lumio', 1000)
+    expect(after.projects.map((p) => p.lastClosedAt)).toEqual([1000, null])
+  })
+
+  it('leaves a project that still holds a pane alone', () => {
+    const config = withPanes(withProjects('Lumio'), pane('a', 'lumio'))
+    expect(markProjectClosed(config, 'lumio', 1000).projects[0].lastClosedAt).toBeNull()
+  })
+
+  it('overwrites an older stamp, so the newest close is the one that sorts first', () => {
+    const config = markProjectClosed(withProjects('Lumio'), 'lumio', 1000)
+    expect(markProjectClosed(config, 'lumio', 2000).projects[0].lastClosedAt).toBe(2000)
+  })
+
+  it('is a no-op for a pane whose row is gone, nothing to attribute the close to', () => {
+    const config = withProjects('Lumio')
+    expect(markProjectClosed(config, undefined, 1000)).toBe(config)
+  })
+
+  it('is a no-op for a slug no project owns, which is every tab in Unsorted', () => {
+    const config = withProjects('Lumio')
+    expect(markProjectClosed(config, 'scratch', 1000)).toBe(config)
+  })
+})
+
 describe('immutability', () => {
   it('never mutates the config it is given', () => {
     const config = withProjects('Adecco', 'Lumio')
@@ -199,6 +241,7 @@ describe('immutability', () => {
     removeProject(config, config.projects[0].id)
     updateProject(config, config.projects[0].id, { name: 'x' })
     reorderProjects(config, [config.projects[1].id])
+    markProjectClosed(config, config.projects[0].slug, 1000)
     expect(JSON.stringify(config)).toBe(before)
   })
 })

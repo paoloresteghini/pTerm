@@ -80,7 +80,7 @@ function configAt(version: number, extra: Record<string, unknown> = {}) {
 describe('config v9 to v10', () => {
   it('reads a v9 file with no wall fields as unpinned', async () => {
     const config = await (await storeWith(configAt(9))).read()
-    expect(config.version).toBe(10)
+    expect(config.version).toBe(11)
     expect(config.projects[0]?.wallPin).toBeNull()
     expect(config.projects[0]?.wallFollowActive).toBe(false)
   })
@@ -121,7 +121,7 @@ describe('config v9 to v10', () => {
   // Unchanged behaviour from `store.ts:477`, asserted here because the version
   // branch this task widens is the one that decides it.
   it('still refuses a version from the future', async () => {
-    const config = await (await storeWith(configAt(11))).read()
+    const config = await (await storeWith(configAt(12))).read()
     expect(config.projects).toEqual([])
   })
 })
@@ -138,6 +138,7 @@ describe('describeProjects carries the pin', () => {
       activeBrowserTabId: null,
       wallPin: null,
       wallFollowActive: false,
+      lastClosedAt: null,
       ...extra,
     }
   }

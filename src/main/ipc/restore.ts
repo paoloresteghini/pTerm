@@ -62,6 +62,7 @@ export async function describeProjects(
       // between "no pin" and "the pinned pane is gone".
       wallPin: project.wallPin,
       wallFollowActive: project.wallFollowActive,
+      lastClosedAt: project.lastClosedAt,
       available: await isDirectory(project.cwd),
     })
   }
@@ -503,7 +504,7 @@ export async function restoreWorkspace(
     const restored = attachSavedFields(merged.panes, saved.panes)
 
     await store.write({
-      version: 10,
+      version: 11,
       // Only real projects are persisted; the Unsorted row is synthetic.
       // Matched by id rather than by index: `describeProjects` returns one row
       // per project today, but adding a `filter` or a `continue` to it would

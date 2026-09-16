@@ -1,4 +1,4 @@
-import { useRef, useState, type CSSProperties, type ReactElement } from 'react'
+import { useRef, useState, type CSSProperties, type DragEvent, type ReactElement } from 'react'
 import {
   UNSORTED_ID,
   canHaveSession,
@@ -9,6 +9,8 @@ import {
 import { NeedsYou } from './NeedsYou'
 import { StatusDot } from './StatusDot'
 import { tabLabel } from './lib/tabLabel'
+import { groupProjects, MAX_PROJECT_SHORTCUTS, MAX_VISIBLE_INACTIVE_PROJECTS } from './lib/projectOrder'
+import { moveBlock } from './lib/moveBlock'
 import { scoreEntry } from './lib/match'
 import type { TabTreeNode } from './lib/tabGroups'
 import { useColumnWidth } from './lib/columnWidth'
@@ -64,7 +66,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 
-const MAX_VISIBLE_INACTIVE_PROJECTS = 5
 
 export function Sidebar({
   projects,
@@ -83,6 +84,8 @@ export function Sidebar({
   onRename,
   onRenameTab,
   onMove,
+  onReorderProjects,
+  onReorderTabs,
   onRemove,
   onMoveTab,
   onCloseTab,
@@ -109,6 +112,12 @@ export function Sidebar({
   onRename: (id: string, name: string) => void
   onRenameTab: (id: string, title: string) => void
   onMove: (id: string, direction: -1 | 1) => void
+  /** The projects in their new stored order, Unsorted excluded, as `onMove`
+   *  sends it. Called by a drag; the menu still uses `onMove`. */
+  onReorderProjects: (ids: string[]) => void
+  /** One project's panes in their new order, flattened the way this list draws
+   *  them: a split's members adjacent, in layout order. */
+  onReorderTabs: (ids: string[]) => void
   onRemove: (id: string) => void
   onMoveTab: (tabId: string, projectId: string) => void
   onCloseTab: (tabId: string) => void
@@ -185,17 +194,87 @@ export function Sidebar({
     if (commit) onRenameTab(id, tabDraft.trim())
   }
 
-  // Grouped, not sorted: the projects you have sessions open in sit together at
-  // the top, the dormant ones in a section of their own pinned above the
-  // footer. Within each group the manual order from "Move up"/"Move down" is
-  // untouched, so the list a user arranged is still the list they get.
+  // Grouped first: the projects you have sessions open in sit together at the
+  // top, the dormant ones in a section of their own pinned above the footer.
+  // The live group keeps the manual order from "Move up"/"Move down", so the
+  // list a user arranged is still the list they get; the dormant group is
+  // sorted by when it was closed instead: see `dormant` below.
   const rows: Row[] = projects.map((project, index) => {
     const nodes = tabNodesOf(project.id)
     return { project, index, nodes, tabs: nodes.flatMap((node) => node.panes) }
   })
-  const live = rows.filter((row) => row.tabs.length > 0)
-  const dormant = rows.filter((row) => row.tabs.length === 0)
-  const orderedRows = [...live, ...dormant]
+  // The dormant group is the one that is not in manual order: the projects you
+  // closed most recently are the ones you are most likely to reopen, and a list
+  // of dormant projects is not a list anybody arranged deliberately.
+  //
+  // `visible` is the rows this draws, top to bottom, and it is what numbers
+  // them: see `groupProjects`. `Row.index` is still each project's position in
+  // `projects`, which is what "Move up"/"Move down" resolve against, and the
+  // two are deliberately no longer the same number.
+  const { live, dormant, visible } = groupProjects(rows, (row) => row.tabs.length > 0)
+  const shortcutOf = (project: ProjectDescriptor): string | null => {
+    const at = visible.findIndex((row) => row.project.id === project.id)
+    return at === -1 || at >= MAX_PROJECT_SHORTCUTS ? null : `⌘${at + 1}`
+  }
+
+  /** What is being dragged. A tab drag carries its whole node, because a split
+   *  draws as one row with its members under it and the layout draws them in
+   *  that order: pulling one member out of the run here would claim a
+   *  rearrangement the pane area cannot make. */
+  type Drag = { kind: 'project'; ids: string[] } | { kind: 'tab'; projectId: string; ids: string[] }
+  const [drag, setDrag] = useState<Drag | null>(null)
+  const [over, setOver] = useState<{ id: string; place: 'before' | 'after' } | null>(null)
+  const endDrag = (): void => {
+    setDrag(null)
+    setOver(null)
+  }
+  /** Which half of the row the pointer is in, which is where the run lands. */
+  const placeIn = (event: DragEvent<HTMLElement>): 'before' | 'after' => {
+    const box = event.currentTarget.getBoundingClientRect()
+    return event.clientY < box.top + box.height / 2 ? 'before' : 'after'
+  }
+
+  const liveIds = new Set(live.map((row) => row.project.id))
+  /**
+   * Whether a project row can be dragged, and dropped on.
+   *
+   * The live group only. Unsorted is not in the stored order `reorderProjects`
+   * writes, and the dormant group sorts itself by when each project was last
+   * closed, so a drop there would be undone by the next render: an affordance
+   * that appears to work and does not is worse than one that is not offered.
+   */
+  const reorderable = (project: ProjectDescriptor): boolean =>
+    project.id !== UNSORTED_ID && liveIds.has(project.id)
+
+  const dropProject = (target: ProjectDescriptor, place: 'before' | 'after'): void => {
+    if (drag?.kind !== 'project') return
+    // Unsorted excluded, exactly as the "Move up"/"Move down" path sends it:
+    // main appends anything the list omits, and sending it would move it.
+    const order = projects.filter((row) => row.id !== UNSORTED_ID).map((row) => row.id)
+    onReorderProjects(moveBlock(order, drag.ids, target.id, place))
+  }
+
+  const dropTab = (row: Row, node: TabTreeNode, place: 'before' | 'after'): void => {
+    if (drag?.kind !== 'tab' || drag.projectId !== row.project.id) return
+    // The edge of the target NODE, not of the row under the pointer: dropping
+    // after a split means after its last member, and `moveBlock` places a run
+    // relative to one id.
+    const edge = place === 'before' ? node.panes[0] : node.panes[node.panes.length - 1]
+    onReorderTabs(moveBlock(row.tabs.map((tab) => tab.id), drag.ids, edge.id, place))
+  }
+
+  /** The accent line that says where the run would land. */
+  const dropLine = (id: string, kind: Drag['kind']): ReactElement | null =>
+    over?.id === id && drag?.kind === kind ? (
+      <span
+        aria-hidden
+        data-testid={`drop-line-${id}`}
+        data-place={over.place}
+        className={`pointer-events-none absolute inset-x-0 h-0.5 bg-accent ${
+          over.place === 'before' ? 'top-0' : 'bottom-0'
+        }`}
+      />
+    ) : null
   // The Inactive section only earns its place when there is something on both
   // sides of it: a heading over the whole list would be labelling nothing, and
   // a list anchored to the footer with an empty scroll area above it would be
@@ -206,11 +285,23 @@ export function Sidebar({
   /** One project row, its open tabs, and its menu. A function rather than an
    *  inline map body, because the scroll area and the pinned Inactive section
    *  below both draw it. */
-  const projectRow = ({ project, index, nodes, tabs }: Row, onSelected?: () => void): ReactElement => {
+  const projectRow = (
+    row: Row,
+    onSelected?: () => void,
+    /** False inside the "Show N more" dialog, whose list is filtered and
+     *  re-ranked by the search box: a drag there would be aiming at an order
+     *  that is not the sidebar's. */
+    canReorder = true,
+  ): ReactElement => {
+    const { project, index, nodes, tabs } = row
     const active = project.id === activeProjectId
     const synthetic = project.id === UNSORTED_ID
     const isMuted = muted(project.id)
-    const shortcut = index < 9 ? `⌘${index + 1}` : null
+    const shortcut = shortcutOf(project)
+    // Not while the row is being renamed: the input sits inside this div, and
+    // a draggable ancestor turns a text selection inside it into a row drag.
+    // The tab rows below guard the same way.
+    const dragProject = canReorder && reorderable(project) && renamingId !== project.id
     // A live project is still useful to spot before its first status event
     // arrives. Give it the same quiet idle marker older project rows used;
     // a reported state always takes precedence, and dormant projects stay
@@ -226,11 +317,33 @@ export function Sidebar({
         >
           <div
             data-testid={`project-${project.id}`}
+            className="relative"
+            draggable={dragProject}
+            onDragStart={(event) => {
+              event.dataTransfer.effectAllowed = 'move'
+              setDrag({ kind: 'project', ids: [project.id] })
+            }}
+            onDragEnd={endDrag}
+            onDragOver={(event) => {
+              if (!dragProject || drag?.kind !== 'project' || drag.ids.includes(project.id)) return
+              // Both halves are load-bearing: without `preventDefault` on
+              // dragover the browser refuses the drop and never fires it.
+              event.preventDefault()
+              event.dataTransfer.dropEffect = 'move'
+              setOver({ id: project.id, place: placeIn(event) })
+            }}
+            onDragLeave={() => setOver((seen) => (seen?.id === project.id ? null : seen))}
+            onDrop={(event) => {
+              event.preventDefault()
+              dropProject(project, placeIn(event))
+              endDrag()
+            }}
             onClick={() => {
               onSelectProject(project.id)
               onSelected?.()
             }}
           >
+            {dropLine(project.id, 'project')}
             <FolderGit2 aria-hidden />
             <StatusDot state={projectState} testid={`pdot-${project.id}`} />
             {renamingId === project.id ? (
@@ -370,11 +483,49 @@ export function Sidebar({
                       <div
                         data-testid={`stab-${tab.id}`}
                         data-split-peer={splitPeer || undefined}
+                        draggable={renamingTabId !== tab.id}
+                        onDragStart={(event) => {
+                          event.dataTransfer.effectAllowed = 'move'
+                          setDrag({
+                            kind: 'tab',
+                            projectId: project.id,
+                            ids: node.panes.map((pane) => pane.id),
+                          })
+                        }}
+                        onDragEnd={endDrag}
+                        onDragOver={(event) => {
+                          if (drag?.kind !== 'tab' || drag.projectId !== project.id) return
+                          if (drag.ids.includes(tab.id)) return
+                          event.preventDefault()
+                          event.dataTransfer.dropEffect = 'move'
+                          // Snapped to the edge of the NODE, not of the row
+                          // under the pointer, so the line is drawn where the
+                          // drop will actually put things: hovering the top of
+                          // a split's second member still lands above the
+                          // first.
+                          const place = placeIn(event)
+                          const edge =
+                            place === 'before' ? node.panes[0] : node.panes[node.panes.length - 1]
+                          setOver({ id: edge.id, place })
+                        }}
+                        onDragLeave={() =>
+                          setOver((seen) =>
+                            seen !== null && node.panes.some((pane) => pane.id === seen.id)
+                              ? null
+                              : seen,
+                          )
+                        }
+                        onDrop={(event) => {
+                          event.preventDefault()
+                          dropTab(row, node, placeIn(event))
+                          endDrag()
+                        }}
                         onClick={() => {
                           onSelectProject(project.id)
                           onSelectTab(tab.id)
                         }}
                       >
+                        {dropLine(tab.id, 'tab')}
                         {splitPeer ? (
                           <>
                             <span
@@ -424,40 +575,44 @@ export function Sidebar({
                           </span>
                         )}
                         {synthetic && canHaveSession(tab) ? (
-                          <>
-                            <select
-                              data-testid={`smove-${tab.id}`}
-                              aria-label={`Move ${tab.id.slice(0, 6)} to a project`}
-                              value=""
-                              onClick={(event) => event.stopPropagation()}
-                              onChange={(event) => {
-                                if (event.target.value) onMoveTab(tab.id, event.target.value)
-                              }}
-                              className="cursor-default rounded-sm border border-sidebar-border bg-background px-1 text-xs text-sidebar-foreground/70"
-                            >
-                              <option value="">move…</option>
-                              {projects
-                                .filter((candidate) => candidate.id !== UNSORTED_ID)
-                                .map((candidate) => (
-                                  <option key={candidate.id} value={candidate.id}>
-                                    {candidate.name}
-                                  </option>
-                                ))}
-                            </select>
-                            <button
-                              type="button"
-                              data-testid={`sclose-${tab.id}`}
-                              aria-label={`Close ${tabLabel(tab)}`}
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                onCloseTab(tab.id)
-                              }}
-                              className="shrink-0 rounded-sm p-0.5 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                            >
-                              <X className="size-3.5" />
-                            </button>
-                          </>
+                          <select
+                            data-testid={`smove-${tab.id}`}
+                            aria-label={`Move ${tab.id.slice(0, 6)} to a project`}
+                            value=""
+                            onClick={(event) => event.stopPropagation()}
+                            onChange={(event) => {
+                              if (event.target.value) onMoveTab(tab.id, event.target.value)
+                            }}
+                            className="cursor-default rounded-sm border border-sidebar-border bg-background px-1 text-xs text-sidebar-foreground/70"
+                          >
+                            <option value="">move…</option>
+                            {projects
+                              .filter((candidate) => candidate.id !== UNSORTED_ID)
+                              .map((candidate) => (
+                                <option key={candidate.id} value={candidate.id}>
+                                  {candidate.name}
+                                </option>
+                              ))}
+                          </select>
                         ) : null}
+                        {/* Every tab, not just Unsorted's, and revealed on
+                            hover the way `SidebarMenuAction`'s `showOnHover`
+                            reveals the project menu: the same three classes,
+                            against this row's own group. `onCloseTab` is the
+                            same prompt-first path the menu uses, so an editor
+                            with unsaved changes still asks. */}
+                        <button
+                          type="button"
+                          data-testid={`sclose-${tab.id}`}
+                          aria-label={`Close ${tabLabel(tab)}`}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            onCloseTab(tab.id)
+                          }}
+                          className="shrink-0 rounded-sm p-0.5 text-sidebar-foreground/60 group-focus-within/menu-sub-item:opacity-100 group-hover/menu-sub-item:opacity-100 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground md:opacity-0"
+                        >
+                          <X className="size-3.5" />
+                        </button>
                       </div>
                     </SidebarMenuSubButton>
                   </SidebarMenuSubItem>
@@ -473,10 +628,11 @@ export function Sidebar({
   const visibleDormant = dormant.slice(0, MAX_VISIBLE_INACTIVE_PROJECTS)
   const hiddenDormantCount = dormant.length - visibleDormant.length
   // The dialog's own list, narrowed by its search box. An empty query leaves
-  // the manual "Move up"/"Move down" order untouched; a query hands ranking to
+  // `dormant`'s most-recently-closed-first order untouched, so the dialog opens
+  // on the same order the section it came from was in; a query hands ranking to
   // the same `scoreEntry` the skills panel and ⌘K use, so one name cannot rank
-  // differently in two places. Ties keep their manual order, because sort is
-  // stable.
+  // differently in two places. Ties keep the order they came in, because sort
+  // is stable.
   const matchedDormant =
     inactiveQuery.length === 0
       ? dormant
@@ -485,7 +641,7 @@ export function Sidebar({
           .filter((scored): scored is { row: Row; score: number } => scored.score !== null)
           .sort((a, b) => b.score - a.score)
           .map((scored) => scored.row)
-  const projectRows = split ? live : orderedRows.slice(0, live.length + MAX_VISIBLE_INACTIVE_PROJECTS)
+  const projectRows = split ? live : visible
   const moreInactiveProjects =
     hiddenDormantCount > 0 ? (
       <SidebarMenuItem>
@@ -633,7 +789,7 @@ export function Sidebar({
               </p>
             ) : (
               <SidebarMenu>
-                {matchedDormant.map((row) => projectRow(row, closeInactiveDialog))}
+                {matchedDormant.map((row) => projectRow(row, closeInactiveDialog, false))}
               </SidebarMenu>
             )}
           </div>

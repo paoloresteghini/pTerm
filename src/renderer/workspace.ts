@@ -9,6 +9,7 @@ import {
   type TabRow,
   type TabShape,
 } from '../shared/ipc'
+import { reorderById } from '../shared/paneOrder'
 import { worst, type TabState } from '../shared/status'
 import { groupedTabs } from './lib/tabGroups'
 import { cellRect, type CellRect } from './lib/wallLayout'
@@ -85,6 +86,14 @@ export type WorkspaceAction =
   | { type: 'activatedProject'; id: string }
   | { type: 'movedTab'; panes: TabDescriptor[]; projects: ProjectDescriptor[] }
   | { type: 'panesMerged'; panes: TabDescriptor[] }
+  /**
+   * A drag in the sidebar's tab list. Carries the ids rather than the reply's
+   * pane array, because the reply is built from disk and the window holds
+   * panes the disk does not: a pane whose row main has not written yet would
+   * be dropped by a wholesale replacement. `reorderById` moves what it is
+   * given and leaves the rest at the index it had.
+   */
+  | { type: 'reorderedPanes'; ids: string[] }
   | { type: 'statusSnapshot'; status: Record<string, TabState>; since?: Record<string, number> }
   | { type: 'statusChanged'; tabId: string; state: TabState | null; since?: number | null }
   | { type: 'died'; id: string; code: number }
@@ -1369,6 +1378,13 @@ export function workspaceReducer(
             null),
       }
     }
+
+    case 'reorderedPanes':
+      // The same function main applied before writing, on the same array
+      // shape. Two spellings of a rule this positional would disagree only
+      // after a relaunch, when the disk's answer replaced the window's, which
+      // is the worst moment to find out.
+      return { ...state, panes: reorderById(state.panes, action.ids) }
 
     case 'panesMerged': {
       // Merged by id, like `movedTab`, rather than replacing `state.panes`

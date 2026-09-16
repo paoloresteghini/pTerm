@@ -373,7 +373,7 @@ html[data-theme="workspaceLight"] .wall-cell-header {
   border-radius: 9px 9px 0 0;
   background: var(--workspace-paper);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 html[data-theme="workspaceLight"] .wall-cell[data-focused="true"] {

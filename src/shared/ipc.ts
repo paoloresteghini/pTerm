@@ -23,6 +23,7 @@ export const CHANNELS = {
   scanCandidates: 'pterm:scanCandidates',
   pickFolder: 'pterm:pickFolder',
   moveTabToProject: 'pterm:moveTabToProject',
+  reorderPanes: 'pterm:reorderPanes',
   renameTab: 'pterm:renameTab',
   setPaneColor: 'pterm:setPaneColor',
   data: 'pterm:data',
@@ -780,6 +781,15 @@ export interface ProjectDescriptor {
   wallPin?: string | null
   /** Same optionality, same reason, as `wallPin`. A reader must spell the absence `=== true`. */
   wallFollowActive?: boolean
+  /**
+   * When this project's last pane closed, epoch milliseconds, or null while it
+   * still has one or has never had one close.
+   *
+   * What the sidebar's Inactive section sorts by, most recent first. Optional
+   * for the same reason `wallPin` is, and a reader must spell the absence
+   * `?? null`.
+   */
+  lastClosedAt?: number | null
   /** False when `cwd` is no longer a directory — renamed or deleted. */
   available: boolean
 }
@@ -1099,6 +1109,16 @@ export interface PTermApi {
     tabId: string,
     projectId: string,
   ): Promise<{ projects: ProjectDescriptor[]; panes: TabDescriptor[] }>
+  /**
+   * Reorder the panes named by `ids` among the slots they already hold, and
+   * persist it. See `reorderById` (`shared/paneOrder.ts`) for why it is a slot
+   * fill: tab order is a position in one flat array shared by every project,
+   * so a drag inside one project must leave the others where they sit.
+   *
+   * The caller sends one project's panes, in their new order. Anything else in
+   * the array is untouched, so a stale id costs nothing.
+   */
+  reorderPanes(ids: string[]): Promise<TabDescriptor[]>
   /**
    * Name a tab, or clear its name with an empty string.
    *

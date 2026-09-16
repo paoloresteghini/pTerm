@@ -86,7 +86,8 @@ import {
   type PaneDirection,
   type PaneGroup,
 } from './workspace'
-import { groupedTabs, tabTree } from './lib/tabGroups'
+import { groupedTabs, tabTree, type TabTreeNode } from './lib/tabGroups'
+import { groupProjects } from './lib/projectOrder'
 import { projectMuted, toggleProjectMute } from './mute'
 import { PANE_COLOR_DEFAULT, type PaneColor } from '../shared/paneColors'
 import type { ThemeId } from '../shared/themes'
@@ -712,6 +713,19 @@ export function App() {
   const tabEntries = state.activeProjectId
     ? groupedTabs(tabsOfProject(state, state.activeProjectId, 'terminal'), state.tabs)
     : []
+  /** A project's tabs, as the sidebar draws them: one node per tab, its split
+   *  members inside it. Hoisted out of the JSX for the same reason
+   *  `tabEntries` is, and read by `sidebarProjects` just below. */
+  const tabNodesOf = (id: string): TabTreeNode[] =>
+    tabTree(tabsOfProject(state, id, 'terminal'), state.tabs)
+  // The sidebar's rows, in the order it draws them, which is the order `⌘1..9`
+  // selects: the Digit branch below indexes this and the badge on each row is
+  // its position in it. Same argument as `tabEntries` above, one level up:
+  // two lists that must agree, derived once.
+  const sidebarProjects = groupProjects(
+    state.projects.map((project) => ({ project })),
+    (row) => tabNodesOf(row.project.id).length > 0,
+  ).visible
   // Hoisted out of the JSX below because the welcome page's condition is read
   // off it. "No visible group" is the literal statement of an empty pane area,
   // and it is not the same as "no tabs": a tab whose kids were all boxed by an
@@ -1579,6 +1593,48 @@ export function App() {
     [state.projects],
   )
 
+  /** Which slugs held a pane as of the last run, or null before the workspace arrived. */
+  const wereOccupied = useRef<Set<string> | null>(null)
+
+  /**
+   * Stamp a project the moment its last pane goes, so the sidebar's Inactive
+   * section can order by it within this session.
+   *
+   * Main writes `lastClosedAt` to the config on the same transition, and this
+   * is not a second source of truth: nothing pushes projects back into this
+   * window when a pane closes (`closePane` answers with a `TabShape`), so
+   * without this the project you just emptied would keep the stamp it had at
+   * launch, usually none, and sort to the BOTTOM of the section it just
+   * joined. What main writes is what a relaunch reads; this is what the
+   * current window reads until then.
+   *
+   * Guarded by `ready` for the reason the browser-column effect above is: the
+   * restored panes arrive in one dispatch, and a project that came back empty
+   * was not emptied by the user now. Its stamp, if it has one, is on disk.
+   */
+  useEffect(() => {
+    if (!ready) return
+    const occupied = new Set(state.panes.map((pane) => pane.projectSlug))
+    const was = wereOccupied.current
+    wereOccupied.current = occupied
+    if (was === null) return
+    const emptied = new Set(
+      state.projects
+        .filter((project) => was.has(project.slug) && !occupied.has(project.slug))
+        .map((project) => project.id),
+    )
+    // The dispatch below lands back here with the same membership, which is
+    // what stops this: an empty set returns before writing anything.
+    if (emptied.size === 0) return
+    const at = Date.now()
+    dispatch({
+      type: 'projects',
+      projects: state.projects.map((project) =>
+        emptied.has(project.id) ? { ...project, lastClosedAt: at } : project,
+      ),
+    })
+  }, [ready, state.panes, state.projects])
+
   /** A click on a cell's header, which means the same as a click in its pane. */
   const focusWallCell = useCallback(
     (projectId: string, paneId: string | undefined) => {
@@ -2246,7 +2302,14 @@ export function App() {
       // dispatching exactly what it dispatched before the wall existed. A
       // project not on the wall is still selectable this way, which is right:
       // it is what the columns and a wall turned off would then show.
-      const target = state.projects[index]
+      //
+      // Indexed on what the sidebar DRAWS, not on `state.projects`. The two
+      // stopped being the same list when the sidebar started grouping live
+      // projects above dormant ones, and diverged further when the dormant
+      // group began sorting by when it was closed: the badge said ⌘2, ⌘4, ⌘5
+      // down three consecutive rows and the keys agreed with the badges about
+      // nothing. `groupProjects` is the one ordering both halves read.
+      const target = sidebarProjects[index]?.project
       if (target) {
         event.preventDefault()
         dispatch({ type: 'activatedProject', id: target.id })
@@ -2263,7 +2326,7 @@ export function App() {
     browserTabEntries,
     currentBrowserTabId,
     keyRegion,
-    state.projects,
+    sidebarProjects,
     visitTab,
     openTab,
     requestClosePane,
@@ -2968,7 +3031,7 @@ export function App() {
             side="left"
             projects={state.projects}
             activeProjectId={state.activeProjectId}
-            tabNodesOf={(id) => tabTree(tabsOfProject(state, id, 'terminal'), state.tabs)}
+            tabNodesOf={tabNodesOf}
             activeTabId={currentTabId}
             status={state.status}
             projectStateOf={(id) => stateOfProject(state, id)}
@@ -3014,6 +3077,22 @@ export function App() {
               window.pterm
                 .reorderProjects(order)
                 .then((projects) => dispatch({ type: 'projects', projects }))
+                .catch(fail)
+            }}
+            onReorderProjects={(order) => {
+              window.pterm
+                .reorderProjects(order)
+                .then((projects) => dispatch({ type: 'projects', projects }))
+                .catch(fail)
+            }}
+            onReorderTabs={(ids) => {
+              // Dispatched from the ids sent, not from the reply, for the
+              // reason `reorderedPanes` gives: the reply is built from disk,
+              // and the window can hold a pane the disk has not been told
+              // about yet.
+              window.pterm
+                .reorderPanes(ids)
+                .then(() => dispatch({ type: 'reorderedPanes', ids }))
                 .catch(fail)
             }}
             onRemove={(id) => {

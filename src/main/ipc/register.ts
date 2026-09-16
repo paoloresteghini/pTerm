@@ -100,11 +100,13 @@ import { commit, diffOf, discard, stage, stashAll, unstage } from '../git/ops'
 import { newSessionId } from '../tmux/names'
 import {
   addProject,
+  markProjectClosed,
   projectForSlug,
   removeProject,
   reorderProjects,
   updateProject,
 } from '../projects/projects'
+import { reorderById } from '../../shared/paneOrder'
 import { isPaneColor, PANE_COLOR_DEFAULT, type PaneColor } from '../../shared/paneColors'
 import { isThemeId, type ThemeId } from '../../shared/themes'
 
@@ -615,7 +617,11 @@ export function registerIpc(
       // is collected by the next `read()`; see `normaliseLayout`.
       const panes = config.panes.filter((saved) => saved.id !== id)
       if (panes.length === config.panes.length) return
-      await store.write({ ...config, panes })
+      // Read off the row that is about to go, before the filter takes it: the
+      // slug is the only link back to the project, and `markProjectClosed`
+      // asks the panes that survive whether this was the last of them.
+      const slug = config.panes.find((saved) => saved.id === id)?.projectSlug
+      await store.write(markProjectClosed({ ...config, panes }, slug, Date.now()))
     })
 
   /**
@@ -1307,6 +1313,18 @@ export function registerIpc(
     }),
   )
 
+  ipcMain.handle(CHANNELS.reorderPanes, (_event, ids: string[]) =>
+    serialise(async () => {
+      const config = await store.read()
+      const panes = reorderById(config.panes, ids)
+      await store.write({ ...config, panes })
+      // The saved rows, for the reason `renameTab` below gives: this is the
+      // array that was just persisted, not a second derivation of it, so the
+      // window and the disk cannot answer the order differently.
+      return panes
+    }),
+  )
+
   ipcMain.handle(CHANNELS.renameTab, (_event, id: string, title: string) =>
     serialise(async () => {
       const config = await store.read()
@@ -1889,7 +1907,12 @@ export function registerIpc(
         kids.length > 0 ? tabRowFor({ id: tabId, groupId }, kids, saved, tombstones) : null
 
       const tabs = withTabRow(config.tabs, tabId, row)
-      await store.write({ ...config, panes, tabs })
+      // Same stamp `forgetTab` writes, read the same way: off the row this pass
+      // is removing, applied only when nothing of that project survives. Both
+      // paths need it because a pane leaves config through either one: × on
+      // the last pane comes here, a shell that exited on its own goes there.
+      const slug = config.panes.find((saved) => saved.id === paneId)?.projectSlug
+      await store.write(markProjectClosed({ ...config, panes, tabs }, slug, Date.now()))
       return { panes: row ? held(panes, row.layout.kids) : [], tabs: row ? [row] : [] }
     })
   })
